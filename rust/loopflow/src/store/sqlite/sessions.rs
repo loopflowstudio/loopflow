@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 
 use crate::durable::{FlowSession, TaskId};
 use crate::engine::ExecutionCursor;
-use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -664,6 +664,94 @@ impl SqliteStore {
         Ok(session)
     }
 
+    /// The scope's one uncompleted primary conversation.
+    pub fn primary_session(&self, scope: &PrimaryScope) -> StoreResult<Option<AgentSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        primary_session_in(&conn, scope)
+    }
+
+    /// Admit the scope's primary once; every later caller receives that row.
+    pub fn ensure_primary_session(
+        &self,
+        scope: &PrimaryScope,
+        session: AgentSession,
+        caller_exec: Option<&crate::id::ExecId>,
+    ) -> StoreResult<AgentSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = primary_session_in(&tx, scope)? {
+            return Ok(existing);
+        }
+        let session = admit_primary_in(&tx, scope, session, caller_exec)?;
+        tx.commit()?;
+        Ok(session)
+    }
+
+    /// Complete the expected primary and admit its successor together. A repeat
+    /// naming the already replaced predecessor returns the current primary.
+    pub fn replace_primary_session(
+        &self,
+        scope: &PrimaryScope,
+        expected: &str,
+        successor: AgentSession,
+        caller_exec: Option<&crate::id::ExecId>,
+    ) -> StoreResult<AgentSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        match primary_session_in(&tx, scope)? {
+            Some(current) if current.id == expected => {
+                tx.execute(
+                    "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
+                    params![expected, crate::store::rows::now_unix()],
+                )?;
+            }
+            Some(current) => {
+                let (name, id) = scope_column(scope);
+                let replaced: bool = tx.query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                         AND primary_scope=?2 AND {name}=?3 AND completed_at IS NOT NULL)"
+                    ),
+                    params![expected, scope_name(scope), id],
+                    |row| row.get(0),
+                )?;
+                return if replaced {
+                    Ok(current)
+                } else {
+                    Err(StoreError::InvalidAuthority(format!(
+                        "Session {expected} is not this scope's primary; the current primary is {}",
+                        current.id
+                    )))
+                };
+            }
+            None => {}
+        }
+        let session = admit_primary_in(&tx, scope, successor, caller_exec)?;
+        tx.commit()?;
+        Ok(session)
+    }
+
+    /// The scope a Session is or was primary for.
+    pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT primary_scope,wave_id FROM agent_sessions WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            Some((Some(kind), Some(wave))) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
+                crate::id::WaveId::parse(&wave).map_err(invalid)?,
+            ))),
+            Some((Some(kind), _)) => Err(invalid(format!(
+                "Session {id} has unsupported primary scope {kind:?}"
+            ))),
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn publish_capture(&self, id: &str, captured: Option<i64>) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
@@ -1111,6 +1199,59 @@ pub(super) fn reserve_session_in(
     }
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
+    Ok(session)
+}
+
+fn scope_name(scope: &PrimaryScope) -> &'static str {
+    match scope {
+        PrimaryScope::Wave(_) => "wave",
+    }
+}
+
+fn scope_column(scope: &PrimaryScope) -> (&'static str, &str) {
+    match scope {
+        PrimaryScope::Wave(wave) => ("wave_id", wave.as_str()),
+    }
+}
+
+fn primary_session_in(
+    conn: &Connection,
+    scope: &PrimaryScope,
+) -> StoreResult<Option<AgentSession>> {
+    let (name, id) = scope_column(scope);
+    conn.query_row(
+        &format!(
+            "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{name}=?2 AND s.completed_at IS NULL"
+        ),
+        params![scope_name(scope), id],
+        read_session,
+    )
+    .optional()?
+    .transpose()
+}
+
+fn admit_primary_in(
+    tx: &Transaction<'_>,
+    scope: &PrimaryScope,
+    mut session: AgentSession,
+    caller: Option<&crate::id::ExecId>,
+) -> StoreResult<AgentSession> {
+    match scope {
+        PrimaryScope::Wave(wave) => {
+            if session.task_id.is_some() || session.flow_session_id.is_some() {
+                return Err(invalid("a Wave's primary Session names no Task or Flow"));
+            }
+            session.wave_id = Some(wave.clone());
+        }
+    }
+    if session.kind != SessionKind::Conversation || !session.interactive {
+        return Err(invalid("a primary Session is an interactive conversation"));
+    }
+    let session = reserve_session_in(tx, session, caller)?;
+    tx.execute(
+        "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
+        params![session.id, scope_name(scope)],
+    )?;
     Ok(session)
 }
 

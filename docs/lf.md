@@ -72,10 +72,16 @@ lf mon list --json                 # bounded Exec history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf mon show SESSION --final         # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
+lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session connect SESSION         # continue a conversation
+lf session replace SESSION         # fresh conversation for the same Wave
 lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 ```
+
+Each Wave has one ongoing conversation. `session ensure` finds it, or starts it
+with the Wave's goal and memory, and repeats return the same Session. `replace`
+stops that conversation, keeps it as history, and starts a fresh one.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 Its overview explains each item's state and next action. A mechanical Exec has

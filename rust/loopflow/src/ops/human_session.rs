@@ -18,6 +18,7 @@ use crate::work::task::{Task, TaskId};
 
 #[cfg(test)]
 pub(crate) mod action_test;
+pub(crate) mod primary;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
@@ -81,9 +82,19 @@ pub(crate) struct FlowSessionToken {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum HumanSessionToken {
-    Flow { token: Box<FlowSessionToken> },
-    Ask { id: String },
-    StandaloneFlow { id: String },
+    Flow {
+        token: Box<FlowSessionToken>,
+    },
+    Ask {
+        id: String,
+    },
+    StandaloneFlow {
+        id: String,
+    },
+    /// A scope's ongoing conversation; no caller or Flow waits on it.
+    Primary {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1009,6 +1020,9 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let id = match active_session_token()? {
         HumanSessionToken::Flow { token } => flow_token_id(&token),
         HumanSessionToken::StandaloneFlow { id } | HumanSessionToken::Ask { id } => id,
+        HumanSessionToken::Primary { .. } => {
+            bail!("a primary Session has no caller waiting on readiness")
+        }
     };
     // The store fences readiness on the Session's current Run.
     store
@@ -1238,7 +1252,11 @@ fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
             id: session.id.clone(),
         },
-        _ => HumanSessionToken::Ask {
+        // Only a primary conversation launches from a prepared input.
+        crate::session::SessionKind::Conversation => HumanSessionToken::Primary {
+            id: session.id.clone(),
+        },
+        crate::session::SessionKind::Ask => HumanSessionToken::Ask {
             id: session.id.clone(),
         },
     })
@@ -1299,7 +1317,10 @@ async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<Str
         Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
-    args.push(ask_message(session.request.as_deref().unwrap_or_default()));
+    args.push(match session.kind {
+        crate::session::SessionKind::Conversation => PRIMARY_MESSAGE.to_string(),
+        _ => ask_message(session.request.as_deref().unwrap_or_default()),
+    });
     args
 }
 
@@ -1361,10 +1382,21 @@ pub(crate) async fn open(
             if session.kind == crate::session::SessionKind::Conversation =>
         {
             let native = NativeSession::of(session)?;
-            let provider_session = store
-                .sqlite
-                .input_provider_session(&session.artifact_key)?
-                .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))?;
+            let Some(provider_session) =
+                store.sqlite.input_provider_session(&session.artifact_key)?
+            else {
+                // A primary conversation's first launch has no history to resume.
+                anyhow::ensure!(
+                    store.sqlite.primary_scope(&session.id)?.is_some(),
+                    "Session {} has no provider history yet",
+                    session.id
+                );
+                let surface = surface(store, session).await?;
+                if resume {
+                    open_waiting(store, &session.id).await?;
+                }
+                return Ok(surface);
+            };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
                 if mode == OpenMode::Replace {
@@ -2212,6 +2244,8 @@ fn ask_message(request: &str) -> String {
     )
 }
 
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the ongoing primary conversation for the selected Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+
 async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
     let step = position.current();
     let node_id = step
@@ -2477,7 +2511,7 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
             }
             Ok(Some(token.skill))
         }
-        HumanSessionToken::Ask { .. } => Ok(None),
+        HumanSessionToken::Ask { .. } | HumanSessionToken::Primary { .. } => Ok(None),
     }
 }
 
@@ -2632,14 +2666,14 @@ mod tests {
     pub(super) static FAILED_ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
         LazyLock::new(|| Mutex::new(HashSet::new()));
 
-    struct AskHome {
+    pub(super) struct AskHome {
         home: tempfile::TempDir,
         previous: Vec<(&'static str, Option<OsString>)>,
         _ambient: crate::test_ambient::EnvGuard,
     }
 
     impl AskHome {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             ASK_LAUNCHERS.lock().unwrap().clear();
             FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
             let ambient = crate::test_ambient::EnvGuard::new();
@@ -2690,7 +2724,7 @@ mod tests {
             }
         }
 
-        async fn store(&self) -> SharedStore {
+        pub(super) async fn store(&self) -> SharedStore {
             std::sync::Arc::new(
                 open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("registry.db")))
                     .await

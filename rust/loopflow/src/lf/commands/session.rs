@@ -106,6 +106,18 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             open(id, *json, mode).await
         }
+        SessionCommand::Ensure { wave, json } => {
+            let store = open_shared_store().await?;
+            let repo = crate::repo::find_repo_root()?;
+            let session =
+                crate::ops::human_session::primary::ensure_wave(&store, &repo, wave).await?;
+            report_primary(&session, *json)
+        }
+        SessionCommand::Replace { id, json } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::primary::replace(&store, id).await?;
+            report_primary(&session, *json)
+        }
         SessionCommand::Complete { id } => complete(id).await,
         SessionCommand::Rename {
             id,
@@ -249,6 +261,23 @@ async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
     let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
+    }
+    Ok(())
+}
+
+fn report_primary(
+    session: &crate::ops::human_session::SessionRecord,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(session)?);
+    } else {
+        println!(
+            "Session {} is {}'s conversation. Open it with `lf session connect {}`.",
+            session.id,
+            session.work_path.as_deref().unwrap_or("this scope"),
+            session.id
+        );
     }
     Ok(())
 }

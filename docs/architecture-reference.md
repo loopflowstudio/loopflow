@@ -198,6 +198,14 @@ conversations. Explicit filters expose headless and completed history; `--all`
 continues to mean all repositories. Interactive mode grants neither review
 completion nor Flow authority.
 
+A primary Session is the one ongoing conversation of a scope. It is an ordinary
+interactive conversation whose row names that scope; a Wave has at most one
+uncompleted primary. `lf session ensure` finds or admits it and starts its
+terminal once. `lf session replace` stops the predecessor's provider, then
+completes it and admits the successor in one transaction, so a scope never has
+two or none midway. Primary grants no Flow, review or process authority, and
+the Wave's goal and memory reach it as ordinary Wave context.
+
 An AgentSession can have many historical driving Execs and at most one current
 driver. Driver compare-and-set increments its driver generation. A continuing
 engine keeps its provider generation and origin through handoff and a driverless

@@ -535,6 +535,19 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
+    /// Find or start a Wave's one ongoing conversation
+    Ensure {
+        #[arg(short = 'w', long)]
+        wave: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Give a primary Session's scope a fresh conversation
+    Replace {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Complete a review, blocked Ask, or interactive session
     Complete { id: String },
     /// Rename a Session; a human name is never replaced by a suggestion
@@ -575,7 +588,7 @@ pub enum SessionCommand {
         skill: String,
         iteration: u32,
     },
-    /// Run one ad-hoc request in its durable terminal
+    /// Run one prepared Ask or primary conversation in its durable terminal
     #[command(name = "serve-ask", hide = true)]
     ServeAsk { input: String },
     /// Stop one exact native provider client after its review completes

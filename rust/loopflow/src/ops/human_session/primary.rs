@@ -317,7 +317,15 @@ mod tests {
             assert_eq!((session.wave_id, session.task_id), (None, None));
 
             // A Wave's conversation in the same repository is a separate scope.
-            wave(&store, &repo).await;
+            let ambient_wave = wave(&store, &repo).await;
+            std::env::set_var("LF_WAVE_ID", ambient_wave.id().as_str());
+            assert_eq!(
+                ensure(&store, repo.path(), None).await.unwrap().id,
+                first.id
+            );
+
+            // Explicit selection also ignores stale ambient Wave context.
+            std::env::set_var("LF_WAVE_ID", "unknown-wave");
             let wave = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();

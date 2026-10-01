@@ -184,7 +184,7 @@ impl SqliteStore {
         repo: Option<&str>,
     ) -> StoreResult<Option<crate::id::WaveId>> {
         self.resolve_work_id(
-            "SELECT id FROM waves WHERE id=?1 OR (name=?1 AND (?2 IS NULL OR repo=?2))
+            "SELECT id FROM wave_addresses WHERE id=?1 OR (slug=?1 AND (?2 IS NULL OR repo=?2))
             ORDER BY (id=?1) DESC,id LIMIT 2",
             selector,
             repo,

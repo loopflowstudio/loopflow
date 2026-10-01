@@ -11,15 +11,13 @@ use super::{
 use crate::durable::FlowSession;
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
-use crate::id::WaveId;
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
-use crate::work::wave::Wave;
-use crate::work::wave::WaveLocator;
+use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
 fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
@@ -421,14 +419,7 @@ async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> P
             .unwrap(),
     );
     for name in ["a", "b"] {
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                name.into(),
-                repo.display().to_string(),
-            ))
-            .await
-            .unwrap();
+        ensure_wave_row(&store, repo, name).await.unwrap();
     }
     store
         .upsert_provider_token(&ProviderToken {

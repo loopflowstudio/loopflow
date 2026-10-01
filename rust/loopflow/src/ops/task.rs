@@ -1656,18 +1656,18 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         .pm_snapshot(&task.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let snapshot = snapshot.snapshot;
     let item = snapshot
         .items
         .iter()
         .find(|item| item.id == task.plan.id.as_str())
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let url = item
         .url
         .as_deref()
         .filter(|url| _valid_task_url(url))
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let pr = store
         .active_task_pr(&task.id)
         .await
@@ -4013,7 +4013,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
         body,
     };
     let outcome =
-        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.name(), &request, &prior).await;
+        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.slug(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
     // reading, but an operator running `lf pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
@@ -4047,7 +4047,7 @@ async fn reconcile_pm_writeback(
         let wave = owning_wave(store, task).await?;
         crate::ops::task_pm::complete_task(
             Path::new(wave.repo()),
-            wave.name(),
+            wave.slug(),
             task.plan.id.as_str(),
             pr_url,
         )
@@ -4389,7 +4389,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             project: project.plan.slug,
             pm_snapshot_synced_at: task.plan.pm_snapshot_synced_at,
             pm_writeback: task.pm_writeback,
-            wave: wave.name().to_string(),
+            wave: wave.slug().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
             execution,
@@ -5413,7 +5413,8 @@ mod tests {
             "scripts/lifecycle_scorecard.py",
             r#"import os, pathlib, time
 repo = pathlib.Path.cwd()
-repo.joinpath('entered').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').rename(repo.joinpath('entered'))
 time.sleep(30)
 "#,
         );

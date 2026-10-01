@@ -58,6 +58,7 @@ pub enum WaveChatConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
+    pub id: Option<crate::id::WaveId>,
     #[serde(default)]
     pub context_budgets: BTreeMap<BudgetKey, usize>,
     pub crons: Option<Vec<WaveCronDef>>,

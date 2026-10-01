@@ -663,7 +663,7 @@ impl SqliteStore {
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT 0 AS kind, id, NULL AS parent, name, NULL AS external_id, created_at FROM waves
+            "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id, created_at FROM wave_addresses
              UNION ALL
              SELECT 1, id, wave_id, project_slug, external_project_id, created_at FROM projects
              UNION ALL
@@ -818,12 +818,12 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = if repo.is_some() {
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
         } else {
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves WHERE retired_at IS NULL ORDER BY created_at DESC"
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses WHERE retired_at IS NULL ORDER BY created_at DESC"
         };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
             vec![Box::new(repo.to_string())]
@@ -851,6 +851,13 @@ impl SqliteStore {
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
+        validate_wave_parent(
+            &tx,
+            wave.id(),
+            wave.name(),
+            wave.repo(),
+            wave.parent_wave_id(),
+        )?;
         tx.execute(
             "INSERT INTO waves (
                  id, name, repo, created_at, parent_wave_id, promoted_at,
@@ -876,6 +883,48 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn validate_wave_parent(
+    conn: &Connection,
+    id: &WaveId,
+    name: &str,
+    repo: &str,
+    parent: Option<&WaveId>,
+) -> StoreResult<()> {
+    if name.is_empty() || name.contains(['/', '\\']) || matches!(name, "." | "..") {
+        return Err(StoreError::InvalidData(format!(
+            "Wave name must be one segment: {name:?}"
+        )));
+    }
+    if let Some(parent) = parent {
+        let parent_repo: String = conn.query_row(
+            "SELECT repo FROM waves WHERE id=?1 AND retired_at IS NULL",
+            params![parent],
+            |row| row.get(0),
+        )?;
+        if parent_repo != repo {
+            return Err(StoreError::InvalidData(
+                "Wave directory parent belongs to another repository".into(),
+            ));
+        }
+        let cycle: bool = conn.query_row(
+            "WITH RECURSIVE ancestors(id, parent_wave_id) AS (
+                SELECT id, parent_wave_id FROM waves WHERE id = ?1
+                UNION
+                SELECT w.id, w.parent_wave_id FROM waves w
+                JOIN ancestors a ON w.id = a.parent_wave_id
+             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ?2)",
+            params![parent, id],
+            |row| row.get(0),
+        )?;
+        if cycle {
+            return Err(StoreError::InvalidData(
+                "Wave parent would create a cycle".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_exec_schema(conn: &Connection) -> StoreResult<()> {
@@ -1745,8 +1794,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses
              WHERE parent_wave_id = ?1 AND retired_at IS NULL
              ORDER BY created_at ASC",
         )?;
@@ -1762,8 +1811,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves WHERE id = ?1",
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses WHERE id = ?1",
         )?;
         let wave = stmt
             .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
@@ -1775,9 +1824,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves
-             WHERE repo = ?1 AND name = ?2 AND retired_at IS NULL",
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses
+             WHERE repo = ?1 AND slug = ?2 AND retired_at IS NULL",
         )?;
         let wave = stmt
             .query_row(params![locator.repo().to_string(), locator.slug()], |row| {
@@ -1797,7 +1846,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = tx
             .query_row(
-                "SELECT repo, name FROM waves WHERE id = ?1",
+                "SELECT repo, slug FROM wave_addresses WHERE id = ?1",
                 params![wave_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
@@ -1814,8 +1863,8 @@ impl SqliteStore {
         }
         let collision = tx
             .query_row(
-                "SELECT id FROM waves
-                 WHERE repo = ?1 AND name = ?2 AND id != ?3 AND retired_at IS NULL",
+                "SELECT id FROM wave_addresses
+                 WHERE repo = ?1 AND slug = ?2 AND id != ?3 AND retired_at IS NULL",
                 params![target_repo, current.1, wave_id],
                 |row| row.get::<_, String>(0),
             )
@@ -1842,9 +1891,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason
-             FROM waves
-             WHERE name = ?1 AND retired_at IS NULL
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses
+             WHERE slug = ?1 AND retired_at IS NULL
              ORDER BY repo",
         )?;
         let rows = stmt.query_map(params![slug], |row| Ok(map_wave_row(row)))?;
@@ -1853,6 +1902,28 @@ impl SqliteStore {
             waves.push(wave??);
         }
         Ok(waves)
+    }
+
+    pub(crate) fn reconcile_wave_directory(
+        &self,
+        id: &WaveId,
+        name: &str,
+        parent: Option<&WaveId>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let repo: String =
+            tx.query_row("SELECT repo FROM waves WHERE id=?1", params![id], |row| {
+                row.get(0)
+            })?;
+        validate_wave_parent(&tx, id, name, &repo, parent)?;
+        tx.execute(
+            "UPDATE waves SET name = ?2, parent_wave_id = ?3
+             WHERE id = ?1 AND (name != ?2 OR parent_wave_id IS NOT ?3)",
+            params![id, name, parent],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -1869,7 +1940,7 @@ impl SqliteStore {
         for update in updates {
             let current = tx
                 .query_row(
-                    "SELECT repo, name FROM waves WHERE id = ?1 AND retired_at IS NULL",
+                    "SELECT repo, slug FROM wave_addresses WHERE id = ?1 AND retired_at IS NULL",
                     params![update.wave_id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
@@ -1886,8 +1957,8 @@ impl SqliteStore {
 
             let collision = tx
                 .query_row(
-                    "SELECT id FROM waves
-                     WHERE repo = ?1 AND name = ?2 AND id != ?3
+                    "SELECT id FROM wave_addresses
+                     WHERE repo = ?1 AND slug = ?2 AND id != ?3
                        AND retired_at IS NULL",
                     params![
                         update.target.repo().to_string(),
@@ -1939,13 +2010,28 @@ impl SqliteStore {
                     ],
                 )?;
             }
+            let (parent_slug, name) = update
+                .target
+                .slug()
+                .rsplit_once('/')
+                .map_or((None, update.target.slug()), |(parent, name)| {
+                    (Some(parent), name)
+                });
+            let repo = update.target.repo().to_string();
+            let parent: Option<WaveId> = match parent_slug {
+                Some(slug) => Some(tx.query_row(
+                    "SELECT id FROM wave_addresses
+                     WHERE repo = ?1 AND slug = ?2 AND retired_at IS NULL",
+                    params![repo, slug],
+                    |row| row.get(0),
+                )?),
+                None => None,
+            };
+            validate_wave_parent(&tx, &update.wave_id, name, &repo, parent.as_ref())?;
             tx.execute(
-                "UPDATE waves SET repo = ?2, name = ?3 WHERE id = ?1",
-                params![
-                    update.wave_id,
-                    update.target.repo().to_string(),
-                    update.target.slug()
-                ],
+                "UPDATE waves SET repo = ?2, name = ?3, parent_wave_id = ?4
+                 WHERE id = ?1 AND (repo != ?2 OR name != ?3 OR parent_wave_id IS NOT ?4)",
+                params![update.wave_id, repo, name, parent],
             )?;
         }
         tx.commit()?;
@@ -2131,14 +2217,28 @@ mod frontier_tests {
     fn observation_reads_identity_without_execution_schema() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE waves (id TEXT, name TEXT, created_at INTEGER);
+            "CREATE TABLE waves (id TEXT, name TEXT, created_at INTEGER, parent_wave_id TEXT);
              CREATE TABLE projects (id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
              CREATE TABLE tasks (id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
-             INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1);
+             INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1, NULL);
              INSERT INTO projects VALUES ('proj_desktop', '00000000-0000-0000-0000-000000000001', 'desktop', 'linear-project', 2);
-             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);
-             PRAGMA query_only = ON;",
+             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);",
         ).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let reference =
+            SqliteStore::open_ephemeral(&directory.path().join("reference.db")).unwrap();
+        let view: String = reference
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='wave_addresses'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute_batch(&view).unwrap();
+        conn.execute_batch("PRAGMA query_only = ON").unwrap();
         let store = SqliteStore {
             conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
         };

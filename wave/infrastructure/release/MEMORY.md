@@ -1,8 +1,10 @@
 # Release memory
 
-Release is a subarea of infrastructure. Jack Heart selected this scope for
-release-specific durable findings; product support for subwaves is being
-explored separately before changing live Wave ownership.
+Release is the nested Wave `infrastructure/release`. Jack Heart selected its
+objective and ownership of release-focused planning on 2026-09-28. Its GOAL.md
+owns the authored release schedule. Live Linear ownership and schedule cutover
+remain pending until the subwave implementation lands and installed `lf` applies
+the split; authored files do not establish that cutover.
 
 ## Scheduled release failure boundaries (2026-09-28)
 

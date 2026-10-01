@@ -28,8 +28,6 @@ pub struct ExecPromptInput {
     pub surface: Surface,
     pub docs: Vec<String>,
     pub wave: Option<String>,
-    /// Wave memory already resolved by the Work layer.
-    pub wave_memory: Option<String>,
     pub message: Option<String>,
     pub no_loopflow: bool,
     pub agent: Option<String>,
@@ -84,7 +82,6 @@ pub(crate) fn preview_exec_prompt(
         surface,
         docs: requested_docs,
         wave,
-        wave_memory,
         message,
         no_loopflow,
         agent,
@@ -116,7 +113,6 @@ pub(crate) fn preview_exec_prompt(
         docs,
         files: Vec::new(),
         wave,
-        wave_memory,
         include_diff: diff,
         include_diff_files: diff_files,
         include_clipboard: clipboard,
@@ -304,6 +300,10 @@ Test skill body.
         fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         let evidence =
             "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
+        fs::create_dir_all(tmp.path().join("wave/infrastructure/release")).unwrap();
+        for wave in ["infrastructure", "infrastructure/release"] {
+            fs::write(tmp.path().join(format!("wave/{wave}/MEMORY.md")), &evidence).unwrap();
+        }
         for index in 0..14 {
             fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
         }
@@ -322,8 +322,7 @@ Test skill body.
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".into()),
-                wave: Some("infrastructure".into()),
-                wave_memory: Some(evidence.clone()),
+                wave: Some("infrastructure/release".into()),
                 message: Some(message.clone()),
                 surface: Surface::Headless,
                 ..Default::default()
@@ -336,10 +335,18 @@ Test skill body.
         assert!(bytes <= input_bytes, "{bytes}");
         assert!(tokens <= input_tokens, "{tokens}");
         assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= goal_tokens);
-        assert!(
-            count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
-                <= memory_tokens
-        );
+        for path in [
+            "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/release/MEMORY.md",
+        ] {
+            let memory = prepared
+                .components
+                .docs
+                .iter()
+                .find(|doc| doc.path == path)
+                .unwrap();
+            assert!(count_tokens(&memory.content) <= memory_tokens);
+        }
         assert!(
             prepared
                 .components
@@ -359,7 +366,17 @@ Test skill body.
             .unwrap()
             .collect();
         assert_eq!(sources.len(), 3);
-        assert_eq!(prepared.components.budget_decisions.len(), 3);
+        assert_eq!(prepared.components.budget_decisions.len(), 4);
+        assert!(
+            config
+                .task_prompt
+                .find("<lf:file path=\"wave/infrastructure/MEMORY.md\">")
+                .unwrap()
+                < config
+                    .task_prompt
+                    .find("<lf:file path=\"wave/infrastructure/release/MEMORY.md\">")
+                    .unwrap()
+        );
         let path = sources
             .iter()
             .map(|entry| entry.as_ref().unwrap().path())
@@ -372,6 +389,110 @@ Test skill body.
             evidence
         );
         eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
+    }
+
+    #[test]
+    fn repository_ancestor_and_selected_wave_memory_share_one_budget() {
+        let tmp = create_repo_fixture();
+        let inherited = "Parent decisions and observations.\n".repeat(8_000);
+        let own = "Release decisions and observations.\n".repeat(2_000);
+        fs::write(tmp.path().join("MEMORY.md"), &inherited).unwrap();
+        for (wave, memory) in [
+            ("infrastructure", &inherited),
+            ("infrastructure/delivery", &inherited),
+            ("infrastructure/delivery/release", &own),
+        ] {
+            let directory = tmp.path().join("wave").join(wave);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("MEMORY.md"), memory).unwrap();
+        }
+        let memory_tokens = 6_000;
+        let memory_bytes = 48 * 1024;
+        let config = Config {
+            context_budgets: [
+                (
+                    crate::engine::context_budget::BudgetKey::MemoryTokens,
+                    memory_tokens,
+                ),
+                (
+                    crate::engine::context_budget::BudgetKey::MemoryBytes,
+                    memory_bytes,
+                ),
+            ]
+            .into(),
+            ..default_test_config()
+        };
+        let prepared = prepare_exec_prompt(
+            &config,
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                wave: Some("infrastructure/delivery/release".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let memories = &prepared.components.docs;
+        assert_eq!(
+            memories
+                .iter()
+                .map(|doc| doc.path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "MEMORY.md",
+                "wave/infrastructure/MEMORY.md",
+                "wave/infrastructure/delivery/MEMORY.md",
+                "wave/infrastructure/delivery/release/MEMORY.md",
+            ]
+        );
+        assert!(memories
+            .iter()
+            .all(|doc| doc.content.contains("excerpt only")));
+        let submitted_tokens: usize = memories
+            .iter()
+            .map(|doc| crate::engine::prompt::count_tokens(&doc.content))
+            .sum();
+        assert!(submitted_tokens <= memory_tokens);
+        assert!(memories.iter().map(|doc| doc.content.len()).sum::<usize>() <= memory_bytes);
+        let usage = &prepared.budget_report.usage[..memories.len()];
+        assert!(usage.iter().map(|entry| entry.token_limit).sum::<usize>() <= memory_tokens);
+        assert!(usage.iter().map(|entry| entry.byte_limit).sum::<usize>() <= memory_bytes);
+        for (doc, entry) in memories.iter().zip(usage) {
+            assert_eq!(entry.source, doc.path);
+            assert_eq!(
+                entry.submitted_tokens,
+                crate::engine::prompt::count_tokens(&doc.content)
+            );
+            assert_eq!(entry.submitted_bytes, doc.content.len());
+            assert!(entry.original_tokens > entry.submitted_tokens);
+        }
+    }
+
+    #[test]
+    fn repository_memory_is_bounded_without_a_selected_wave() {
+        let tmp = create_repo_fixture();
+        let memory = "Repository decisions and observations.\n".repeat(8_000);
+        fs::write(tmp.path().join("MEMORY.md"), &memory).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let doc = &prepared.components.docs[0];
+        assert!(
+            crate::engine::prompt::count_tokens(&doc.content)
+                <= crate::engine::context_budget::BudgetKey::MemoryTokens.default_limit()
+        );
+        assert!(doc.content.contains("excerpt only"));
+        assert_eq!(
+            prepared.components.budget_decisions[0].scope,
+            crate::trace::ContextScope::Repo
+        );
+        assert!(fs::read_dir(tmp.path().join(".lf/tmp/context"))
+            .unwrap()
+            .any(|entry| fs::read_to_string(entry.unwrap().path()).unwrap() == memory));
     }
 
     #[test]
@@ -429,13 +550,19 @@ Test skill body.
         let intent = "> $kickoff\n> ok just run kickoff here then";
         fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
         fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        fs::create_dir_all(tmp.path().join("wave/product")).unwrap();
+        fs::write(
+            tmp.path().join("wave/product/MEMORY.md"),
+            "Jack previously invoked $kickoff.",
+        )
+        .unwrap();
         let prepared = prepare_exec_prompt(
             &default_test_config(),
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
                 agent: Some("codex".into()),
-                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                wave: Some("product".into()),
                 message: Some(
                     "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
                         .into(),

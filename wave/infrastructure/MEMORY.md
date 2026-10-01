@@ -565,8 +565,9 @@ draft preservation are discarded. Keep current Work/links, account routes and
 resumable conversations. Exactly three direct drafts remain: `record_execs`,
 `project_status_chapters` and `session_ownership`; released SQL remains immutable.
 
-**Merge and conversion have different proof.** The working merge checklist is
-`scratch/remaining-work.md` until delivery clears it. Configured provider and
+**Merge and conversion have different proof.** LOO-298 owns its merge checklist;
+this branch retains the earlier copy at `ab901f1f1:scratch/remaining-work.md`
+in Git history. Configured provider and
 Desktop continuity remain unproven; removing Jack's attendance requirement does
 not turn fixtures into acceptance. Before release conversion, quiesce old writers
 and new launches, preserve a consistent SQLite/filesystem backup and matching

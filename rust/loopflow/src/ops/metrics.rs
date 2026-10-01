@@ -100,7 +100,7 @@ pub(crate) fn metric_prompt_section(tag: &str, portfolio: Result<MetricPortfolio
 fn discover_wave_contracts(wave: &Wave) -> Result<MetricContractDiscovery> {
     let metrics_dir = metric_contract_repo(wave, std::env::var_os("LOOPFLOW_DEV_WAVE_REPO"))
         .join("wave")
-        .join(wave.name())
+        .join(wave.slug())
         .join("metrics");
     discover_metric_contracts(&metrics_dir, wave.id().as_str()).map_err(|error| anyhow!(error))
 }
@@ -298,7 +298,7 @@ pub(crate) async fn publish_metric_observations(
         };
         let wave = waves
             .iter()
-            .find(|wave| wave.name() == wave_name)
+            .find(|wave| wave.slug() == wave_name)
             .with_context(|| {
                 format!("producer metric {wave_name}/{metric_id} has no registered Wave")
             })?;

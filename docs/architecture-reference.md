@@ -253,10 +253,12 @@ The managed FlowSession is one marked member. Its selection remains authoritativ
 only for Task worker run/retry/restart/stop, cursor/claim fencing, exact Task review
 settlement and worker delivery authority. The managed Flow panel describes that
 cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
-headless and closed history. Completion and recovery inspect independent work;
-unfinished Flows, pending Asks/reviews and live or unresolved Execs preserve the
-checkout. The completing managed worker may settle itself; it cannot settle an
-independent Flow by completing its Task. Passive membership grants no control.
+headless and closed history. Completion waits for independent unfinished Flows;
+recovery preserves idle Flows and waits for unresolved execution, including a
+worker claim before its first step. Pending Asks/reviews and live or unresolved
+Execs preserve the checkout. The completing managed worker may settle itself;
+it cannot settle an independent Flow by completing its Task. Passive membership
+grants no control.
 Template composition compiles into the graph.
 One started Flow is one FlowSession; loop passes are node/iteration positions and
 lenses over its history. They have no separate claim or lifecycle. Captured

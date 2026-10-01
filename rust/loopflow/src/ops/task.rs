@@ -5246,6 +5246,92 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn task_work_recovery_preserves_another_tasks_claim_in_a_descendant_checkout() {
+        let fixture = task_fixture("WORK-PARENT").await;
+        let managed = claim_stop_fixture(&fixture, 999_999).await;
+        let mut child = fixture.task.clone();
+        child.id = TaskId::new();
+        child.plan.id = LinearIssueId::new("child-issue").unwrap();
+        child.plan.identifier = "WORK-CHILD".into();
+        child.worktree = child.worktree.join("child");
+        let mut pr = fixture
+            .store
+            .task_prs(&fixture.task.id)
+            .await
+            .unwrap()
+            .remove(0);
+        pr.id = TaskPrId::new();
+        pr.task_id = child.id.clone();
+        pr.branch = "test/child".into();
+        fixture.store.create_task(&child, &pr).await.unwrap();
+        let mut flow = managed.clone();
+        flow.invocation.id = "child-flow".into();
+        flow.task_id = Some(child.id.clone());
+        flow.cwd = child.worktree.clone();
+        flow.claim = None;
+        let flow = fixture
+            .store
+            .start_task_flow(&child.id, flow)
+            .await
+            .unwrap();
+        let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+        assert!(work
+            .flows
+            .iter()
+            .any(|entry| entry.summary.id == flow.id() && !entry.managed));
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+
+        // A claim can precede the first Flow event. Missing process evidence
+        // cannot authorize recovery over another Task's worker.
+        fixture
+            .store
+            .claim_task_worker(
+                &child.id,
+                flow.id(),
+                flow.version,
+                &managed.claim.as_ref().unwrap().owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = fixture.store.task_flow(&child.id).await.unwrap().unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+        assert_eq!(
+            fixture.store.task_flow(&child.id).await.unwrap(),
+            Some(claimed.clone())
+        );
+        fixture
+            .store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
     async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowSession {
         claim_stop_fixture_for(
             fixture,

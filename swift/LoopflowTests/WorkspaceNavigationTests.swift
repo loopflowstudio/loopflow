@@ -11,15 +11,19 @@ struct WorkspaceNavigationTests {
     @Test("Checkout-only Sessions use Rust membership in Task navigation")
     func checkoutMembershipKeepsUnboundConversationReachable() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
-        let original = try session("manual", work: nil)
-        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        json["task_ids"] = ["ts_review00000000000000000000000000"]
-        let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [record])
-        #expect(record.work == nil)
-        #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
-        #expect(projection.unmatchedSessions.isEmpty)
-        #expect(projection.breadcrumb(selection: nil, sessionId: "manual")?.task?.task.id == "issue-review")
+        let bindings: [WorkReference?] = [nil, .wave(id: roadmap.waves[0].wave.id)]
+        for work in bindings {
+            let original = try session("manual", work: work)
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            json["task_ids"] = ["ts_review00000000000000000000000000"]
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+            let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [record])
+            #expect(record.work == work)
+            #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
+            #expect(projection.unmatchedSessions.isEmpty)
+            #expect(projection.waves.allSatisfy { $0.sessions.isEmpty })
+            #expect(projection.breadcrumb(selection: nil, sessionId: "manual")?.task?.task.id == "issue-review")
+        }
     }
 
     @Test("Repository path spellings share one outline root")

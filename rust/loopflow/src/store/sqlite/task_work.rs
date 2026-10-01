@@ -7,6 +7,9 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
+// Bound Flows inherit their Task's checkout instead of storing a second path.
+const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.task_id))";
+
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -21,7 +24,7 @@ pub(super) fn flow_ids(selector: &str) -> String {
     format!(
         "SELECT af.id FROM flow_sessions af JOIN ({}) tw ON af.task_id=tw.id OR ({})",
         tasks(selector),
-        checkout("af.cwd")
+        checkout(FLOW_CWD)
     )
 }
 
@@ -30,7 +33,7 @@ fn session_membership(session: &str) -> String {
         "{session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
         WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({})))",
         checkout(&format!("{session}.cwd")),
-        checkout("af.cwd")
+        checkout(FLOW_CWD)
     )
 }
 
@@ -217,6 +220,11 @@ mod tests {
             // Binding includes earlier Execs in the inventory without assigning
             // their earlier performed work or usage to this Task.
             conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_exec]).unwrap();
+            conn.execute(
+                "UPDATE execs SET parent_exec_id=?1 WHERE id=?2",
+                params![mechanical, sibling],
+            )
+            .unwrap();
         }
         let work = store.task_work(&task).unwrap();
         assert_eq!(
@@ -267,7 +275,7 @@ mod tests {
         assert!(store
             .execs(
                 &ExecFilter {
-                    performed_work: Some(ExecWorkFilter::Task(task)),
+                    performed_work: Some(ExecWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
@@ -276,5 +284,49 @@ mod tests {
             .unwrap()
             .entries
             .is_empty());
+
+        let child = TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,0,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
+            conn.execute(
+                "UPDATE tasks SET current_invocation_id='child-flow' WHERE id=?1",
+                [child.as_str()],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,flow_session_id,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/elsewhere','child-flow',?1,?2)", params![child.as_str(), wave]).unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert!(work
+            .flows
+            .iter()
+            .any(|flow| flow.summary.id == "child-flow" && !flow.managed));
+        assert!(work
+            .sessions
+            .iter()
+            .any(|session| session.id == "child-session" && !session.managed));
+        let memberships = store.session_task_ids("child-session").unwrap();
+        assert!(memberships.contains(&task) && memberships.contains(&child));
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE tasks SET worktree='' WHERE id=?1", [task.as_str()])
+                .unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(
+            work.sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["history"]
+        );
+        assert_eq!(
+            work.flows
+                .iter()
+                .map(|flow| flow.summary.id.as_str())
+                .collect::<Vec<_>>(),
+            ["managed"]
+        );
     }
 }

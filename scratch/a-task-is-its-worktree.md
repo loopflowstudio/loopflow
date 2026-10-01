@@ -49,9 +49,30 @@ or alternate durable owner is required.
   rows decode directly without temporary placeholder kinds, and managed Exec
   exclusions use set membership rather than scanning history for every Exec.
 
-## Remaining verification
+## Verification
 
-Gate owns affected suites and broader lifecycle acceptance. Configured Desktop
-judgment remains with demo/review; no publication or installation was attempted.
+The affected-suite run retained failures rather than rewriting its receipt:
+the expanded Rust fixture needed valid insertion order and Flow identity, and
+the rename/breadcrumb fixture needed Rust's explicit-binding membership. Both
+are repaired. The unchanged native-client publication test failed temporary
+executable discovery once and passed in isolation; its cause remains unproven.
+The earlier gate was interrupted for review repairs before behavioral tests.
+CI owns the final full-suite receipt. Optional display diagnostics were skipped;
+configured Desktop judgment remains with demo/review. No publication or
+installation was attempted.
 
-Checks: `cargo test -p loopflow --lib task_work_` 2 passed; `cargo test -p loopflow --test dto_fixtures` 13 passed; `swift test --package-path swift --filter 'DTOFixtureTests|WorkspaceNavigationTests'` 45 passed; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed; broader acceptance → gate.
+Checks: `uv run python scripts/test.py --base de074a2ebd2cb54e6f7dde799400dae36c87bbbe --reuse-passing` — architecture passed, Rust 2,026 passed/2 failed/17 skipped, website 78 passed/3 skipped, Swift 307-case run with one failing fixture; isolated `cargo nextest run -p loopflow --lib -E 'test(task_work_)'` 3 passed and native-client publication proof passed unchanged; `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'SessionRenameTests|WorkspaceNavigationTests|DesktopHeadlessTests'` 31 passed; final all-target Clippy, formatting, diff check, Swift boundaries and 4 CLI-doc alignment tests passed; full final-tree receipt → CI.
+
+## Gate review repairs
+
+- Bound Flows inherit their checkout from their Task. Association now resolves
+  that path, including a different Task in a descendant checkout, and still
+  marks managed status relative to the inspected Task.
+- Recovery inspects independent Flow execution and claims even before a first
+  step exists. Idle Flows remain recoverable; their claims and cursor are retained.
+- A Wave-bound Session associated with a visible Task appears under that Task
+  once. Its recorded binding stays unchanged, and missing Tasks retain the Wave
+  fallback. A headless production-view test covers all three work inventories
+  and managed markers.
+- The shared rename fixture now includes its explicit Task binding in
+  `task_ids`, preserving the Wave → Task → exact Session breadcrumb.

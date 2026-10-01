@@ -617,16 +617,27 @@ fn execution_blockers(
 ) -> OpsResult<Vec<String>> {
     let mut blockers = Vec::new();
     let mut managed_execs = HashSet::new();
-    for flow in work.flows.iter().filter(|flow| flow.managed) {
-        managed_execs.extend(
-            store
-                .sqlite
-                .flow_exec_ids(&flow.summary.id)
-                .map_err(task_error)?,
-        );
+    for flow in work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
+    {
         if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
-            if let Some(claim) = position.claim {
-                managed_execs.insert(claim.owner.exec_id);
+            if flow.managed {
+                managed_execs.extend(
+                    store
+                        .sqlite
+                        .flow_exec_ids(&flow.summary.id)
+                        .map_err(task_error)?,
+                );
+                if let Some(claim) = position.claim {
+                    managed_execs.insert(claim.owner.exec_id);
+                }
+            } else if execution_unsettled(store, &position)? {
+                blockers.push(format!(
+                    "Flow {} has live or unresolved execution",
+                    flow.summary.id
+                ));
             }
         }
     }

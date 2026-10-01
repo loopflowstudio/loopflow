@@ -21,7 +21,7 @@ The launch prompt identifies the reviewer.
   creation require the present User. When absent, report the exact blocker and
   next commands; do not manufacture a session.
 
-Never expose credential values. Use Loopflow's auth commands; do not read
+Never expose credential values. Use Loopflow's account commands; do not read
 tokens from dotfiles or environment variables.
 
 ## 1. Discover the existing system
@@ -33,10 +33,10 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
-lf auth route show
-lf home id --json
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
+lf id --json
 lf wave list --json
 command -v claude
 command -v codex
@@ -48,7 +48,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
-If `lf home id` says the local store is not initialized, record that plainly
+If `lf id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
 Present one compact topology:
@@ -69,7 +69,7 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
-Read `lf user name --json`: a personal Loopflow `user.name` override wins,
+Read `lf user --json`: a personal Loopflow `user.name` override wins,
 otherwise Git's configured `user.name` supplies the baseline. An available name
 needs no additional setup. Agents may also use a name already known in the session.
 In an interactive session, if neither source supplies a name, ask what name to
@@ -130,20 +130,20 @@ Ask the user what they want to make operational now:
 This answer determines the minimum accounts and files. Do not turn init into a
 questionnaire.
 
-For durable planning and delivery, inspect `lf auth status` and offer only the
+For durable planning and delivery, inspect `lf account` and offer only the
 missing connections:
 
 ```bash
-lf auth connect github
-lf auth connect linear
-lf auth connect claude
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
+lf account connect github
+lf account connect linear
+lf account connect claude
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
 ```
 
 OAuth client credentials resolve from environment first, with a Doppler fallback
 when configured. If this repository uses Doppler and credentials are missing,
-use `doppler run -- lf auth connect linear`. Otherwise follow the customer's secret
+use `doppler run -- lf account connect linear`. Otherwise follow the customer's secret
 manager and the exact missing variable names. Never print credential values.
 
 Account connection is an external side effect. The user must choose it and
@@ -162,13 +162,13 @@ Read its `wave/<name>/GOAL.md`, then verify its shared state:
 ```bash
 lf wave status <wave> --json
 lf roadmap --wave <wave> --json
-lf wave status <wave> --no-sync
+lf wave status <wave>
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf wave connect --wave <wave>
+lf repo connect <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the
@@ -220,7 +220,7 @@ Require its exact issue identifier. If Linear is connected and the Task belongs
 to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
-lf task run <ISSUE-ID>
+lf --task <ISSUE-ID> flow start
 lf task status <ISSUE-ID> --json
 ```
 
@@ -250,9 +250,9 @@ actual ids observed from the commands:
 
 ```bash
 lf ssh <host> home id --json
-lf home observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> auth status
-lf ssh <home-id> route show
+lf observe <home-id> ssh://<user>@<host>
+lf ssh <home-id> account --cached
+lf ssh <home-id> account route
 lf wave list --json
 lf wave place <wave-id> <home-id>
 lf wave status <wave> --json
@@ -275,10 +275,10 @@ changing placement, or starting a Wave; each changes durable execution state.
 Run the smallest checks that prove the selected path:
 
 ```bash
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
-lf auth route show
-lf home id --json
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
+lf id --json
 lf wave list --json
 ```
 
@@ -302,7 +302,7 @@ Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
 Next         lf --wave designer wave/operate
-Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
+Also         lf roadmap --wave designer | lf --task DES-123 flow start | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and

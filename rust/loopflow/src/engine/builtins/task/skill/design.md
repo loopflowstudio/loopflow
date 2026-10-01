@@ -111,4 +111,4 @@ historical skill names unprefixed.
 Leave the current design and its evidence ready for kickoff to shape into an
 implementation plan. Task allocation and launch belong to launch-plan when
 execution is requested. Preserve accepted intent and unresolved choices in the
-artifact; finishing design does not itself authorize launching work.
+artifact; finishing design does not itself accountorize launching work.

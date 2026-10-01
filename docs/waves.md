@@ -126,7 +126,7 @@ newer. A Wave without a current Project requires an unambiguous predecessor;
 the command never selects an arbitrary historical plan.
 
 There is no transaction across Linear mutations or across Homes. A second Home
-observes the same statuses on `lf wave sync --wave <wave>` or its next normal
+observes the same statuses on `lf repo refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
 A successful preview does not authorize ignoring later external reassignments.
 
@@ -140,9 +140,9 @@ flow: feature
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf task run <task>` uses that Flow unless `--flow` overrides it. Existing
+`lf --task <task> flow start` uses that Flow unless a template argument selects another. Existing
 Projects observed before the status-model upgrade retain their identity and
-custom default Flow. The first explicit `lf wave sync` or chapter rotation
+custom default Flow. The first explicit `lf repo refresh` or chapter rotation
 converts their old `recommended:` line to `flow:` and marks the recorded current
 Project In Progress. Until then, planning reads project that same conversion
 without changing Linear. Deliberately Planned successors stay Planned; archived
@@ -227,9 +227,9 @@ remain owned by the Wave; rotation does not freeze another copy of those reading
 The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 
 ```bash
-lf wave status <wave>            # owner, value, target, window, freshness, reason
-lf wave status <wave> --json     # the shared metric_portfolio DTO
-lf roadmap --json           # the same DTO on every Wave row
+lf wave status <wave>                  # owner, value, target, window, freshness, reason
+lf wave status <wave> --json           # the shared metric_portfolio DTO
+lf roadmap --json                      # the same DTO on every Wave row
 ```
 
 `installed` metrics appear under Instrumenting. Promote a contract to
@@ -264,7 +264,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf runs --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf mon show --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -305,8 +305,8 @@ New Project or Task Work inherits its parent's recorded Home once. Readers
 operate on the selected Home; they never silently aggregate other Homes.
 
 ```bash
-lf wave relocate <wave-id> --name platform
-lf wave relocate <wave-id> --repo ../moved-repository
+lf wave rename <wave-id> --name platform
+lf wave rename <wave-id> --repo ../moved-repository
 ```
 
 Relocation preserves the Wave UUID, Linear projection, authored files, Work and
@@ -322,7 +322,7 @@ See [Homes and processes](architecture/homes.md) and
 
 ```bash
 lf wave status infra --json
-lf wave update-plan --wave infra --plan plan.json
+lf update-plan --wave infra --plan plan.json
 ```
 
 `plan.json` contains the complete current plan:
@@ -340,15 +340,15 @@ the default Flow, retaining any explicitly prepared successor plan.
 Tasks live in Linear; there are no local task lists. A Wave maps to an
 Initiative, its Project for each Chapter maps to a Linear Project, and each
 Task maps to an Issue. The chapter name groups the current Projects. Connect
-once — `lf wave connect` links or creates the Wave Initiative and establishes one
+once — `lf repo connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
 ```bash
-lf wave connect --wave infra --team-key LOO     # first Wave establishes the repo Team
-lf wave connect --all                           # all nested Waves reuse it
-lf wave sync --wave infra                    # refresh the local SQLite snapshot
-lf wave status infra --no-sync          # deterministic cache-only read
+lf repo connect infra --team-key LOO # first Wave establishes the repo Team
+lf repo connect --all                  # all nested Waves reuse it
+lf repo refresh infra              # refresh the local SQLite snapshot
+lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"
 ```
@@ -366,11 +366,11 @@ durable Task Work in its own stable sibling worktree:
 ```bash
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
-lf task checkout INF-123
+lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
-lf task run INF-123
-lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
-lf task run INF-125 --flow incident
+lf --task INF-123 flow start
+lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent merges
+lf --task INF-125 flow start incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its
@@ -402,9 +402,9 @@ steering, resume and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf pr land --next parser-proof   # merge this PR, then rotate to the next
-lf pr land -c                    # merge this PR, then complete the Task
-lf task complete INF-124 --summary "investigation recorded"   # no PR needed
+lf land --next parser-proof            # merge this PR, then rotate to the next
+lf land -c                             # merge this PR, then complete the Task
+lf task complete INF-124 --summary "investigation recorded" # no PR needed
 ```
 
 `task complete` also finishes planning-only Tasks without creating a checkout.
@@ -451,7 +451,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The Wave reads its chapter and Tasks with `lf wave status --no-sync`, judges the
+The Wave reads its chapter and Tasks with `lf wave status`, judges the
 KR evidence, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 

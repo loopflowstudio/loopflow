@@ -202,7 +202,7 @@ def test_release_subwave_cron_runs_the_host_release_after_telemetry():
         {"flow": "release-run", "schedule": "0 0 10 * * *"},
     ]
     assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
-        {"cmd": "release run patch"}
+        {"cmd": "repo release run patch"}
     ]
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())

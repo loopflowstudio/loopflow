@@ -111,9 +111,9 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task checkout <issue> --json
+lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> --flow <chosen-flow>
+lf --task <issue> flow start <chosen-flow>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs

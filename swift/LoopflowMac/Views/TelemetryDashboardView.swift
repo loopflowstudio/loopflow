@@ -412,7 +412,7 @@ private struct CodebaseGrowthChart: View {
         if points.isEmpty {
             EmptyChartHint(
                 message: failure ?? "No git history in this window",
-                hint: "`lf tokens --days 30` walks the repo's commits"
+                hint: "`lf repo tokens --days 30` walks the repo's commits"
             )
         } else {
             Chart(points) { point in
@@ -458,7 +458,7 @@ private struct CodeFlame: View {
         } else {
             EmptyChartHint(
                 message: failure ?? "No codebase measured",
-                hint: "`lf tokens` measures the selected repo"
+                hint: "`lf repo tokens` measures the selected repo"
             )
         }
     }

@@ -73,6 +73,29 @@ Jack Heart set these in one design session. Wording in quotes is his.
   jack works is probably more of like a blog post." Docs teach the
   product; his own practice is told in his voice, elsewhere.
 
+## CLI account naming decision (2026-09-30)
+
+Jack Heart: “i thought we decided on lf account instead of lf identity”.
+LOO-338 uses `lf account` for provider logins, status, connection, routing and
+its overview. `identity`/`id` are superseded draft names, with no account short
+alias. `lf home id` retains machine identity. Jack also requires a complete
+Clap-derived command and option catalog, including internal surfaces, with
+caller evidence and keep/rename/merge/delete verdicts before implementation.
+Jack's later September 30 steers reject prefix-only reorganization and waive
+review/demo waiting. Guides use the shortest uniquely resolving commands;
+canonical ownership stays in reference/help. Keep `wt`, `top` and `ps`; `mon`
+is a derived prefix. The newest selectors are `--task` / `--wt` for location
+and `--wave` for context and identity, with no `--as` alias.
+
+LOO-338 now integrates the landed Exec/AgentSession/FlowSession and Account
+models. Monitor separates live processes, recorded outcomes and missing
+observations; active conversation streaming, raw/final Session evidence, usage
+and historical Work queries retain distinct readers. Account and route each
+have one reader. Saved per-provider choices survive retry/background children;
+remote launch still needs destination access. Catalog and exact counts live in
+the Task's scratch until delivery; the command reference is generated from Clap.
+
+
 ## CLI guide decisions (2026-09-29)
 
 Jack asked the CLI guide to lead with complete workflows and the outcomes
@@ -84,20 +107,19 @@ Jack cut the dedicated Wave showcase section for now, while keeping its detailed
 reference and capabilities in scope. Existing page addresses remain valid.
 
 The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
-are design previews. Local discovery now supports help without launching,
-flow-first untyped selection, strict typed definitions, and unique command
-shorthand. Owner moves and proposed monitor/identity overviews remain future
-work. Fixture and read-only CLI evidence does not demonstrate the first local
-result, a live app walkthrough, or a complete autonomous lifecycle. Keep those
-proof obligations before publishing a walkthrough; compact help alone does not
-resolve first-project setup or planning-account requirements.
+describe the implemented owner tree. A disposable public-CLI walkthrough on
+2026-09-30 produced a real Codex-authored README in a fresh Git project without
+Linear or Task setup, then read Monitor, cached Account and each owner on that
+state. Synthetic tests separately cover account restrictions and continuation.
+This establishes the first local result; live OAuth, remote-Home execution,
+rendered Desktop and a complete autonomous release lifecycle are different
+proofs and are not claimed by that walkthrough.
 
 Jack's subsequent authoring decisions use `cmd:` for command steps and one
 Target model for commands, skills, flows, and XOR composition. Local source
 implements these decisions and direct review/repeat fields on steps. Saved
 execution plans still capture instruction bodies before running. These internal
-changes do not establish any additional newcomer journey; the guide's proposed
-owner tree and walkthrough proof obligations remain unchanged.
+changes do not establish any additional newcomer journey; the public guide keeps planning setup separate from the first local result.
 
 ## Docs rewrite plan (2026-09-26)
 

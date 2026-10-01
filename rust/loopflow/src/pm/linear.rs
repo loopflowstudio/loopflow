@@ -624,7 +624,7 @@ impl LinearClient {
             ))),
             None => Err(PmError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf wave connect --team-key {}` to claim it for {repository}",
+                 run `lf repo connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }
@@ -634,7 +634,7 @@ impl LinearClient {
         self.team_id.clone().ok_or_else(|| {
             PmError::Message(
                 "Linear write requires repository `pm.linear_team` in .lf/config.yaml; \
-                 run `lf wave connect --wave <wave> --team-key <KEY>`"
+                 run `lf repo connect <wave> --team-key <KEY>`"
                     .to_string(),
             )
         })

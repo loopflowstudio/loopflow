@@ -215,13 +215,13 @@ export GH_LOG="$TMP_ROOT/publication.gh.log" GH_STATE="$TMP_ROOT/publication.gh.
 export OPEN_LOG="$TMP_ROOT/publication.open.log"
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/publication.provider.log"
 : >"$GH_LOG"; : >"$OPEN_LOG"; : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" pr publish --title "behind branch" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" task pr publish --title "behind branch" --body "proof" >/dev/null)
 published_head=$(git -C "$REPO" rev-parse HEAD)
 test "$(git -C "$REPO" rev-list --count "$pre_publish_head..$published_head")" = 1
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$published_head"
 test ! -e "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
 test ! -s "$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" pr open --title "behind branch" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" task pr open --title "behind branch" --body "proof" >/dev/null)
 test "$(git -C "$REPO" rev-parse HEAD)" = "$published_head"
 test "$(wc -l <"$OPEN_LOG" | tr -d ' ')" = 1
 test ! -s "$SENTINEL_LOG"

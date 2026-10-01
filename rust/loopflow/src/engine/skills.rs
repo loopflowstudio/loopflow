@@ -421,10 +421,10 @@ mod tests {
             assert!(!root.join("update-wave/SKILL.md").exists());
             assert!(!root.join("record-learnings/SKILL.md").exists());
             let control = fs::read_to_string(root.join("loopflow/SKILL.md")).unwrap();
-            assert!(control.contains("lf task restart"));
+            assert!(control.contains("lf restart"));
             assert!(control.contains("lf wave place"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
-            assert!(!implement.contains("lf task restart"));
+            assert!(!implement.contains("lf restart"));
         }
     }
 

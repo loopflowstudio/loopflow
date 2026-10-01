@@ -339,7 +339,7 @@ fn resolve_selectors(
                 .map(|provider| format!("{provider} "))
                 .unwrap_or_default();
             return Err(ProviderAccountError::Runtime(format!(
-                "no managed {provider}account matches '{}'; see `lf auth status`",
+                "no managed {provider}account matches '{}'; see `lf account`",
                 selector.account
             )));
         }

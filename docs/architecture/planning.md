@@ -3,9 +3,9 @@
 ```bash
 lf --wave product wave/operate
 lf task status INF-124 --json
-lf task checkout INF-124
+lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
-lf task run INF-124
+lf --task INF-124 flow start
 lf repo new-chapter 2026-10 --dry-run
 ```
 
@@ -20,7 +20,7 @@ records the remaining implementation and proof gaps.
 
 ```bash
 lf repo new-chapter 2026-10
-lf wave sync --wave product
+lf repo refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
@@ -152,10 +152,10 @@ the answer instead of opening duplicate conversations.
 ## Recover without inventing an outcome
 
 ```bash
-lf task run INF-124
+lf --task INF-124 flow start
 lf flow resume FLOW_SESSION
 lf flow resume FLOW_SESSION --retry
-lf task run INF-124 --retry
+lf --task INF-124 flow start --retry
 ```
 
 The Flow orchestration claim and conversation driver claim have different owners.

@@ -737,7 +737,7 @@ struct WorkspaceNavigationTests {
         {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
+         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }

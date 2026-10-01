@@ -48,14 +48,17 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
 
-    let removed = run(home.path(), &["runs", "historical-input", "--resume"]);
+    let removed = run(
+        home.path(),
+        &["monitor", "show", "historical-input", "--resume"],
+    );
     assert!(!removed.status.success());
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
         &["session", "ready"][..],
         &["session", "complete"],
-        &["session", "open"],
+        &["session", "connect"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
@@ -127,7 +130,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         command
     };
     let prepared = command(env!("CARGO_BIN_EXE_lf"))
-        .args(["session", "open", &id, "--json"])
+        .args(["session", "connect", &id, "--json"])
         .output()
         .unwrap();
     assert!(
@@ -177,7 +180,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest["artifact_key"], run_id.as_str());
     assert_eq!(manifest["caller_artifact_key"], CALLER);
-    let opened = run(home.path(), &["session", "open", &id, "--json"]);
+    let opened = run(home.path(), &["session", "connect", &id, "--json"]);
     assert!(
         opened.status.success(),
         "{}",
@@ -189,7 +192,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
-    let inspected = run(home.path(), &["runs", &run_id, "--json"]);
+    let inspected = run(home.path(), &["monitor", "show", &id, "--json"]);
     assert!(
         inspected.status.success(),
         "{}",
@@ -278,7 +281,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             )
             .unwrap();
             std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let failed = command(home.path(), &["session", "open", id])
+            let failed = command(home.path(), &["session", "connect", id])
                 .env("LF_BIN", &rejected)
                 .output()
                 .unwrap();
@@ -294,7 +297,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(!error.contains("Local proof"), "prompt leaked: {error}");
         }
         let evidence = home.path().join("resumed");
-        let mut first = command(home.path(), &["session", "open", id])
+        let mut first = command(home.path(), &["session", "connect", id])
             .env(
                 "PATH",
                 format!(
@@ -324,7 +327,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             );
         }
         let selector = id;
-        let mut second = command(home.path(), &["session", "open", selector, "--json"])
+        let mut second = command(home.path(), &["session", "connect", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -339,7 +342,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             second.kill().unwrap();
         }
         let reopened = second.wait_with_output().unwrap();
-        let active = run(home.path(), &["runs", "--active", "--json"]);
+        let active = run(home.path(), &["monitor", "active", "--json"]);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
         let first = first.wait_with_output().unwrap();
@@ -361,7 +364,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         assert_eq!(active["sessions"].as_array().unwrap().len(), 1, "{active}");
         assert_eq!(active["sessions"][0]["id"], id);
         assert_eq!(active["sessions"][0]["processes"][0]["state"], "waiting");
-        let ended = run(home.path(), &["runs", "--active", "--json"]);
+        let ended = run(home.path(), &["monitor", "active", "--json"]);
         let ended: serde_json::Value = serde_json::from_slice(&ended.stdout).unwrap();
         assert_eq!(ended["sessions"], serde_json::json!([]));
         if !resume {
@@ -549,7 +552,7 @@ fn session_names_are_shared_and_human_names_win() {
     let readback = listed(home.path(), id);
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
-    let reopened = run(home.path(), &["session", "open", id, "--json"]);
+    let reopened = run(home.path(), &["session", "connect", id, "--json"]);
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
     // Naming touches only the Session row, never the Run or provider state.
@@ -599,7 +602,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     let evidence = home.path().join("launched");
-    let mut opened = command(home.path(), &["session", "open", id])
+    let mut opened = command(home.path(), &["session", "connect", id])
         .env(
             "PATH",
             format!(

@@ -374,7 +374,7 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "choosing a preview mutates nothing")
         try find("task-flow-start").button().tap()
         for _ in 0..<20 where await source.controls.isEmpty { try await settle(window) }
-        #expect(await source.controls == [["task", "run", "W2-156", "--flow", "build"]])
+        #expect(await source.controls == [["--task", "W2-156", "flow", "start", "build"]])
 
         // Pinned and waiting for review: the saved position, not the catalogue.
         model.select(.task(id: "issue-review"))
@@ -586,7 +586,7 @@ private actor FlowSource {
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return catalog
-        case ("task", "run"):
+        case ("--task", _) where args.dropFirst(2).starts(with: ["flow", "start"]):
             controls.append(args)
             return ""
         case ("task", "restart"):

@@ -495,48 +495,6 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     })
 }
 
-/// Address the existing PR/sync operation through its owning Task.
-pub fn task_operation(
-    issue: &str,
-    operation: &str,
-    args: &[String],
-    agent: Option<&str>,
-) -> OpsResult<()> {
-    if !matches!(operation, "pr" | "sync") {
-        return Err(task_error("expected a PR or sync operation"));
-    }
-    let task = block_on_task(async {
-        task_store()
-            .await?
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "no placed Task for {issue}; use task checkout first"
-                ))
-            })
-    })?;
-    if !task.worktree.exists() {
-        return Err(task_error(format!(
-            "Task checkout is absent; recover it with `lf task checkout {issue}`"
-        )));
-    }
-    let mut command = std::process::Command::new(std::env::current_exe()?);
-    command.current_dir(&task.worktree);
-    if let Some(agent) = agent {
-        command.args(["--model", agent]);
-    }
-    command.arg(operation).args(args);
-    let status = command.status()?;
-    if !status.success() {
-        return Err(task_error(format!(
-            "Task {issue} {operation} failed ({status})"
-        )));
-    }
-    Ok(())
-}
-
 /// Resolve placed Task operations through retained Wave ownership, even after
 /// their checkout is gone. Unplaced planning work uses the caller's repository.
 pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<std::path::PathBuf> {
@@ -640,7 +598,7 @@ fn execution_blockers(
             != crate::journal::ProcessIdentityEvidence::Dead
         {
             blockers.push(format!(
-                "Exec {} has live or unresolved execution; inspect `lf exec show {}`",
+                "Exec {} has live or unresolved execution; inspect `lf mon show {}`",
                 exec.id, exec.id
             ));
         }

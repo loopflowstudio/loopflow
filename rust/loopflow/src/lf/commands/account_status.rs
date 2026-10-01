@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use super::{format_relative_delta, parse_provider};
+use super::format_relative_delta;
 use crate::profile::{AccessProfile, AuthBrowserBinding, LocalChromeProfile};
 use crate::provider_account::{account_login, acquire_managed_login_lock, open_account_store};
 use crate::provider_auth::{Provider, ProviderAuthService};
@@ -27,14 +27,14 @@ enum Scope {
 
 /// One invocation's projection; retained windows keep their original evidence.
 #[derive(Debug, Serialize, Deserialize)]
-struct AuthReport {
-    accounts: Vec<AuthRow>,
+struct AccountReport {
+    accounts: Vec<AccountRow>,
     forwarded_accounts_diagnostic: Option<String>,
     browser: Option<BrowserDetails>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct AuthRow {
+struct AccountRow {
     provider: Provider,
     account_id: Option<ProviderAccountId>,
     login: Option<String>,
@@ -63,12 +63,11 @@ struct BrowserDetails {
 }
 
 pub(super) async fn run(
-    provider: Option<&str>,
+    provider: Option<Provider>,
     verify: bool,
     details: bool,
     json: bool,
 ) -> Result<()> {
-    let provider = provider.map(parse_provider).transpose()?;
     let store = if verify {
         Some(open_account_store().await?)
     } else {
@@ -117,7 +116,7 @@ pub(super) async fn run(
     } else {
         None
     };
-    let report = AuthReport {
+    let report = AccountReport {
         accounts: rows,
         forwarded_accounts_diagnostic,
         browser,
@@ -137,7 +136,7 @@ pub(super) async fn run(
     Ok(())
 }
 
-fn forwarded_rows(provider: Option<Provider>) -> Result<Vec<AuthRow>> {
+fn forwarded_rows(provider: Option<Provider>) -> Result<Vec<AccountRow>> {
     let mut rows = Vec::new();
     if let Some(client) = crate::provider_account::lease::AccountLeaseClient::from_env()? {
         let lease = client.describe()?;
@@ -147,7 +146,7 @@ fn forwarded_rows(provider: Option<Provider>) -> Result<Vec<AuthRow>> {
             .filter(|g| provider.is_none_or(|p| p == g.provider))
         {
             for account_id in &grant.accounts {
-                rows.push(AuthRow {
+                rows.push(AccountRow {
                     provider: grant.provider,
                     account_id: Some(account_id.clone()),
                     login: Some(client.login_email(grant.provider, account_id)?),
@@ -176,7 +175,7 @@ async fn local_rows(
     service: Option<&ProviderAuthService>,
     filter: Option<Provider>,
     verify: bool,
-) -> Result<Vec<AuthRow>> {
+) -> Result<Vec<AccountRow>> {
     let mut rows = Vec::new();
     for provider in Provider::all()
         .into_iter()
@@ -186,7 +185,7 @@ async fn local_rows(
             Some(service) => service.cached_status(provider).await?,
             None => None,
         };
-        rows.push(AuthRow {
+        rows.push(AccountRow {
             provider,
             account_id: None,
             login: snapshot.as_ref().and_then(|s| s.status.login()),
@@ -229,7 +228,7 @@ async fn managed_rows(
     store: &SharedStore,
     provider: Option<Provider>,
     verify: bool,
-) -> Result<Vec<AuthRow>> {
+) -> Result<Vec<AccountRow>> {
     let accounts = store
         .list_provider_accounts(provider.map(Provider::as_str))
         .await?;
@@ -356,7 +355,7 @@ async fn managed_rows(
             && presence == crate::provider_auth::CredentialPresence::Present
         {
             diagnostic =
-                Some("current credential identity is unverified; run lf auth status claude".into());
+                Some("current credential identity is unverified; run lf account claude".into());
             Verification::Unavailable
         } else if verify {
             diagnostic = Some("no readable managed credential".into());
@@ -384,7 +383,7 @@ async fn managed_rows(
                     .max_by_key(|w| w.observed_at)
                     .and_then(|w| w.plan.clone())
             });
-        rows.push(AuthRow {
+        rows.push(AccountRow {
             provider,
             account_id: Some(account.account_id.clone()),
             login: observed_login.or_else(|| account.login_email.as_ref().map(ToString::to_string)),
@@ -395,7 +394,7 @@ async fn managed_rows(
             diagnostic,
             recovery: recover.then(|| {
                 format!(
-                    "lf auth connect {} {}",
+                    "lf account connect {} {}",
                     account.provider,
                     account_login(account)
                 )
@@ -422,7 +421,33 @@ async fn managed_rows(
     Ok(rows)
 }
 
-fn render(report: &AuthReport, width: usize, now: i64) -> String {
+fn next_action(row: &AccountRow, now: i64) -> String {
+    let provider = row.provider.as_str();
+    if row.scope == Scope::Forwarded {
+        return "inspect lf account on the origin Home".into();
+    }
+    if row.scope == Scope::Local {
+        return if row.cached_credential_state == "active"
+            && row.expires_at.is_none_or(|expires| expires > now)
+        {
+            "use the service; launch checks required access".into()
+        } else {
+            format!("lf account connect {provider} (ambient access is not checked here)")
+        };
+    }
+    if row.routing.as_deref() == Some("disabled") {
+        return "lf account route (account disabled for routing)".into();
+    }
+    if row.cooldown_until.is_some_and(|until| until > now) {
+        return format!("wait for cooldown, then lf account {provider}");
+    }
+    if row.routing.as_deref() == Some("explicit_only") {
+        return "select this login with --account; launch checks required access".into();
+    }
+    format!("lf account {provider} (refresh credential and capacity evidence)")
+}
+
+fn render(report: &AccountReport, width: usize, now: i64) -> String {
     let mut lines = Vec::new();
     for (local, title) in [(false, "Managed accounts"), (true, "Local services")] {
         lines.push(title.into());
@@ -441,20 +466,17 @@ fn render(report: &AuthReport, width: usize, now: i64) -> String {
             };
             lines.push(format!("{:<12} {identity}", row.provider.as_str()));
             let evidence = match row.verification {
-                Verification::Accepted => "active (verified)",
-                Verification::Rejected => "needs login (identity or credential rejected)",
-                Verification::Unavailable => "verification unavailable",
-                Verification::NotChecked => "not checked",
-            };
-            match row.verification {
-                Verification::Accepted | Verification::Rejected => {
-                    lines.push(format!("  auth: {evidence}"))
-                }
-                _ => lines.push(format!(
-                    "  auth: cached {} · {evidence}",
+                Verification::Accepted => "active (verified)".into(),
+                Verification::Rejected => "needs login (identity or credential rejected)".into(),
+                Verification::Unavailable => format!(
+                    "cached {} · verification unavailable",
                     row.cached_credential_state
-                )),
-            }
+                ),
+                Verification::NotChecked => {
+                    format!("cached {} · not checked", row.cached_credential_state)
+                }
+            };
+            lines.push(format!("  auth: {evidence}"));
             if row.scope == Scope::Forwarded {
                 lines.push("  forwarded from origin · remote usage unknown".into());
             }
@@ -479,8 +501,10 @@ fn render(report: &AuthReport, width: usize, now: i64) -> String {
             }
             if let Some(recovery) = &row.recovery {
                 lines.push(format!("  recover: {recovery}"));
+            } else {
+                lines.push(format!("  next: {}", next_action(row, now)));
             }
-            if !local && row.windows.is_empty() {
+            if row.windows.is_empty() {
                 lines.push("  usage: unknown".into());
             }
             for window in &row.windows {
@@ -647,7 +671,7 @@ fn wrap_line(line: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{render, AuthReport};
+    use super::{render, AccountReport};
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
@@ -790,9 +814,9 @@ mod tests {
     }
 
     #[test]
-    fn auth_report_fixture_preserves_missingness_and_readable_widths() {
+    fn account_report_fixture_preserves_missingness_and_readable_widths() {
         let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
-        let report: AuthReport = serde_json::from_str(fixture).unwrap();
+        let report: AccountReport = serde_json::from_str(fixture).unwrap();
         let rejected = report
             .accounts
             .iter()
@@ -813,6 +837,9 @@ mod tests {
                 "reset passed; refresh needed",
                 "reset unknown",
                 "usage: unknown",
+                "next: lf account claude",
+                "wait for cooldown, then lf account claude",
+                "inspect lf account on the origin Home",
                 "needs login (identity or credential rejected)",
                 "verification unavailable",
                 "forwarded from origin",
@@ -847,6 +874,6 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("windows");
-        assert!(serde_json::from_value::<AuthReport>(incomplete).is_err());
+        assert!(serde_json::from_value::<AccountReport>(incomplete).is_err());
     }
 }

@@ -173,7 +173,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     }
     assert receipts == [receipt]
     assert not any(
-        command[:3] == ["lf", "release", "publish"]
+        command[:4] == ["lf", "repo", "release", "publish"]
         for command in commands[:prepare_commands]
     )
     deploy = next(command for command in commands if "deploy_website.py" in command[1])

@@ -36,17 +36,19 @@ authority, and never impersonates the User in chat.
 ## Git, Worktrees, GitHub → `lf`
 
 ```bash
-lf commit -m "message" -p            # commit and push
+lf commit -m "message"               # local checkpoint
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                         # done; the user clicks merge
-lf pr land                           # done; loopflow lands it hands-off
-lf pr land -c                        # land and complete the owning Task
-lf sync --plan                       # show strategy; bare `lf sync` applies it
-lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
+lf submit                            # done; the user clicks merge
+lf arm                               # request auto-merge; return
+lf land                              # watch CI, repair, and finish merged
+lf land -c                           # complete the Task after merge
+lf task sync --plan                  # show strategy; bare `lf task sync` applies it
+lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
-prepares it for the user's merge click; **arm/land** request auto-merge.
+prepares it for the user's merge click; **arm** requests auto-merge, and **land**
+watches CI and repairs failures until merge.
 `lf pr open` creates or updates a draft and opens its page when a person asks
 to see it. Existing ready PRs stay ready; opening a draft does not publish it.
 Publish/submit/arm/land make drafts ready.
@@ -70,10 +72,10 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                       # durable Task Work, own worktree
-lf task comment <issue-id> "smaller approach" # post direction for the Task advancer
-lf task status <issue-id> --json             # inspect durable state
-lf task wait <issue-id> --until terminal
+lf --task <issue-id> flow start                 # durable Task Work, own worktree
+lf comment <issue-id> "smaller approach" # post direction for the Task advancer
+lf task status <issue-id> --json       # inspect durable state
+lf wait <issue-id> --until terminal
 ```
 
 When work feels slow or stuck, run `lf top` before guessing — it shows

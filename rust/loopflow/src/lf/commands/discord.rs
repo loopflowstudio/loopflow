@@ -61,7 +61,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
         );
         let binding =
             crate::ops::resolve_work_binding(&store, repo, &format!("wave:{wave}")).await?;
-        let cli = Cli::try_parse_from(["lf", "--batch", "--wave", wave])?;
+        let cli = Cli::try_parse_from(["lf", "--mode", "batch", "--wave", wave])?;
         let mut cursor = messages(&client, &url, None)
             .await?
             .first()

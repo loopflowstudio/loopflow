@@ -12,7 +12,7 @@ Before starting, orient yourself in this branch:
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
 - If a `wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
-  PM snapshot, and live tasks (`lf wave status <name> --no-sync`).
+  PM snapshot, and live tasks (`lf wave status <name>`).
 - Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -38,7 +38,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 
 1. Read the parent wave
    - Use the wave passed by argument, or ask which `wave/<name>/` to split
-   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf wave status <parent> --json --no-sync`)
+   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf wave status <parent> --json`)
 
 2. Find split boundaries
    - Look for thematic clusters, dependency chains, or independent workstreams
@@ -53,7 +53,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - `wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
    - `wave/<child>/metrics/*.md` — contracts allocated to that child
-   - `lf wave connect --wave <child>` — create each child's Linear Initiative
+   - `lf repo connect <child>` — create each child's Linear Initiative
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain
      future and historical content. Preserve existing Project identities.

@@ -1,1 +1,1 @@
-- cmd: release run patch
+- cmd: repo release run patch

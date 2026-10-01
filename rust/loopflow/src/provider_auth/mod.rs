@@ -2,7 +2,7 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into store provider tokens.
 //!
-//! Called in-process by `lf auth`. Each attempt retains its completion until
+//! Called in-process by `lf account`. Each attempt retains its completion until
 //! consumed, including credential persistence failure. Stored tokens own durable
 //! credential state; they do not establish whether a new attempt succeeded.
 
@@ -139,7 +139,9 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Linear => Some("Linear requires OAuth. Run 'lf auth connect linear' to connect."),
+            Self::Linear => {
+                Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            }
             _ => None,
         }
     }
@@ -4815,7 +4817,7 @@ attributes:
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth connect linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth_endpoint(Provider::Linear).is_some());
@@ -4829,7 +4831,7 @@ attributes:
             .any(|broker| broker.provider() == Provider::Linear);
         assert!(
             has_linear,
-            "`lf auth connect linear` needs a registered broker"
+            "`lf account connect linear` needs a registered broker"
         );
     }
 
@@ -5216,7 +5218,7 @@ esac
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth connect linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

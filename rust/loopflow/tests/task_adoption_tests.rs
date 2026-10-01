@@ -169,7 +169,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .args(args)
                 .env("LF_HOME", home.path())
                 .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-                .env("LF_DB_PATH", home.path().join("loopflow.db"))
                 .env(
                     "PATH",
                     format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),

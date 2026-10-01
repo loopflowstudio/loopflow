@@ -107,10 +107,7 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_CONTROL_HOME", home)
         .env("HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID");
     command
 }
@@ -267,16 +264,10 @@ fn repository_team_matrix() {
         ["intelligence", "survival", "survival/infrastructure"]
     );
     let old_home = std::env::var_os("LF_HOME");
-    let old_db = std::env::var_os("LF_DB_PATH");
-    let old_control_home = std::env::var_os("LF_CONTROL_HOME");
-    let old_control_db = std::env::var_os("LF_CONTROL_DB_PATH");
     // SAFETY: this integration binary contains one test; no sibling thread can
     // observe the temporary storage selection.
     unsafe {
         std::env::set_var("LF_HOME", &home);
-        std::env::set_var("LF_CONTROL_HOME", &home);
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
     }
     assert_eq!(
         canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
@@ -291,18 +282,6 @@ fn repository_team_matrix() {
         match old_home {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
-        }
-        match old_db {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
-        match old_control_home {
-            Some(value) => std::env::set_var("LF_CONTROL_HOME", value),
-            None => std::env::remove_var("LF_CONTROL_HOME"),
-        }
-        match old_control_db {
-            Some(value) => std::env::set_var("LF_CONTROL_DB_PATH", value),
-            None => std::env::remove_var("LF_CONTROL_DB_PATH"),
         }
     }
 

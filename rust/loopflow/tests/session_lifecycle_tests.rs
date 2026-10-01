@@ -69,9 +69,6 @@ impl Fixture {
             .current_dir(self.repo.path())
             .env("HOME", home)
             .env("LF_HOME", home)
-            .env("LF_CONTROL_HOME", home)
-            .env("LF_DB_PATH", home.join("loopflow.db"))
-            .env("LF_CONTROL_DB_PATH", home.join("loopflow.db"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env(
                 "PATH",
@@ -804,7 +801,6 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let output = command
             .current_dir(cwd)
             .env("LF_AGENT_CALLER", &caller)
-            .env("LF_TASK_ORIGIN", "1")
             .env("LF_WORK_ADVANCE_CLAIM", "obsolete identity")
             .output()
             .unwrap();
@@ -1212,10 +1208,7 @@ impl LockedStore {
     }
 
     fn select(&self, command: &mut Command) {
-        let path = self.directory.join("loopflow.db");
-        command
-            .env("LF_DB_PATH", &path)
-            .env("LF_CONTROL_DB_PATH", &path);
+        command.env("LF_HOME", &self.directory);
     }
 
     fn unlock(&self) -> rusqlite::Connection {

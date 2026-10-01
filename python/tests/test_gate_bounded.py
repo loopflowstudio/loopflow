@@ -382,7 +382,6 @@ def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch
         for path in (sibling / "target/artifact", sibling / "target"):
             os.utime(path, (old, old))
     marker = tmp_path / "product-ran"
-    monkeypatch.delenv("LF_CONTROL_HOME", raising=False)
     monkeypatch.setenv("LF_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv"))
     monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))

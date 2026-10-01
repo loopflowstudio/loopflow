@@ -682,7 +682,6 @@ fn cached_auth_records_its_exec_without_creating_account_state() {
         .current_dir(temp.path())
         .env_clear()
         .env("LF_HOME", &lf_home)
-        .env("LF_DB_PATH", lf_home.join("loopflow.db"))
         .env("PATH", "/nonexistent")
         .args(["account", "--cached", "--json"])
         .output()

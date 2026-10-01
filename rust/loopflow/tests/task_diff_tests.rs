@@ -14,7 +14,6 @@ fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("PATH", "/usr/bin:/bin")
         .current_dir(repo)
         .args(args)

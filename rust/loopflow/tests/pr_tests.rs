@@ -86,7 +86,6 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
             .env_clear()
             .env("HOME", home.path())
             .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("store.db"))
             .env("PATH", std::env::var_os("PATH").unwrap())
             .args(args)
             .current_dir(repo.path())
@@ -143,7 +142,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         let store = loopflow::store::open_ephemeral_store(&loopflow::store::StorageConfig::sqlite(
-            home.path().join("store.db"),
+            home.path().join("loopflow.db"),
         ))
         .await
         .unwrap();
@@ -1375,7 +1374,6 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["--task", "INF-123", "flow", "start", "--json"])
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(repo.path())
         .output()

@@ -314,18 +314,6 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
         ),
         ("LF_BIN".to_string(), control_bin),
         (
-            "LF_DB_PATH".to_string(),
-            execution.db_path.to_string_lossy().to_string(),
-        ),
-        (
-            "LF_HOME".to_string(),
-            execution.lf_home.to_string_lossy().to_string(),
-        ),
-        (
-            "LF_DB_PATH".to_string(),
-            execution.db_path.to_string_lossy().to_string(),
-        ),
-        (
             "LF_HOME".to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
@@ -377,7 +365,7 @@ mod tests {
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
+            directory.path().join("loopflow.db"),
         ))
         .await
         .unwrap();
@@ -707,7 +695,7 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        rusqlite::Connection::open(directory.path().join("registry.db"))
+        rusqlite::Connection::open(directory.path().join("loopflow.db"))
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
@@ -724,8 +712,6 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(binding.work, work);
-            let previous_db = std::env::var_os("LF_DB_PATH");
-            std::env::set_var("LF_DB_PATH", directory.path().join("registry.db"));
             let capture = crate::session_record::CaptureHandle::begin_at(
                 directory.path(),
                 crate::session_record::SessionCaptureSpec {
@@ -758,16 +744,12 @@ mod tests {
                 Some(task.id.clone())
             );
             let previous = [
-                "LF_CONTROL_DB_PATH",
-                "LF_CONTROL_HOME",
                 "LF_HOME",
                 "LF_RUN_DIR",
                 "LF_RUN_ID",
                 crate::lf::WORK_DECLARATION_ENV,
             ]
             .map(|name| (name, std::env::var_os(name)));
-            std::env::set_var("LF_CONTROL_DB_PATH", directory.path().join("registry.db"));
-            std::env::set_var("LF_CONTROL_HOME", directory.path());
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
             std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
@@ -815,10 +797,6 @@ mod tests {
                     Some(value) => std::env::set_var(name, value),
                     None => std::env::remove_var(name),
                 }
-            }
-            match previous_db {
-                Some(value) => std::env::set_var("LF_DB_PATH", value),
-                None => std::env::remove_var("LF_DB_PATH"),
             }
         }
         assert!(super::resolve_checkout_binding(&store, repo.path())

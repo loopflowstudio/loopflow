@@ -573,8 +573,6 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
             ],
             None,
         )
-        .env_remove("LF_CONTROL_DB_PATH")
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .output()
         .unwrap();
         assert!(
@@ -622,7 +620,6 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
         ],
         None,
     )
-    .env("LF_DB_PATH", home.path().join("loopflow.db"))
     .output()
     .unwrap();
     assert!(!failed.status.success());
@@ -1831,7 +1828,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .current_dir(repo.path())
         .env("HOME", home.path())
         .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env(
             loopflow::durable::TASK_WORKER_CLAIM_ENV,

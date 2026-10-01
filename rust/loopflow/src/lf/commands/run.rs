@@ -1444,13 +1444,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "PATH",
             "LF_BIN",
             "LF_HOME",
-            "LF_DB_PATH",
             crate::journal::LF_TRACE_ID_ENV,
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            crate::store::CONTROL_HOME_ENV,
-            crate::store::CONTROL_DB_PATH_ENV,
         ];
         let _environment = EnvironmentRestore::capture(&keys);
         let path = format!(
@@ -1462,7 +1459,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
-        std::env::set_var("LF_DB_PATH", &registry);
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
         std::env::set_var(
@@ -1473,8 +1469,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::session_record::RUN_DIR_ENV,
             home.path().join("stale-run"),
         );
-        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
 
         let task = "prove the generic Run launch";
         let context = crate::trace::PreparedTurnContext::from_prompts("", task);
@@ -1652,8 +1646,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];

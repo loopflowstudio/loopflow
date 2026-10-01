@@ -410,9 +410,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         // Redirect HOME so `lf cron add` writes plists into the temp dir,
         // not the real ~/Library/LaunchAgents.
         .env("HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID");
 
@@ -720,9 +717,6 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
         .env("LF_HOME", &home)
         .env("HOME", &home)
         .env("LF_WAVE_ID", alpha_uuid)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_RUN_ID")
         .output()
         .expect("run cron add");

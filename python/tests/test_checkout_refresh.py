@@ -48,7 +48,6 @@ def checkout(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         key: value for key, value in os.environ.items() if not key.startswith(("LF_", "LOOPFLOW_"))
     }
     env["LF_HOME"] = str(tmp_path / "lf-home")
-    env["LF_DB_PATH"] = str(tmp_path / "lf-home/store.db")
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     return main, author, env
 

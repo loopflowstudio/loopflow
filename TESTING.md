@@ -228,6 +228,10 @@ uv run pytest python/tests/                          # All Python tests
 uv run pytest python/tests/test_install_script.py -v # One file
 ```
 
+After changing Infrastructure or Release's `GOAL.md` schedules, run
+`uv run pytest python/tests/test_release_automation.py` even when no Python files
+changed. It checks telemetry and release cadence under their owning Waves.
+
 After changing the CLI guide, agent API docs, published Loopflow skill, or
 builtin `LOOPFLOW.md`, run the shared inspection-command check even when no
 Python files changed:
@@ -881,6 +885,10 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+
+When a subprocess fixture signals readiness with file contents, write a sibling
+temporary file and rename it into place after closing it. File existence alone
+can expose an empty file between creation and the first write.
 
 ### Shared identity fixtures
 

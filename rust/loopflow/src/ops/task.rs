@@ -5309,7 +5309,8 @@ mod tests {
             "scripts/lifecycle_scorecard.py",
             r#"import os, pathlib, time
 repo = pathlib.Path.cwd()
-repo.joinpath('entered').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').rename(repo.joinpath('entered'))
 time.sleep(30)
 "#,
         );

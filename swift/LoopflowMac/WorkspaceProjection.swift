@@ -230,7 +230,7 @@ extension WorkspaceProjection {
             ))
         }
         for wave in waves {
-            let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.name)
+            let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.displayName)
             let complete: Bool
             if case .available(_, false) = wave.roadmap.tasks {
                 complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
@@ -276,7 +276,7 @@ extension WorkspaceProjection {
             if let waveId {
                 ancestors.append(WorkspaceOutlineSubject(
                     key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: .wave(id: waveId)),
-                    title: wave?.roadmap.wave.name ?? "Wave \(waveId)"
+                    title: wave?.roadmap.wave.displayName ?? "Wave \(waveId)"
                 ))
             }
             if session.scope == nil, let work = session.work, work.kind != .wave {

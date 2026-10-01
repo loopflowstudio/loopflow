@@ -617,7 +617,7 @@ struct WorkspaceNavigationTests {
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No active Tasks in this repository.") }
         if hasUnplannedWork {
             let projected = try #require(model.workspace.waves.first)
-            try navigator.inspect().find(button: projected.roadmap.wave.name).tap()
+            try navigator.inspect().find(button: projected.roadmap.wave.displayName).tap()
             #expect(model.selection == projected.id.work)
             let task = try #require(projected.roadmap.unavailableTasks.first)
             #expect(throws: Never.self) {

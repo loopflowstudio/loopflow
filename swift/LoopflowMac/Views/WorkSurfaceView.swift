@@ -113,7 +113,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     HStack(alignment: .center, spacing: Spacing.md) {
-                        Text(roadmap.wave.name)
+                        Text(roadmap.wave.displayName)
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")

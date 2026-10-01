@@ -45,3 +45,17 @@ Review findings fixed: filtering before root resolution lost symlink Sessions;
 reusing Task checkout identity for scoped Sessions could share their panes; the old
 Ask caller lookup decoded captures during passive listing. Regression tests now
 cover scope exclusions, aliases, stable orphan pages, and attention-independent counts.
+
+Configured private-copy smoke: current CLI read three Sessions, all Task-associated,
+and an empty orphan inventory. The reopened native app rendered planning and Task
+Session counts without the old main-navigation orphan section. No provider Session
+was opened by this check, and the copy contains no explicit repo/Wave primary rows;
+those exclusion cases remain covered by local tests, not this live reading.
+
+The demo helper needed its existing test-materialized 0.12.30 catalog restored after
+source refresh; the first read rejected the mismatched catalog before app replacement.
+The current branch source and matching test catalog then read the copied Home normally.
+No main Home migration was attempted. Native screenshot: `/tmp/loopflow-20261001-162208.png`.
+
+That capture exposed the accepted lowercase-name rule only reaching the older Wave
+view model. Reuse the same `displayName` implementation in the new outline and title.

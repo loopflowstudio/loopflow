@@ -400,6 +400,8 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let retirementReason: String?
     public let home: Home
 
+    public var displayName: String { toWave().displayName }
+
     enum CodingKeys: String, CodingKey {
         case id, name, status, goal, repo, home
         case activeTasks = "active_tasks"

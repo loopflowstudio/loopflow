@@ -1,3 +1,5 @@
+import Foundation
+
 /// A durable control plane for one repository. Projects and Tasks carry the
 /// shipping state; a Wave itself has no worktree, branch, diff, or PR.
 ///
@@ -13,6 +15,14 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let retiredAt: String?
     public let supersededByWaveId: String?
     public let retirementReason: String?
+
+    public var displayName: String {
+        guard !name.contains(where: \.isUppercase) else { return name }
+        return name.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
+    }
+
 
     public init(
         id: String,

@@ -112,3 +112,10 @@ simulated-transport and fixture-shell results; they do not establish live provid
 continuation or measured presentation latency. The CLI no-opt-out check, prompt golden, Clippy, formatting and both native build
 paths passed. The final navigation refinement passed 29 focused tests. PR #1369
 remains unmerged; these checks do not constitute a configured provider demo.
+
+The revised private-copy smoke read three Task-associated Sessions and no orphans;
+native capture showed planning and Task counts without an orphan sidebar section.
+No provider was opened, and explicit primary-scope exclusions were tested locally
+because this copy had no such rows. The main Home was untouched. The capture also
+exposed the lowercase-name rule missing from the new outline; it now shares the
+existing display-name implementation with the Wave view model.

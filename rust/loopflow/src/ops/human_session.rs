@@ -2810,6 +2810,61 @@ mod tests {
     }
 
     #[test]
+    fn raw_ask_keys_retain_answers_within_one_caller_input() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let first_caller = super::active_run_manifest().unwrap();
+            let first = super::ask_with_key(&store, Some("policy"), "Choose a policy", None);
+            let duplicate = super::ask_with_key(&store, Some("policy"), "Choose a policy", None);
+            let human = async {
+                let sessions = wait_until_asks(&store, 1).await;
+                assert_eq!(
+                    sessions[0].caller_artifact_key,
+                    Some(first_caller.artifact_key.clone())
+                );
+                answer(&store, &sessions[0], "Use the first policy").await;
+            };
+            let (first, duplicate, ()) = tokio::join!(first, duplicate, human);
+            assert_eq!(first.unwrap(), "Use the first policy");
+            assert_eq!(duplicate.unwrap(), "Use the first policy");
+            assert_eq!(
+                super::ask_with_key(&store, Some("policy"), "", None)
+                    .await
+                    .unwrap(),
+                "Use the first policy"
+            );
+
+            let mut next_caller = first_caller;
+            next_caller.artifact_key = crate::session_record::new_artifact_key();
+            std::fs::write(
+                home.home.path().join("manifest.json"),
+                serde_json::to_vec(&next_caller).unwrap(),
+            )
+            .unwrap();
+            std::env::set_var("LF_RUN_ID", &next_caller.artifact_key);
+            ASK_LAUNCHERS.lock().unwrap().clear();
+            let human = async {
+                let sessions = wait_until_asks(&store, 1).await;
+                assert_eq!(
+                    sessions[0].caller_artifact_key,
+                    Some(next_caller.artifact_key.clone())
+                );
+                answer(&store, &sessions[0], "Use the second policy").await;
+            };
+            let (second, ()) = tokio::join!(
+                super::ask_with_key(&store, Some("policy"), "Choose again", None),
+                human
+            );
+            assert_eq!(second.unwrap(), "Use the second policy");
+            assert!(super::ask_with_key(&store, Some(" "), "Invalid", None)
+                .await
+                .is_err());
+        });
+    }
+
+    #[test]
     fn keyed_asks_join_recover_completion_and_keep_boundaries_independent() {
         let _lock = crate::journal::test_env_lock();
         let home = AskHome::new();

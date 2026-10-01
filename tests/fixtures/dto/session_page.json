@@ -48,7 +48,9 @@
           []
         ]
       },
-      "interactive": true
+      "interactive": true,
+      "caller_session_id": null,
+      "workspace": null
     }
   ],
   "next": null

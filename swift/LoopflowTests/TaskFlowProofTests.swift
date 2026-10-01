@@ -29,7 +29,7 @@ struct TaskFlowTests {
         value["id"] = "exact"
         value["state"] = "waiting"
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": pinned.invocationId,
-            "step": "demo", "node": "4", "iterations": pinned.iterations, "occurrence": "current"]
+            "step": "demo", "node": 4, "iterations": pinned.iterations, "occurrence": "current"]
         let exact = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         var wrong = value
         wrong["id"] = "previous"
@@ -42,7 +42,7 @@ struct TaskFlowTests {
         #expect(participationSession(node: "7", pinned: pinned, sessions: [exact]) == nil)
         #expect(exact.offersParticipation)
         #expect(exact.participationLabel == "Available · preparing")
-        value["kind"] = "interactive"
+        value["kind"] = "conversation"
         let independent = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         #expect(!independent.offersParticipation)
         value["kind"] = "ask"

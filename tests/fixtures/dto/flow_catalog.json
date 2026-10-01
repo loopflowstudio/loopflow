@@ -224,8 +224,8 @@
             "nodes": [
               "5",
               "6",
-              "6/fix/0",
-              "7"
+              "7",
+              "8"
             ],
             "routes": [
               {
@@ -240,22 +240,22 @@
               },
               {
                 "from": "6",
-                "to": "6/fix/0",
+                "to": "7",
                 "condition": "fix"
               },
               {
                 "from": "6",
-                "to": "7",
+                "to": "8",
                 "condition": "skip"
               },
               {
-                "from": "7",
+                "from": "8",
                 "to": "@end",
                 "condition": null
               },
               {
-                "from": "6/fix/0",
-                "to": "7",
+                "from": "7",
+                "to": "8",
                 "condition": null
               }
             ]

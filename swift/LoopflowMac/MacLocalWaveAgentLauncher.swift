@@ -127,9 +127,8 @@ enum LocalWaveAgentLauncher {
 
     /// Return the CLI that owns the Home this Mac client controls.
     ///
-    /// Installed apps use their registered bundled helper. A development app
-    /// carries an explicit pointer to the machine install gate so Finder and
-    /// scripted launches see the same selected Home as terminal `lf`.
+    /// Use an explicitly configured helper when present; otherwise use the
+    /// bundled CLI, which shares the app's protocol and selects its own Home.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         developmentConfig: URL? = Bundle.main.url(

@@ -1194,6 +1194,7 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Changes { issue, .. }
             | Self::Diff { issue, .. }
+            | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
             | Self::Pr { issue, .. }

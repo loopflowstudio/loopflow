@@ -158,6 +158,7 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub caller_session_id: Option<String>,
     pub captured: Option<i64>,
     pub id: String,
     pub artifact_key: String,

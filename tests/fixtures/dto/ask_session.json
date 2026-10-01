@@ -35,7 +35,6 @@
       "unavailable_reason": "The session agent has not marked this ready"
     }
   ],
-  "run_id": "run_00000000000000000000000000000001",
   "flow_membership": {
     "kind": "independent"
   },
@@ -45,5 +44,6 @@
     "task_id": "task_00000000000000000000000000000001",
     "unavailable": null
   },
-  "caller_run_id": "run_00000000000000000000000000000002"
+  "caller_session_id": "session_00000000000000000000000000000002",
+  "interactive": true
 }

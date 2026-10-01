@@ -27,7 +27,6 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -54,7 +53,6 @@ ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"
-MACHINE_LF_GATE = Path.home() / ".lf-machine" / "install" / "gates" / "1" / "lf"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
 GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
@@ -65,6 +63,13 @@ def _app_environment(repo: Path) -> dict[str, str]:
     for key in ("LF_HOME", "LF_DB_PATH"):
         if value := os.environ.get(key):
             env[key] = value
+    if not any(key in env for key in ("LF_HOME", "LF_DB_PATH")) and MACHINE_INSTALL_STATE.exists():
+        state = json.loads(MACHINE_INSTALL_STATE.read_text())
+        source = Path(state["selection"]["store"])
+        # Source CLI startup snapshots installed data into its branch Home and
+        # clears inherited execution authority before opening it.
+        env["LF_HOME"] = str(source.parent)
+        env["LF_DB_PATH"] = str(source)
     return env
 
 
@@ -538,7 +543,7 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
-    _write_dev_control_config(app_dir / "Resources")
+    (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
@@ -556,41 +561,13 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
-def _write_dev_control_config(resources_dir: Path) -> None:
-    """Point the dev UI at the machine-selected Home's stable CLI gate."""
-    try:
-        state = json.loads(MACHINE_INSTALL_STATE.read_text())
-        artifacts = state["selection"]["artifact_set"]["artifacts"]
-        selected_cli = next(
-            artifact for artifact in artifacts if artifact["role"] == {"kind": "cli"}
-        )
-    except (FileNotFoundError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"Cannot resolve the machine-selected lf from {MACHINE_INSTALL_STATE}: {error}"
-        ) from error
-
-    if not MACHINE_LF_GATE.is_file() or not os.access(MACHINE_LF_GATE, os.X_OK):
-        raise RuntimeError(f"Machine lf gate is missing or not executable: {MACHINE_LF_GATE}")
-    with MACHINE_LF_GATE.open("rb") as gate:
-        gate_sha256 = hashlib.file_digest(gate, "sha256").hexdigest()
-    if gate_sha256 != selected_cli["sha256"]:
-        raise RuntimeError(
-            f"Machine lf gate {MACHINE_LF_GATE} does not match the active CLI artifact"
-        )
-
-    config = {"lf_path": str(MACHINE_LF_GATE)}
-    (resources_dir / DEV_CONTROL_CONFIG).write_text(json.dumps(config, indent=2) + "\n")
-
-
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    # The app is a live operator surface even when its Swift shell is a dev
-    # build. Compile its bundled control binary against the installed Home,
-    # but never grant it migration authority. Ordinary development binaries
-    # keep their isolated `.lf-dev` stores.
+    # UI and CLI share this checkout's protocol. Development startup copies an
+    # installed source Home into branch data without changing the live store.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",
-        "LOOPFLOW_BUILD_PROVENANCE=release",
+        "LOOPFLOW_BUILD_PROVENANCE=development",
         "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
         "cargo",
         "build",

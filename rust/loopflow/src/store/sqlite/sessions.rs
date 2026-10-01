@@ -110,7 +110,10 @@ fn inventory_query(
         );
     }
     if let Some(repo) = &filter.repo {
-        sql.push_str(&format!(" AND s.repo={}", bind(Value::Text(repo.clone()))));
+        sql.push_str(&format!(
+            " AND COALESCE(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id))={}",
+            bind(Value::Text(repo.clone()))
+        ));
     }
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
@@ -166,7 +169,10 @@ fn summary_query(page: &str, by_id: bool) -> String {
         COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
-         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
+         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
+        (SELECT caller.session_id FROM session_events current JOIN session_events caller
+         ON caller.receipt_key=json_extract(current.payload,'$.caller_key') AND caller.kind='captured'
+         WHERE current.seq=s.current_capture)
         FROM page s
         LEFT JOIN flows f ON f.id=s.flow_session_id
         LEFT JOIN waves w ON w.id=s.wave_id
@@ -181,6 +187,7 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
+            caller_session_id: row.get(32)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -1308,6 +1315,42 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn retained_sessions_without_repo_use_their_recorded_wave() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("retained", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'Product','/repo',1)",
+                [wave.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET wave_id=?1,repo=NULL WHERE id='retained'",
+                [wave.as_str()],
+            )
+            .unwrap();
+        }
+        let filter = SessionFilter {
+            repo: Some("/repo".into()),
+            ..SessionFilter::default()
+        };
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "retained");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET repo='/other' WHERE id='retained'",
+                [],
+            )
+            .unwrap();
+        assert!(store.session_summaries(&filter).unwrap().is_empty());
+    }
 
     #[test]
     fn captured_reservation_survives_interruption_and_fences_replacement() {

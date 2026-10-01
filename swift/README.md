@@ -7,9 +7,10 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app follows the machine-selected Loopflow Home through the
-stable install gate, so launching it from Finder shows the same Waves and
-Sessions as terminal `lf`.
+The development app bundles this checkout's matching CLI. Its first scripted
+launch snapshots the machine-selected Home into private branch data; later
+launches reuse that copy, including from Finder. The installed Home stays unchanged.
+Set `LF_HOME` to select existing private demo data explicitly.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -329,11 +330,11 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app bundles the current source `lf` with release Home selection and
-validation-only migration authority. Its operator views therefore read the
-real Home without allowing an unpromoted build to advance the shared database
-frontier. Ordinary source-built `lf` commands keep their isolated `.lf-dev`
-Home.
+The dev app bundles the current source `lf` with development Home selection and
+validation-only migration authority. It reads and updates private branch data
+under `.lf-dev`; its CLI and UI always use the same wire protocol. This copy
+retains recorded checkout paths, so file edits still affect those real checkouts.
+It does not inherit live provider connections or driver authority.
 
 | Command | What it does |
 | --- | --- |

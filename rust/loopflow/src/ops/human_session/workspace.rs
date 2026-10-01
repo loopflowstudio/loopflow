@@ -134,15 +134,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         {
             continue;
         }
-        let manifest = super::local_session_run_dir(&session.run_id)
-            .and_then(|dir| crate::run_record::read_manifest(&dir).ok());
-        session.workspace = resolver.resolve(
-            Path::new(&session.cwd),
-            manifest
-                .as_ref()
-                .and_then(|manifest| manifest.worktree.as_deref()),
-            session.work.as_ref(),
-        );
+        session.workspace = resolver.resolve(Path::new(&session.cwd), None, session.work.as_ref());
     }
     Ok(())
 }

@@ -218,8 +218,7 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
                         to: path
                             .steps
                             .first()
-                            .map_or_else(|| next.clone(), |node| node.key.to_string())
-                            .into(),
+                            .map_or_else(|| next.clone(), |node| node.key.to_string()),
                         condition: Some(path.name.clone()),
                     });
                     connect(&path.steps, &next, routes, stages);
@@ -227,7 +226,7 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
             } else {
                 routes.push(InteractionRoute {
                     from: node.key.to_string(),
-                    to: next.into(),
+                    to: next,
                     condition: node.returns_to.as_ref().map(|_| "advance".into()),
                 });
             }
@@ -244,8 +243,7 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
         from: "@start".into(),
         to: steps
             .first()
-            .map_or_else(|| "@end".to_string(), |node| node.key.to_string())
-            .into(),
+            .map_or_else(|| "@end".to_string(), |node| node.key.to_string()),
         condition: None,
     }];
     let mut stages = Vec::new();

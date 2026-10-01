@@ -8,6 +8,18 @@ Unit 2 follows Unit 1 and retains the unresolved mechanisms described below.
 Placement: Product, matching its shared workspace/user-contract responsibility.
 [Evidence](kickoff-evidence.md) records the source findings behind the plan.
 
+Demo reconciliation, 2026-09-30: main through `de074a2eb` now owns durable
+AgentSessions and numeric Flow occurrences. Unit 1 preserves that authority;
+caller links use stable Session identity and raw Ask keys use the caller's
+captured input. Earlier Run-based implementation details below describe the
+pre-merge mechanism. Jack accepted a private copy of the real Home for this
+branch demonstration after the installed CLI and branch UI proved incompatible.
+The app now bundles its matching development CLI and uses existing source-build
+isolation. Native planning renders; Task navigation and the full retained-pane,
+provider and latency walkthrough remain open. [Demo evidence](task-workspace-demo.md)
+records Jack's screenshots, the repairs and the current next step. These results
+do not establish live-main-Home operation or acceptance of Unit 1.
+
 ## Problem and accepted direction
 
 Jack wants to work on the software without monitoring agents or shepherding work

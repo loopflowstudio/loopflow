@@ -11,8 +11,8 @@ struct SessionsStoreTests {
     func askCallerFixture() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let record = try JSONDecoder().decode(SessionRecord.self, from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/ask_session.json")))
-        #expect(record.callerRunId == "run_00000000000000000000000000000002")
-        #expect(record.callerRunId != record.runId)
+        #expect(record.callerSessionId == "session_00000000000000000000000000000002")
+        #expect(record.callerSessionId != record.id)
         #expect(record.offersParticipation)
         #expect(record.action(.complete)?.unavailableReason != nil)
     }

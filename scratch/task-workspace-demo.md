@@ -7,9 +7,10 @@ Design: [growth-thoughts.md](growth-thoughts.md).
 Prior local proof: [kickoff-evidence.md](kickoff-evidence.md).
 Ask contract: [ask-evidence.md](ask-evidence.md).
 
-Status: configured demonstration blocked at the app/CLI installation boundary.
-No Unit 1 behavior or latency target has passed this demo. Jack has not accepted
-the experience or requested a product design change in this review.
+Status: the app/CLI protocol mismatch is repaired using a private copy of Jack's
+Home, as Jack explicitly accepted. Native planning renders; Task navigation is
+still under review. No complete Unit 1 walkthrough or latency target has passed.
+Jack has not accepted the experience or requested a workspace design change.
 
 ## Jack's direction
 
@@ -19,6 +20,13 @@ files read-only, pane collapse/focus/restore, participation, Ask retries and lat
 Jack initially said any Task was fine, then suggested LOO-298 or growth-thoughts.
 The demo selected LOO-298 for its placed Task workspace; this conversation remains
 in the supplied growth-thoughts checkout.
+
+Jack later confirmed LOO-298 had landed. The copied reading agrees: its runtime
+is done. The walkthrough now targets LOO-330, which has an existing checkout and
+pending design review. Jack authorized stopping the concurrent merge-recovery
+run and finishing in this demo Session. Its `lf` process and the separate waiting
+Ask were interrupted through their normal signal handlers; their provider and
+parent processes exited. The Ask was not completed and recovery was not resumed.
 
 ## Executed observations
 
@@ -115,19 +123,60 @@ Receipt: `.lf/tmp/task-workspace-demo/launch-recording/report.md`.
 
 ## Recommended next action
 
-Resolve the supported branch-app/main-Home execution path before resuming the
-walkthrough. The current development launcher promises main-Home continuity but
-selects an older CLI protocol; its matching helper cannot read that installation.
-The implementation owner must reconcile that contract with installation authority,
-without relying on copied Home results as live acceptance or bypassing store
-ownership. This is a demo finding and proposed implementation direction, not a
-new product decision accepted by Jack.
+Finish opening LOO-330's retained workspace in the copied Home, then resume the
+walkthrough and measure actual layout actions. Jack's screenshot at 17:57 showed
+the Open Task sheet remaining at “Finding Task…”, after the planning repair.
+This is a counterexample to treating healthy planning as a working Task demo.
+The exact CLI lookup succeeds, but an unscoped lookup also reports unavailable
+planning from unrelated repositories and therefore cannot automatically select
+its one match. A scoped lookup for LOO-298 still includes an unavailable engbot
+Wave alongside the infrastructure match. Those observations do not by themselves
+explain a sheet that remains loading. Direct navigation through ⌘K to LOO-330 is
+the next discriminator. Jack's feedback on that step is pending.
 
-First proof: the app's actual selected helper reads the main Home, emits
-`SessionRecord.workspace` and required Flow `graph.interactions`, lists LOO-298's
-files, and supports keyed Ask. The native planning read must decode and show the
-Task workspace; helper output alone is insufficient. Do not mask this mismatch
-by defaulting the missing interaction graph. Then
-resume the real Task walkthrough and measure its actions. Capture Jack's feedback
-before calling the review accepted. This independent Session has no Flow
-completion/navigation verdict.
+## Repair and local proof
+
+The branch now incorporates main through `de074a2eb`, with adopted merge
+`5355bba15`. Unit 1 association, participation and Ask keys were reconciled with
+durable AgentSessions and numeric Flow occurrence keys. Ask caller links now name
+the stable caller Session; retry keys remain scoped to the caller's captured input.
+Shared Rust/Swift fixtures move together; absent interaction graphs are not defaulted.
+
+The development installer bundles this checkout's CLI with development provenance
+and removes its stale pointer to the published machine CLI. Existing source-build
+isolation copies the selected installed store into
+`/Users/jack/.lf-dev/worktrees/loopflow-growth-thoughts-1c80b40d4504/loopflow.db`.
+The copy retains Home/Task identity and checkout paths, but not inherited execution
+authority. This is Jack's accepted copied-Home demonstration, not proof of operating
+the live main Home. Real checkout files remain real files; no planning was deleted
+and no live provider continuation was attempted.
+
+Configured observations using the installed branch helper:
+
+- Roadmap JSON includes `graph.interactions`; LOO-298's file listing returns 41 entries.
+- Six migrated Sessions had no explicit repository and were omitted by the repository
+  filter. The reader now uses their recorded Wave repository when the Session has no
+  repository; an explicit Session repository remains authoritative. All six appear
+  in the repository inventory and all six carry Task workspace association.
+- Native captures `repaired-planning.png` and `task330-copied-home.png` under
+  `.lf/tmp/task-workspace-demo/` show planning and participation indicators without
+  the original JSON error. They do not show the selected Task workspace.
+- A 15-second capture was still loading; a 45-second capture with explicit copied
+  Home paths rendered planning. These are observations, not startup latency passes.
+
+Executed local proof: 10 Rust Flow graph tests, 27 Session/workspace tests, the
+focused raw Ask retry test, the retained-Session repository test, 14 shared DTO
+tests, and 84 focused Swift tests passed. Swift transport/provider fixtures remain
+simulated. The native fallback Xcode build-for-testing passed. Formatting, Clippy
+with all targets and warnings denied, and whitespace checks passed. A duplicate
+raw-key test introduced by concurrent reconciliation was removed; the retained
+behavioral proof and Clippy passed again. All 10 WorkspaceDestinationTests also
+passed, covering exact, historical, unavailable and overlapping Task links with
+simulated transport. The configured LOO-330 file query succeeds as well.
+
+Review findings addressed: the UI must use its matching CLI, migrated Sessions must
+remain discoverable without inventing repository identity, numeric occurrence keys
+must stay consistent through graph projection, and a copied Home must not inherit
+live execution authority. The remaining navigation failure is explicit above.
+No PR mutation or push was performed by this demo. This independent Session has no
+Flow completion/navigation verdict.

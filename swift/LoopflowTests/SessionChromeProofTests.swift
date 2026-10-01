@@ -237,7 +237,7 @@ struct SessionChromeProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let workspace = registry.workspace(for: WorkspaceIdentity(homeId: "local", worktree: repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell()

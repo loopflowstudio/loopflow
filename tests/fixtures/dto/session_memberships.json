@@ -50,7 +50,9 @@
         []
       ]
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": "review"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -109,7 +111,9 @@
         ]
       ]
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -160,7 +164,9 @@
     "flow_membership": {
       "kind": "independent"
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -206,7 +212,9 @@
       "kind": "unknown",
       "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -262,7 +270,9 @@
         ]
       ]
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -313,7 +323,9 @@
       "node": null,
       "iterations": null
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -371,6 +383,8 @@
         ]
       ]
     },
-    "interactive": true
+    "interactive": true,
+    "primary_scope": null,
+    "attention": "review"
   }
 ]

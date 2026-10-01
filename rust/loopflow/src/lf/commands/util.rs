@@ -280,13 +280,47 @@ pub(crate) fn resume_session_with_env(
         crate::engine::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),
     );
-    spawn_session_command_with_env(
+    // A native resume has no CaptureHandle, but still owns an exact driver.
+    // Remote connections already claimed their surviving engine's driver.
+    let owned = if remote.is_none() {
+        if let Some(exec) = crate::journal::current_exec_id() {
+            let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+            let session = store
+                .session_for_artifact(run_id)?
+                .ok_or_else(|| anyhow!("Session input {run_id} is not recorded"))?;
+            let expected = store.session_driver(&session.id)?;
+            let driver = store.claim_session_driver(&session.id, expected.as_ref(), &exec, true)?;
+            crate::session_record::register_session_driver_interrupt(
+                &store,
+                session.id.clone(),
+                driver.clone(),
+            );
+            Some((store, session.id, driver))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let result = spawn_session_command_with_env(
         &command,
         &environment,
         Some(&provider_session.provider_session_id),
         provider_session.account_id.as_ref(),
         launch_lock,
-    )
+    );
+    if let Some((store, session, driver)) = owned {
+        let outcome = if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        };
+        match store.finish_session_driver(&session, &driver, outcome) {
+            Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    result
 }
 
 pub(crate) fn active_provider_clients(dir: &Path, harness: &str) -> Result<Vec<ProviderClientRef>> {

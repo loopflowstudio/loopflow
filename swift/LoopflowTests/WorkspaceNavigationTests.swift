@@ -8,6 +8,56 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkspaceNavigationTests {
+    @Test("Needs me exposes exact Sessions despite collapse, hides closed records, and preserves primaries")
+    func attentionDestinations() throws {
+        let snapshot = try roadmap()
+        func record(_ id: String, attention: String?, primary: String? = nil, closed: Bool = false) throws -> SessionRecord {
+            let original = try session(id, work: nil)
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            json["attention"] = attention as Any? ?? NSNull()
+            json["primary_scope"] = primary as Any? ?? NSNull()
+            json["state"] = closed ? "closed" : "waiting"
+            return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        let records = try [record("review", attention: "review"), record("retired", attention: "review", closed: true),
+                           record("repository", attention: nil, primary: "repository")]
+        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: records)
+        let collapsed = Set(projection.waves.map(\.id))
+        let rows = projection.outline(presentation: .full, collapsed: collapsed, search: "", planningReadable: true, needsMe: true)
+        #expect(rows.compactMap { $0.session?.id } == ["review"])
+        #expect(projection.attentionRows(search: "REVIEW").count == 1)
+        #expect(projection.attentionRows(search: "missing").isEmpty)
+        #expect(projection.orphanSessions(search: "").map(\.id) == ["review"])
+        let ordinary = projection.outline(presentation: .full, collapsed: collapsed, search: "", planningReadable: true)
+        #expect(ordinary.contains { $0.session?.id == "repository" })
+        #expect(!ordinary.contains { $0.session?.id == "retired" })
+    }
+
+    @Test("Needs me opens a headless review directly and counts the searched destinations")
+    func attentionFilterOpensExactSession() async throws {
+        let record = try session("review", work: .task(id: "ts_review00000000000000000000000000"))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        json["attention"] = "review"
+        json["interactive"] = false
+        let records = String(decoding: try JSONSerialization.data(withJSONObject: [json]), as: UTF8.self)
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: records)
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.navigation.collapsed = Set(model.workspace.waves.map(\.id))
+        var opened: String?
+        let view = WorkspaceNavigator(model: model, onOpenSession: { opened = $0.id })
+        #expect(model.needsMeCount == 1)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-needs-me").button().tap()
+        #expect(model.navigation.showsNeedsMe)
+        let rows = model.visibleWorkspace.attentionRows(search: "")
+        #expect(rows.compactMap { $0.session?.id } == ["review"])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-review").button().tap()
+        #expect(opened == "review")
+        model.navigation.search = "missing"
+        #expect(model.needsMeCount == 0)
+        #expect(model.visibleWorkspace.attentionRows(search: model.navigation.search).isEmpty)
+    }
+
     @Test("Checkout-only Sessions use Rust membership in Task navigation")
     func checkoutMembershipKeepsUnboundConversationReachable() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
@@ -43,7 +93,7 @@ struct WorkspaceNavigationTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
     }
 
-    @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
+    @Test("Every presentation exposes started conversations and leaves backlog on the Wave")
     func compressedOutlinePreservesIdentity() throws {
         var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var waves = try #require(json["waves"] as? [[String: Any]])
@@ -61,7 +111,7 @@ struct WorkspaceNavigationTests {
         let full = rows(.full)
         let compact = rows(.compact)
         let flat = rows(.sessions)
-        // Task Sessions ride their Task row; Wave and unmatched Sessions stay leaves.
+        // Task ancestry and exact Session destinations survive every presentation.
         func sessionIds(_ rows: [WorkspaceOutlineRow]) -> Set<String> {
             Set(rows.flatMap { ($0.session.map { [$0.id] } ?? []) + $0.inlineSessions.map(\.id) })
         }
@@ -70,7 +120,7 @@ struct WorkspaceNavigationTests {
         #expect(compact.compactMap(\.workKey).allSatisfy { $0.work.kind == .task })
         let review = try #require(compact.first { $0.workKey?.work == .task(id: "issue-review") })
         #expect(review.inlineSessions.map(\.id) == ["human"])
-        #expect(!compact.contains { $0.session?.id == "human" })
+        #expect(compact.contains { $0.session?.id == "human" })
         // Upcoming work lives in the Wave plan, not the started working set.
         #expect(!compact.contains { $0.workKey?.work == .task(id: "issue-available") })
         #expect(flat.allSatisfy { $0.session != nil && $0.depth == 0 })
@@ -207,13 +257,11 @@ struct WorkspaceNavigationTests {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human").button().tap()
             } else {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
-                #expect(throws: (any Error).self) {
-                    try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
-                }
+                try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human").button().tap()
             }
             #expect(model.selection == selected)
         }
-        #expect(opened == ["human"])
+        #expect(opened == ["human", "human", "human"])
         #expect(tasks == [.task(id: "issue-review"), .task(id: "issue-review")])
     }
 
@@ -377,10 +425,11 @@ struct WorkspaceNavigationTests {
         await model.refresh()
         #expect(model.roadmap.errorMessage == "offline")
         #expect(model.sessions.errorMessage == "offline")
+        #expect(model.needsMeCount == nil)
         #expect(model.workspace.waves[0].tasks.map(\.id) == keys)
         #expect(model.workspace.subject(for: "human") == model.selection)
         let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: Never.self) { try view.inspect().find(text: "Sessions unavailable: offline") }
+        #expect(throws: Never.self) { try view.inspect().find(text: "Sessions unavailable") }
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")

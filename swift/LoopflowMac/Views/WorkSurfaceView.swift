@@ -381,7 +381,7 @@ struct WorkSurfaceView: View {
         case .unknown: .neutral
         case .active: .running
         case .waiting, .ready: .human
-        case .closed: .stopped
+        case .closed, .interrupted: .stopped
         }
     }
 

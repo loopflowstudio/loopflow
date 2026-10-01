@@ -787,15 +787,15 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
 
 #[test]
 fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
-    for payload in [None, Some("{}"), Some(r#"{"projects": [], "items": []}"#)] {
+    for payload in [None, Some("{}"), Some("not-json")] {
         let home = tempfile::tempdir().unwrap();
         seed_stale_project_work(home.path(), false);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_snapshots SET payload=?1", [payload])
+            conn.execute("UPDATE pm_projects SET body=?1", [payload])
                 .unwrap();
         } else {
-            conn.execute("DELETE FROM pm_snapshots", []).unwrap();
+            conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
@@ -852,12 +852,7 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         seed_persisted_merge_request_without_copy(home.path());
         if missing_provider_task {
             let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            connection
-                .execute(
-                    "UPDATE pm_snapshots SET payload=json_set(payload, '$.items', json('[]'))",
-                    [],
-                )
-                .unwrap();
+            connection.execute("DELETE FROM pm_items", []).unwrap();
         }
 
         let status = status_json(home.path(), &["product"], None);

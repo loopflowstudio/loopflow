@@ -561,6 +561,7 @@ mod tests {
             MetricEvidenceDto::Untargeted { value: 1.0, .. }
         )));
         let mut targeted_project = projects[0].clone();
+        targeted_project.revision = Some("2026-09-30T00:00:01Z".into());
         targeted_project
             .metric_targets
             .push(crate::pm::ChapterMetricTarget {
@@ -583,6 +584,7 @@ mod tests {
             projects: projects.to_vec(),
             items: vec![],
         };
+        snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await

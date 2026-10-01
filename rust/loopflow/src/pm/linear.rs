@@ -1271,7 +1271,7 @@ impl LinearClient {
         if promote {
             node.status.type_ = crate::pm::ProjectStatus::Started;
         }
-        let project = node.into_pm_project()?;
+        let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if project.flow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started {
             return Err(PmError::Message(format!("Project {project_id} has no recorded default Flow; set flow: in Linear before adoption")));
@@ -1300,6 +1300,9 @@ impl LinearClient {
         }
         if apply {
             let confirmed = self.project_ownership(project_id).await?;
+            // The accepted write advances updatedAt; compare authored facts and
+            // retain the provider's confirmed revision for subsequent ingestion.
+            project.revision.clone_from(&confirmed.revision);
             if confirmed != project {
                 return Err(PmError::Message(format!(
                     "Project {project_id} changed during adoption; refresh and retry"

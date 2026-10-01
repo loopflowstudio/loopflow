@@ -418,7 +418,7 @@ pub(crate) async fn adopt_legacy_projects(
         );
     }
     if apply {
-        for project in &converted {
+        for project in &mut converted {
             let confirmed = ctx
                 .client
                 .adopt_project(
@@ -430,6 +430,7 @@ pub(crate) async fn adopt_legacy_projects(
                 )
                 .await
                 .map_err(error)?;
+            project.revision.clone_from(&confirmed.revision);
             if confirmed != *project {
                 return Err(error(format!(
                     "Project {} changed during adoption; refresh and retry",

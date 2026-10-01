@@ -3,7 +3,7 @@
 Status: implementation follows Jack Heart's 2026-09-30 scope cut below. The
 2026-09-29 approval and older installation-continuation plans remain historical
 context; they do not reinstate multi-store succession. Main is merged locally;
-the waiting sync caller owns final verification and publication.
+gate repairs and evidence are recorded below. The saved Flow owns delivery.
 Review feedback: [repository connection and Task validity](repository-planning-connection-review.md).
 Open choices: [questions](questions.md).
 Research: [Apollo, Relay, Realm and PowerSync](planning-store-sync-research.md).
@@ -11,6 +11,41 @@ Command walkthrough: [Dave takes an idea to running work](idea-to-task-command-s
 Wave mapping and remaining migration details: [Wave existence and Linear migration](wave-existence-and-linear-migration.md).
 
 ## Main integration — 2026-09-30
+
+Gate reviewed `61d21f885..ea0f9ed93` plus its repairs. Two production findings
+are fixed: legacy Project adoption now retains the revision returned after its
+own write instead of rejecting that legitimate revision change; malformed planning
+for one Wave stays unavailable on that Wave without hiding readable siblings or
+retained execution. The 15 Chapter regressions and unavailable-planning projections
+pass. Review also removed a redundant conflicting fixture snapshot, updated old
+Task status assertions and the removed `op:` Flow syntax, and made the schema-
+upgrade fixture independent of an installed sqlite3 CLI. The architecture reference
+now names the five normalized planning tables; all 58 released migrations remain
+unchanged.
+
+The first affected-suite receipt remains failed. Its Rust run was interrupted
+once selected-runtime children reached the host's older installed executable.
+Subsequent proofs ran in disposable Linux without mounting host installation,
+Home or credentials; the harness pins the source executable for operations that
+need it. TESTING.md records why changing HOME/LF_HOME alone is insufficient.
+Every initial Rust failure/interruption and unrun check has a later passing
+result; the last 32 CLI unit tests pass in the materialized tree. Public
+adoption passes existing-checkout, run and remote-only recovery cases, preserving
+Git bytes, PR identity and the exact saved review/Flow; invalid managed planning
+still refuses continuation. Provider and terminal responses are simulated.
+All proof containers were removed. This is repaired-check evidence, not a
+replacement green receipt for the entire final tree, configured-provider
+acceptance or permission to change the installed Home. Hosted CI owns the final
+matrix, including Linux-only checks and retained ignored installation proofs.
+
+Verification: `uv run python scripts/test.py --base 61d21f88564783a5fc8f63e385ec035f096fc069 --reuse-passing` initially failed (Rust 1,893 passed, 40 failed/interrupted, 103 unrun); architecture plus its 21 Python checks, materialized Chapter/Wave/metrics checks, disposable affected integration suites and public adoption/runtime fallback proofs subsequently passed; website 78 passed/3 skipped, Swift app build and 293 tests passed, migration history/format/all-target Clippy/diff checks passed. Logs: `.lf/tmp/loo334-gate*.log`, `.lf/tmp/loo334-migrations.log` (including 32 passing CLI unit tests in `loo334-gate-cli-unit.log`).
+
+The latest delivery scope is adoption and managed validity under Jack Heart's
+one-Home decision. Historical cross-store succession proofs below are superseded.
+Recursive explicit runtime locks and provider-shell PATH propagation remain
+unimplemented; current official-runtime selection must not be described as proof
+of those earlier requirements. Relationship repair also retains its documented
+unresolved-evidence behavior.
 
 Merge target `61d21f885` includes Jack Heart's later LOO-298 compression decision:
 retain current state and final Session owners; remove historical import and

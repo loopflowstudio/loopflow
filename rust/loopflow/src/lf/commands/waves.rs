@@ -855,12 +855,11 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-        let Some(row) = store
-            .pm_snapshot(wave.id())
-            .await
-            .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
-        else {
-            continue;
+        let row = match store.pm_snapshot(wave.id()).await {
+            Ok(Some(row)) => row,
+            // Each Wave reports its own unavailable planning. A malformed
+            // entity must not hide that Wave's execution or readable siblings.
+            Ok(None) | Err(_) => continue,
         };
         let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
@@ -2162,9 +2161,18 @@ mod tests {
             .unwrap();
         for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
-            stale.snapshot.projects[0].id = project_id.to_string();
-            for item in &mut stale.snapshot.items {
-                item.project_id = Some(project_id.to_string());
+            if project_id == "next" {
+                let mut successor = stale.snapshot.projects[0].clone();
+                successor.id = "next".into();
+                successor.slug = "next".into();
+                successor.name = "Next chapter".into();
+                stale.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
+                stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
+                stale.snapshot.projects.push(successor);
+                for item in &mut stale.snapshot.items {
+                    item.project_id = Some(project_id.to_string());
+                    item.revision = Some("2026-09-30T00:00:01Z".into());
+                }
             }
             store.put_pm_snapshot(stale).await.unwrap();
             let reopened = Arc::new(
@@ -2234,7 +2242,16 @@ mod tests {
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         unreadable.snapshot.projects.clear();
         unreadable.snapshot.items.clear();
-        store.put_pm_snapshot(unreadable).await.unwrap();
+        assert!(store.put_pm_snapshot(unreadable).await.is_err());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Ok { items, .. } if items.len() == 1
+        ));
+        // Corrupt the stored entity directly; ingestion rejects malformed plans.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute("UPDATE pm_projects SET body='not-json'", [])
+            .unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Unavailable { .. }

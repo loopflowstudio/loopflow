@@ -238,6 +238,7 @@ struct Provider {
     projects: BTreeMap<String, Value>,
     issues: BTreeMap<String, Value>,
     mutations: usize,
+    revision: i64,
     interrupt_after: Option<usize>,
     unavailable: bool,
     status_change_at_final_inventory: Option<(String, String)>,
@@ -258,6 +259,37 @@ async fn graphql(
     if provider.unavailable {
         return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
     }
+    for project in provider.projects.values_mut() {
+        project
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+    }
+    for issue in provider.issues.values_mut() {
+        issue
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+        issue["branchName"] = Value::Null;
+    }
+    let prior_projects = provider.projects.clone();
+    let prior_issues = provider.issues.clone();
+    // Apply an external status change only once the predecessor's dispositions finish.
+    if provider.status_change_at_final_inventory.is_some()
+        && vars["initiativeId"] == "initiative-a"
+        && provider.issues["a-started"]["project"]["id"] != "a-old"
+        && provider.issues["a-backlog"]["state"]["type"] == "canceled"
+    {
+        if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
+            provider.revision += 1;
+            let revision = fixture_revision(provider.revision);
+            let project = provider.projects.get_mut(&id).unwrap();
+            project["status"]["type"] = json!(status);
+            project["updatedAt"] = revision;
+        }
+    }
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ListInitiatives") {
@@ -266,16 +298,6 @@ async fn graphql(
             json!({"id":"initiative-b","name":"B","description":""}),
         ])})
     } else if query.contains("query ListInitiativeProjects") {
-        // Apply an external status change only once the predecessor's dispositions finish.
-        if provider.status_change_at_final_inventory.is_some()
-            && vars["initiativeId"] == "initiative-a"
-            && provider.issues["a-started"]["project"]["id"] != "a-old"
-            && provider.issues["a-backlog"]["state"]["type"] == "canceled"
-        {
-            if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
-                provider.projects.get_mut(&id).unwrap()["status"]["type"] = json!(status);
-            }
-        }
         let initiative = &vars["initiativeId"];
         json!({"initiative":{"projects":page(provider.projects.values().filter(|project|
             project["archivedAt"].is_null() && project["initiatives"]["nodes"].as_array().unwrap().iter().any(|node| &node["id"] == initiative)).cloned().collect())}})
@@ -342,12 +364,32 @@ async fn graphql(
     };
     if query.starts_with("mutation") {
         provider.mutations += 1;
+        provider.revision += 1;
+        let revision = fixture_revision(provider.revision);
+        for (id, project) in &mut provider.projects {
+            if prior_projects.get(id) != Some(project) {
+                project["updatedAt"] = revision.clone();
+            }
+        }
+        for (id, issue) in &mut provider.issues {
+            if prior_issues.get(id) != Some(issue) {
+                issue["updatedAt"] = revision.clone();
+            }
+        }
         if provider.interrupt_after == Some(provider.mutations) {
             provider.unavailable = true;
             return Json(json!({"errors":[{"message":"fixture lost mutation response"}]}));
         }
     }
     Json(json!({"data":data}))
+}
+
+fn fixture_revision(revision: i64) -> Value {
+    json!(
+        (OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(revision))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    )
 }
 
 fn provider_fixture() -> Provider {
@@ -774,7 +816,9 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     })
     .await
     .unwrap();
-    assert_eq!(provider.lock().await.projects["a-old"], expected);
+    let mut observed = provider.lock().await.projects["a-old"].clone();
+    assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
+    assert_eq!(observed, expected);
     let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
     let snapshot = snapshot.snapshot;
     let synced = snapshot

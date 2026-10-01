@@ -895,6 +895,13 @@ fake provider and launch the real one. A temporary `LF_HOME` alone does not prev
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
 
+Official-runtime selection also reads the OS account's installation records,
+independently of `HOME`, `LF_HOME`, `LF_BIN`, and PATH. Flow/Session child-launch
+tests therefore need an uninstalled OS account or a disposable container when
+the machine's selected runtime differs from the test build. Clearing environment
+variables alone does not isolate those tests. Use the installation harness for
+installed-runtime proofs; never replace the machine's selection to make tests pass.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed

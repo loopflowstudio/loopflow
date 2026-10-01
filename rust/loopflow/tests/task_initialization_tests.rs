@@ -13,7 +13,6 @@ use loopflow::machine_install::{
 };
 use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
@@ -923,7 +922,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let stale = runtime
             .block_on(task.store.create_session(stale, None))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
         let current = runtime
             .block_on(
@@ -962,7 +961,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         runtime
             .block_on(task.store.complete_session(&session, current.captured))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         assert_eq!(
             runtime
                 .block_on(task.store.task_flow(&task.task.id))
@@ -982,7 +981,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             runtime
                 .block_on(task.store.create_session(other, None))
                 .unwrap();
-            assert_eq!(read(&status_args)["execution"]["state"], "running");
+            assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         }
         // The body is real; the five-minute observation history is simulated.
         struct SleepingBody(std::process::Child);
@@ -1007,6 +1006,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         });
         std::fs::write(run_dir.join("events.jsonl"), format!("{observation}\n")).unwrap();
         let stalled = read(&status_args);
+        let stalled = &stalled["execution"];
         let desktop = read(&["roadmap", "--json"]);
         drop(body);
         assert_eq!(stalled["execution"]["state"], "stalled");
@@ -1050,45 +1050,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .expect("publish initialization marker");
     std::fs::create_dir_all(&missing_worktree)
         .expect("simulate a partially created worktree directory");
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .expect("read owning Project")
-        .expect("owning Project exists");
-    let payload = serde_json::json!({
-        "projects": [{
-            "id": project.plan.id.as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
-            "summary": project.plan.prompt_context,
-            "metric_targets": [],
-            "flow": "feature", "status": "started",
-            "krs": [],
-            "initiative_ids": ["initialization-initiative"],
-            "team_ids": ["initialization-team"]
-        }],
-        "items": [{
-            "id": task.task.plan.id.as_str(),
-            "identifier": task.task.plan.identifier,
-            "url": null,
-            "name": task.task.plan.title,
-            "description": task.task.plan.description,
-            "rank": 1,
-            "completed": false,
-            "project_id": project.plan.id.as_str(),
-            "project": project.plan.slug,
-            "team_id": "initialization-team",
-            "assignee": null
-        }]
-    });
-    runtime
-        .block_on(task.store.put_pm_snapshot(PmSnapshotRow {
-            wave_id: task.task.wave_id.clone(),
-            provider: "linear".to_string(),
-            initiative: "initialization-initiative".to_string(),
-            synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
-        }))
-        .expect("seed roadmap planning");
     let run_lf = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)

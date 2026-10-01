@@ -271,7 +271,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         // Catalog changes must not replace the saved graph or reset its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
-            "- op: sync --plan\n",
+            "- cmd: sync --plan\n",
         )
         .unwrap();
         invoke("checkout");

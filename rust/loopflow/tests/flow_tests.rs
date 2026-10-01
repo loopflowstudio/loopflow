@@ -56,7 +56,11 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
         // A replacement executable delegates the actual effect to lf, then
         // simulates a future build committing an additive schema migration.
         let migration = if upgrade {
-            r#"sqlite3 "$LF_HOME/loopflow.db" <<'SQL'
+            r#"python3 - <<'PYTHON'
+import os
+import sqlite3
+with sqlite3.connect(os.path.join(os.environ["LF_HOME"], "loopflow.db")) as connection:
+    connection.executescript("""
 BEGIN IMMEDIATE;
 CREATE TABLE future_flow_feature (id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS development_migrations (
@@ -65,7 +69,8 @@ CREATE TABLE IF NOT EXISTS development_migrations (
 INSERT INTO development_migrations
  SELECT COUNT(*), 'future', 'future_flow_feature', 'fixture', 1 FROM development_migrations;
 COMMIT;
-SQL
+""")
+PYTHON
 "#
         } else {
             ""
@@ -114,7 +119,11 @@ SQL
             .unwrap();
         assert_eq!(state, if upgrade { "current" } else { "completed" });
         if upgrade {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"));
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             let selected: Option<i64> = conn
                 .query_row("SELECT operation_start FROM flow_sessions", [], |r| {
                     r.get(0)
@@ -864,7 +873,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .unwrap();
         assert!(position.cursor.progress.verdict.is_none());
         let resolved: serde_json::Value = serde_json::from_slice(&decision.stdout).unwrap();
-        assert_eq!(resolved["task_id"], child.task.id.as_str());
+        assert_eq!(resolved["execution"]["task_id"], child.task.id.as_str());
         assert!(runtime
             .block_on(child.store.task_flow(&parent.id))
             .unwrap()

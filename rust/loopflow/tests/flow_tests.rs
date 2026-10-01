@@ -40,7 +40,7 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
 }
 
 #[test]
-fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade() {
+fn flow_steps_use_explicit_binary_and_retain_effects_after_experimental_schema_changes() {
     for upgrade in [false, true] {
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
@@ -51,8 +51,8 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
             "path-proof",
             "- cmd: sync --plan\n- cmd: sync --plan\n",
         );
-        // A replacement executable delegates the actual effect to lf, then
-        // simulates a future build committing an additive schema migration.
+        // An explicitly selected executable delegates the effect to lf, then
+        // changes the experimental schema so subsequent opens must refuse it.
         let migration = if upgrade {
             r#"sqlite3 "$LF_HOME/loopflow.db" <<'SQL'
 BEGIN IMMEDIATE;
@@ -82,6 +82,7 @@ SQL
             &["flow", "path-proof", "-b", "--no-loopflow"],
             None,
         )
+        .env("LF_BIN", bin.join("lf"))
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .output()
         .unwrap();
@@ -772,7 +773,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         use loopflow::engine::agent::AgentConfig;
         use loopflow::harness::{codex::CodexHarness, ApprovalPolicy, Harness};
         let provider = codex_app_server_script("done", "")
-            .replace("read -r thread_start", "read -r thread_start\nprintf '%s\\n' \"$thread_start\" > \"$LF_CONTROL_HOME/thread-request\"")
+            .replace("read -r thread_start", "read -r thread_start\nprintf '%s\\n' \"$thread_start\" > \"$LF_HOME/thread-request\"")
             .replace("printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"", "read -r release\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"");
         let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
         let _env =
@@ -1151,10 +1152,10 @@ fn agent_step_survives_driver_death_without_another_turn() {
     write_flow(repo.path(), "survive-agent", "- work\n");
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf 'turn\\n' >> \"$LF_CONTROL_HOME/turns\"",
+        "read -r turn_start\nprintf 'turn\\n' >> \"$LF_HOME/turns\"",
     ).replace(
         "printf '%s\\n'",
-        "touch \"$LF_CONTROL_HOME/entered\"\ni=0\nwhile [ ! -e \"$LF_CONTROL_HOME/release\" ]; do\n  i=$((i+1)); [ \"$i\" -lt 300 ] || exit 1\n  sleep 0.1\ndone\nprintf '%s\\n'",
+        "touch \"$LF_HOME/entered\"\ni=0\nwhile [ ! -e \"$LF_HOME/release\" ]; do\n  i=$((i+1)); [ \"$i\" -lt 300 ] || exit 1\n  sleep 0.1\ndone\nprintf '%s\\n'",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -1959,9 +1960,9 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
 
     register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
-    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_CONTROL_HOME/cwds\"").replace(
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_CONTROL_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(

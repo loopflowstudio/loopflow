@@ -565,9 +565,9 @@ test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task controller consumers: durable work reservation retains Started
 after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Installed development
-builds record draft checksums too: add a forward draft after the owning migration
-instead of rewriting an applied draft. Preserve populated historical fixtures.
+changes; an ordinary draft build may omit the trigger. Experimental Homes record
+the exact draft checksums: use a fresh Home after changing the schema. Preserve
+populated historical fixtures for published migration coverage.
 
 For manual migration check in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization
@@ -803,6 +803,10 @@ Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
 the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
+
+Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
+`LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables
+are removed before provider launch.
 
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test

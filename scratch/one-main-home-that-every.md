@@ -30,10 +30,6 @@ identity and continuation. No automatic data merging or Task transfer.
 
 ## Remaining
 
-- Gate owns the full affected suites and materialized migration checks, including
-  `default_and_nested_commands_use_the_installed_cli_and_main_home` in the
-  disposable OS-account harness. The local source CLI was observed forwarding
-  `home id --json` to the installed main Home with stale control pins.
 - Publication and published installation remain the caller's later Flow steps.
 - Finish retiring the stores recorded in `home-retirement.json` after their live
   processes settle. Older running builds can still recreate implicit side Homes
@@ -57,5 +53,15 @@ identity and continuation. No automatic data merging or Task transfer.
 - Startup and child launches now share published-artifact selection, including
   the fallback from a retired development selection. Diagnostics give one
   disposable-Home instruction instead of contradictory recovery advice.
+- Gate corrected PR fixtures that selected only `LF_DB_PATH`, provider fixtures
+  that still read retired `LF_CONTROL_HOME`, and a Flow fixture that expected PATH
+  to override the selected CLI. The fixtures now exercise explicit `LF_HOME` and
+  `LF_BIN`, retaining the schema-refusal and completed-effect assertions.
+- The populated historical status fixture now applies published migrations
+  explicitly before reading the result; ordinary experimental opens no longer
+  serve as its upgrade boundary.
+- Testing guidance and the migration-authority comment now describe one-time
+  experimental initialization. Infrastructure memory retains Jack's post-release
+  cleanup direction and the five dated retirement paths before scratch clearing.
 
-Checks: `cargo test -p loopflow --lib store::migrations::tests:: -- --test-threads=4` passed (79); focused published-CLI selection and WAL-lock regressions passed; `cargo test -p loopflow --test one_home_tests --test global_commands` passed (10, one disposable-account proof deferred to gate); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all --check` and `git diff --check` passed; prior installer Python (8) and Swift observation (8) passes remain applicable.
+Checks (gate, 2026-09-30): `cargo nextest run --all --no-fail-fast --build-jobs 4 --test-threads 4` completed 2,010 cases (1,995 passed, 15 stale-fixture failures, 13 skipped); after repairs, `cargo nextest run -p loopflow --test flow_tests --test land_tests --test pr_tests --test status_tests --no-fail-fast --build-jobs 4 --test-threads 4` passed all 87 (2 skipped); `uv run python scripts/test_task_installation.py` passed all 4 disposable-account proofs after correcting its explicit executable fixture; `uv run pytest python/tests/` passed 312; `cd website && uv run python dev.py test` passed 78 (3 skipped); `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` built the app and passed 304 tests without WindowServer; `cargo clippy --all-targets --jobs 4 -- -D warnings`, `cargo fmt --all -- --check`, architecture and Swift-boundary scripts, `check_migrations.py` (58 released migrations unchanged), and `git diff --check` passed; disposable-copy `canonicalize_migrations.py 0.12.29 --materialize-for-tests` found no drafts, so the tested schema already matches the materialized graph. Hosted CI owns the final candidate matrix; live installation and retirement remain later operations.

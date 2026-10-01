@@ -201,8 +201,8 @@ pub(crate) enum FrontierAdvance {
 /// Whether this open may apply migrations to `path`.
 ///
 /// A private store (any path that is not the machine's shared `~/.lf/loopflow.db`)
-/// is always the caller's to initialize and advance — that is the isolated dev
-/// database. The shared release store is exclusive to the promotion boundary: a
+/// may initialize once; subsequent opens require its exact schema. The shared
+/// release store is exclusive to the promotion boundary: a
 /// validation-only build never writes to it, and an ordinary (`Forbidden`) open
 /// neither initializes nor advances it. Bootstrapping a missing or empty shared
 /// store to the candidate's head can strand an older installed binary exactly as

@@ -144,7 +144,13 @@ matching materialized CLI preserved and reopened on the same copied Home. Logs:
 has no open Session, so an empty workspace alone cannot demonstrate the new one- or
 multiple-Session rules. The next review should open a real conversation, verify its
 full-size entry, then add another and exercise Command-click, active-slot replacement,
-ratio retention and sidebar toggle. Full Unit 1 acceptance and latency remain open.
+ratio retention and sidebar toggle. Full Unit 1 acceptance and latency remain open. Native capture
+`.lf/tmp/sync-oct1/ide-layout-reopened.png` confirms the updated app renders LOO-330,
+all four Waves without current-Project warnings, and the New shell label. It is an
+empty workspace, not proof of populated Session interaction. Capture initially
+returned no window because SnapshotService requires `NSApp.keyWindow`; activating
+the app before capture succeeded. That error alone must not be used as evidence
+of window closure or an application crash.
 
 ## October 1 retry
 

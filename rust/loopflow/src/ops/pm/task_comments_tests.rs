@@ -52,9 +52,10 @@ async fn graphql(
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
     } else if query.contains("query IssueOwnership") {
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
-            "description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+            "description":"","prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"",
+            "project":{"id":"project-1","name":"Chapter","description":"","content":"flow: feature",
+                "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation CreateComment") {
         let node = comment(
@@ -79,7 +80,7 @@ async fn graphql(
                 vec![comment(
                     "c-3",
                     Some("2026-09-24T12:00:00Z"),
-                    Some("Third, written last.\n\n```sh\nlf status\n```"),
+                    Some("Third, written last.\n\n```sh\nlf wave status\n```"),
                     json!({"id":"person-1","displayName":"Jack","name":"Jack H"}),
                 )],
                 Some("cursor-1"),
@@ -124,7 +125,10 @@ async fn graphql(
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // isolates publication provenance in LF_RUN_ID
 async fn task_comments_read_and_publish_without_placement() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
     let directory = tempfile::tempdir().unwrap();
     let repo = directory.path().join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
@@ -196,7 +200,7 @@ async fn task_comments_read_and_publish_without_placement() {
     };
     PM_TEST_CONTEXT
         .scope(context, async {
-            let read = task_comment_async(&repo, None, "FIX-7", None)
+            let read = task_comment_async(&repo, None, "FIX-7", None, false)
                 .await
                 .unwrap();
             assert_eq!(read.identifier, "FIX-7");
@@ -228,52 +232,61 @@ async fn task_comments_read_and_publish_without_placement() {
                     name: Some("Jack".into())
                 }
             );
-            assert!(read.comments[3].body.ends_with("```sh\nlf status\n```"));
+            assert!(read.comments[3].body.ends_with("```sh\nlf wave status\n```"));
             assert_eq!(
                 read.comments[3].created_at.as_deref(),
                 Some("2026-09-24T12:00:00Z")
             );
 
-            let wrong_wave = task_comment_async(&repo, Some("other"), "FIX-7", None)
+            let wrong_wave = task_comment_async(&repo, Some("other"), "FIX-7", None, false)
                 .await
                 .unwrap_err();
             assert!(wrong_wave.to_string().contains("belongs to wave/product"));
 
             provider.lock().await.thread = Thread::Empty;
-            let empty = task_comment_async(&repo, Some("product"), "FIX-7", None)
+            let empty = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
                 .await
                 .unwrap();
             assert!(empty.comments.is_empty());
 
             provider.lock().await.thread = Thread::MissingCursor;
-            let truncated = task_comment_async(&repo, Some("product"), "FIX-7", None)
+            let truncated = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
                 .await
                 .unwrap_err();
             assert!(truncated.to_string().contains("continuation cursor"));
 
             provider.lock().await.thread = Thread::Failing;
-            let failed = task_comment_async(&repo, Some("product"), "FIX-7", None)
+            let failed = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
                 .await
                 .unwrap_err();
             assert!(failed.to_string().contains("rate limited"));
             assert!(provider.lock().await.queries.iter().all(|query| !query.trim_start().starts_with("mutation")), "reading the thread cannot publish anything");
 
             provider.lock().await.thread = Thread::Empty;
-            let published = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name")).await.unwrap();
+            let published = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), false).await.unwrap();
             assert_eq!(published.comments.len(), 1);
             assert!(published.comments[0].body.starts_with("Keep the public name"));
             assert!(published.comments[0].body.contains("<!-- loopflow-steer:"));
-            let readback = task_comment_async(&repo, None, "FIX-7", None).await.unwrap();
+            let readback = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(published, readback);
             assert_eq!(provider.lock().await.posted.len(), 1);
             provider.lock().await.thread = Thread::Failing;
-            let failed_read = task_comment_async(&repo, None, "FIX-7", Some("A second instruction")).await.unwrap_err().to_string();
+            let failed_read = task_comment_async(&repo, None, "FIX-7", Some("A second instruction"), false).await.unwrap_err().to_string();
             assert!(failed_read.contains("Posted Linear comment posted-1"), "{failed_read}");
             assert!(failed_read.contains("do not post it again"), "{failed_read}");
             provider.lock().await.thread = Thread::Empty;
-            let confirmed = task_comment_async(&repo, None, "FIX-7", None).await.unwrap();
+            let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(confirmed.comments.len(), 2);
             assert_eq!(provider.lock().await.posted.len(), 2);
+            std::env::set_var(crate::durable::RUN_ID_ENV, crate::session_record::new_artifact_key());
+            let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
+            let body = &progress.comments.last().unwrap().body;
+            assert!(body.contains("<!-- loopflow-progress:"));
+            assert!(!crate::ops::linear_observe::is_direction_comment(body, Some("same-account")));
+            let direction = task_comment_async(&repo, None, "FIX-7", Some("Preserve the requested API"), true).await.unwrap();
+            let body = &direction.comments.last().unwrap().body;
+            assert!(body.contains("<!-- loopflow-steer:"));
+            assert!(crate::ops::linear_observe::is_direction_comment(body, Some("same-account")));
             assert!(store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 
 use loopflow::id::WaveId;
 use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
+use loopflow::pm::PmSnapshot;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::{Wave, WaveLocator};
@@ -48,8 +49,8 @@ fn snapshot(
     issue_id: &str,
     identifier: &str,
     completed: bool,
-) -> String {
-    serde_json::json!({
+) -> PmSnapshot {
+    serde_json::from_value(serde_json::json!({
         "projects": [{
             "id": project_id,
             "slug": project_slug,
@@ -74,11 +75,17 @@ fn snapshot(
             "team_id": "team-loo",
             "assignee": null
         }]
-    })
-    .to_string()
+    }))
+    .unwrap()
 }
 
-fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, payload: String) {
+fn put_snapshot(
+    store: &SqliteStore,
+    repo: &Path,
+    wave: &str,
+    initiative: &str,
+    snapshot: PmSnapshot,
+) {
     let registered = store
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
@@ -89,7 +96,7 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload,
+            snapshot,
         })
         .unwrap();
 }
@@ -171,7 +178,7 @@ fn repository_team_matrix() {
     );
     let infrastructure = Wave::new(
         WaveId::new(),
-        "survival/infrastructure".to_string(),
+        "infrastructure".to_string(),
         repo_locator.repo().to_string(),
     )
     .with_parent(survival.id().clone());
@@ -242,7 +249,15 @@ fn repository_team_matrix() {
         foreign_repo.path(),
         "intelligence",
         "initiative-intelligence",
-        r#"{"projects":[],"items":[{"id":"stale"}]}"#.to_string(),
+        snapshot(
+            "initiative-intelligence",
+            "project-foreign",
+            "foreign",
+            "Foreign",
+            "issue-foreign",
+            "OTHER-1",
+            false,
+        ),
     );
     drop(store);
 
@@ -292,23 +307,29 @@ fn repository_team_matrix() {
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(&home, &repo, &["status", wave, "--no-sync", "--json"]);
+        let show = run_lf(
+            &home,
+            &repo,
+            &["wave", "status", wave, "--no-sync", "--json"],
+        );
         let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
-        let run = run_lf(&home, &repo, &["task", "run", issue]);
-        let error = String::from_utf8_lossy(&run.stderr);
-        assert!(!run.status.success());
+        let checkout = run_lf(&home, &repo, &["task", "checkout", issue]);
+        let error = String::from_utf8_lossy(&checkout.stderr);
+        assert!(!checkout.status.success());
         assert!(
             error.contains("terminal and cannot start execution"),
             "unexpected task result: {error}"
         );
     }
-    let status = assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
+    let status = assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
-    // An unreadable snapshot remains visible as unavailable evidence for its
-    // Wave without blanking readable Work from another repository.
+    // Another repository's same-named Wave does not hide this repository's work.
     let roadmap = assert_success(&run_lf(&home, &repo, &["roadmap", "--json"]), "roadmap");
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));
@@ -317,30 +338,40 @@ fn repository_team_matrix() {
     let reopened = SqliteStore::new(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
-    // A duplicated Project/Issue association fails before Work or worktree creation.
-    put_snapshot(
-        &reopened,
-        &repo,
-        "survival/infrastructure",
+    // Acquire a Project with ambiguous ownership. Changing a known relationship
+    // would instead invalidate that Project before these readers see it.
+    let mut ambiguous = snapshot(
         "initiative-infrastructure",
-        snapshot(
-            "initiative-infrastructure",
-            "project-survival",
-            "a-real-task",
-            "A real task reaches done",
-            "issue-survival",
-            "LOO-1",
-            false,
-        ),
+        "project-ambiguous",
+        "a-real-task",
+        "A real task reaches done",
+        "issue-ambiguous",
+        "LOO-4",
+        false,
     );
+    ambiguous.projects[0]
+        .initiative_ids
+        .push("initiative-survival".into());
+    let survival = reopened
+        .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
+        .unwrap()
+        .unwrap();
+    let mut planning = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
+    planning.snapshot.projects.extend(ambiguous.projects);
+    planning.snapshot.items.extend(ambiguous.items);
+    reopened.put_pm_snapshot(&planning).unwrap();
     drop(reopened);
-    let duplicate = run_lf(&home, &repo, &["task", "run", "LOO-1"]);
-    let error = String::from_utf8_lossy(&duplicate.stderr);
-    assert!(error.contains("belongs to both"), "{error}");
+    let ambiguous = run_lf(&home, &repo, &["task", "checkout", "LOO-4"]);
+    let error = String::from_utf8_lossy(&ambiguous.stderr);
+    assert!(!ambiguous.status.success());
+    assert!(error.contains("belongs to 2 Initiatives"), "{error}");
     // Registry discovery remains available; planning reads reject ambiguity.
-    assert_success(&run_lf(&home, &repo, &["ls", "--json"]), "Wave list");
+    assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     for args in [
-        &["status", "survival", "--json"][..],
+        &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
     ] {
@@ -352,7 +383,7 @@ fn repository_team_matrix() {
             args.join(" ")
         );
         assert!(
-            error.contains("belongs to both") || error.contains("belongs to 2"),
+            error.contains("belongs to Initiatives"),
             "{} returned an unrelated error: {error}",
             args.join(" ")
         );
@@ -421,7 +452,7 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["status", "product", "--no-sync", "--json"],
+            &["wave", "status", "product", "--no-sync", "--json"],
         ),
         "legacy cached read",
     );

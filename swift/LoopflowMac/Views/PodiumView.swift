@@ -12,16 +12,19 @@ struct PodiumView: View {
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
     @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
+    private let taskLinks: WorkspaceLinkRouter?
     private let query: RegistryQuery
 
     init(
         portfolioService: PortfolioService,
         initialRepoPath: String? = nil,
-        query: RegistryQuery = RegistryQueryLocal.shared
+        query: RegistryQuery = RegistryQueryLocal.shared,
+        taskLinks: WorkspaceLinkRouter? = nil
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
         self.query = query
+        self.taskLinks = taskLinks
         let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath
                 .flatMap(PortfolioDiscovery.resolveLaunchRepo)
@@ -56,9 +59,22 @@ struct PodiumView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("The Podium")
         .accessibilityIdentifier("podium")
-        .task { await model.activeRunsLifetime() }
+        .background {
+            if let taskLinks {
+                WorkspaceLinkReceiver(router: taskLinks) { url in
+                    Task { await model.openTaskLink(url) }
+                }.frame(width: 0, height: 0)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { model.showsTaskLink },
+            set: { if !$0 { model.dismissTaskLink() } }
+        )) {
+            TaskLinkView(model: model)
+        }
+        .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-            Task { await model.rescanActiveRuns() }
+            Task { await model.rescanActiveSessions() }
         }
         .task {
             await model.refreshPortfolio(

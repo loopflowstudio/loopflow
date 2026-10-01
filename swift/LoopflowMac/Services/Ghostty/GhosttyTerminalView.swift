@@ -79,34 +79,72 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
-    func makeNSView(context: Context) -> GhosttyMetalView {
+    func makeNSView(context: Context) -> GhosttyTerminalMount {
         let view: GhosttyMetalView
         if let surfacePool {
             view = surfacePool.view(for: terminal)
         } else {
             view = GhosttyMetalView(terminal: terminal)
         }
-        view.workingDirectory = workingDirectory
-        view.command = command
-        view.onSurfaceCreated = onSurfaceCreated
-        view.onFocus = onFocus
-
         if case .uninitialized = manager.state {
             manager.initialize()
         }
 
-        return view
+        view.recordMountLifecycle("make")
+        return GhosttyTerminalMount(terminal: view)
     }
 
-    func updateNSView(_ nsView: GhosttyMetalView, context: Context) {
-        nsView.onFocus = onFocus
-        nsView.sizeDidChange(size)
+    func updateNSView(_ mount: GhosttyTerminalMount, context: Context) {
+        let nsView = mount.terminal
+        nsView.recordMountLifecycle("update focused=\(isFocused) enabled=\(isEnabled)", host: mount)
+        let enabled = isEnabled
+        mount.configure = { nsView in
+            nsView.workingDirectory = workingDirectory
+            nsView.command = command
+            nsView.onSurfaceCreated = onSurfaceCreated
+            nsView.onFocus = onFocus
+            nsView.sizeDidChange(size)
 
-        if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
-           size.width > 0, size.height > 0 {
-            nsView.createSurface(manager: manager)
+            if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
+               size.width > 0, size.height > 0 {
+                nsView.createSurface(manager: manager)
+            }
+            nsView.updateFocus(isFocused: isFocused, isEnabled: enabled)
         }
-        nsView.updateFocus(isFocused: isFocused, isEnabled: isEnabled)
+        guard nsView.superview === mount else { return }
+        mount.configure?(nsView)
+    }
+}
+
+/// SwiftUI owns each mount; the workspace owns the terminal. Splitting a pane
+/// can retire the old representable after its terminal has moved to a new one.
+/// Only a mount attached to a window may adopt the terminal: SwiftUI can lay out
+/// and discard an off-window replacement without ever displaying it.
+final class GhosttyTerminalMount: NSView {
+    let terminal: GhosttyMetalView
+    var configure: ((GhosttyMetalView) -> Void)?
+
+    init(terminal: GhosttyMetalView) {
+        self.terminal = terminal
+        super.init(frame: terminal.frame)
+        terminal.recordMountLifecycle("mount-created", host: self)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        terminal.recordMountLifecycle("mount-superview", host: self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        terminal.recordMountLifecycle("mount-window", host: self)
+        guard window != nil else { return }
+        configure?(terminal)
+        terminal.frame = bounds
+        terminal.autoresizingMask = [.width, .height]
+        addSubview(terminal)
     }
 }
 
@@ -213,6 +251,32 @@ func ghosttyCommandBlockFrame(
 
 @MainActor
 final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
+    /// Bounded debug evidence for a pooled surface moving between SwiftUI mounts.
+    private(set) var mountLifecycle: [String] = []
+    private var lastMountObservation: String?
+
+    func recordMountLifecycle(_ event: String, host: NSView? = nil) {
+        #if DEBUG
+        func identity(_ view: NSView?) -> String {
+            guard let view else { return "nil" }
+            return "\(type(of: view))@\(ObjectIdentifier(view))"
+        }
+        let host = host ?? superview
+        let parents = sequence(first: host?.superview, next: { $0?.superview })
+            .prefix(4).map { identity($0) }.joined(separator: "/")
+        let observation = "\(event) host=\(identity(host)) owner=\(identity(superview)) hostWindow=\(host?.window?.windowNumber.description ?? "nil") window=\(window?.windowNumber.description ?? "nil") parents=\(parents) frame=\(frame)"
+        guard observation != lastMountObservation else { return }
+        lastMountObservation = observation
+        mountLifecycle.append("\(ProcessInfo.processInfo.systemUptime): \(observation)")
+        if mountLifecycle.count > 48 { mountLifecycle.removeFirst(mountLifecycle.count - 48) }
+        #endif
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        recordMountLifecycle("terminal-superview")
+    }
+
     var workingDirectory: String = ""
     var command: String?
     let terminal: TerminalIdentity
@@ -240,6 +304,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var commandBlockMouseDown = false
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
+    private var inputEnabled = true
     /// Open from a key press until the next display-link draw.
     private var keyToDraw: OSSignpostIntervalState?
 
@@ -289,6 +354,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        recordMountLifecycle("terminal-window")
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
@@ -301,6 +367,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func updateFocus(isFocused: Bool, isEnabled: Bool) {
+        inputEnabled = isEnabled
         let requested = isEnabled && isFocused
         let changed = focusRequested != requested
         focusRequested = requested
@@ -506,9 +573,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         setupTrackingArea()
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { inputEnabled }
 
     override func becomeFirstResponder() -> Bool {
+        guard inputEnabled else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)

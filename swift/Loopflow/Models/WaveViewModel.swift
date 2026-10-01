@@ -27,7 +27,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var openTaskCount: Int { api.activeTasks }
 
     /// The operational lens for this row, in the shared green/red/blue/black grammar.
-    /// A registered Wave projects from the runtime `lf ls` carries; an unregistered
+    /// A registered Wave projects from the runtime `lf wave list` carries; an unregistered
     /// Wave (authored on disk, never served) has no runtime reading, so it stays
     /// unknown-with-reason rather than a silent black or a local-session guess.
     public var lens: WaveLens {
@@ -42,7 +42,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
             )
         }
         return WaveLens.forWave(
-            enabled: api.enabled,
             activeTasks: api.activeTasks
         )
     }

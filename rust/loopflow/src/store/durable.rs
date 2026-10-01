@@ -7,6 +7,14 @@ use crate::durable::{
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub async fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.begin_task_abandon(&task_id)
+        })
+        .await
+    }
+
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -39,14 +47,6 @@ impl Store {
     pub async fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
-    }
-
-    pub async fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_work_enabled(&work, enabled)
-        })
-        .await
     }
 
     pub(crate) async fn place_work(
@@ -159,21 +159,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_work_remains_disabled_when_moved() {
+    async fn placement_preserves_the_selected_home() {
         let (store, work) = wave_work().await;
         let local = store.local_home().await.unwrap();
-
-        let disabled = store.set_work_enabled(&work, false).await.unwrap();
-        assert!(!disabled.enabled);
 
         let remote = store
             .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
             .await
             .unwrap();
-        assert!(!store.place_work(&work, &remote.id).await.unwrap().enabled);
-        assert!(!store.place_work(&work, &local.id).await.unwrap().enabled);
-
-        assert!(store.set_work_enabled(&work, true).await.unwrap().enabled);
+        assert_eq!(
+            store.place_work(&work, &remote.id).await.unwrap().home_id,
+            remote.id
+        );
+        assert_eq!(
+            store.place_work(&work, &local.id).await.unwrap().home_id,
+            local.id
+        );
     }
 
     #[tokio::test]

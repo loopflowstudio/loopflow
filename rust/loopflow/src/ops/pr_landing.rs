@@ -9,7 +9,7 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::current_branch;
 use crate::engine::load_skill;
@@ -17,12 +17,17 @@ use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
 };
+use crate::session_record::{
+    AgentExecRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+};
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
-use super::pr::{merge_gate_state, observe_pr_by_number, PrInfo, PrObservation, PrReadFreshness};
+use super::pr::{
+    merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
+};
 use super::progress::Progress;
 
 const LANDING_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
@@ -107,48 +112,26 @@ struct GithubLandingDriver;
 
 impl LandingDriver for GithubLandingDriver {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
-        match observe_pr_by_number(
-            &landing.worktree,
-            landing.pr_number,
-            &landing.branch,
-            PrReadFreshness::Fresh,
-        ) {
-            PrObservation::Fresh(pr) => {
-                if matches!(pr.state.as_str(), "open" | "draft") {
-                    match super::pr::auto_merge_enabled(&landing.worktree, pr.number) {
-                        Ok(false) => {
-                            return Ok(LandingObservation::Unarmed {
-                                head_sha: pr
-                                    .head_sha
-                                    .unwrap_or_else(|| landing.observed_head_sha.clone()),
-                            });
-                        }
-                        Ok(true) => {}
-                        Err(error) => {
-                            return Ok(LandingObservation::Degraded {
-                                reason: error.to_string(),
-                            });
-                        }
-                    }
-                }
-                classify_github_observation(landing, pr)
+        match observe_pr_merge(&landing.worktree, u64::from(landing.pr_number)) {
+            Ok(observation) => {
+                classify_github_observation(landing, observation.pr, observation.request)
             }
-            PrObservation::NotFound => Ok(LandingObservation::Degraded {
-                reason: format!(
-                    "GitHub no longer exposes pull request #{}; merge state is unknown",
-                    landing.pr_number
-                ),
+            Err(error) => Ok(LandingObservation::Degraded {
+                reason: error.to_string(),
             }),
-            PrObservation::Degraded { reason } => Ok(LandingObservation::Degraded { reason }),
         }
     }
 
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
-        launch_ci_fix(landing, incident)
+        exec_ci_fix(landing, incident)
     }
 }
 
-fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<LandingObservation> {
+fn classify_github_observation(
+    landing: &PrLanding,
+    pr: PrInfo,
+    request: Option<MergeRequest>,
+) -> OpsResult<LandingObservation> {
     let head_sha = pr
         .head_sha
         .unwrap_or_else(|| landing.observed_head_sha.clone());
@@ -166,7 +149,24 @@ fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<Lan
             })
         }
         "closed" => Ok(LandingObservation::Closed { head_sha }),
-        _ => match merge_gate_state(&landing.worktree, &landing.branch) {
+        // The queue checks an integrated commit. Its membership takes precedence
+        // over the original PR head's mergeability and check results.
+        _ if matches!(request, Some(MergeRequest::Queued(_))) => {
+            Ok(LandingObservation::Pending { head_sha })
+        }
+        _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
+        _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
+            Ok(LandingObservation::Degraded {
+                reason: format!(
+                    "pull request #{} needs integration ({}); sync and resume landing",
+                    pr.number,
+                    pr.merge_state
+                        .as_deref()
+                        .expect("integration state matched")
+                ),
+            })
+        }
+        _ => match merge_gate_state(&landing.worktree, u64::from(landing.pr_number), &head_sha) {
             Ok(Some(reading)) if reading.failing => Ok(LandingObservation::Failing {
                 head_sha,
                 failing_checks: reading
@@ -188,22 +188,26 @@ fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<Lan
     }
 }
 
-fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
         .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    let urls = merge_gate_state(&landing.worktree, &landing.branch)
-        .ok()
-        .flatten()
-        .map(|reading| {
-            reading
-                .failing_leaves
-                .into_iter()
-                .filter_map(|check| check.url.map(|url| (check.name, url)))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
+    let urls = merge_gate_state(
+        &landing.worktree,
+        u64::from(landing.pr_number),
+        &incident.failed_head_sha,
+    )
+    .ok()
+    .flatten()
+    .map(|reading| {
+        reading
+            .failing_leaves
+            .into_iter()
+            .filter_map(|check| check.url.map(|url| (check.name, url)))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    })
+    .unwrap_or_default();
     let checks = incident
         .failure_set
         .iter()
@@ -220,7 +224,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         .unwrap_or_default();
     let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf rebase`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -244,8 +248,8 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         chrome: config.chrome,
     };
     let (harness, model) = crate::engine::parse_agent(launch.agent());
-    let capture = crate::run_record::CaptureHandle::begin_with_launch(
-        crate::run_record::RunSpec {
+    let capture = CaptureHandle::begin_with_request(
+        SessionCaptureSpec {
             harness,
             model,
             surface: "headless".to_string(),
@@ -254,14 +258,17 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
-            work: landing.task_id.clone().map(|task| crate::session::RunWork {
-                task_id: Some(task),
-                wave_id: None,
-                source: crate::session::WorkSource::Declared,
-            }),
+            flow: SessionFlowMembership::Independent,
+            work: landing
+                .task_id
+                .clone()
+                .map(|task| crate::session::SessionWork {
+                    task_id: Some(task),
+                    wave_id: None,
+                    source: crate::session::WorkSource::Declared,
+                }),
         },
-        crate::run_record::RunLaunchRequest::from_prepared(&launch, &capabilities),
+        AgentExecRequest::from_prepared(&launch, &capabilities),
     )
     .map_err(|error| OpsError::Message(error.to_string()))?;
     capture.record_input("initial", &launch.task_prompt);
@@ -271,7 +278,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let result = launch_agent(&launch, &process, &capabilities);
+    let result = exec_agent(&launch, &process, &capabilities);
     let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
         "completed"
     } else {
@@ -280,14 +287,15 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
     capture
         .finish(outcome)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let conclusion = crate::run_record::read_final_answer(&capture.artifact_dir())
+    let conclusion = capture
+        .final_answer()
         .ok()
         .flatten()
         .map(|answer| answer.text)
         .unwrap_or_else(|| {
             format!(
                 "No repair conclusion recorded; inspect lf runs {} --events",
-                capture.run_id()
+                capture.artifact_key()
             )
         });
     let result = result.map_err(|error| {
@@ -777,6 +785,44 @@ async fn landing_store() -> OpsResult<SharedStore> {
         .map_err(|error| OpsError::Message(format!("open landing store: {error}")))
 }
 
+async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResult<()> {
+    if let Some(task_id) = &landing.task_id {
+        let task = store
+            .get_task(task_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("landing Task {task_id} disappeared")))?;
+        if crate::ops::task::task_work_status(store, &task).await?
+            == crate::durable::WorkStatus::Done
+        {
+            return crate::ops::task::cleanup_completed_task(store, &task).await;
+        }
+        eprintln!("Task {} remains open; retained its checkout for the saved Flow and next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        return Ok(());
+    }
+    if store
+        .sqlite
+        .landing_has_pending_flow(&landing.id)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        eprintln!("PR merged; retained its checkout for the saved Flow.");
+        return Ok(());
+    }
+    let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;
+    if std::fs::canonicalize(&repo)? == std::fs::canonicalize(&landing.worktree)? {
+        eprintln!("PR merged; retained the primary checkout and branch.");
+        return Ok(());
+    }
+    let deletion =
+        crate::ops::wt::prepare_landed_delete(&repo, &landing.branch, &landing.observed_head_sha)?;
+    crate::ops::wt::apply_delete(deletion, &crate::ops::NullProgress).map_err(|error| {
+        OpsError::Message(format!(
+            "PR merged, but cleanup failed: {error}; retry `lf wt delete {}`",
+            landing.branch,
+        ))
+    })
+}
+
 async fn create_landing(
     store: &SharedStore,
     repo: &Path,
@@ -882,6 +928,11 @@ pub fn reconcile_repository(repo: &Path, progress: &impl Progress) -> OpsResult<
             match reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver)).await
             {
                 Ok(landing) => {
+                    if landing.state == PrLandingState::Merged {
+                        if let Err(error) = cleanup_landed_pr(&store, &landing).await {
+                            errors.push(format!("PR #{number}: {error}"));
+                        }
+                    }
                     let detail = landing
                         .blocked_reason
                         .as_deref()
@@ -905,11 +956,104 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use time::OffsetDateTime;
 
-    use super::{reconcile_pr_landing, LandingDriver, LandingObservation};
+    use super::{
+        classify_github_observation, reconcile_pr_landing, LandingDriver, LandingObservation,
+    };
     use crate::ops::error::{OpsError, OpsResult};
+    use crate::ops::pr::{MergeRequest, PrInfo};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::task::{CiCheck, CiIncident};
+    use std::path::PathBuf;
+
+    fn github_landing_fixture() -> (PrLanding, PrInfo) {
+        let landing = PrLanding::new(
+            NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 1323,
+                worktree: PathBuf::from("/unused"),
+                branch: "jack/landing".to_string(),
+                task_id: None,
+                requested_head_sha: "pr-head".to_string(),
+                after_merge: None,
+                next_slug: None,
+            },
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap();
+        let pr = PrInfo {
+            url: "https://github.com/loopflowstudio/loopflow/pull/1323".to_string(),
+            number: u64::from(landing.pr_number),
+            state: "open".to_string(),
+            branch: landing.branch.clone(),
+            merge_commit: None,
+            merged_at: None,
+            head_sha: Some("pr-head".to_string()),
+            merge_state: Some("behind".to_string()),
+        };
+        (landing, pr)
+    }
+
+    #[test]
+    fn queued_landing_waits_for_integration_instead_of_requiring_sync() {
+        let (landing, mut pr) = github_landing_fixture();
+        for merge_state in ["behind", "dirty", "clean"] {
+            pr.merge_state = Some(merge_state.to_string());
+            let observed = classify_github_observation(
+                &landing,
+                pr.clone(),
+                Some(MergeRequest::Queued("queue-entry".to_string())),
+            )
+            .unwrap();
+            assert_eq!(
+                observed,
+                LandingObservation::Pending {
+                    head_sha: "pr-head".to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn dequeued_landing_resumes_ordinary_integration_and_authorization_checks() {
+        let (landing, pr) = github_landing_fixture();
+        let observed =
+            classify_github_observation(&landing, pr.clone(), Some(MergeRequest::Auto)).unwrap();
+        assert!(matches!(observed, LandingObservation::Degraded { reason }
+            if reason.contains("needs integration (behind)")));
+        assert_eq!(
+            classify_github_observation(&landing, pr, None).unwrap(),
+            LandingObservation::Unarmed {
+                head_sha: "pr-head".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn queue_membership_never_overrides_a_confirmed_merge_or_closure() {
+        let (landing, mut pr) = github_landing_fixture();
+        pr.state = "merged".to_string();
+        pr.merge_commit = Some("integrated-head".to_string());
+        assert_eq!(
+            classify_github_observation(
+                &landing,
+                pr.clone(),
+                Some(MergeRequest::Queued("queue-entry".to_string()))
+            )
+            .unwrap(),
+            LandingObservation::Merged {
+                head_sha: "pr-head".to_string(),
+                merge_commit: "integrated-head".to_string()
+            }
+        );
+        pr.state = "closed".to_string();
+        assert_eq!(
+            classify_github_observation(&landing, pr, None).unwrap(),
+            LandingObservation::Closed {
+                head_sha: "pr-head".to_string()
+            }
+        );
+    }
 
     struct FakeDriver {
         observations: Mutex<VecDeque<LandingObservation>>,

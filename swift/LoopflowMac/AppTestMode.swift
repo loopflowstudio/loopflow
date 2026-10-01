@@ -106,7 +106,7 @@ enum AppTestMode: String {
 
     /// Seconds the surface settles before the snapshot fires, from
     /// `LOOPFLOW_UI_TEST_DELAY`. The fixture legs render fast; the `live` leg
-    /// shells out to `lf ls`/`lf status`, so a real-data capture gives it more
+    /// shells out to `lf wave list`/`lf wave status`, so a real-data capture gives it more
     /// room. Defaults to 2.5s — the value the fixture distinctness proof tuned.
     static var snapshotDelay: TimeInterval {
         guard let raw = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_DELAY"],

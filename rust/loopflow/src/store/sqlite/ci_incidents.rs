@@ -225,7 +225,7 @@ impl super::SqliteStore {
                 ci.claimed_landing_generation, ci.responded_at, ci.green_at,
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
-                w.name, ts.issue_identifier,
+                w.slug, ts.issue_identifier,
                 ts.work_state,
                 ts.created_at,
                 EXISTS (
@@ -243,10 +243,10 @@ impl super::SqliteStore {
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
              LEFT JOIN projects p ON p.id=ts.project_id
-             LEFT JOIN waves w ON w.id=p.wave_id
+             LEFT JOIN wave_addresses w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                             ci.webhook_received_at, ci.created_at) >= ?1
-               AND (?2 IS NULL OR w.name=?2)
+               AND (?2 IS NULL OR w.slug=?2)
                AND (?3 IS NULL OR ci.repo=?3)
              ORDER BY COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                                ci.webhook_received_at, ci.created_at) DESC",

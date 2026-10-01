@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,6 +44,7 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
+    requests: Arc<Mutex<HashSet<String>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -58,9 +60,9 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Serialize one Claude Code stream-json user message.
-fn user_message_line(text: &str) -> String {
+fn user_message_line(text: &str, id: &str) -> String {
     let message = serde_json::json!({
-        "type": "user",
+        "type": "user", "uuid": id,
         "message": {"role": "user", "content": [{"type": "text", "text": text}]},
     });
     format!("{message}\n")
@@ -79,6 +81,7 @@ impl ClaudeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
+            requests: Arc::new(Mutex::new(HashSet::new())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -119,9 +122,36 @@ impl ClaudeHarness {
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
+        let owner = config
+            .session_driver
+            .as_ref()
+            .map(|(session, driver)| {
+                let path = crate::store::database_path_from_env()?;
+                Ok::<_, anyhow::Error>((
+                    crate::store::sqlite::SqliteStore::new(&path)?,
+                    session.clone(),
+                    driver.clone(),
+                ))
+            })
+            .transpose()?;
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        if let Some((store, session, driver)) = &owner {
+            let recorded = (|| -> Result<()> {
+                if let Some(pid) = child.id() {
+                    if let Some(start) = crate::journal::process_started_at(pid)? {
+                        store.record_session_provider_process(session, driver, pid, start)?;
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = recorded {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(error);
+            }
+        }
         let stdin = child
             .stdin
             .take()
@@ -135,7 +165,15 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        self.spawn_reader(stdout);
+        self.spawn_reader(
+            stdout,
+            super::claude_history::History {
+                owner,
+                selection: config.flow_selection.clone(),
+                requests: self.requests.clone(),
+                pending: VecDeque::new(),
+            },
+        );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);
@@ -144,7 +182,11 @@ impl ClaudeHarness {
 
     /// The persistent NDJSON reader: maps events for the whole process lifetime
     /// and emits one `TurnCompleted` per coalesced runner turn.
-    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout) {
+    fn spawn_reader(
+        &mut self,
+        stdout: tokio::process::ChildStdout,
+        mut history: super::claude_history::History,
+    ) {
         let events = self.events.clone();
         let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
@@ -204,6 +246,14 @@ impl ClaudeHarness {
                     }
                 }
 
+                if let Err(error) = history.record(&line) {
+                    let _ = events.send(ConversationEvent::Error {
+                        code: "claude_history".into(),
+                        message: error.to_string(),
+                        evidence: None,
+                    });
+                    break;
+                }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
                 if let Some(session_id) = state.take_provider_session_id() {
                     *session_slot
@@ -380,7 +430,11 @@ impl Harness for ClaudeHarness {
         self.interrupt_requested.store(false, Ordering::SeqCst);
         self.ensure_process().await?;
 
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(turn_id.clone());
         *self
             .current_turn_id
             .lock()
@@ -396,7 +450,7 @@ impl Harness for ClaudeHarness {
             .as_mut()
             .ok_or_else(|| anyhow!("claude stdin not available"))?;
         if let Err(error) = stdin
-            .write_all(user_message_line(&turn_content).as_bytes())
+            .write_all(user_message_line(&turn_content, &turn_id).as_bytes())
             .await
         {
             // The process died between spawn and write; tear it down so the
@@ -427,7 +481,15 @@ impl Harness for ClaudeHarness {
         {
             return SendCurrentOutcome::NotSteerable;
         }
-        if let Err(error) = stdin.write_all(user_message_line(content).as_bytes()).await {
+        let request = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(request.clone());
+        if let Err(error) = stdin
+            .write_all(user_message_line(content, &request).as_bytes())
+            .await
+        {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
                 error: format!("failed to write claude steer: {error}"),
@@ -497,7 +559,9 @@ mod activity_tests {
 
     use super::ClaudeHarness;
     use crate::harness::Harness;
-    use crate::run_record::{activity, CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{
+        activity, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+    };
 
     #[tokio::test]
     async fn claude_body_activity_does_not_require_process_group_authority() {
@@ -513,7 +577,7 @@ mod activity_tests {
         );
         let capture = CaptureHandle::begin_at(
             home.path(),
-            RunSpec {
+            SessionCaptureSpec {
                 harness: "claude".into(),
                 model: None,
                 surface: "headless".into(),
@@ -522,7 +586,7 @@ mod activity_tests {
                 worktree: None,
                 skill: None,
                 subjects: vec![],
-                flow: RunFlowMembership::Independent,
+                flow: SessionFlowMembership::Independent,
                 work: None,
             },
         )
@@ -530,7 +594,7 @@ mod activity_tests {
         capture.observe_activity(harness.process_id()).await;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if activity::read(home.path(), &capture.run_id()).await
+                if activity::read(home.path(), &capture.artifact_key()).await
                     == activity::Activity::Running
                 {
                     break;
@@ -547,7 +611,67 @@ mod activity_tests {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
+    async fn sequential_managed_sessions_retain_their_exact_claude_engines() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let _storage =
+            crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH", "LF_BIN", "PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_DB_PATH", &database);
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let exec = crate::id::ExecId::new();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
+            [&exec],
+        )
+        .unwrap();
+        let script = home.path().join("claude");
+        std::fs::write(&script, "#!/bin/sh\nwhile read -r line; do printf '%s\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}'; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Vendor setup rebuilds PATH from the process environment, not AgentConfig.
+        let mut paths = vec![home.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&original_path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let mut harnesses = Vec::new();
+        let mut recorded = Vec::new();
+        for id in ["first", "second"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let mut harness = ClaudeHarness::new(tx);
+            let mut config = live_config();
+            config.session_driver = Some((id.into(), driver.clone()));
+            harness.config = Some(config);
+            harness.send_input("one turn").await.unwrap();
+            recorded.push((
+                harness.process_id().unwrap(),
+                store.session_provider_process(id).unwrap(),
+            ));
+            store.release_session_driver(id, &driver).unwrap();
+            // Retain the first process while the same Exec starts the next step.
+            harnesses.push(harness);
+        }
+        for harness in &mut harnesses {
+            harness.stop().await.unwrap();
+        }
+        assert_ne!(recorded[0].0, recorded[1].0);
+        for (pid, evidence) in recorded {
+            let (saved, start) = evidence.expect("managed Claude publishes exact engine identity");
+            assert_eq!(pid, saved);
+            assert!(start > 0);
+        }
+    }
 
     // build_claude_session_turn_args coverage lives in engine::agent::tests.
 
@@ -556,6 +680,9 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
+            chrome: false,
+            session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -610,6 +737,9 @@ mod tests {
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
+            chrome: false,
+            session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

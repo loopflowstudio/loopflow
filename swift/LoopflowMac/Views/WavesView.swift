@@ -1,5 +1,5 @@
 // Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf ls`); Work and Session
+// Discovery is a periodic registry query (`lf wave list`); Work and Session
 // resident motion stream directly from that Wave's listener.
 
 import SwiftUI
@@ -12,6 +12,7 @@ enum RepoFilter: Hashable {
 
 struct WavesView: View {
     let portfolioService: PortfolioService
+    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
@@ -283,11 +284,13 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil }
             )
             .id(waveSelectionId(wave))
+            .environment(sessionWorkspaces)
         } else {
             RoadmapView(
                 repoPath: roadmapRepoPath,
                 onOpenWave: openRoadmapWave
             )
+            .environment(sessionWorkspaces)
         }
     }
 
@@ -550,7 +553,6 @@ struct WavesView: View {
         selectedWaveId = waveSelectionId(selected)
     }
 }
-
 
 /// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
 /// the Wave files through `PortfolioRepoState.createWave`.

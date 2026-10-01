@@ -5,7 +5,8 @@
     uv run python scripts/check_architecture.py --json
 
 The check is deliberately finite. It covers live SQLite tables, root CLI
-families, executable/process entrypoints, provider kinds, literal Rust subprocess edges, declared read projections and
+families, executable/process entrypoints, provider kinds, literal Rust subprocess
+edges, declared read projections and
 compatibility seams, and exact retired vocabulary. It does not claim that every
 public Rust item is an architectural concept.
 """
@@ -25,7 +26,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHITECTURE = Path("docs/architecture-reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
@@ -39,14 +40,14 @@ SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
 DRAFT_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-FLOW_OP = re.compile(r"^\s*-\s*op:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
+FLOW_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
 SCAN_ROOTS = (
     Path("README.md"),
     Path("PROMPTS.md"),
     Path("RELEASE_NOTES.md"),
-    Path("STYLE.md"),
+    Path("AGENTS.md"),
     Path("TESTING.md"),
     Path("VISUAL_DESIGN.md"),
     Path("deploy"),
@@ -64,8 +65,8 @@ SCAN_ROOTS = (
     Path(".lf"),
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "target", "DerivedData", "__pycache__"}
-# Generated docs and chapter evidence copy other sources, not live architecture.
-IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"))
+# Generated docs, historical evidence and local receipts are not live architecture.
+IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"), Path(".lf/tmp"), Path(".lf/log"))
 
 
 @dataclass(frozen=True)
@@ -188,7 +189,7 @@ def _discover_internal_flow_commands(root: Path, internal: set[str]) -> Counter[
     if not flows.is_dir():
         return Counter()
     for path in sorted((*flows.glob("*.yaml"), *flows.glob("*.yml"))):
-        for name in FLOW_OP.findall(path.read_text()):
+        for name in FLOW_COMMAND.findall(path.read_text()):
             command = f"lf {name}"
             if command in internal:
                 commands.add(command)
@@ -410,9 +411,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
         scopes = CODE_TOKEN.findall(row.get("allowed scopes", ""))
         used_scopes: set[str] = set()
         for relative, source in sources:
-            matching_scopes = {
-                scope for scope in scopes if _scope_matches(relative, scope)
-            }
+            matching_scopes = {scope for scope in scopes if _scope_matches(relative, scope)}
             for pattern in patterns:
                 case_sensitive = pattern.isupper()
                 for number, line in enumerate(source.splitlines(), start=1):
@@ -425,9 +424,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
                         else:
                             errors.append(f"stale vocabulary {pattern!r} at {relative}:{number}")
         for scope in sorted(set(scopes) - used_scopes):
-            errors.append(
-                f"unused vocabulary scope {scope!r} for {', '.join(patterns)}"
-            )
+            errors.append(f"unused vocabulary scope {scope!r} for {', '.join(patterns)}")
     return errors
 
 

@@ -1,16 +1,22 @@
 # DTO wire fixtures
 
 Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
-listener and `lf status` contracts consumed by the Mac app. Every absent field
+listener and `lf wave status` contracts consumed by the Mac app. Every absent field
 is a parse error or an explicit null.
 
-Carve-out: `resident_deltas.json` and `resident_door.json` are the wave
 listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 `GET /resident/context` — see `rust/loopflow/src/wave/wire.rs`). Both ends are
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`task_execution.json` pins the execution evidence in `lf task status --json`.
+`task_status.json` pins the planning/execution envelope for available, unavailable,
+invalid, removed and absent planning. Rust round-trips it; Swift decodes the `TaskStatus` model
+returned by `RegistryQuery.taskStatus`. These cases have no execution. Complete
+Task execution/action-state parity remains acceptance work; Wave contracts have
+their own fixtures below.
+
+`task_execution.json` pins the execution boundary inside the status envelope's
+optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
@@ -32,15 +38,16 @@ processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Rust and Swift both round-trip it; The
 Podium derives no process state of its own.
 
-`wave_detail.json` embeds the `RunSnapshot` row shape shared by both bundle
-reads: `lf runs --json` and `lf usage --json`. Provider cumulative counters
-remain optional; stream finality and evidence gaps are required, explicit
-evidence.
+`session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
+shape shared by `lf runs --json` and `lf usage --json`. Captured event sequences
+and native thread/turn references retain distinct outcomes. Optional counters,
+missing capture/start membership, stream finality and evidence gaps stay explicit.
+The optional `task_pr_id` retains the PR captured by the managed Flow;
+`first_provider_attempt_at` differs from capture/import observation time.
 
 `work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
-Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
-identities. Rust and Swift both round-trip it; The Podium filters this one
-history instead of maintaining a second activity store.
+Session capture/provider history, PR and Steer facts retain their original
+identities. Rust and Swift round-trip this shared history.
 
 `pm_show.json` pins the internal planning snapshot used by Task resolution
 and status refresh: a Project carries exactly one Wave Initiative and the repository
@@ -50,3 +57,8 @@ the provider's Wave-qualified title is normalized before this reader returns.
 It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
 
 `task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.
+
+`task_files.json` pins `lf task changes/diff/file/save --json`: exact comparison bases,
+rename paths, scratch listing, and lossless content with a byte revision and
+explicit file state, Save outcome, recovery access and late-change disclosure.
+Rust round-trips the same fixture Swift decodes.

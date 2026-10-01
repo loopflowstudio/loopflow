@@ -1,65 +1,78 @@
-use crate::durable::{FlowInvocation, RunId, TaskId};
-use crate::session::{Run, Session, TitleSource};
+use crate::durable::{FlowSession, TaskId};
+use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub(crate) async fn session_summaries(
+        &self,
+        filter: &crate::session::SessionFilter,
+    ) -> StoreResult<Vec<crate::session::SessionSummary>> {
+        let filter = filter.clone();
+        run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
+    }
+
+    pub(crate) async fn input_final_answer(
+        &self,
+        input: &str,
+    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
+        let input = input.to_owned();
+        run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
+    }
+
     pub async fn reserve_review_run(
         &self,
-        expected: &FlowInvocation,
-    ) -> StoreResult<(FlowInvocation, Run)> {
+        expected: &FlowSession,
+    ) -> StoreResult<(FlowSession, AgentSession)> {
         let expected = expected.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_review_run(&expected)
         })
         .await
     }
-    pub async fn session(&self, id: &str) -> StoreResult<Option<(Session, Run)>> {
+    pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
-    pub async fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<(Session, Run)>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
-    }
-
-    pub async fn run(&self, id: &RunId) -> StoreResult<Option<Run>> {
-        let id = id.clone();
-        run_sqlite(&self.sqlite, move |store| store.run(&id)).await
-    }
-
-    pub async fn create_run(&self, run: Run) -> StoreResult<Run> {
-        run_sqlite(&self.sqlite, move |store| store.create_run(run)).await
-    }
-
-    pub async fn create_session(
-        &self,
-        session: Session,
-        run: Run,
-        review: Option<FlowInvocation>,
-    ) -> StoreResult<(Session, Run)> {
+    pub async fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
+        let run_id = run_id.to_owned();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, run, review.as_ref())
+            store.session_for_artifact(&run_id)
         })
         .await
     }
 
-    pub async fn replace_session_run(&self, expected_run: &RunId, run: Run) -> StoreResult<Run> {
-        let expected_run = expected_run.clone();
+    pub async fn create_session(
+        &self,
+        session: AgentSession,
+        review: Option<FlowSession>,
+    ) -> StoreResult<AgentSession> {
+        let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_run(&expected_run, run)
+            store.create_session(session, review.as_ref(), caller.as_ref())
+        })
+        .await
+    }
+
+    pub async fn replace_session_input(
+        &self,
+        expected_capture: Option<i64>,
+        session: AgentSession,
+    ) -> StoreResult<AgentSession> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.replace_session_input(expected_capture, session)
         })
         .await
     }
 
     pub async fn fill_run_provider(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.clone();
+        let run = run.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
@@ -70,11 +83,11 @@ impl Store {
 
     pub async fn retarget_unpublished_run(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.clone();
+        let run = run.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
@@ -83,30 +96,26 @@ impl Store {
         .await
     }
 
-    pub async fn bind_session(&self, id: &str, task: &TaskId) -> StoreResult<(Session, Run)> {
+    pub async fn bind_session(
+        &self,
+        id: &str,
+        expected_capture: Option<i64>,
+        task: &TaskId,
+    ) -> StoreResult<AgentSession> {
         let id = id.to_string();
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.bind_session(&id, &task)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.bind_session(&id, expected_capture, &task)
+        })
+        .await
     }
 
-    pub async fn runs(
+    pub(crate) async fn conversation_history(
         &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-        caller: Option<&str>,
         since: i64,
-    ) -> StoreResult<Vec<super::sqlite::ListedRun>> {
-        let [wave, project, task, caller] =
-            [wave, project, task, caller].map(|name| name.map(str::to_string));
+    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
         run_sqlite(&self.sqlite, move |store| {
-            store.runs(
-                wave.as_deref(),
-                project.as_deref(),
-                task.as_deref(),
-                caller.as_deref(),
-                since,
-            )
+            store.conversation_history(None, None, None, None, since, true)
         })
         .await
     }
@@ -114,7 +123,7 @@ impl Store {
     pub async fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
-    ) -> StoreResult<Vec<(Session, Run)>> {
+    ) -> StoreResult<Vec<AgentSession>> {
         let filter = filter.clone();
         run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
     }
@@ -124,32 +133,34 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
     }
 
-    pub async fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
+    pub async fn complete_session(
+        &self,
+        id: &str,
+        expected_capture: Option<i64>,
+    ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_session(&id, &expected_run)
+            store.complete_session(&id, expected_capture)
         })
         .await
     }
 
-    pub async fn session_runs(&self, id: &str) -> StoreResult<Vec<Run>> {
+    pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.session_runs(&id)).await
+        run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await
     }
 
     pub async fn rename_session(
         &self,
         id: &str,
-        expected_run: Option<&RunId>,
+        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.cloned();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, expected_run.as_ref(), &title, source)
+            store.rename_session(&id, expected_capture, &title, source)
         })
         .await
     }
@@ -157,14 +168,13 @@ impl Store {
     pub async fn ready_session(
         &self,
         id: &str,
-        expected_run: &RunId,
+        expected_capture: Option<i64>,
         summary: &str,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.clone();
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.ready_session(&id, &expected_run, &summary)
+            store.ready_session(&id, expected_capture, &summary)
         })
         .await
     }

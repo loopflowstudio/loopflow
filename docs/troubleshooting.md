@@ -3,13 +3,13 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave has no active Run
+## A Wave has no active conversation
 
 Wave operations are finite. Read its plan and invoke the next pass explicitly,
 or inspect its cron schedule:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf --wave <wave> wave/operate
 lf cron list
 ```
@@ -31,15 +31,15 @@ lf session list
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
 starting, running, waiting for review, blocked, idle, or unknown. Read its
-reason and worker Run before recovery. Wave status and roadmap use that same
+reason and selected execution before recovery. Wave status and roadmap use that same
 execution evidence for their recommendations. Dirty files under a live worker
 are ongoing progress.
 
-Task Run history includes independent helpers, whether recorded with the public
+Task execution history includes independent helpers, whether recorded with the public
 issue identifier or internal Task ID. An idle Task Flow does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
-controls; reserve bound helper Runs for distinct contributions.
+controls; reserve bound helper conversations for distinct contributions.
 
 Task status and `lf runs` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
@@ -53,11 +53,11 @@ lf session open <session-id>
 lf session complete <session-id>    # return saved review or Ask feedback
 lf task comment INF-123 "address the latest feedback"
 lf task interrupt INF-123
-lf task resume INF-123
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+`task run` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
 is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
@@ -84,11 +84,11 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+for another planning pass; it has no resident Project process to resume.
 
 Other options:
 
@@ -110,17 +110,15 @@ lf wt prune              # remove those worktrees and their branches
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
-
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf rebase
+lf sync
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+Refreshes the local default branch, preserving its unpublished commits and edits,
+then merges it into the feature branch. Stacked Tasks merge their live parent
+until it lands, then merge the default branch using their recorded fork.
 
 ## Status says `ready`, but the Task is waiting
 
@@ -134,7 +132,7 @@ Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf task status INF-123 --json
 ```
 
@@ -145,7 +143,7 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
 lf qa --no-loopflow         # skip LOOPFLOW.md
@@ -167,7 +165,7 @@ the install command. For Claude Code:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-lf auth claude
+lf auth connect claude
 ```
 
 With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and

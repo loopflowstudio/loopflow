@@ -42,7 +42,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "tar czf" in commands
     assert "package-smoke/lf --version" in commands
     assert "package-smoke/lf --help" in commands
-    assert "package-smoke/lf --list" in commands
+    assert "package-smoke/lf list" in commands
     assert 'test "$(package-smoke/lf --version)" = "lf ${expected}"' in commands
 
     forbidden = [
@@ -190,12 +190,19 @@ def test_host_publisher_owns_credentialed_release_steps():
     assert publisher.index('"latest_dmg_uploaded"') < publisher.index('"--finalize"')
 
 
-def test_infrastructure_cron_runs_the_host_release_after_telemetry():
+def test_release_subwave_cron_runs_the_host_release_after_telemetry():
     goal = (ROOT / "wave/infrastructure/GOAL.md").read_text()
     frontmatter = yaml.safe_load(goal.split("---", 2)[1])
     assert frontmatter["crons"] == [
         {"flow": "telemetry-daily", "schedule": "0 0 9 * * *"},
+    ]
+    release_goal = (ROOT / "wave/infrastructure/release/GOAL.md").read_text()
+    release_frontmatter = yaml.safe_load(release_goal.split("---", 2)[1])
+    assert release_frontmatter["crons"] == [
         {"flow": "release-run", "schedule": "0 0 10 * * *"},
+    ]
+    assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
+        {"cmd": "release run patch"}
     ]
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
@@ -210,7 +217,7 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
     assert 'local_home="$(lf home id)"' in bootstrap
-    assert 'placed_home="$(lf status "$wave" --json' in bootstrap
+    assert 'placed_home="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
     assert 'lf cron preflight --wave "$wave"' in bootstrap
     assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
@@ -255,8 +262,6 @@ def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
 
     assert '"$src" install promote \\' in installer
     assert '--cli-target "$dst"' in installer
-    assert '--daemon-source "$daemon_src"' in installer
-    assert '--daemon-target "$daemon_dst"' in installer
     assert 'mv -f "$tmp" "$dst"' not in installer
 
 

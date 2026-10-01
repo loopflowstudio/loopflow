@@ -57,13 +57,18 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
-/// Commands whose optional `--wave` narrows a machine-wide result instead of
-/// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
-/// reject names absent from the registry.
+/// Local context previews accept authored Wave directories without registration.
+/// `global_commands` covers their config, usage and refresh behavior.
+const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
+
+/// Commands whose optional `--wave` filters recorded results instead of
+/// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
+/// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
     &["activity"],
     &["ci"],
     &["cron", "list"],
+    &["exec", "list"],
     &["runs"],
     &["usage"],
 ];
@@ -86,9 +91,9 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
     Cmd {
-        id: "status",
-        path: &["status"],
-        base_args: &["status", "--json"],
+        id: "wave status",
+        path: &["wave", "status"],
+        base_args: &["wave", "status", "--json"],
         wave_form: WaveForm::Positional,
         kind: Kind::Read,
         global_default: false,
@@ -100,14 +105,6 @@ const COMMANDS: &[Cmd] = &[
         wave_form: WaveForm::Flag,
         kind: Kind::Read,
         global_default: true,
-    },
-    Cmd {
-        id: "wave history",
-        path: &["wave", "history"],
-        base_args: &["wave", "history", "--json"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        global_default: false,
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
@@ -145,14 +142,6 @@ const COMMANDS: &[Cmd] = &[
         id: "task create",
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave new-chapter",
-        path: &["wave", "new-chapter"],
-        base_args: &["wave", "new-chapter", "--chapter", "next", "--dry-run"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         global_default: false,
@@ -241,8 +230,10 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation flows may name the Wave being registered.
-    if env.id == "explicit-unknown" && matches!(cmd.id, "wave connect" | "wave new-chapter") {
+    // Creation and explicit chat connection may register the selected Wave.
+    if env.id == "explicit-unknown"
+        && matches!(cmd.id, "chat post" | "wave connect" | "wave new-chapter")
+    {
         return Outcome::Resolved;
     }
 
@@ -306,14 +297,16 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
 
-    // Task start may reach an authored flow after successful Wave resolution. Keep this resolution test hermetic instead of invoking the
-    // developer's real provider CLI.
+    // Resolution may reach chat connection. Keep process startup outside this
+    // matrix; wave_start_tests owns the real daemon path and its cleanup.
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
-    let codex = bin.join("codex");
-    std::fs::write(&codex, "#!/bin/sh\nexit 1\n").expect("fake codex");
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
-        .expect("fake codex permissions");
+    for name in ["tmux", "codex", "claude", "opencode"] {
+        let executable = bin.join(name);
+        std::fs::write(&executable, "#!/bin/sh\nexit 79\n").expect("fake executable");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .expect("fake executable permissions");
+    }
 
     // Task start requires a clean repository before reaching Wave resolution.
     let git = |args: &[&str]| {
@@ -342,7 +335,10 @@ fn seed(home: &Path, repo: &Path) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .expect("seed pm snapshot");
 
@@ -540,7 +536,7 @@ fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a c
 }
 
 /// The registry is complete: every `wave`-bearing clap leaf is classified as
-/// either a resolver or a machine-wide filter, every cron leaf has exactly one
+/// a resolver, filter, Task owner or authored context, every cron leaf has exactly one
 /// Wave-context classification, every ambient/explicit-only command exists as
 /// a real clap leaf, and every registry entry maps to a real clap leaf. Adding
 /// a new `--wave`-bearing command without classifying it fails CI; removing a
@@ -563,6 +559,7 @@ fn registry_is_complete() {
     let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
         .iter()
         .chain(ISSUE_OWNED)
+        .chain(AUTHORED_CONTEXT)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -575,7 +572,7 @@ fn registry_is_complete() {
         assert!(
             registry_paths.contains(path) || filter_paths.contains(path),
             "clap command {:?} has an optional `wave` arg but is not classified — \
-             add resolvers to COMMANDS or machine-wide filters to FILTER_ONLY",
+             classify its Wave selection in the command registry",
             path
         );
     }
@@ -598,7 +595,12 @@ fn registry_is_complete() {
 
     // 5. Every ambient-only, filter-only, and explicit-only command must exist
     //    as a real clap leaf. Explicit-only commands must require `wave`.
-    for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY).chain(ISSUE_OWNED) {
+    for path in AMBIENT_ONLY
+        .iter()
+        .chain(FILTER_ONLY)
+        .chain(ISSUE_OWNED)
+        .chain(AUTHORED_CONTEXT)
+    {
         assert!(
             find_clap_command(&root, path).is_some(),
             "classified command {:?} does not exist in the clap tree",

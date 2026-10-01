@@ -137,11 +137,11 @@ exit 1
 
 fn run_wt_ci_logs(repo: &TestRepo) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "ci", "--logs"])
+        .args(["pr", "checks", "--logs"])
         .current_dir(repo.path())
         .env("RUST_LOG", "off")
         .output()
-        .expect("run lf wt ci --logs")
+        .expect("run lf pr checks --logs")
 }
 
 /// Reproduces the PR 978 (job URL) and PR 983 (run URL) shapes that caused

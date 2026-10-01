@@ -354,7 +354,7 @@ pub struct TaskPr {
     pub base_commit: String,
     /// Selected parent PR, or `None` when rooted on the default branch.
     /// Selection does not move Git: `base_commit` remains the child's last
-    /// recorded fork until rebase succeeds. The link clears after the parent
+    /// recorded fork until sync succeeds. The link clears after the parent
     /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
@@ -590,7 +590,7 @@ pub enum PmWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.

@@ -17,8 +17,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::{
-    arm as land, create_or_update_pr, rebase_with_recovery, submit, LandOptions, NullProgress,
-    PrOptions, RebaseOptions,
+    arm as land, create_or_update_pr, submit, sync_with_recovery, LandOptions, NullProgress,
+    PrOptions, SyncOptions,
 };
 use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
@@ -46,6 +46,8 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
 /// reports an already-open PR, so `land` finds a PR to finalize without
 /// creating one.
 fn gh_open_pr_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -59,7 +61,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -76,6 +78,7 @@ exit 0
 }
 
 fn gh_auto_enabled_script(log_path: &str) -> String {
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -83,7 +86,7 @@ if [ "$1" = "--version" ]; then
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'true'
+  echo '{armed}'
   exit 0
 fi
 if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
@@ -188,7 +191,7 @@ fn submit_refuses_a_contaminated_range_before_any_push() {
 }
 
 /// The serial / dogfood shape: a continuation PR's recorded base sits behind the
-/// current `origin/main` because a sibling landed. `land` rebases, heals the
+/// current `origin/main` because a sibling landed. `land` syncs, heals the
 /// base to the true fork point, and publishes a minimal range — proving the
 /// three views (recorded base, `lf task changes`, GitHub range) agree.
 #[test]
@@ -259,14 +262,9 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
         !range_commits.contains("upstream advance"),
         "the merged upstream commit must be excluded from the range, got:\n{range_commits}"
     );
-    assert_eq!(
-        range_commits.lines().count(),
-        1,
-        "final range is one commit"
-    );
     assert!(
-        range_commits.contains("lf land: collapse authored history"),
-        "the Task's authored tree must be represented by the final commit, got:\n{range_commits}"
+        range_commits.contains("serial PR commit"),
+        "the Task's original commit must remain in the branch, got:\n{range_commits}"
     );
     let files = git_out(&repo, &["diff", "--name-only", &range]);
     assert!(
@@ -276,13 +274,13 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
 }
 
 #[test]
-fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
+fn failed_sync_push_does_not_advance_the_recorded_task_base() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let stale_base = repo.head_sha();
     let _env = EnvGuard::with_lf_home(&[], home.path());
 
-    let branch = "jack/rejected-rebase-push";
+    let branch = "jack/rejected-sync-push";
     repo.create_branch(branch);
     repo.create_file("task.txt", "task work\n");
     repo.stage_all();
@@ -310,9 +308,9 @@ fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
     permissions.set_mode(0o755);
     fs::set_permissions(&hook, permissions).expect("make hook executable");
 
-    let error = rebase_with_recovery(
+    let error = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: true,
             fork_base: None,
@@ -326,7 +324,7 @@ fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
     );
     assert!(
         loopflow::engine::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
-        "the local rebase must complete before the rejected push"
+        "the local sync must complete before the rejected push"
     );
 
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
@@ -341,15 +339,15 @@ fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
 }
 
 #[test]
-fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
+fn sync_revokes_auto_before_force_pushing_a_new_task_head() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let stale_base = repo.head_sha();
-    let log_path = home.path().join("rebase.log");
+    let log_path = home.path().join("sync.log");
     let script = gh_auto_enabled_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
 
-    let branch = "jack/rebase-revokes-auto";
+    let branch = "jack/sync-revokes-auto";
     repo.create_branch(branch);
     repo.create_file("task.txt", "task work\n");
     repo.stage_all();
@@ -362,7 +360,7 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
     pr.publication = Some(PrPublication {
         requested_at: now,
         presentation: Some(PrPresentation {
-            title: "Rebase proof".to_string(),
+            title: "Sync proof".to_string(),
             body: "Reviewer context".to_string(),
             head_sha: old_head.clone(),
         }),
@@ -404,16 +402,16 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
     permissions.set_mode(0o755);
     fs::set_permissions(&hook, permissions).expect("make hook executable");
 
-    rebase_with_recovery(
+    sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: true,
             fork_base: None,
         },
         &NullProgress,
     )
-    .expect("rebase and push Task head");
+    .expect("sync and push Task head");
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -424,16 +422,16 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
     let disable = log
         .find("pr merge 912 --disable-auto")
         .expect("Auto is revoked");
-    let push = log.find("git-push").expect("rebased head is pushed");
+    let push = log.find("git-push").expect("synced head is pushed");
     assert!(
         disable < push,
-        "Auto must be revoked before rebase push:\n{log}"
+        "Auto must be revoked before sync push:\n{log}"
     );
 }
 
 /// Publication is not an integration boundary. A branch behind origin is
 /// pushed unchanged, its recorded fork remains authoritative, and a later
-/// explicit rebase owns the rewrite.
+/// explicit sync owns the integration.
 #[test]
 fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -455,7 +453,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     repo.commit("task commit");
     repo.push_new_branch(branch);
 
-    // origin/main advances past the recorded base. Publication must not rebase.
+    // origin/main advances past the recorded base. Publication must not sync.
     repo.checkout("main");
     repo.create_file("upstream.txt", "landed upstream\n");
     repo.stage_all();
@@ -470,6 +468,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("publish heal".to_string()),
             body: Some("proof body".to_string()),
             agent: None,
@@ -492,6 +491,13 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
         pr.base_commit, stale_base,
         "publication must not advance the recorded integration base"
     );
+    let publication = pr.publication.as_ref().expect("adopted publication");
+    assert_eq!(publication.github.as_ref().unwrap().number, 925);
+    assert_eq!(
+        publication.presentation.as_ref().unwrap().head_sha,
+        before_publish
+    );
+    assert!(publication.merge.is_none());
     let files = git_out(
         &repo,
         &["diff", "--name-only", &format!("{}..HEAD", pr.base_commit)],
@@ -504,7 +510,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
         !std::path::Path::new(&git_out(&repo, &["rev-parse", "--absolute-git-dir"]))
             .join("loopflow/rebase-owner.json")
             .exists(),
-        "publication must not create rebase ownership state"
+        "publication must not create sync ownership state"
     );
 }
 
@@ -739,92 +745,8 @@ fn submit_refuses_contaminated_range_without_a_remote() {
     );
 }
 
-/// Serial rotation: a continuation PR's recorded base sits behind origin/main
-/// because a sibling landed. `land` rebases, heals the base to the true fork
-/// point, and publishes — proving the three views agree. This is the serial
-/// rotation case from the proof matrix, exercised end-to-end through `land`.
-#[test]
-fn serial_rotation_heals_stale_base_and_lands_the_continuation() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let stale_base = repo.head_sha();
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    // The serial PR's own commit, cut from the (soon stale) base and pushed.
-    let branch = "jack/serial-rotation-proof";
-    repo.create_branch(branch);
-    repo.create_file("task.txt", "serial rotation work\n");
-    repo.stage_all();
-    repo.commit("serial rotation commit");
-    repo.push_new_branch(branch);
-
-    // A sibling lands: origin/main advances past the recorded base.
-    repo.checkout("main");
-    repo.create_file("upstream.txt", "landed upstream\n");
-    repo.stage_all();
-    repo.commit("upstream advance");
-    repo.push();
-    let advanced = repo.head_sha();
-    repo.checkout(branch);
-
-    let task = register_task(home.path(), repo.path(), branch, &stale_base);
-
-    land(
-        repo.path(),
-        &land_options(false, "serial rotation"),
-        &NullProgress,
-    )
-    .expect("serial rotation heals stale base and lands");
-
-    // The recorded base healed forward to the current origin tip.
-    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    assert_eq!(
-        pr.base_commit, advanced,
-        "the stale serial base must heal forward to origin/main"
-    );
-
-    // The three views agree: recorded base == GitHub fork point.
-    let github_fork_point = git_out(&repo, &["merge-base", "origin/main", "HEAD"]);
-    assert_eq!(
-        pr.base_commit, github_fork_point,
-        "recorded base must equal GitHub's range fork point"
-    );
-
-    // The Task's authored tree is one final commit; upstream stays excluded.
-    let range = format!("{}..HEAD", pr.base_commit);
-    let range_commits = git_out(&repo, &["log", "--oneline", "--no-decorate", &range]);
-    assert!(
-        !range_commits.contains("upstream advance"),
-        "the merged upstream commit must be excluded, got:\n{range_commits}"
-    );
-    assert_eq!(
-        range_commits.lines().count(),
-        1,
-        "final range is one commit"
-    );
-    assert!(
-        range_commits.contains("lf land: collapse authored history"),
-        "the Task's authored tree must be represented by the final commit, got:\n{range_commits}"
-    );
-    let files = git_out(&repo, &["diff", "--name-only", &range]);
-    assert!(
-        files.contains("task.txt") && !files.contains("upstream.txt"),
-        "the collapsed range must preserve only Task work, got:\n{files}"
-    );
-}
-
 /// The core hole W2-254 closes: an existing PR (already has a GitHub number)
-/// that is reset or rebased empty must refuse before any `gh pr` mutation. The
+/// that is reset or synced empty must refuse before any `gh pr` mutation. The
 /// old `task_pr_has_changes` guard ran only when `pr.github().is_none()`; once
 /// a PR had a number, an empty update sailed through to `gh pr edit`/`ready`/
 /// `merge`. The shared verifier is unconditional, so `submit` on an empty
@@ -890,4 +812,89 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
         !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
         "no gh PR mutation may be issued for an empty range, got log:\n{log}"
     );
+}
+
+#[test]
+fn completed_merge_updates_recorded_base_for_publish_submit_and_land() {
+    for operation in ["publish", "submit", "land"] {
+        let home = tempfile::tempdir().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.stage_all();
+        repo.commit("Track empty scratch");
+        repo.push();
+        let base = repo.head_sha();
+        let log = home.path().join("gh.log");
+        let script = gh_open_pr_script(log.to_str().unwrap());
+        let _env = EnvGuard::with_lf_home(
+            &[("gh", &script), ("open", noop_open_script())],
+            home.path(),
+        );
+        let branch = "jack/completed-merge";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "Task work\n");
+        repo.stage_all();
+        repo.commit("Task work");
+        let authored = repo.head_sha();
+        let task = register_task(home.path(), repo.path(), branch, &base);
+        repo.checkout("main");
+        repo.create_file("upstream.txt", "Main advances\n");
+        repo.stage_all();
+        repo.commit("Upstream work");
+        repo.push();
+        let advanced = repo.head_sha();
+        repo.checkout(branch);
+        git_out(
+            &repo,
+            &["merge", "--no-ff", "-m", "Completed merge", "origin/main"],
+        );
+        let merged = repo.head_sha();
+        let options = land_options(false, "completed merge");
+        match operation {
+            "publish" => create_or_update_pr(
+                repo.path(),
+                &PrOptions {
+                    draft: false,
+                    title: options.pr_title.clone(),
+                    body: options.pr_body.clone(),
+                    agent: None,
+                },
+                &NullProgress,
+            )
+            .map(|_| ()),
+            "submit" => submit(repo.path(), &options, &NullProgress).map(|_| ()),
+            "land" => land(repo.path(), &options, &NullProgress).map(|_| ()),
+            _ => unreachable!(),
+        }
+        .unwrap_or_else(|error| panic!("{operation} rejected a completed merge: {error}"));
+        assert_eq!(
+            repo.head_sha(),
+            merged,
+            "{operation} changed the completed merge"
+        );
+        assert_eq!(
+            git_out(&repo, &["show", "-s", "--format=%P", "HEAD"]),
+            format!("{authored} {advanced}")
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pr = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pr.base_commit, advanced,
+            "{operation} left the recorded base stale"
+        );
+        assert_eq!(
+            git_out(
+                &repo,
+                &["diff", "--name-only", &format!("{}..HEAD", pr.base_commit)]
+            ),
+            "task.txt"
+        );
+        assert_eq!(
+            git_out(&repo, &["rev-parse", &format!("origin/{branch}")]),
+            merged
+        );
+    }
 }

@@ -49,13 +49,6 @@ enum LocalWaveAgentLauncher {
         return try taskCreateReceipt(stdout)
     }
 
-    /// Resume existing Task Flow state without creating another worktree.
-    static func resumeTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
     /// Queue the audited Task interrupt. The Task worker decides how the live
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
@@ -80,22 +73,22 @@ enum LocalWaveAgentLauncher {
 
     /// Ensure Task Work and its checkout without starting a worker; returns
     /// the authoritative worktree.
-    static func prepareTask(repoPath: String, issue: String) throws -> String {
-        let stdout = try runCheckedOutput(taskPrepareCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
-        return try taskPrepareWorktree(stdout)
+    static func checkoutTask(repoPath: String, issue: String) throws -> String {
+        let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        return try taskCheckoutWorktree(stdout)
     }
 
-    static func taskPrepareCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "prepare", issue, "--json"]
+    static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskPrepareWorktree(_ stdout: String) throws -> String {
+    static func taskCheckoutWorktree(_ stdout: String) throws -> String {
         struct Prepared: Decodable { let worktree: String }
         do {
             return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
         } catch {
             throw LocalLfError(
-                errorDescription: "lf task prepare returned an invalid receipt: \(error.localizedDescription)"
+                errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }
@@ -127,10 +120,6 @@ enum LocalWaveAgentLauncher {
                 errorDescription: "lf task create --run returned an invalid receipt: \(error.localizedDescription)"
             )
         }
-    }
-
-    static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "resume", issue]
     }
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
@@ -183,9 +172,9 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
+        guard let result = run([lfPath] + subargs, cwd: cwd, input: input) else {
             throw LocalLfError(
                 errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
             )
@@ -242,13 +231,16 @@ enum LocalWaveAgentLauncher {
 
     private static func run(
         _ args: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        input: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
         let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin
 
         let outHandle = stdout.fileHandleForReading
         let errHandle = stderr.fileHandleForReading
@@ -269,8 +261,20 @@ enum LocalWaveAgentLauncher {
         queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
         queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
 
+        if let input, let stdin {
+            // lf can exit before reading; report the failed write instead of taking SIGPIPE.
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            queue.async(group: group) {
+                defer { try? stdin.fileHandleForWriting.close() }
+                do { try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+                catch { collector.setInputError(error.localizedDescription) }
+            }
+        }
         process.waitUntilExit()
         group.wait()
+        if process.terminationStatus == 0, let error = collector.inputError {
+            return (1, "", "Could not send draft to lf: \(error)")
+        }
 
         return (
             process.terminationStatus,
@@ -286,6 +290,10 @@ private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var out = Data()
     private var err = Data()
+    private var inputFailure: String?
+
+    var inputError: String? { lock.withLock { inputFailure } }
+    func setInputError(_ message: String) { lock.withLock { inputFailure = message } }
 
     var stdout: Data { lock.withLock { out } }
     var stderr: Data { lock.withLock { err } }

@@ -1,9 +1,18 @@
 """Resource pressure is attributed and recovery never crosses into durable work."""
 
+import fcntl
 import importlib.util
+import os
+import select
+import signal
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/resource_envelope.py"
@@ -18,6 +27,8 @@ _spec.loader.exec_module(resources)
 def _policy(**overrides) -> "resources.ResourcePolicy":
     values = {
         "minimum_free_disk_bytes": 100,
+        "cleanup_target_free_disk_bytes": 1_000,
+        "build_cache_retention_hours": 0,
         "worktree_build_cleanup_bytes": 100,
         "maximum_run_record_bytes": 100,
         "maximum_uv_cache_bytes": 100,
@@ -47,6 +58,8 @@ def _source(
     budget: int = 100,
 ) -> "resources.ResourceSource":
     paths = (root / "target",) if kind == "build" else (root,)
+    if kind == "gate":
+        paths = (root / resources.GATE_RELATIVE_PATH,)
     return resources.ResourceSource(
         id=id,
         kind=kind,
@@ -174,45 +187,210 @@ def test_recovery_root_limit_is_a_hard_bound(tmp_path: Path) -> None:
     assert sum((root / "target").exists() for root in roots) == 1
 
 
-def test_disk_pressure_prunes_uv_through_its_supported_boundary(
+@pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
+def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
+    tmp_path: Path, old_entry: str | None
+) -> None:
+    policy = _policy(maximum_recovery_roots=1, build_cache_retention_hours=24)
+    gates = [tmp_path / f"worker-{index}" for index in range(8)]
+    for root in gates:
+        gate = root / resources.GATE_RELATIVE_PATH
+        gate.mkdir(parents=True)
+        (gate / "recent.log").write_text("recent verification evidence")
+    if old_entry is not None:
+        expired = gates[0] / resources.GATE_RELATIVE_PATH / "expired"
+        if old_entry == "file":
+            expired.write_text("expired output")
+        else:
+            expired.mkdir()
+        old = time.time() - 8 * 24 * 3600
+        os.utime(expired, (old, old))
+    sources = [_source(root, id=f"gate:{root.name}", kind="gate") for root in gates]
+    if old_entry is None:
+        assert not resources.recover_resources(policy, _snapshot(policy, sources, free=500))
+
+    stale = tmp_path / "stale"
+    (stale / "target").mkdir(parents=True)
+    artifact = stale / "target/artifact"
+    artifact.write_bytes(b"x" * 4096)
+    old = time.time() - 48 * 3600
+    for path in (artifact, stale / "target"):
+        os.utime(path, (old, old))
+    sources.append(_source(stale, id="build:stale"))
+
+    actions = resources.recover_resources(policy, _snapshot(policy, sources, free=500))
+
+    assert len(actions) == 1
+    assert artifact.exists() == (old_entry is not None)
+    assert actions[0].source == ("build:stale" if old_entry is None else "gate:worker-0")
+    assert all((root / resources.GATE_RELATIVE_PATH / "recent.log").exists() for root in gates)
+    if old_entry is not None:
+        assert not expired.exists()
+
+
+def test_cleanup_reclaims_stale_builds_before_emergency_reserve(tmp_path: Path) -> None:
+    policy = _policy(build_cache_retention_hours=24)
+    roots = [tmp_path / name for name in ("stale", "recent", "active")]
+    old = time.time() - 48 * 3600
+    for root in roots:
+        target = root / "target"
+        target.mkdir(parents=True)
+        artifact = target / "artifact"
+        artifact.write_bytes(b"x" * 4096)
+        os.utime(artifact, (old, old))
+        os.utime(target, (old, old))
+    # Updating an existing file does not update its parent's modification time.
+    (roots[1] / "target/artifact").write_bytes(b"warm")
+    sources = [
+        _source(root, id=f"build:{root.name}", active=root.name == "active", budget=10**6)
+        for root in roots
+    ]
+    assert not resources.recover_resources(policy, _snapshot(policy, sources))
+    snapshot = _snapshot(policy, sources, free=500)
+    assert snapshot.ok  # Above the emergency reserve, below the cleanup target.
+
+    actions = resources.recover_resources(policy, snapshot)
+
+    assert [action.source for action in actions] == ["build:stale"]
+    assert not (roots[0] / "target").exists()
+    assert (roots[1] / "target/artifact").read_bytes() == b"warm"
+    assert (roots[2] / "target/artifact").exists()
+
+
+def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
     tmp_path: Path, monkeypatch
 ) -> None:
+    monkeypatch.setattr(resources, "Path", lambda path: tmp_path if path == "/tmp" else Path(path))
+    (tmp_path / "target").mkdir()
+    artifact = tmp_path / "target/artifact"
+    artifact.write_bytes(b"x" * 4096)
+    policy = _policy()
+    source = _source(tmp_path, id="build:stale")
+    monkeypatch.setattr(resources, "collect_snapshot", lambda *_: _snapshot(policy, [source]))
+    lock = resources._lock_recovery()
+    assert lock is not None
+    try:
+        report = resources.inspect_resources(tmp_path, policy, recover=True)
+        assert report.ok
+        assert not report.recovery
+        assert artifact.exists()
+    finally:
+        lock.close()
+
+    report = resources.inspect_resources(tmp_path, policy, recover=True)
+    assert report.recovery[0].status == "removed"
+    assert not artifact.exists()
+
+
+def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, monkeypatch) -> None:
     cache = tmp_path / "uv-cache"
-    cache.mkdir()
-    (cache / "archive").write_bytes(b"x" * 4096)
+    unused = cache / "archive-v0" / "unused"
+    unused.mkdir(parents=True)
+    payload = unused / "payload"
+    payload.write_bytes(b"unused cache entry" * 4096)
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.delenv("UV_LOCK_TIMEOUT", raising=False)
+
+    with (cache / ".lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        # Bound the regression: a waiting cleaner would prune after this unlock.
+        release = threading.Timer(3, lambda: fcntl.flock(lock, fcntl.LOCK_UN))
+        release.start()
+        try:
+            busy = resources._prune_uv_cache()
+        finally:
+            release.cancel()
+            release.join()
+        assert busy.status == "failed"
+        assert busy.removed_bytes == 0
+        assert payload.exists()
+        assert "lock" in busy.detail.lower()
+
+    idle = resources._prune_uv_cache()
+    assert idle.status == "pruned"
+    assert idle.removed_bytes > 0
+    assert not payload.exists()
+
+
+@pytest.mark.parametrize("busy", [False, True], ids=["unlocked", "busy"])
+def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
+    tmp_path: Path, monkeypatch, busy: bool
+) -> None:
+    cache = tmp_path / "uv-cache"
+    archive = cache / "archive-v0" / "unused"
+    archive.mkdir(parents=True)
+    (archive / "module.py").write_bytes(b"x" * 4096)
+    project = tmp_path / "project"
+    (project / "target").mkdir(parents=True)
+    (project / "target/artifact").write_bytes(b"x" * 4096)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "cache-lock-fixture"\nversion = "0.0.0"\n'
+    )
+    for key in tuple(os.environ):
+        if key.startswith(("UV_", "_UV_", "LF_", "LOOPFLOW_")) or key == "VIRTUAL_ENV":
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
+    monkeypatch.setenv("UV_NO_CONFIG", "1")
     policy = _policy(minimum_free_disk_bytes=1_000)
-    source = resources.ResourceSource(
-        id="cache:uv",
-        kind="cache",
-        owner="uv",
-        root=cache,
-        paths=(cache,),
-        bytes=resources._allocated_bytes(cache),
-        budget_bytes=1_000_000,
-        disposable=True,
-        active=False,
-        action="uv cache prune",
-    )
-    called = []
+    sources = [
+        _source(cache, id="cache:uv", kind="cache", owner="uv", budget=1_000_000),
+        _source(project, id="build:fixture"),
+    ]
+    holder = None
+    try:
+        if busy:
+            holder = subprocess.Popen(
+                [
+                    "uv",
+                    "run",
+                    "--project",
+                    str(project),
+                    "--python",
+                    sys.executable,
+                    "python",
+                    "-c",
+                    "import select, sys; print('ready', flush=True); "
+                    "select.select([sys.stdin], [], [], 10)",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            assert select.select([holder.stdout], [], [], 15)[0], "uv fixture did not start"
+            assert holder.stdout.readline().strip() == "ready"
 
-    def _prune() -> "resources.RecoveryAction":
-        called.append(True)
-        return resources.RecoveryAction(
-            "cache:uv", "uv", source.bytes, (), "pruned", "supported boundary"
-        )
+        actions = resources.recover_resources(policy, _snapshot(policy, sources, free=100))
 
-    monkeypatch.setattr(resources, "_prune_uv_cache", _prune)
+        assert [action.source for action in actions] == ["cache:uv", "build:fixture"]
+        assert actions[0].status == ("failed" if busy else "pruned")
+        assert archive.exists() is busy
+        assert not (project / "target").exists()
+        assert (project / "pyproject.toml").exists()
+        if busy:
+            assert "lock" in actions[0].detail.lower()
+            assert actions[0].removed_bytes == 0
+            assert holder.poll() is None
+        else:
+            assert actions[0].removed_bytes > 0
+    finally:
+        if holder is not None:
+            try:
+                holder.communicate(input="", timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(holder.pid, signal.SIGKILL)
+                holder.communicate()
 
-    actions = resources.recover_resources(
-        policy,
-        _snapshot(policy, [source], free=100),
-    )
-
-    assert called == [True]
-    assert actions[0].source == "cache:uv"
+    if busy:
+        action = resources._prune_uv_cache()
+        assert action.status == "pruned"
+        assert not archive.exists()
 
 
-def test_sibling_build_warns_self_cleans_and_real_disk_pressure_stops(
+def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo, sibling = tmp_path / "current", tmp_path / "landing"
@@ -253,12 +431,12 @@ def test_sibling_build_warns_self_cleans_and_real_disk_pressure_stops(
     assert "200.0 GiB" in output
     assert (sibling / "target/artifact").exists()
 
-    # The current Session is active; its own next build still self-recovers.
+    # Explicit recovery retains active builds, including the current checkout.
     (repo / "target/artifact").write_bytes(b"x" * 4096)
     report = resources.inspect_resources(repo, policy, recover=True)
     assert report.ok
-    assert [action.source for action in report.recovery] == ["build:current"]
-    assert not (repo / "target").exists()
+    assert not report.recovery
+    assert (repo / "target/artifact").exists()
     assert (repo / "source.rs").exists()
     assert (sibling / "target/artifact").exists()
 

@@ -285,7 +285,7 @@ def _print_run_debug_checklist() -> None:
     print("Review checklist:")
     print("  1. Select a Wave: inspect its plan, Tasks and Runs.")
     print("  2. Open a Session under a Task and verify its terminal is retained across navigation.")
-    print("  3. Verify Task conditions and PR delivery refresh from lf status.")
+    print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
 
 
 def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
@@ -562,9 +562,7 @@ def _write_dev_control_config(resources_dir: Path) -> None:
         state = json.loads(MACHINE_INSTALL_STATE.read_text())
         artifacts = state["selection"]["artifact_set"]["artifacts"]
         selected_cli = next(
-            artifact
-            for artifact in artifacts
-            if artifact["role"] == {"kind": "cli"}
+            artifact for artifact in artifacts if artifact["role"] == {"kind": "cli"}
         )
     except (FileNotFoundError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
         raise RuntimeError(
@@ -586,9 +584,8 @@ def _write_dev_control_config(resources_dir: Path) -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. Compile its bundled control binary against the installed Home,
-    # but never grant it migration authority. Ordinary development binaries
-    # keep their isolated `.lf-dev` stores.
+    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # it has no authority to migrate the main Home.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",

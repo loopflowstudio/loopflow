@@ -32,6 +32,12 @@ A Git worktree separates changes but is not a security sandbox. Claude and
 Codex worktree sessions also receive write access to the main repository's Git
 metadata so normal Git operations work.
 
+Task workers retain failed commands as tool output. A failed command blocks
+handoff only when its output contains a permission, filesystem, network refusal,
+or missing executable diagnostic. A nonzero exit, missing search path, or quoted
+denial string in source output does not establish a blocked capability. The
+blocker names the matching diagnostic so the failure can be corrected.
+
 The same boundary covers subprocesses, repository hooks, MCP servers, plugins,
 skills, browser tools, and commands an agent launches. Run repository
 instructions and extensions as code from sources you trust.
@@ -41,7 +47,7 @@ Four controls answer different questions:
 1. **Execution boundary:** which files, processes, and networks the OS permits.
 2. **Action policy:** which vendor tools run automatically or ask first.
 3. **Identity:** which accounts and external systems the process tree can use.
-4. **Workflow review:** when kickoff, iterate, and gate sessions need your
+4. **Workflow review:** when kickoff, realign, and gate sessions need your
    decision.
 
 Only the first is general containment. Review and shipping decisions make work
@@ -197,17 +203,17 @@ the configured model provider as part of an agent run. Browser tools, MCP
 servers, GitHub, Linear, and other integrations receive the data sent to them
 by their commands.
 
-Loopflow keeps Home-local Run records with prompt, conversation, and raw
+Loopflow keeps Home-local captured inputs and conversation history with prompt, conversation, and raw
 provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
-sensitive material, so treat the Run store as sensitive even though it is
+sensitive material, so treat the Home store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
 Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
-`lf discord serve` makes outbound requests and launches bounded Runs. Inject
+`lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
 or Home HTTP service is required. Use `lf ssh` for remote operation.
 

@@ -19,6 +19,9 @@
     "task_00000000000000000000000000000001:task-design:review_kickoff:0"
   ],
   "wave_id": "00000000-0000-0000-0000-000000000001",
+  "task_ids": [
+    "task_00000000000000000000000000000001"
+  ],
   "terminal_ids": [],
   "work_path": "product / LOO-291",
   "actions": [
@@ -35,14 +38,13 @@
       "unavailable_reason": null
     }
   ],
-  "run_id": "run_00000000000000000000000000000001",
   "flow_membership": {
     "kind": "step",
     "flow": "task-design",
     "invocation_id": "00000000-0000-0000-0000-00000000f10w",
     "step": "review-design",
     "occurrence": "current",
-    "node": "1",
+    "node": 1,
     "iterations": [
       []
     ]

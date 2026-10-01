@@ -19,19 +19,20 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                     # inspect integration strategy
-lf rebase                            # apply it
+lf sync --plan                       # inspect integration strategy
+lf sync                              # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf pr submit                         # prepare for the user's merge click
 lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -39,17 +40,13 @@ Do not ask permission for reversible edits or local tests. Ask before pushing,
 PR mutations, external messages or other external side effects, and destructive
 operations unless already authorized by the user or selected workflow.
 
-## Evidence Loop
+## Checks and Flow boundaries
 
-Make the finish line explicit: the observable result, proof, and near-misses
-that do not count. When uncertainty matters, record observations separately
-from hypotheses in the working design or evidence notes.
-
-Use the smallest safe check that distinguishes the leading explanations.
-Verify against all relevant recorded evidence, not only the latest case.
-Treat unexpected tool, test, or user output as a
-counterexample: stop dependent steps, revise the model, then continue. Never
-rewrite an observation to preserve an explanation or call a simulation live proof.
+Implement and compress do basic build/focused-test sanity checks. Gate owns
+verification once; CI owns its matrix. Checks must run headless. Leave unavailable
+checks to a capable later step and human judgment to demo/review; neither blocks
+earlier work. Record a one-line result in scratch, not a verification ledger.
+Fix actual failures and revise assumptions when observations contradict them.
 
 Delegate only when authorized and when an independent subset makes the problem
 smaller. Keep the main blocker inline. A supplied Flow is an instruction;
@@ -76,7 +73,7 @@ A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
 
-When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
+When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
 `loopflow` and `wave/operate` skills.
@@ -86,6 +83,16 @@ never launch a GUI browser executable for capture. Keep credentials out of
 terminal output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge
+
+Keep agent progress in local working notes and the final Run response. Do not
+post routine progress to Linear: Task comments are for new direction from people.
+Agent comments published through `lf task comment` carry a progress marker and
+are excluded from steers. Use `--steer` only for deliberate new direction.
+Preserve `<!-- loopflow-progress:... -->` provenance
+when writing progress through another integration.
+
+Launch context has explicit budgets. An excerpt names its complete local source;
+read relevant omitted sections before acting, rather than rereading whole archives.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
@@ -98,6 +105,6 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
+skills.

@@ -208,8 +208,8 @@ struct PodiumModelTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": fixture.roadmapJSON
-            case "ls": fixture.wavesJSON
-            case "session": "[]"
+            case "wave" where args.dropFirst().first == "list": fixture.wavesJSON
+            case "session": #"{"entries":[],"next":null}"#
             case "activity": fixture.workActivityJSON
             case "ps": try await deferred.response(args: args)
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
@@ -470,9 +470,9 @@ struct PodiumModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["session", "list", "--json", "--limit", "0"])
+            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
-            return json
+            return #"{"entries":\#(json),"next":null}"#
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
 
@@ -495,8 +495,8 @@ struct PodiumModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--limit", "0"])
-            return json
+            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            return #"{"entries":\#(json),"next":null}"#
         }
         let model = PodiumModel(query: query, repoPath: "/src/first")
         await model.refreshSessions()
@@ -520,8 +520,8 @@ struct PodiumModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--limit", "0"])
-            return await deferred.response()
+            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = PodiumModel(query: query, repoPath: "/src/first")
         let refresh = Task { await model.refreshSessions() }
@@ -625,9 +625,9 @@ private struct PodiumTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmapJSON
-            case "ls": return wavesJSON
+            case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "ps": return processActivityJSON
-            case "session": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity":
                 await activityArguments.record(args)
                 return workActivityJSON

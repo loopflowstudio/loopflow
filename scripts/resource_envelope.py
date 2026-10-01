@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import shutil
@@ -12,7 +13,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
@@ -23,11 +24,14 @@ BUILD_RELATIVE_PATHS = (
     Path("website/node_modules"),
 )
 GATE_RELATIVE_PATH = Path(".lf/tmp/gate")
+UV_CACHE_PRUNE_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
 class ResourcePolicy:
     minimum_free_disk_bytes: int
+    cleanup_target_free_disk_bytes: int
+    build_cache_retention_hours: int
     worktree_build_cleanup_bytes: int
     maximum_run_record_bytes: int
     maximum_uv_cache_bytes: int
@@ -192,8 +196,8 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
                 disposable=True,
                 active=active,
                 action=(
-                    "this worktree cleans its own build roots at its next preflight; "
-                    "--recover can also clean inactive worktrees"
+                    "recovery can clean inactive builds unchanged for "
+                    f"{policy.build_cache_retention_hours}h; active and recent builds are retained"
                 ),
                 issues=measurement_issues,
             )
@@ -272,6 +276,13 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
     )
 
     issues = _assess_sources(disk.free, policy, sources)
+    if disk.free < policy.cleanup_target_free_disk_bytes:
+        warnings.append(
+            f"{_format_bytes(disk.free)} free is below the "
+            f"{_format_bytes(policy.cleanup_target_free_disk_bytes)} cleanup target; "
+            "recovery retains active and recent builds. Verification can continue above "
+            f"the {_format_bytes(policy.minimum_free_disk_bytes)} emergency reserve"
+        )
     warnings.extend(
         f"{source.owner} ({source.root}): {source.kind} uses "
         f"{_format_bytes(source.bytes)} / {_format_bytes(source.budget_bytes)} "
@@ -303,9 +314,8 @@ def recover_resources(
     actions: list[RecoveryAction] = []
     roots_used = 0
     bytes_used = 0
-    issue_codes = {issue.code for issue in snapshot.issues}
     oversized = {source.id for source in snapshot.sources if source.bytes > source.budget_bytes}
-    disk_pressure = "disk:free" in issue_codes
+    disk_pressure = snapshot.free_disk_bytes < policy.cleanup_target_free_disk_bytes
 
     gate_sources = sorted(
         (source for source in snapshot.sources if source.kind == "gate" and source.bytes),
@@ -319,6 +329,8 @@ def recover_resources(
         if bytes_used + source.bytes > policy.maximum_recovery_bytes:
             continue
         action = _prune_old_gate_artifacts(source, policy, now)
+        if action is None:
+            continue
         actions.append(action)
         roots_used += 1
         bytes_used += action.removed_bytes
@@ -326,6 +338,7 @@ def recover_resources(
     uv_source = next((source for source in snapshot.sources if source.id == "cache:uv"), None)
     if (
         uv_source is not None
+        and uv_source.bytes > 0
         and ("cache:uv" in oversized or disk_pressure)
         and roots_used < policy.maximum_recovery_roots
         and bytes_used + uv_source.bytes <= policy.maximum_recovery_bytes
@@ -335,7 +348,7 @@ def recover_resources(
         roots_used += 1
         bytes_used += uv_action.removed_bytes
 
-    needed = max(0, policy.minimum_free_disk_bytes - snapshot.free_disk_bytes - bytes_used)
+    needed = max(0, policy.cleanup_target_free_disk_bytes - snapshot.free_disk_bytes - bytes_used)
     candidates = sorted(
         (
             source
@@ -353,6 +366,8 @@ def recover_resources(
             break
         if bytes_used + source.bytes > policy.maximum_recovery_bytes:
             continue
+        if not _build_cache_is_stale(source, now - policy.build_cache_retention_hours * 3600):
+            continue
         action = _remove_build_artifacts(source)
         actions.append(action)
         roots_used += 1
@@ -364,22 +379,50 @@ def recover_resources(
 
 def inspect_resources(repo: Path, policy: ResourcePolicy, recover: bool) -> ResourceReport:
     repo = repo.resolve()
-    before = collect_snapshot(repo, policy)
-    recovery = [
-        _remove_build_artifacts(source)
-        for source in before.sources
-        if recover
-        and source.kind == "build"
-        and source.root == repo
-        and source.bytes > policy.worktree_build_cleanup_bytes
-    ]
-    after = collect_snapshot(repo, policy) if recovery else before
-    if recover:
-        shared_recovery = recover_resources(policy, after)
-        recovery.extend(shared_recovery)
-        if shared_recovery:
-            after = collect_snapshot(repo, policy)
-    return ResourceReport(str(POLICY_PATH), before, after, tuple(recovery))
+    lock = _lock_recovery() if recover else None
+    try:
+        before = collect_snapshot(repo, policy)
+        recovery = recover_resources(policy, before) if lock is not None else ()
+        after = collect_snapshot(repo, policy) if recovery else before
+        return ResourceReport(str(POLICY_PATH), before, after, recovery)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def _lock_recovery() -> Optional[IO[str]]:
+    # Shared caches need one cleaner across repositories and worktrees. A busy
+    # cleaner never makes another verification wait; process exit releases it.
+    path = Path("/tmp") / f"loopflow-cache-recovery-{os.getuid()}.lock"
+    handle = path.open("a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
+def _build_cache_is_stale(source: ResourceSource, cutoff: float) -> bool:
+    try:
+        for path in source.paths:
+            if not path.exists():
+                continue
+            if path.lstat().st_mtime > cutoff:
+                return False
+            if path.is_symlink():
+                continue
+            for root, directories, files in os.walk(path, onerror=_raise_walk_error):
+                for name in [*directories, *files]:
+                    if (Path(root) / name).lstat().st_mtime > cutoff:
+                        return False
+    except OSError:
+        return False
+    return True
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
 
 
 def _discover_worktrees(repo: Path) -> tuple[list[Worktree], Optional[str]]:
@@ -551,12 +594,12 @@ def _assess_sources(
                 owner="host filesystem",
                 detail=(
                     f"{_format_bytes(free_disk_bytes)} free is below the "
-                    f"{_format_bytes(policy.minimum_free_disk_bytes)} verification floor"
+                    f"{_format_bytes(policy.minimum_free_disk_bytes)} emergency reserve"
                 ),
                 action=(
                     "run `uv run python scripts/resource_envelope.py --recover`; "
-                    "verification will not start until the safety floor is restored. "
-                    f"Largest recoverable build roots: {roots}"
+                    "verification will not start until the emergency reserve is restored. "
+                    f"Largest inactive build roots (recent builds retained): {roots}"
                 ),
                 recoverable=True,
             )
@@ -601,7 +644,7 @@ def _prune_old_gate_artifacts(
     source: ResourceSource,
     policy: ResourcePolicy,
     now: float,
-) -> RecoveryAction:
+) -> Optional[RecoveryAction]:
     gate_root = source.root / GATE_RELATIVE_PATH
     if source.paths != (gate_root,):
         return RecoveryAction(
@@ -626,6 +669,8 @@ def _prune_old_gate_artifacts(
                 child.unlink()
             removed_paths.append(str(child))
             removed_bytes += measured
+    if not removed_paths:
+        return None
     return RecoveryAction(
         source.id,
         source.owner,
@@ -637,17 +682,36 @@ def _prune_old_gate_artifacts(
 
 
 def _prune_uv_cache() -> RecoveryAction:
-    before = _allocated_bytes(_uv_cache_dir())
-    result = subprocess.run(["uv", "cache", "prune"], capture_output=True, text=True)
-    after = _allocated_bytes(_uv_cache_dir())
-    detail = result.stderr.strip() or result.stdout.strip()
+    cache = _uv_cache_dir()
+    before = _allocated_bytes(cache)
+    try:
+        # An enclosing `uv run` can hold the cache lock until this script exits.
+        result = subprocess.run(
+            ["uv", "cache", "prune"],
+            capture_output=True,
+            text=True,
+            timeout=UV_CACHE_PRUNE_TIMEOUT_SECONDS,
+            env={**os.environ, "UV_LOCK_TIMEOUT": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        status = "timed_out"
+        detail = (
+            f"uv cache prune exceeded {UV_CACHE_PRUNE_TIMEOUT_SECONDS}s; "
+            "the cache may be in use, including by an enclosing `uv run`. "
+            "Other recovery continues; retry `uv cache prune` after other uv processes exit"
+        )
+    else:
+        status = "pruned" if result.returncode == 0 else "failed"
+        detail = result.stderr.strip() or result.stdout.strip()
+        detail = detail or f"uv cache prune exited {result.returncode}"
+    after = _allocated_bytes(cache)
     return RecoveryAction(
         "cache:uv",
         "uv",
         max(0, before - after),
         (),
-        "pruned" if result.returncode == 0 else "failed",
-        detail or f"uv cache prune exited {result.returncode}",
+        status,
+        detail,
     )
 
 
@@ -698,7 +762,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--recover",
         action="store_true",
-        help="clean this checkout's oversized build and inactive disposable roots, then remeasure",
+        help="clean inactive disposable roots, retain active builds, then remeasure",
     )
     parser.add_argument("--repo", type=Path, default=REPO_ROOT, help="Loopflow checkout to inspect")
     parser.add_argument("--policy", type=Path, default=POLICY_PATH, help="budget policy JSON")

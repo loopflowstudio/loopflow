@@ -1,54 +1,445 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use loopflow::durable::RunId;
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{Run, Session, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, SessionKind, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
-async fn inspection_records_one_completed_exec_without_starting_work() {
+async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
+    use loopflow::exec::{Exec, ExecPage};
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("LF_")
-            || key.to_string_lossy().starts_with("LOOPFLOW_")
-        {
-            command.env_remove(key);
-        }
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let parent = ExecId::new();
+    let raw = serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ literal"]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&parent],
+        )
+        .unwrap();
+    let ids = [ExecId::new(), ExecId::new()];
+    for (index, id) in ids.iter().enumerate() {
+        connection.execute("INSERT INTO execs(id,trace_id,parent_exec_id,via_agent,caller_session_id,command,started_at)
+            VALUES(?1,?1,?2,?3,?4,?5,?6)", rusqlite::params![id,parent,index != 0,
+                if index == 0 { None } else { Some("caller-session") },raw,10-index as i64]).unwrap();
     }
-    let output = command
-        .args(["session", "list", "--all", "--json"])
-        .current_dir(home.path())
-        .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", &database)
+    let invoke = |args: &[&str]| {
+        let result = command(home.path(), home.path(), args).output().unwrap();
+        assert!(result.status.success(), "{result:?}");
+        result.stdout
+    };
+    let first: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--parent",
+        parent.as_str(),
+        "--search",
+        "PR LAND --strict %_",
+        "--outcome",
+        "unknown",
+        "--limit",
+        "1",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(first.entries[0].id, ids[0]);
+    assert_eq!(first.entries[0].via_agent, Some(false));
+    assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
+    assert_eq!(first.entries[0].outcome, None);
+    let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
+    let second: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--parent",
+        parent.as_str(),
+        "--search",
+        "PR LAND --strict %_",
+        "--outcome",
+        "unknown",
+        "--limit",
+        "1",
+        "--after",
+        &cursor,
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(second.entries[0].id, ids[1]);
+    assert_eq!(
+        second.entries[0].caller_session_id.as_deref(),
+        Some("caller-session")
+    );
+    assert_eq!(second.next, None);
+    let detail: Exec =
+        serde_json::from_slice(&invoke(&["exec", "show", &ids[1].as_str()[..20], "--json"]))
+            .unwrap();
+    assert_eq!(detail, second.entries[0]);
+    let caller: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--caller",
+        "caller-session",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(caller.entries, vec![detail]);
+    let wave = loopflow::id::WaveId::new();
+    let project = loopflow::durable::ProjectId::new();
+    let task = loopflow::durable::TaskId::new();
+    connection
+        .execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'historical','/missing',1)",
+            [&wave],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
+        rusqlite::params![project.as_str(),wave]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,work_state,work_terminal_at,created_at)
+        VALUES(?1,?2,'issue-proof','PROOF-1','done',2,1)",
+            rusqlite::params![task.as_str(), project.as_str()],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+        VALUES('caller-session','Historical','human',1,1,'/missing',?1,?2)",
+        rusqlite::params![task.as_str(),wave]).unwrap();
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+        VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
+        rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
+    for args in [
+        vec!["exec", "list", "--all", "--task", "PROOF-1", "--json"],
+        vec!["exec", "list", "--all", "--task", task.as_str(), "--json"],
+        vec!["exec", "list", "--all", "--wave", "historical", "--json"],
+    ] {
+        let page: ExecPage = serde_json::from_slice(&invoke(&args)).unwrap();
+        assert_eq!(
+            page.entries.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            vec![&ids[1]]
+        );
+    }
+
+    let repos = [TestRepo::new(), TestRepo::new()];
+    let other_wave = loopflow::id::WaveId::new();
+    let paths = repos
+        .iter()
+        .map(|repo| {
+            loopflow::repository::CanonicalRepo::discover(repo.path())
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    connection
+        .execute(
+            "UPDATE waves SET repo=?2 WHERE id=?1",
+            rusqlite::params![wave, paths[0]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'historical',?2,1)",
+            rusqlite::params![other_wave, paths[1]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE execs SET repo=?2 WHERE id=?1",
+            rusqlite::params![ids[1], paths[0]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE execs SET repo=?2 WHERE id=?1",
+            rusqlite::params![ids[0], paths[1]],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,wave_id)
+        VALUES('other-session','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,wave_id,observed_at,payload)
+        VALUES('other-session','thread','turn','started','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
+    for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
+        let result = command(
+            home.path(),
+            repo.path(),
+            &["exec", "list", "--wave", "historical", "--json"],
+        )
         .output()
         .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let connection = rusqlite::Connection::open(&database).unwrap();
-    let (count, completed): (i64, i64) = connection
+        assert!(result.status.success(), "{result:?}");
+        let page: ExecPage = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(
+            page.entries.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            vec![expected]
+        );
+    }
+    let ambiguous = command(
+        home.path(),
+        repos[0].path(),
+        &["exec", "list", "--all", "--wave", "historical", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
+    let explicit: ExecPage = serde_json::from_slice(&invoke(&[
+        "exec",
+        "list",
+        "--all",
+        "--wave",
+        other_wave.as_str(),
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(explicit.entries[0].id, ids[0]);
+    let zero = command(home.path(), home.path(), &["exec", "list", "--limit", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(zero.status.code(), Some(2));
+}
+
+#[test]
+fn parser_returns_exact_status_without_admitting_an_early_store() {
+    for (args, code) in [
+        (vec!["--help"], 0),
+        (vec!["--version"], 0),
+        (vec!["session", "list", "--definitely-not-a-flag"], 2),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        // An incompatible existing target must not be opened or repaired for help.
+        std::fs::write(&database, b"retained incompatible store").unwrap();
+        let output = command(home.path(), home.path(), &args)
+            .env("PATH", "")
+            .env("RUST_LOG", "off")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains("Exec history unavailable: no compatible process ledger"));
+        assert_eq!(
+            std::fs::read(&database).unwrap(),
+            b"retained incompatible store"
+        );
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 1);
+        if code == 0 {
+            assert!(!output.stdout.is_empty(), "{output:?}");
+        } else {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    let schema: String = conn
         .query_row(
-            "SELECT count(*), count(completed_at) FROM execs WHERE outcome='succeeded'",
+            "SELECT group_concat(sql) FROM sqlite_master ORDER BY name",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for (args, code) in [
+        (vec!["--help"], 0),
+        (vec!["--version"], 0),
+        (vec!["session", "list", "--definitely-not-a-flag"], 2),
+    ] {
+        let output = command(home.path(), home.path(), &args)
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Exec history unavailable"),
+            "{output:?}"
+        );
+    }
+    let rows: Vec<(i32, String)> = conn
+        .prepare("SELECT exit_code,outcome FROM execs ORDER BY started_at,rowid")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (0, "succeeded".into()),
+            (0, "succeeded".into()),
+            (2, "failed".into())
+        ]
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT group_concat(sql) FROM sqlite_master ORDER BY name",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        schema
+    );
+}
+
+#[tokio::test]
+async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    drop(store);
+    let output = command(
+        home.path(),
+        home.path(),
+        &["install", "preflight", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    // No browser executable is available; both actual lf processes still exist.
+    let output = command(
+        home.path(),
+        home.path(),
+        &["screenshot", "missing.html", "-o", "missing.png"],
+    )
+    .env("PATH", "")
+    .output()
+    .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    let (count, completed): (i64, i64) = conn
+        .query_row(
+            "SELECT count(*),count(completed_at) FROM execs",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("every parsed lf command has an Exec row");
-    assert_eq!((count, completed), (1, 1));
-    let work: i64 = connection
-        .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(work, 0, "inspection must not reserve agent or Task work");
+    assert_eq!((count, completed), (3, 3));
+    let (child, parent): (String,String) = conn.query_row(
+        "SELECT c.id,p.id FROM execs c JOIN execs p ON c.parent_exec_id=p.id WHERE c.command LIKE '%__screenshot-supervisor%'",
+        [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_ne!(child, parent);
+    assert!(!home.path().join("missing.png").exists());
+}
+
+#[test]
+fn remote_command_status_is_the_local_exec_status() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // No real credential CLI, Keychain reader or remote transport participates.
+    for (name, script) in [
+        ("ssh", "#!/bin/sh\ncat >/dev/null\nexit 42\n"),
+        ("gh", "#!/bin/sh\nexit 1\n"),
+        ("security", "#!/bin/sh\nexit 1\n"),
+    ] {
+        let path = bin.join(name);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let output = command(
+        home.path(),
+        repo.path(),
+        &["ssh", "proof@example.invalid", "catalog"],
+    )
+    .env_clear()
+    .env("HOME", home.path())
+    .env("LF_HOME", home.path())
+    .env("LF_DB_PATH", home.path().join("loopflow.db"))
+    .env(
+        "PATH",
+        format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+    )
+    .output()
+    .unwrap();
+    assert_eq!(output.status.code(), Some(42), "{output:?}");
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("Error:"),
+        "{output:?}"
+    );
+    assert_recorded_exit(home.path(), 42);
+}
+
+#[test]
+fn empty_release_check_returns_through_exec_completion() {
+    let repo = TestRepo::new();
+    let tagged = Command::new("git")
+        .args(["tag", "v0.9.0"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(tagged.status.success(), "{tagged:?}");
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = command(home.path(), repo.path(), &["release", "check"])
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No commits in the target area since the last tag."),
+        "{output:?}"
+    );
+    assert!(!stderr.contains("Error:"), "{output:?}");
+    assert_recorded_exit(home.path(), 1);
+}
+
+fn assert_recorded_exit(home: &Path, code: i32) {
+    let conn = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let rows: Vec<(String, Option<i32>, bool, Option<String>)> = conn
+        .prepare("SELECT outcome,exit_code,completed_at IS NOT NULL,signal FROM execs")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
+    let work: (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(work, (0, 0));
 }
 
 #[tokio::test]
@@ -58,14 +449,30 @@ async fn command_failure_records_the_process_result() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let result = command(
-        home.path(),
-        home.path(),
-        &["session", "rename", "missing", "Name"],
-    )
-    .output()
-    .unwrap();
-    assert_eq!(result.status.code(), Some(1));
+    let repo = TestRepo::new();
+    for args in [
+        vec!["session", "rename", "missing", "Name"],
+        vec![
+            "--wave",
+            "fixture-wave-does-not-exist",
+            "session",
+            "list",
+            "--all",
+            "--json",
+        ],
+    ] {
+        let result = command(home.path(), repo.path(), &args).output().unwrap();
+        assert_eq!(result.status.code(), Some(1), "{result:?}");
+    }
+    std::fs::write(repo.path().join("change.txt"), "retained work").unwrap();
+    let lock = repo.path().join(".git/index.lock");
+    std::fs::write(&lock, "retained lock").unwrap();
+    let result = command(home.path(), repo.path(), &["commit", "-m", "fixture"])
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    assert!(String::from_utf8_lossy(&result.stderr).contains("index.lock"));
+    assert_eq!(std::fs::read_to_string(lock).unwrap(), "retained lock");
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32) = conn
         .query_row("SELECT outcome,exit_code FROM execs", [], |row| {
@@ -73,6 +480,17 @@ async fn command_failure_records_the_process_result() {
         })
         .unwrap();
     assert_eq!(row, ("failed".into(), 1));
+    let failed: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM execs WHERE outcome='failed' AND exit_code=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        failed, 3,
+        "resolution, dispatch and delivery failures retain their command outcomes"
+    );
 }
 
 fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
@@ -113,15 +531,22 @@ struct Driver {
     child: Child,
     id: ExecId,
     stop: std::path::PathBuf,
+    output: std::path::PathBuf,
 }
 
 impl Driver {
-    fn start(home: &Path, repo: &Path, name: &str) -> Self {
-        let mut child = command(home, repo, &["__telemetry-scorecard"])
+    fn start(home: &Path, repo: &Path, name: &str, preload: Option<&Path>) -> Self {
+        let output = home.join(format!("{name}.output"));
+        let log = std::fs::File::create(&output).unwrap();
+        let mut command = command(home, repo, &["__telemetry-scorecard"]);
+        if let Some(preload) = preload {
+            command.env("LD_PRELOAD", preload);
+        }
+        let mut child = command
             .env("LF_TEST_DRIVER", name)
             .env("LF_TEST_BINARY", env!("CARGO_BIN_EXE_lf"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
             .spawn()
             .unwrap();
         let ready = home.join(format!("{name}.ready"));
@@ -130,6 +555,7 @@ impl Driver {
             child,
             id: ExecId::parse(std::fs::read_to_string(ready).unwrap().trim()).unwrap(),
             stop: home.join(format!("{name}.stop")),
+            output,
         }
     }
 }
@@ -158,6 +584,7 @@ home = pathlib.Path(os.environ['LF_HOME'])
 name = os.environ['LF_TEST_DRIVER']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
                check=True, stdout=subprocess.DEVNULL)
+(home / (name + '.pid')).write_text(str(os.getpid()))
 (home / (name + '.ready')).write_text(os.environ['LF_PROCESS_ID'])
 while not (home / (name + '.stop')).exists():
     time.sleep(.02)
@@ -176,13 +603,33 @@ async fn interruption_records_the_exec_without_a_fabricated_signal_name() {
         .await
         .unwrap();
     write_scorecard(repo.path());
-    let mut driver = Driver::start(home.path(), repo.path(), "interrupt");
+    // Hold the existing cleanup hook after killing its owned group. Without
+    // exit coordination the awakened command returns 1 while Exec already says
+    // interrupted/130. A passing ordinary timing alone does not cover this race.
+    #[cfg(target_os = "linux")]
+    let preload = {
+        let source = home.path().join("hold_group_kill.c");
+        let library = home.path().join("hold_group_kill.so");
+        std::fs::write(&source, include_str!("support/hold_group_kill.c")).unwrap();
+        let output = Command::new("cc")
+            .args(["-shared", "-fPIC", "-o"])
+            .arg(&library)
+            .arg(&source)
+            .arg("-ldl")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        Some(library)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let preload: Option<std::path::PathBuf> = None;
+    let mut driver = Driver::start(home.path(), repo.path(), "interrupt", preload.as_deref());
     // SAFETY: this PID is our still-owned child, retained until wait completes.
     assert_eq!(
         unsafe { libc::kill(driver.child.id() as i32, libc::SIGINT) },
         0
     );
-    assert_eq!(driver.child.wait().unwrap().code(), Some(130));
+    let exit = driver.child.wait().unwrap();
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32, Option<String>) = conn
         .query_row(
@@ -191,7 +638,54 @@ async fn interruption_records_the_exec_without_a_fabricated_signal_name() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(row, ("interrupted".into(), 130, None));
+    assert_eq!(
+        (exit.code(), row),
+        (Some(130), ("interrupted".into(), 130, None)),
+        "{}",
+        std::fs::read_to_string(&driver.output).unwrap()
+    );
+    if preload.is_some() {
+        assert!(std::fs::read_to_string(&driver.output)
+            .unwrap()
+            .contains("test ordering: owned group killed before interrupt hook returns"));
+    }
+    let scorecard_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
+    let script = repo
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("scripts/lifecycle_scorecard.py");
+    let alive = || {
+        let output = Command::new("ps")
+            .args(["-p", scorecard_pid.trim(), "-o", "command="])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).contains(script.to_str().unwrap())
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let survived = alive();
+    if survived {
+        eprintln!(
+            "owned scorecard survived interrupted lf: pid={} script={}",
+            scorecard_pid.trim(),
+            script.display()
+        );
+        // Keep fixture cleanup distinct from the interruption result. Release
+        // only this script and observe exit before deleting its stop directory.
+        std::fs::write(&driver.stop, "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "owned scorecard failed fixture cleanup");
+    }
+    assert!(
+        !survived,
+        "interrupted command left its owned scorecard alive"
+    );
 }
 
 #[tokio::test]
@@ -205,10 +699,10 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original");
+    let original = Driver::start(home.path(), repo.path(), "original", None);
     let original_id = original.id.clone();
-    let replacement = Driver::start(home.path(), repo.path(), "replacement");
-    let restart = Driver::start(home.path(), repo.path(), "restart");
+    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
+    let restart = Driver::start(home.path(), repo.path(), "restart", None);
     let session_id = "engine-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
@@ -296,12 +790,26 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
 }
 
 fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
-    let run_id = RunId::new();
+    let run_id = uuid::Uuid::new_v4().simple().to_string();
     store
         .create_session(
-            Session {
+            AgentSession {
+                captured: None,
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
                 id: session_id.into(),
-                current_run_id: run_id.clone(),
+                artifact_key: run_id,
+                caller_artifact_key: None,
+                input_published: false,
+                cwd: repo.into(),
+                skill: None,
+                provider: Some("codex".into()),
+                model: None,
+                node: None,
+                iterations: None,
                 kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
@@ -312,25 +820,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 completed_at: None,
                 created_at: 1,
             },
-            Run {
-                id: run_id,
-                session_id: Some(session_id.into()),
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
-                task_id: None,
-                wave_id: None,
-                work_source: None,
-                created_at: 1,
-                published: false,
-                cwd: repo.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                caller_run_id: None,
-                ended: None,
-            },
+            None,
             None,
         )
         .unwrap();
@@ -347,8 +837,8 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original");
-    let replacement = Driver::start(home.path(), repo.path(), "replacement");
+    let original = Driver::start(home.path(), repo.path(), "original", None);
+    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store

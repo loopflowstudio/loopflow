@@ -144,6 +144,23 @@ impl AccountSelection {
         }
     }
 
+    pub(crate) fn from_flags_or_env(
+        preferred: &[String],
+        restricted: &[String],
+    ) -> Result<Self, ProviderAccountError> {
+        if preferred.is_empty() && restricted.is_empty() {
+            Self::from_env()
+        } else {
+            Self::from_flags(preferred, restricted)
+        }
+    }
+
+    pub(crate) fn activate(&self) -> Result<AccountSelectionGuard, ProviderAccountError> {
+        let previous = std::env::var_os(ACCOUNT_SELECTION_ENV);
+        std::env::set_var(ACCOUNT_SELECTION_ENV, self.env_value()?);
+        Ok(AccountSelectionGuard(previous))
+    }
+
     pub fn is_default(&self) -> bool {
         matches!(self.0, SelectionMode::Default)
     }
@@ -191,6 +208,18 @@ impl AccountSelection {
                 .map(|resolved| (resolved.provider, resolved.account_id))
                 .collect()
         })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AccountSelectionGuard(Option<std::ffi::OsString>);
+
+impl Drop for AccountSelectionGuard {
+    fn drop(&mut self) {
+        match &self.0 {
+            Some(value) => std::env::set_var(ACCOUNT_SELECTION_ENV, value),
+            None => std::env::remove_var(ACCOUNT_SELECTION_ENV),
+        }
     }
 }
 
@@ -310,7 +339,7 @@ fn resolve_selectors(
                 .map(|provider| format!("{provider} "))
                 .unwrap_or_default();
             return Err(ProviderAccountError::Runtime(format!(
-                "no managed {provider}account matches '{}'; see `lf auth accounts`",
+                "no managed {provider}account matches '{}'; see `lf auth status`",
                 selector.account
             )));
         }
@@ -520,18 +549,21 @@ impl BrokerState {
         if let Some(access_token) = self.prepared.credentials.get(&key) {
             return Ok(access_token.clone());
         }
-        let account = self
+        let accounts = self
             .prepared
             .store
             .list_provider_accounts(Some(provider.as_str()))
-            .await?
-            .into_iter()
+            .await?;
+        let account = accounts
+            .iter()
             .find(|account| account.account_id == *account_id)
             .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
                 provider,
                 accounts: format!("'{account_id}'"),
             })?;
-        match crate::provider_account::prepare_account_access_token(provider, &account).await {
+        match crate::provider_account::prepare_account_access_token(provider, account, &accounts)
+            .await
+        {
             Ok(access_token) => {
                 self.prepared.credentials.insert(key, access_token.clone());
                 Ok(access_token)
@@ -855,7 +887,7 @@ impl BrokerState {
     }
 }
 
-pub struct AccountLeaseBroker {
+pub(crate) struct AccountLeaseBroker {
     secret: String,
     local_socket: PathBuf,
     remote_socket: PathBuf,
@@ -876,19 +908,6 @@ impl std::fmt::Debug for AccountLeaseBroker {
 }
 
 impl AccountLeaseBroker {
-    pub async fn start_root(
-        selection: &AccountSelection,
-    ) -> Result<Option<Self>, ProviderAccountError> {
-        prepare_root_lease(selection)
-            .await?
-            .map(Self::start)
-            .transpose()
-    }
-
-    pub fn local_env_value(&self) -> Result<String, ProviderAccountError> {
-        self.local_handle().encode()
-    }
-
     pub(crate) fn start(prepared: PreparedAccountLease) -> Result<Self, ProviderAccountError> {
         let directory = tempfile::Builder::new()
             .prefix("lf-account-lease-")
@@ -973,8 +992,9 @@ impl AccountLeaseBroker {
         })
     }
 
-    /// Handle a local child inherits: points at the broker's own socket.
-    pub(crate) fn local_handle(&self) -> AccountLeaseHandle {
+    // Fixtures reach the broker directly instead of forwarding its socket over SSH.
+    #[cfg(test)]
+    fn local_handle(&self) -> AccountLeaseHandle {
         AccountLeaseHandle {
             socket: self.local_socket.clone(),
             secret: self.secret.clone(),
@@ -1238,7 +1258,6 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::fs;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1250,9 +1269,14 @@ mod tests {
         ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV, ACCOUNT_SELECTION_ENV,
     };
     use crate::profile::{ProviderRoute, RouteScope};
-    use crate::provider_account::{new_account, parse_account_id, RateLimitSignal};
+    use crate::provider_account::{
+        inspect_provider_route, new_account, parse_account_id, resolve_provider_account,
+        ProviderAccountRoute, RateLimitSignal,
+    };
     use crate::provider_auth::Provider;
-    use crate::store::{CredentialState, ProviderAccount, ProviderAccountId, StorageConfig};
+    use crate::store::{
+        CredentialState, ProviderAccount, ProviderAccountId, SharedStore, StorageConfig,
+    };
     use tempfile::tempdir;
     fn id(value: &str) -> ProviderAccountId {
         parse_account_id(value).unwrap()
@@ -1424,12 +1448,7 @@ mod tests {
         preferred.home = None;
         let mut fallback = account(Provider::Claude, "fallback", "fallback@example.com");
         fallback.home = Some(temp.path().join("claude-fallback"));
-        fs::create_dir_all(fallback.home.as_ref().unwrap()).unwrap();
-        fs::write(
-            fallback.home.as_ref().unwrap().join(".credentials.json"),
-            r#"{"claudeAiOauth":{"accessToken":"fallback-secret","expiresAt":4102444800000}}"#,
-        )
-        .unwrap();
+        crate::provider_account::identity::tests::write_claude_identity(&mut fallback);
         store.upsert_provider_account(&preferred).await.unwrap();
         store.upsert_provider_account(&fallback).await.unwrap();
         store
@@ -1467,6 +1486,23 @@ mod tests {
         );
     }
 
+    async fn inspect_and_select(store: &SharedStore) -> ProviderAccountRoute {
+        let before = store.list_provider_accounts(None).await.unwrap();
+        let inspected = inspect_provider_route(Some(store), None, Provider::Claude)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!inspected.is_empty());
+        assert_eq!(store.list_provider_accounts(None).await.unwrap(), before);
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the inspected candidate should be selectable");
+        assert_eq!(route.account_id(), &inspected[0].0.account_id);
+        assert_eq!(!route.uses_native_home(), inspected[0].1);
+        route
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn target_selection_uses_one_merged_local_and_forwarded_catalog() {
@@ -1494,9 +1530,11 @@ mod tests {
         );
         let mut local = account(Provider::Claude, "local", "local@example.com");
         local.home = Some(target_home.join("accounts/claude/local"));
+        crate::provider_account::identity::tests::write_claude_identity(&mut local);
         target_store.upsert_provider_account(&local).await.unwrap();
         let mut shared = account(Provider::Claude, "shared", "shared@example.com");
         shared.home = Some(target_home.join("accounts/claude/shared"));
+        crate::provider_account::identity::tests::write_claude_identity(&mut shared);
         target_store.upsert_provider_account(&shared).await.unwrap();
         let mut missing = account(Provider::Claude, "missing", "missing@example.com");
         missing.home = Some(target_home.join("accounts/claude/missing"));
@@ -1571,22 +1609,16 @@ mod tests {
             restricted: false,
         })
         .unwrap();
-        std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_env_value().unwrap());
+        std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_handle().encode().unwrap());
 
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the target-local route should be available");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
         let codex_preference =
             AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
         std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("a Codex preference should leave the Claude route available");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
@@ -1596,10 +1628,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             target_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the forwarded account should be selectable on the target");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &forwarded.account_id);
         assert!(!route.uses_native_home());
 
@@ -1609,10 +1638,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             shared_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the target-local copy should win for a shared identity");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
         assert!(route.uses_native_home());
 
@@ -1622,10 +1648,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             missing_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("a missing target preference should fall through to the local route");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
@@ -1636,10 +1659,7 @@ mod tests {
             .await
             .unwrap();
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the local copy should precede the forwarded origin route");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
         assert!(route.uses_native_home());
 
@@ -1671,7 +1691,7 @@ mod tests {
         .unwrap();
         std::env::set_var(
             ACCOUNT_LEASE_ENV,
-            restricted_broker.local_env_value().unwrap(),
+            restricted_broker.local_handle().encode().unwrap(),
         );
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let error = crate::provider_account::resolve_provider_account(Provider::Claude, None)

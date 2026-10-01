@@ -10,6 +10,7 @@ pub mod id;
 pub mod journal;
 pub mod lf;
 pub mod machine_install;
+pub mod task_work;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;
@@ -23,9 +24,9 @@ pub mod provider_account;
 pub mod provider_auth;
 pub mod repo;
 pub mod repository;
-pub(crate) mod run_record;
 pub mod security;
 pub mod session;
+pub(crate) mod session_record;
 pub mod store;
 pub mod subscription;
 pub mod trace;

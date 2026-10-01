@@ -166,7 +166,10 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .expect("seed pm snapshot");
     wave
@@ -216,7 +219,7 @@ fn cached_status_honors_the_shared_resolution_rules() {
     let overridden = lf(
         &home,
         &repo,
-        &["status", "product", "--no-sync", "--json"],
+        &["wave", "status", "product", "--no-sync", "--json"],
         Some(&WaveId::new().to_string()),
     );
     assert_eq!(wave_field(&overridden), "product");
@@ -225,13 +228,18 @@ fn cached_status_honors_the_shared_resolution_rules() {
     let named = lf(
         &home,
         &repo,
-        &["status", "--no-sync", "--json"],
+        &["wave", "status", "--no-sync", "--json"],
         Some("product"),
     );
     assert_eq!(wave_field(&named), "product");
 
     // No context: the classified "pass --wave" error, not a UUID-as-name crash.
-    let missing = lf(&home, &repo, &["status", "--no-sync", "--json"], None);
+    let missing = lf(
+        &home,
+        &repo,
+        &["wave", "status", "--no-sync", "--json"],
+        None,
+    );
     assert!(!missing.status.success());
     assert!(
         String::from_utf8_lossy(&missing.stderr).contains("no wave in context"),
@@ -245,7 +253,7 @@ fn cached_status_honors_the_shared_resolution_rules() {
     let stale = lf(
         &home,
         &repo,
-        &["status", "--no-sync", "--json"],
+        &["wave", "status", "--no-sync", "--json"],
         Some(&stale_id),
     );
     assert!(!stale.status.success());
@@ -292,22 +300,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            None,
-        ),
-        "chat history (no ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["status", "--wave", "definitely-unknown"],
+            &["wave", "status", "--wave", "definitely-unknown"],
             None,
         ),
         "status (no ambient)",
@@ -316,7 +309,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["status", "definitely-unknown", "--no-sync"],
+            &["wave", "status", "definitely-unknown", "--no-sync"],
             None,
         ),
         "cached status (no ambient)",
@@ -327,22 +320,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            Some(uuid),
-        ),
-        "chat history (with ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["status", "--wave", "definitely-unknown"],
+            &["wave", "status", "--wave", "definitely-unknown"],
             Some(uuid),
         ),
         "status (with ambient)",
@@ -351,7 +329,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["status", "definitely-unknown", "--no-sync"],
+            &["wave", "status", "definitely-unknown", "--no-sync"],
             Some(uuid),
         ),
         "cached status (with ambient)",

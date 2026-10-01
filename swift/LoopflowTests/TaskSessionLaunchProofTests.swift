@@ -10,7 +10,7 @@ import ViewInspector
 
 private final class SessionLaunchBundleMarker: NSObject {}
 
-@Suite("Task Session preparation subprocess proof", .serialized)
+@Suite("Task Session preparation subprocess proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskSessionLaunchProofTests {
     @Test("Delayed preparation and launch failures stay with the requesting Task; retry uses its prepared checkout")
@@ -69,7 +69,7 @@ struct TaskSessionLaunchProofTests {
         let script = #"""
         #!/bin/sh
         fixture_dir=$(dirname "$0")
-        if [ "$1" = "task" ] && [ "$2" = "prepare" ]; then
+        if [ "$1" = "task" ] && [ "$2" = "checkout" ]; then
             printf '%s\n' "$@" > "$fixture_dir/prepare-args"
             pwd > "$fixture_dir/prepare-cwd"
             attempt=0
@@ -123,7 +123,8 @@ struct TaskSessionLaunchProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls", "session", "flow": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session", "flow": return "[]"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case "pm": return #"{"identifier":"W2-131","comments":[]}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")
@@ -170,7 +171,7 @@ struct TaskSessionLaunchProofTests {
             try await wait { fm.fileExists(atPath: directory.appendingPathComponent("prepare-args").path) }
             #expect(origin.startingTaskSessions.contains("issue-review"))
             #expect(try String(contentsOf: directory.appendingPathComponent("prepare-args"), encoding: .utf8)
-                == "task\nprepare\nW2-131\n--json\n")
+                == "task\ncheckout\nW2-131\n--json\n")
             if mode != "success" {
                 model.select(.task(id: "issue-available"))
                 try await settle(window)
@@ -189,6 +190,9 @@ struct TaskSessionLaunchProofTests {
             } else {
                 #expect(origin.taskSessionErrors.isEmpty)
                 #expect(model.selection == .task(id: "issue-review"))
+                #expect(origin.preparedTaskWorktrees["issue-review"] == checkout.path)
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+                    .text().string() == checkout.lastPathComponent)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
                 #expect(args.hasPrefix("--interactive\n--task\nW2-131\n:\n"))

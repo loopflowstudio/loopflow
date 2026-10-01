@@ -27,8 +27,8 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf status` |
-| Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
+| Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
+| Run on another machine | `lf ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -51,9 +51,9 @@ clipboard        634 ▏
 
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
 scratch notes, and clipboard—and passes it to the coding agent. Before the
-provider starts, Loopflow publishes one immutable Run manifest under this
-Home's `$LF_HOME/runs/`; conversation, usage, and terminal evidence accumulate
-there without becoming a lock on the repository or planning system. Add repo
+provider starts, Loopflow reserves the AgentSession and captures its input in
+this Home. The store must be writable even for unbound work. Native history
+retains provider outcomes and usage; Exec records the command result. Add repo
 docs explicitly with `--docs` and changed file bodies with `--diff-files`.
 
 `LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
@@ -107,7 +107,7 @@ lf task wait <issue-id> --until terminal
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `compress` | Simplify the implementation without changing behavior |
-| `gate` | Verify the branch for shipping: tests, static checks, docs, PR description |
+| `gate` | Verify the branch for shipping: tests, static checks and docs |
 | `qa` | Thorough quality assessment of the current branch |
 
 ### How steps chain
@@ -116,7 +116,7 @@ lf task wait <issue-id> --until terminal
 |------|-------|--------|
 | design | — | `scratch/<branch>.md` |
 | implement | `scratch/<branch>.md` | code |
-| gate | code, tests | code, PR description |
+| gate | code, tests | code, docs and proof |
 | qa | code | findings and fixes on branch |
 
 ### Named flows
@@ -124,11 +124,15 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf --task DES-123 design                  # design skill with Task context
-lf flow launch-plan                      # plan the core → implement → gate → demo → land
-lf build                                 # one code → reviewable Task slice
-lf ship                                  # final Task gate → learnings → land
+lf incident                              # unbreak → 5whys → launch-plan
+lf code                                  # implement → compress; local changes
+lf feature                               # kickoff → design review → pursue → queue → land
+lf ship                                  # gate → land and complete the Task
 ```
+
+Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
+`lf flow incident` explicitly selects the Flow when a name also names a skill
+or CLI command; the prefix is otherwise optional.
 
 Flow YAML owns step order, interactive reviews (`human: true`), and explicit
 backward edges. A Flow with backward edges is a loopflow; it runs with or without
@@ -160,8 +164,8 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr publish   # push + create or update PR (no browser)
-lf pr open      # publish, then open the PR for review
+lf pr open      # push + create or update a draft, then open its page
+lf pr publish   # push + create or update PR and mark ready (no browser)
 lf pr submit    # prepare the exact head; you click merge
 lf pr arm       # arm exact-head auto-merge and return
 lf pr land      # request auto-merge, record delivery, and return
@@ -177,17 +181,17 @@ branch and Task PR record when present; they do not require a live Task worker.
 
 ```bash
 lf --wave shipper wave/operate "Review the release blockers"
-lf status shipper
+lf wave status shipper
 lf ps --json
 ```
 
 Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
-`crons:` schedules recurring Runs; `pm:` connects shared planning. Each
+`crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave/operate` invocation reviews the plan and takes a bounded next action.
 Tasks own implementation in stable worktrees; `lf pr land` hands off delivery and
 `lf pr reconcile` repairs CI and settles verified merges.
 
-Open the repository in Loopflow on macOS to read Waves, Tasks and Runs.
+Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations, Asks and Flow reviews; open one with
 `lf session open <session-id>`. Completing it returns its saved feedback.
 
@@ -196,23 +200,23 @@ Open the repository in Loopflow on macOS to read Waves, Tasks and Runs.
 ## Go Remote
 
 Run agents while you sleep. A Home is a stable machine identity with local
-planning, process, journal, and Run evidence; its SSH route can change.
+planning, process, journal, and conversation history; its SSH route can change.
 Bootstrap the remote identity once:
 
 ```bash
 lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
-lf ls --json
+lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> --wave shipper wave/operate
 ```
 
 The target Home proves its identity before running the command and keeps the
-resulting Run locally.
+resulting execution locally.
 
-Reads follow the same rule: `lf runs`, `lf usage`, `lf ls`, and `lf status`
+Reads follow the same rule: `lf runs`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
-another Home. Loopflow does not silently aggregate or replicate Run records.
+another Home. Loopflow does not silently aggregate or replicate execution records.
 
 Foreground `lf ssh` commands can choose from subscription accounts installed on
 the origin and target. A detached process sheds forwarded credentials
@@ -222,10 +226,10 @@ and uses authority installed on its own machine. See
 Auth connects your providers locally:
 
 ```bash
-lf auth github    # connect GitHub
-lf auth claude    # connect Claude
-lf auth linear    # connect Linear with OAuth
-lf auth status    # check connections
+lf auth connect github    # connect GitHub
+lf auth connect claude    # connect Claude
+lf auth connect linear    # connect Linear with OAuth
+lf auth status    # refresh managed identity and usage
 ```
 
 ---

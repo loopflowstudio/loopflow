@@ -9,7 +9,6 @@
         "goal": "Conduct goal-authored work everywhere.",
         "repo": "/src/loopflow",
         "active_tasks": 2,
-        "enabled": true,
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "retired_at": null,
@@ -106,90 +105,90 @@
                   "name": "feature",
                   "steps": [
                     {
-                      "key": "0",
+                      "key": 0,
                       "id": "design",
                       "label": "task-design",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "1",
+                      "key": 1,
                       "id": "implement",
                       "label": "implement",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "2",
+                      "key": 2,
                       "id": null,
-                      "label": "review-slice",
+                      "label": "realign",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "3",
+                      "key": 3,
                       "id": "decide",
                       "label": "loop-decide",
                       "kind": "skill",
                       "human": false,
-                      "returns_to": "1",
-                      "parents": [
+                      "returns_to": 1,
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "4",
+                      "key": 4,
                       "id": "demo",
                       "label": "demo",
                       "kind": "skill",
                       "human": true,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "5",
+                      "key": 5,
                       "id": "decide_delivery",
                       "label": "loop-decide",
                       "kind": "skill",
                       "human": false,
-                      "returns_to": "1",
-                      "parents": [
+                      "returns_to": 1,
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "6",
+                      "key": 6,
                       "id": null,
                       "label": "xor-route",
                       "kind": "xor",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature"
                       ],
                       "paths": [
@@ -198,13 +197,13 @@
                           "description": "Repair the failing check",
                           "steps": [
                             {
-                              "key": "6/fix/0",
+                              "key": 7,
                               "id": "patch",
                               "label": "patch",
                               "kind": "skill",
                               "human": false,
                               "returns_to": null,
-                              "parents": [],
+                              "sources": [],
                               "paths": []
                             }
                           ]
@@ -217,13 +216,13 @@
                       ]
                     },
                     {
-                      "key": "7",
+                      "key": 8,
                       "id": null,
                       "label": "pr land -c",
                       "kind": "op",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "queue"
                       ],
@@ -231,23 +230,23 @@
                     }
                   ]
                 },
-                "current": "2",
+                "current": 2,
                 "completed": [
-                  "0",
-                  "1"
+                  0,
+                  1
                 ],
                 "returns": [
                   {
-                    "decider": "3",
+                    "decider": 3,
                     "traversals": 2
                   },
                   {
-                    "decider": "5",
+                    "decider": 5,
                     "traversals": 0
                   }
                 ],
                 "execution": "running",
-                "reason": "Worker is running review-slice",
+                "reason": "Worker is running realign",
                 "restart_required": false,
                 "iterations": [
                   [
@@ -361,90 +360,90 @@
                   "name": "feature",
                   "steps": [
                     {
-                      "key": "0",
+                      "key": 0,
                       "id": "design",
                       "label": "task-design",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "1",
+                      "key": 1,
                       "id": "implement",
                       "label": "implement",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "2",
+                      "key": 2,
                       "id": null,
-                      "label": "review-slice",
+                      "label": "realign",
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "3",
+                      "key": 3,
                       "id": "decide",
                       "label": "loop-decide",
                       "kind": "skill",
                       "human": false,
-                      "returns_to": "1",
-                      "parents": [
+                      "returns_to": 1,
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "4",
+                      "key": 4,
                       "id": "demo",
                       "label": "demo",
                       "kind": "skill",
                       "human": true,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "5",
+                      "key": 5,
                       "id": "decide_delivery",
                       "label": "loop-decide",
                       "kind": "skill",
                       "human": false,
-                      "returns_to": "1",
-                      "parents": [
+                      "returns_to": 1,
+                      "sources": [
                         "feature",
                         "pursue"
                       ],
                       "paths": []
                     },
                     {
-                      "key": "6",
+                      "key": 6,
                       "id": null,
                       "label": "xor-route",
                       "kind": "xor",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature"
                       ],
                       "paths": [
@@ -453,13 +452,13 @@
                           "description": "Repair the failing check",
                           "steps": [
                             {
-                              "key": "6/fix/0",
+                              "key": 7,
                               "id": "patch",
                               "label": "patch",
                               "kind": "skill",
                               "human": false,
                               "returns_to": null,
-                              "parents": [],
+                              "sources": [],
                               "paths": []
                             }
                           ]
@@ -472,13 +471,13 @@
                       ]
                     },
                     {
-                      "key": "7",
+                      "key": 8,
                       "id": null,
                       "label": "pr land -c",
                       "kind": "op",
                       "human": false,
                       "returns_to": null,
-                      "parents": [
+                      "sources": [
                         "feature",
                         "queue"
                       ],
@@ -486,20 +485,20 @@
                     }
                   ]
                 },
-                "current": "4",
+                "current": 4,
                 "completed": [
-                  "0",
-                  "1",
-                  "2",
-                  "3"
+                  0,
+                  1,
+                  2,
+                  3
                 ],
                 "returns": [
                   {
-                    "decider": "3",
+                    "decider": 3,
                     "traversals": 1
                   },
                   {
-                    "decider": "5",
+                    "decider": 5,
                     "traversals": 1
                   }
                 ],
@@ -607,7 +606,7 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views \u2014 research",
+              "name": "Now + Available work views — research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
@@ -727,7 +726,6 @@
         "goal": "context",
         "repo": "/src/context",
         "active_tasks": 0,
-        "enabled": false,
         "created_at": null,
         "parent_wave_id": null,
         "retired_at": null,

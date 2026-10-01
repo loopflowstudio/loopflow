@@ -1,16 +1,14 @@
 # Loopflow
 
-A software instrument. It doesn't make the software for you. You make the
-software through it.
-
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
+lf debug -c
 ```
 
-AI can build a lot of software fast. It can also spend all day going in
-circles, and it's hard to tell which is happening. Loopflow keeps track, so
-you can see what got done and what still needs you.
+A software instrument. Give an agent a task, keep its conversation, and resume
+captured work when a command stops. Loopflow keeps the command's result, the
+agent's history and the Flow's progress separate, so each answers one question.
 
 Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 or [Codex](https://github.com/openai/codex), which have their own cost.
@@ -23,7 +21,7 @@ lf install schedule         # check at login and weekly (macOS)
 lf install schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf rebase` inside a repository to update its checkout.
+Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -51,9 +49,30 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g -y
 The harness acts as a User over the same `lf` API. See
 [The Agent API](docs/agent-api.md).
 
+## Find a command or workflow
+
+```bash
+lf list                    # commands, skills, and flows
+lf help debug              # inspect a definition without launching it
+lf run feature             # select a flow, otherwise a skill
+lf skill release-run       # explicitly select the skill
+lf land --help             # explain the uniquely owned pr land command
+lf pr-review               # build an HTML walkthrough of the important code in this PR
+```
+
+Commands take precedence over definitions. Omit owners when the command is
+unique; ambiguous names show the canonical choices. Help and list stay local.
+A same-named flow takes precedence in untyped execution; invalid flows report
+an error. Use `lf skill NAME` to select the skill explicitly.
+External skills honor the same frontmatter as local skills, on first fetch and
+when read from cache. Malformed definitions report their parse error.
+
+Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
+See [Authoring](docs/authoring.md) for composition and review boundaries.
+
 ## Keep work moving
 
-Author a Wave in the repo and run it:
+Author a Wave in the repo and open its conversation:
 
 ```markdown
 <!-- wave/designer/GOAL.md -->
@@ -76,20 +95,20 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task prepare INF-123                               # durable Task Work + worktree, no controller
+lf task checkout INF-123                               # durable Task Work + worktree, no controller
 lf task run INF-123                                   # start end-to-end Task automation
 lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
-lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
+lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
-lf task status INF-123 --json                         # inspect durable state
+lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once, repair or settle
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
-an idle Task or broadcasts to independent Runs.
+an idle Task or broadcasts to independent conversations.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -101,19 +120,16 @@ lf launch-plan                                        # keep the core here; laun
 Watch this repository and the current Home:
 
 ```bash
-lf ls                  # every durable Wave and its Home/runtime evidence
+lf wave list                  # every durable Wave and its Home/runtime evidence
 lf user name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
-lf status designer     # one Wave's current chapter and Tasks
-lf activity            # durable Work changes with exact Run, PR, and Steer proof
-lf runs                # recent Home-local Run records
-lf runs --parent run_ab12 --json # every direct child Run, uncapped
-lf runs run_ab12 --final  # print the durable provider conclusion
-lf runs run_ab12 --events # inspect one Run's append-only evidence
-lf replay run_ab12     # repeat its recorded provider request as a child Run
-lf usage --days 30     # direct provider-authored usage for those Runs
-lf usage --task LOO-265 # drill usage to one Task's Runs
+lf wave status designer     # one Wave's current chapter and Tasks
+lf activity            # durable work, delivery and steering history
+lf session list --json # conversations on this Home
+lf context             # context budgets, configuration sources and current usage
+lf usage --days 30      # recorded provider usage
+lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
 lf prune --dry-run     # inspect dead receipts and registered orphan providers
@@ -121,41 +137,48 @@ lf prune --dry-run     # inspect dead receipts and registered orphan providers
 
 ## Sessions
 
-Finish every kind of Session explicitly:
-
 ```bash
 lf session list
-lf session open run_ab12
-lf session rename run_ab12 "Release notes"            # human name; agents add --suggest
-lf session complete run_ab12                         # interactive Run
-
-lf session ready "Ready for review"                 # inside an Ask
-lf session complete ask_ab12                         # release its caller
-
-lf session ready "Ready for review"                 # inside a Task FlowStep
-lf session approve <flowstep-id> "Verified summary"
-lf session iterate <flowstep-id> "Narrow the design"
+lf session list --interactive false --history --json
+lf session connect SESSION
+lf session history SESSION --json
+lf session rename SESSION "Release notes"
+lf session bind SESSION --task INF-123
+lf session ready "Ready for review"  # inside an Ask or review
+lf session complete SESSION        # return its saved feedback
 ```
 
-Ready, provider exit, and pane close resolve nothing. Complete resolves an
-interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
-In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
-**Move here** explicitly takes over a Session active in another terminal.
+A Session keeps the conversation's identity, name, feedback and native history
+across commands. Interactive and headless work use the same model. Default lists
+show interactive conversations; explicit filters reveal headless or completed
+ones. `--all` means all repositories.
+
+Ready saves feedback. Complete ends an Ask or review; a Flow's following decision
+chooses navigation. Closing a pane or exiting a provider does not complete a review.
+Bind assigns an unbound conversation to one Task permanently, including a done Task.
 
 ## The model
 
-| Atom | What it does | Where it lives |
-|------|--------------|----------------|
-| **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
-| **Flow** | Chains skills together | `.lf/flows/*.yaml` |
-| **Wave** | Durable operating context: memory, cadence, chat, metrics | `wave/<name>/` |
-| **Chapter** | Fresh plan and KRs for one interval | Internal Linear Project, via `lf wave` |
-| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf task` |
-| **Run** | Append-only evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
-| **Home** | Stable machine identity; its SSH route may move | local SQLite |
+| Object | What it does | Where it lives |
+| --- | --- | --- |
+| **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
+| **Flow** | Composes agent work, mechanical operations and reviews | `.lf/flows/*.yaml` |
+| **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
+| **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
+| **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
+| **Task** | Owns concrete work, its checkout, serial PRs and managed Flow selection | Linear and local SQLite |
+| **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
+| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
+| **FlowSession** | Keeps a captured Flow and consumes exact boundary completions | Home-local SQLite |
+| **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
+
+The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)
+separate this model from the remaining implementation. Existing historical commands
+and wire fields are documented in the CLI reference; Run is not a fourth execution
+object in the model.
 
 | Built-in | What it does |
-|----------|--------------|
+| --- | --- |
 | `testing-audit` | Finds low-value tests and redundant verification, then improves the workflow |
 | `token-compress` | Fits a complete artifact to an explicit token budget without truncating it |
 
@@ -183,13 +206,12 @@ each `.md` URL, use the curated
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
 lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf rebase                                    # refresh main and integrate it into this worktree
-uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
-lf install                                   # return to the latest published release and reliable Home
+lf sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local        # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # run a disposable experiment
 ```
 
-`TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;
+`TESTING.md` covers the test suites; `AGENTS.md` is the governing style guide;
 `RELEASE_NOTES.md` and `release/` carry the release chronology.
 Loopflow maintainers should use the repository resource envelope and affected
 suite runner documented in [TESTING.md](TESTING.md#bounded-and-honest).

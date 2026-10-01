@@ -1,0 +1,179 @@
+{
+  "00000000-0000-0000-0000-00000000f10w": {
+    "name": "task-design",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ]
+  },
+  "00000000-0000-0000-0000-0000000000f1": {
+    "name": "feature",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 2,
+        "id": null,
+        "label": "implement",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ]
+  },
+  "00000000-0000-0000-0000-0000000000f2": {
+    "name": "feature",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 2,
+        "id": null,
+        "label": "implement",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 3,
+        "id": null,
+        "label": "compress",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 4,
+        "id": null,
+        "label": "route",
+        "kind": "xor",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": [
+          {
+            "name": "fix",
+            "description": "Repair",
+            "steps": [
+              {
+                "key": 5,
+                "id": null,
+                "label": "patch",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [],
+                "paths": []
+              },
+              {
+                "key": 6,
+                "id": null,
+                "label": "implement",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [],
+                "paths": []
+              }
+            ]
+          },
+          {
+            "name": "skip",
+            "description": "Skip",
+            "steps": []
+          }
+        ]
+      },
+      {
+        "key": 7,
+        "id": null,
+        "label": "loop-decide",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 8,
+        "id": null,
+        "label": "pr-publish",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 9,
+        "id": null,
+        "label": "demo",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ]
+  }
+}

@@ -1,5 +1,9 @@
 # Codebase map
 
+This is a current-source navigation map, including historical capture evidence.
+The [contract and cutover status](../architecture-reference.md#cutover-status)
+own the accepted model and the remaining conversion.
+
 Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
@@ -24,7 +28,7 @@ complexity.
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
-| Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifacts, repository identity, subscriptions |
+| Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifacts, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
 | External tests | Rust, Python, and Swift test roots | 27,100 | cross-module, wire, migration, CLI, and app proofs |
@@ -43,9 +47,9 @@ subprocess edge to one concept.
 | prompt assembly | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route and lease |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
-| Run evidence | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) | manifest, append events, terminal receipt |
+| Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
-| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` Run |
+| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` conversation |
 | Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
@@ -70,21 +74,21 @@ Flows may invoke the named internal operations that own their exact boundary.
 | Public family | Owns |
 | --- | --- |
 | `lf <skill>`, `lf flow` | direct execution and composition |
-| `lf wave`, `project`, `task`, `work` | planning and Work coordination |
+| `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf ask`, `session` | durable Sessions and resolution |
-| `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
+| `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
 | `lf home`, `lf ssh` | Home identity, placement, command routing |
-| `lf auth`, `profile`, `route` | provider credential and account authority |
+| `lf auth` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
-`lf task prepare` belongs to tracked Work and delivery: it starts no execution.
-`lf task run`, `restart`, and `resume` compose that substrate with a bounded
+`lf task checkout` belongs to tracked Work and delivery: it starts no execution.
+`lf task run` and `restart` compose that substrate with a bounded
 Task worker. `lf --task ... <skill>` goes directly through execution with Task
 attribution and never advances the Task's Flow position.
 
@@ -102,7 +106,7 @@ work      ⇏ task worker
 ```
 
 Keep these directions literal. Work types own Project/Task domain progression;
-the Task worker joins them with the exact `FlowInvocation` worker claim.
+the Task worker joins them with the exact `FlowSession` worker claim.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 
@@ -135,7 +139,7 @@ usage receipt.
 4. Rebuild prompts or views from the fact at a boundary.
 5. Keep provider observation and authored state distinguishable.
 
-Do not introduce a global revision, active-Run slot, or mirrored lifecycle to
+Do not introduce a global revision, generic active-attempt slot, or mirrored lifecycle to
 coordinate facts that already have natural keys.
 
 ## Add a read surface
@@ -157,7 +161,7 @@ scope and publish birth-validated ownership before exposing stop or steer. The
 receipt must include PID plus kernel birth identity, Home/boot identity, and
 the exact group, session, or native scope. Revalidate every later signal.
 
-Never infer ownership from a Run id, Work, PID alone, tmux name, telemetry, or
+Never infer ownership from a conversation ID, Work, PID alone, tmux name, telemetry, or
 parentage.
 
 ## Keep the map honest

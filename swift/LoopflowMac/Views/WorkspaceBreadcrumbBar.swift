@@ -38,7 +38,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
         .font(Typography.text)
         .tint(palette.textSecondary)
         .padding(.horizontal, 14)
-        .frame(minHeight: 40)
+        .frame(height: TaskFileChrome.headerHeight)
         .background(palette.surfaceMuted)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("workspace-toolbar")
@@ -46,14 +46,16 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
 
     private func crumbs(_ crumb: WorkspaceBreadcrumb) -> some View {
         HStack(spacing: 6) {
-            if let wave = crumb.wave {
-                Button(wave.roadmap.wave.name) { model.select(wave.id.work) }
+            if let work = crumb.waveWork {
+                Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.textSecondary)
+                    .help(crumb.wave == nil ? "Wave name unavailable" : "Show Wave")
+                    .disabled(crumb.wave == nil)
                     .accessibilityIdentifier("breadcrumb-wave")
             }
             if let task = crumb.task {
-                separator
+                if crumb.waveWork != nil { separator }
                 // The Task overview shows its title once below; inside a
                 // Session the ancestor carries the title to navigate upward.
                 if crumb.session != nil {
@@ -78,10 +80,19 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                 } else {
                     Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
                 }
+            } else if let work = crumb.taskWork {
+                if crumb.waveWork != nil { separator }
+                Text("Task \(work.id)")
+                    .font(Typography.code(12))
+                    .foregroundStyle(palette.textSecondary)
+                    .help("Task name and planning details unavailable")
+                    .accessibilityIdentifier("breadcrumb-task")
             }
             if let session = crumb.session {
-                if crumb.wave != nil { separator }
-                sessionCrumb(session, siblings: crumb.siblings)
+                if crumb.waveWork != nil || crumb.taskWork != nil { separator }
+                sessionCrumb(session, siblings: crumb.siblings.filter {
+                    model.navigation.showsHeadlessSessions || $0.interactive || $0.id == session.id
+                })
             }
         }
         .lineLimit(1)
@@ -145,6 +156,15 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                 .accessibilityLabel("Rename Session")
                 .accessibilityIdentifier("session-rename")
             }
+            if session.work?.kind != .task || model.navigation.binding?.sessionId == session.id {
+                Button("Bind to Task…") { model.beginSessionBinding(session) }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("session-bind")
+                    .popover(isPresented: Binding(
+                        get: { model.navigation.binding?.sessionId == session.id },
+                        set: { if !$0 { model.cancelSessionBinding() } }
+                    )) { bindingForm }
+            }
             if case .step = session.flowMembership {
                 Button {
                     if let target = flowTarget(session) {
@@ -174,6 +194,43 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
         }
     }
 
+    @ViewBuilder
+    private var bindingForm: some View {
+        if let draft = model.navigation.binding {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Bind “\(draft.title)” to a Task").font(Typography.textStrong)
+                if let preview = draft.preview {
+                    Text("\(preview.identifier) · \(preview.title)")
+                    Text("This assignment is permanent. This Session cannot be moved to another Task or unbound.")
+                    HStack {
+                        Button("Choose another Task") { model.navigation.binding?.preview = nil }
+                        Button("Bind permanently") { Task { await model.commitSessionBinding() } }
+                            .accessibilityIdentifier("session-bind-confirm")
+                    }
+                    .disabled(draft.submitting)
+                } else {
+                    TextField("Task identifier or stable ID", text: Binding(
+                        get: { model.navigation.binding?.selector ?? "" },
+                        set: { model.navigation.binding?.selector = $0 }))
+                        .disabled(draft.submitting)
+                        .accessibilityIdentifier("session-bind-target")
+                    Button("Review assignment") { Task { await model.previewSessionBinding() } }
+                        .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("session-bind-preview")
+                }
+                if let error = draft.error {
+                    Text(error).foregroundStyle(Color.statusWarning)
+                        .accessibilityIdentifier("session-bind-error")
+                }
+                Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)
+            }
+            .padding(16)
+            .frame(width: 380)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     /// Membership is a fact, so it reads as quiet mono text; blue stays with
     /// running work and loop regions.
     private func membershipChip(_ session: SessionRecord) -> some View {
@@ -185,6 +242,8 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             .layoutPriority(-1)
     }
 
+    // Numeric node IDs are local to the captured invocation; keep this fence
+    // before resolving a Session into the current diagram.
     private func flowTarget(_ session: SessionRecord) -> (task: WorkspaceTask, node: FlowNodeSelection)? {
         guard let task = crumb?.task,
               case let .step(_, invocation, _, node?, _, occurrence) = session.flowMembership,
@@ -211,6 +270,8 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
 
     private func membershipHelp(_ membership: SessionFlowMembership) -> String {
         switch membership {
+        case .step(_, _, _, _, _, .unknown):
+            "This conversation retains Flow membership, but its relative position is unknown."
         case .step(_, _, _, _, _, .current):
             "This conversation is the Flow's current step."
         case .step(_, _, _, _, _, .earlier):

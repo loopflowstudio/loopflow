@@ -2,6 +2,12 @@ use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in std::env::vars_os() {
+        let key = name.to_string_lossy();
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+            command.env_remove(name);
+        }
+    }
     command
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -12,6 +18,11 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env_remove("LF_RUN_ID")
         .env_remove("LF_RUN_DIR")
+        .env_remove("LF_RUN_CONTEXT")
+        .env_remove("LF_TRACE_ID")
+        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_FLOW_STEP")
+        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -32,9 +43,14 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
     assert!(help.contains("complete"));
+    assert!(help.contains("connect"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
+
+    let removed = run(home.path(), &["runs", "historical-input", "--resume"]);
+    assert!(!removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
         &["session", "ready"][..],
@@ -47,7 +63,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
 
     for args in [
-        &["session", "open", "missing-session", "--json"][..],
+        &["session", "connect", "missing-session", "--json"][..],
         &["session", "complete", "missing-session"],
     ] {
         let output = run(home.path(), args);
@@ -101,6 +117,8 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_ID",
             "LF_RUN_DIR",
             "LF_RUN_CONTEXT",
+            "LF_TRACE_ID",
+            "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
             "LF_FLOW_STEP",
         ] {
@@ -128,12 +146,11 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     );
     let listed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let argv = listed[0]["open_argv"].as_array().unwrap();
-    assert_eq!(
-        std::fs::canonicalize(argv[0].as_str().unwrap()).unwrap(),
-        std::fs::canonicalize(env!("CARGO_BIN_EXE_lf")).unwrap()
-    );
+    let other_home = tempfile::tempdir().unwrap();
     let reopened = command(argv[0].as_str().unwrap())
         .args(argv[1..].iter().map(|arg| arg.as_str().unwrap()))
+        .env("LF_HOME", other_home.path())
+        .env("LF_DB_PATH", other_home.path().join("loopflow.db"))
         .arg("--json")
         .output()
         .unwrap();
@@ -144,10 +161,11 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     );
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["id"], id);
+    assert!(!other_home.path().join("loopflow.db").exists());
 }
 
 #[test]
-fn asked_session_has_a_run_before_any_provider_is_started() {
+fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     let home = tempfile::tempdir().unwrap();
     let (id, run_id, dir) = prepare_ask(
         home.path(),
@@ -157,8 +175,8 @@ fn asked_session_has_a_run_before_any_provider_is_started() {
     );
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["run_id"], run_id.as_str());
-    assert_eq!(manifest["parent_run_id"], CALLER);
+    assert_eq!(manifest["artifact_key"], run_id.as_str());
+    assert_eq!(manifest["caller_artifact_key"], CALLER);
     let opened = run(home.path(), &["session", "open", &id, "--json"]);
     assert!(
         opened.status.success(),
@@ -166,7 +184,7 @@ fn asked_session_has_a_run_before_any_provider_is_started() {
         String::from_utf8_lossy(&opened.stderr)
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    assert_eq!(opened["run_id"], run_id.as_str());
+    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["state"], "waiting");
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
@@ -178,9 +196,9 @@ fn asked_session_has_a_run_before_any_provider_is_started() {
         String::from_utf8_lossy(&inspected.stderr)
     );
     let inspected: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
-    assert_eq!(inspected["id"], run_id.as_str());
-    assert_eq!(inspected["parent_run_id"], CALLER);
-    assert!(inspected["outcome"].is_null());
+    assert_eq!(inspected["artifact_key"], run_id.as_str());
+    assert_eq!(inspected["caller_artifact_key"], CALLER);
+    assert!(inspected["recorded_outcome"].is_null());
     let listed = run(home.path(), &["session", "list", "--all", "--json"]);
     assert!(
         listed.status.success(),
@@ -188,8 +206,27 @@ fn asked_session_has_a_run_before_any_provider_is_started() {
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert_eq!(listed[0]["run_id"], run_id.as_str());
+    assert!(listed[0].get("run_id").is_none());
     assert!(!dir.join("events.jsonl").exists());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND session_id=?1",
+            [&id],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[cfg(unix)]
@@ -213,15 +250,16 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         // The native history belongs to this isolated fixture. The executable below
         // stands in for the provider; both opens exercise the real CLI and locks.
         if resume {
-            std::fs::write(
-                dir.join("provider-session.json"),
-                serde_json::json!({
-                    "schema_version": 1, "provider_session_id": "ses_resume-proof",
-                    "account_id": null
-                })
-                .to_string(),
+            let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            db.execute(
+                "UPDATE agent_sessions SET provider_thread='ses_resume-proof' WHERE id=?1",
+                [id],
             )
             .unwrap();
+            db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                SELECT id,'observed','fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
+            std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -232,6 +270,29 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
     )
     .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !resume {
+            let rejected = bin.join("rejecting-lf");
+            std::fs::write(
+                &rejected,
+                "#!/bin/sh\necho 'unexpected argument --tui' >&2\nexit 2\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let failed = command(home.path(), &["session", "open", id])
+                .env("LF_BIN", &rejected)
+                .output()
+                .unwrap();
+            assert!(!failed.status.success());
+            let error = String::from_utf8_lossy(&failed.stderr);
+            assert!(error.contains(rejected.to_str().unwrap()), "{error}");
+            assert!(error.contains("sha256"), "{error}");
+            assert!(
+                error.contains(home.path().join("loopflow.db").to_str().unwrap()),
+                "{error}"
+            );
+            assert!(error.contains("before becoming resumable"), "{error}");
+            assert!(!error.contains("Local proof"), "prompt leaked: {error}");
+        }
         let evidence = home.path().join("resumed");
         let mut first = command(home.path(), &["session", "open", id])
             .env(
@@ -262,7 +323,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let mut second = command(home.path(), &["session", "open", id, "--json"])
+        let selector = id;
+        let mut second = command(home.path(), &["session", "open", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -288,24 +350,47 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         );
         assert!(reopened.status.success(), "{:?}", reopened);
         let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
-        assert_eq!(reopened["run_id"], run_id);
-        assert_eq!(std::fs::read_to_string(evidence).unwrap(), run_id);
+        assert!(reopened.get("run_id").is_none());
+        let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
+            .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
+        assert_eq!(std::fs::read_to_string(evidence).unwrap(), selected);
         assert_eq!(reopened["state"], "active");
         assert!(active.status.success(), "{:?}", active);
         let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
         assert_eq!(active["gaps"], serde_json::json!([]), "{active}");
-        assert_eq!(active["runs"].as_array().unwrap().len(), 1, "{active}");
-        assert_eq!(active["runs"][0]["id"], run_id);
-        assert_eq!(active["runs"][0]["processes"][0]["state"], "waiting");
+        assert_eq!(active["sessions"].as_array().unwrap().len(), 1, "{active}");
+        assert_eq!(active["sessions"][0]["id"], id);
+        assert_eq!(active["sessions"][0]["processes"][0]["state"], "waiting");
         let ended = run(home.path(), &["runs", "--active", "--json"]);
         let ended: serde_json::Value = serde_json::from_slice(&ended.stdout).unwrap();
-        assert_eq!(ended["runs"], serde_json::json!([]));
+        assert_eq!(ended["sessions"], serde_json::json!([]));
         if !resume {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-            assert_eq!(manifest["run_id"], run_id);
+            assert_eq!(manifest["artifact_key"], run_id);
             assert!(manifest["context"].is_object());
             assert!(!dir.join("prepared").exists());
+            let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            let failure: String = database
+                .query_row(
+                    "SELECT error FROM execs WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(failure.contains(run_id), "{failure}");
+            assert!(failure.contains("sha256"), "{failure}");
+            assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
+            assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
+            let (completed_at, ready_summary): (Option<i64>, Option<String>) = database
+                .query_row(
+                    "SELECT completed_at, ready_summary FROM agent_sessions WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(completed_at.is_none());
+            assert!(ready_summary.is_none());
         }
     }
 }
@@ -323,13 +408,13 @@ fn prepare_ask(
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
-    let caller = home.join("caller");
+    let caller = home.join("runs").join(&CALLER[4..6]).join(CALLER);
     std::fs::create_dir_all(&caller).unwrap();
     let manifest = serde_json::json!({
-        "schema_version": 1, "run_id": CALLER, "parent_run_id": null,
+        "schema_version": 1, "artifact_key": CALLER, "caller_artifact_key": null,
         "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
         "surface": "headless", "cwd": cwd, "repo": null, "worktree": null,
-        "skill": "proof", "subjects": [], "flow": null, "launch": null, "context": null,
+        "skill": "proof", "subjects": [], "flow": null, "exec": null, "context": null,
         "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
     });
     std::fs::write(caller.join("manifest.json"), manifest.to_string()).unwrap();
@@ -367,14 +452,29 @@ fn prepare_ask(
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .and_then(|db| {
+            let ready: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions')", [], |row| row.get(0))?;
+            if !ready { return Err(rusqlite::Error::QueryReturnedNoRows); }
             db.query_row(
-                "SELECT id, current_run_id FROM sessions WHERE kind='ask' AND request=?1",
+                "SELECT id, (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture) FROM agent_sessions WHERE kind='ask' AND input_published=1 AND request=?1",
                 [question],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
         });
-        if let Ok(stored) = stored {
-            break stored;
+        match stored {
+            Ok(stored) => break stored,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if matches!(
+                    error.code,
+                    rusqlite::ErrorCode::CannotOpen
+                        | rusqlite::ErrorCode::DatabaseBusy
+                        | rusqlite::ErrorCode::DatabaseLocked
+                ) => {}
+            Err(error) => {
+                let _ = asking.kill();
+                let output = asking.wait_with_output();
+                panic!("cannot inspect stored Ask: {error}; caller: {output:?}");
+            }
         }
         if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
             let _ = asking.kill();
@@ -384,7 +484,10 @@ fn prepare_ask(
     };
     asking.kill().unwrap();
     asking.wait().unwrap();
-    let dir = home.join("runs").join(&stored.1[4..6]).join(&stored.1);
+    let dir = home
+        .join("runs")
+        .join(&stored.1.strip_prefix("run_").unwrap_or(&stored.1)[..2])
+        .join(&stored.1);
     (stored.0, stored.1, dir)
 }
 
@@ -410,7 +513,7 @@ fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
 #[test]
 fn session_names_are_shared_and_human_names_win() {
     let home = tempfile::tempdir().unwrap();
-    let (id, run_id, dir) = prepare_ask(
+    let (id, _run_id, dir) = prepare_ask(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
         "codex",
@@ -427,7 +530,7 @@ fn session_names_are_shared_and_human_names_win() {
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title"], "Launch notes");
     assert_eq!(named["title_source"], "human");
-    assert_eq!(named["run_id"], run_id.as_str());
+    assert!(named.get("run_id").is_none());
 
     let later = run(
         home.path(),
@@ -549,12 +652,12 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
     assert_eq!(inside["kind"], "ask");
-    assert_eq!(inside["run_id"], replacement.as_str());
+    assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");
 
     let readback = listed(home.path(), id);
-    assert_eq!(readback["run_id"], replacement.as_str());
+    assert!(readback.get("run_id").is_none());
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // The boundary's Run never appears as a second, interactive Session.
@@ -597,4 +700,34 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         .join("human-sessions")
         .join(format!("{id}.json"))
         .exists());
+}
+
+#[test]
+fn session_inventory_pages_are_explicit_bounded_and_complete() {
+    let home = tempfile::tempdir().unwrap();
+    let output = run(
+        home.path(),
+        &[
+            "session", "list", "--page", "--json", "--all", "--limit", "1",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let page: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["entries"], serde_json::json!([]));
+    assert!(page["next"].is_null());
+    for args in [
+        &["session", "list", "--page"][..],
+        &["session", "list", "--page", "--json", "--limit", "0"],
+        &["session", "list", "--page", "--json", "--offset", "1"],
+        &["session", "list", "--json", "--after", "old"],
+    ] {
+        assert!(
+            !run(home.path(), args).status.success(),
+            "accepted {args:?}"
+        );
+    }
 }

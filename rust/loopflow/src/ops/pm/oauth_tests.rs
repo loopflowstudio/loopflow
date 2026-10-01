@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
-use tracing::instrument::WithSubscriber;
 
 use super::test_fixture::{now, token, Fixture};
 use super::{
@@ -48,11 +47,10 @@ impl Fixture {
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            payload: serde_json::to_string(&PmSnapshot {
+            snapshot: PmSnapshot {
                 projects: vec![],
                 items: vec![],
-            })
-            .unwrap(),
+            },
         };
         self.store.put_pm_snapshot(row.clone()).await.unwrap();
         row
@@ -160,8 +158,8 @@ async fn pm_read_linear_oauth_recovers() {
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"
         }]}}})),
         json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
-            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"",
-            "content":"## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
+            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
+            "content":"flow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
             "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}],
             "pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
@@ -175,16 +173,29 @@ async fn pm_read_linear_oauth_recovers() {
     assert!(result.projects[0].metric_targets.is_empty());
     assert_eq!(result.projects[0].krs[0].text, "Fresh proof");
     let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-    let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+    let snapshot = row.snapshot;
     assert_eq!(snapshot.projects, result.projects);
     assert_eq!(
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap(),
         stored_wave
     );
-    assert_eq!(
-        fixture.store.get_project(&project.id).await.unwrap(),
-        Some(project.clone())
-    );
+    let refreshed = fixture
+        .store
+        .get_project(&project.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(refreshed.id, project.id);
+    assert_eq!(refreshed.wave_id, project.wave_id);
+    assert_eq!(refreshed.iteration, project.iteration);
+    assert_eq!(refreshed.abandon_intent, project.abandon_intent);
+    assert_eq!(refreshed.created_at, project.created_at);
+    assert!(refreshed.updated_at >= project.updated_at);
+    assert_eq!(refreshed.plan.id, project.plan.id);
+    assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
+    assert_eq!(refreshed.plan.flow, "feature");
+    assert!(refreshed.plan.prompt_context.contains("Fresh proof"));
+    assert!(refreshed.plan.pm_snapshot_synced_at > project.plan.pm_snapshot_synced_at);
     assert_eq!(
         fixture
             .store
@@ -233,7 +244,10 @@ async fn pm_read_linear_oauth_invalid_grant() {
         let (graphql, requests) = test_server::spawn(vec![]).await;
         let error =
             failure_message(scoped(fixture.context(&graphql), &oauth, forced_read(&repo)).await);
-        assert!(error.contains("invalid_grant") && error.contains("doppler run -- lf auth linear"));
+        assert!(
+            error.contains("invalid_grant")
+                && error.contains("doppler run -- lf auth connect linear")
+        );
         assert!(!error.contains("synthetic-secret"));
         assert_eq!(exchanges.lock().await.len(), 1);
         assert!(requests.lock().await.is_empty());
@@ -338,7 +352,10 @@ async fn linear_oauth_classifies_failures_without_partial_writes() {
         let original = fixture.seed(now() - 1).await;
         let (url, requests) = test_server::spawn(vec![response.clone(), response]).await;
         let error = failure_message(fixture.resolve(&url).await);
-        assert_eq!(error.contains("doppler run -- lf auth linear"), reconnect);
+        assert_eq!(
+            error.contains("doppler run -- lf auth connect linear"),
+            reconnect
+        );
         assert!(!error.contains("synthetic-secret"));
         assert_eq!(requests.lock().await.len(), attempts);
         fixture.assert_token(&original).await;
@@ -490,7 +507,10 @@ async fn linear_oauth_optional_local_authority_and_legacy_guidance() {
                 .scope(Err(reason), fixture.resolve(&url))
                 .await,
         );
-        assert_eq!(error.contains("doppler run -- lf auth linear"), reconnect);
+        assert_eq!(
+            error.contains("doppler run -- lf auth connect linear"),
+            reconnect
+        );
         fixture.assert_token(&original).await;
     }
     assert!(requests.lock().await.is_empty());
@@ -604,8 +624,30 @@ impl std::io::Write for TraceBuffer {
     }
 }
 
+#[test]
+fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+    // Tracing callsite interest is process-global. Capture in an isolated process
+    // so concurrently running tests cannot disable this subscriber's callsites.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "ops::pm::oauth_tests::oauth_trace_process_entry",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[tokio::test]
-async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+#[ignore = "isolated tracing entry point"]
+async fn oauth_trace_process_entry() {
     let fixture = Fixture::new().await;
     let mut original = fixture.seed(now() + 60).await;
     original.access_token = "synthetic-secret-access".into();
@@ -624,11 +666,8 @@ async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
         .with_max_level(tracing::Level::TRACE)
         .with_writer(move || writer.clone())
         .finish();
-    let value = fixture
-        .resolve(&url)
-        .with_subscriber(subscriber)
-        .await
-        .unwrap();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let value = fixture.resolve(&url).await.unwrap();
     assert!(value.as_deref() == Some(original.access_token.as_str()));
     let captured = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
     assert!(captured.contains("proactive Linear refresh failed"));

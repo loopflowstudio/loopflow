@@ -7,16 +7,20 @@ import Foundation
 import Loopflow
 
 enum RegistryQueryLocal {
-    static let shared = RegistryQuery(watchActiveRuns: {
+    static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await Task.detached(priority: .userInitiated) {
-            let configuration = try ActiveRunsLaunchConfiguration.current()
+            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
+        }.value
+    }, watchActiveSessions: {
+        try await Task.detached(priority: .userInitiated) {
+            let configuration = try ActiveSessionsLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(
                 [configuration.helper, "runs", "--active", "--watch", "--json"]
             )
             process.environment = configuration.environment
-            return try LocalActiveRunsObservation.start(
+            return try LocalActiveSessionsObservation.start(
                 process: process,
-                configurationChanged: { try ActiveRunsLaunchConfiguration.current() != configuration }
+                configurationChanged: { try ActiveSessionsLaunchConfiguration.current() != configuration }
             )
         }.value
     }) { args, cwd in
@@ -30,7 +34,7 @@ enum RegistryQueryLocal {
 
 /// Invalidate on replacement; let lf resolve the selected Home/store itself.
 /// Metadata is sufficient here: these installation files are atomically replaced.
-private struct ActiveRunsLaunchConfiguration: Equatable {
+private struct ActiveSessionsLaunchConfiguration: Equatable {
     let helper: String
     let environment: [String: String]
     let files: [String]

@@ -1,4 +1,4 @@
-//! `lf runs` — read Home-local Run records.
+//! `lf runs` — read retained AgentSession input and provider history.
 
 use std::{
     io::Read,
@@ -10,8 +10,8 @@ use anyhow::{anyhow, Result};
 use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
-pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
-pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
+pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
+pub use crate::session_record::{SessionHistory, SessionUsage};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -19,9 +19,8 @@ const MAX_RUNS: usize = 50;
 pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let (home, store, task) = runtime.block_on(async {
-        let home = crate::store::observability_home_dir();
-        let config =
-            crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
+        let home = crate::store::lf_home_dir();
+        let config = crate::store::StorageConfig::sqlite(crate::store::database_path_from_env()?);
         let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
         let task = match task {
             Some(task) => Some(crate::durable::WorkRef::Task(
@@ -39,67 +38,70 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         return super::runs_watch::run(&home, &store, task, &runtime);
     }
     runtime.block_on(async {
-        let snapshot = crate::run_record::active::snapshot(&home, &store, task).await;
+        let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
         if json {
             println!("{}", serde_json::to_string(&snapshot)?);
         } else {
-            for run in &snapshot.runs {
-                println!("{}  {}  {}", run.id, run.harness, run.label);
+            for session in &snapshot.sessions {
+                println!("{}  {}", session.id, session.title);
             }
             for gap in &snapshot.gaps {
                 println!("Unavailable: {gap}");
             }
-            if snapshot.runs.is_empty() && snapshot.gaps.is_empty() {
-                println!("No active Runs.");
+            if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
+                println!("No active Sessions.");
             }
         }
         Ok(())
     })
 }
 
-/// The Runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
-/// can never disagree on what a run is.
-pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool)> {
+/// Shared Session history, newest input first. SQL selects the recent budget
+/// before decoding; exact Task and caller-input drills remain complete.
+pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let mut runs = collect_runs_started_since(filter, since)?;
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
+    let database = crate::store::database_path_from_env()?;
+    if !database.exists() {
+        return Ok((Vec::new(), false));
+    }
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+    Ok(store.recent_conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        since,
+        MAX_RUNS,
+    )?)
 }
 
 pub(crate) fn collect_runs_started_since(
     filter: WorkFilter,
     since: i64,
-) -> Result<Vec<RunSnapshot>> {
-    let path = crate::store::observability_database_path()?;
-    let mut runs = collect_runs_at(
-        &crate::store::observability_home_dir(),
-        &path,
-        filter,
-        None,
-        since,
-    )?;
-    runs.retain(|run| run.started >= since);
-    Ok(runs)
+) -> Result<Vec<SessionHistory>> {
+    let path = crate::store::database_path_from_env()?;
+    collect_runs_at(&crate::store::lf_home_dir(), &path, filter, None, since)
 }
 
-/// Runs are rows: one query selects them, and each Run's usage and launch
-/// evidence are read from its own record.
+/// Select conversations in SQL before reading their subordinate history.
 fn collect_runs_at(
-    lf_home: &Path,
+    _lf_home: &Path,
     database: &Path,
     filter: WorkFilter,
     parent: Option<&str>,
     since: i64,
-) -> Result<Vec<RunSnapshot>> {
+) -> Result<Vec<SessionHistory>> {
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
-    let runs = store.runs(filter.wave, filter.project, filter.task, parent, since)?;
-    let runs = crate::run_record::run_snapshots(lf_home, runs)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    Ok(runs.into_iter().map(|(_, snapshot)| snapshot).collect())
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(database)?;
+    Ok(store.conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        parent,
+        since,
+        false,
+    )?)
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -111,19 +113,18 @@ pub fn list(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
-    let home = crate::store::observability_home_dir();
+    let home = crate::store::lf_home_dir();
     let filter = WorkFilter {
         wave,
         project,
         task,
     };
-    // A Task's Runs and a Run's children list whole; other drills are recent.
+    // A Task's history and a capture's callers list whole; other drills are recent.
     let runs = match (parent, task) {
         (Some(parent), _) => {
-            let (_, manifest) = crate::run_record::resolve_manifest(&home, parent)
-                .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-            let database = crate::store::observability_database_path()?;
-            let parent = manifest.run_id.to_string();
+            let database = crate::store::database_path_from_env()?;
+            let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+            let parent = store.resolve_history_input(parent)?;
             collect_runs_at(&home, &database, filter, Some(&parent), 0)?
         }
         (None, Some(_)) => collect_runs_started_since(filter, 0)?,
@@ -137,18 +138,20 @@ pub fn list(
 
     if runs.is_empty() {
         match (parent, wave, project, task) {
-            (Some(parent), _, _, _) => println!("No child Runs recorded for {parent}."),
+            (Some(parent), _, _, _) => println!("No caller-input history recorded for {parent}."),
             (None, _, _, Some(task)) => {
-                println!("No Runs recorded for {task}.")
+                println!("No Session history recorded for {task}.")
             }
             (None, _, Some(project), None) => {
-                println!("No Runs recorded for project/{project} in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded for project/{project} in the last {WINDOW_DAYS} days.")
             }
             (None, Some(wave), None, None) => {
-                println!("No Runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
+                println!(
+                    "No Session history recorded for wave/{wave} in the last {WINDOW_DAYS} days."
+                )
             }
             (None, None, None, None) => {
-                println!("No Runs recorded in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded in the last {WINDOW_DAYS} days.")
             }
         }
         return Ok(());
@@ -156,13 +159,13 @@ pub fn list(
 
     let colors = Colors::default();
     println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  RUN{reset}",
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  INPUT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         wave = "WAVE",
-        label = "RUN",
+        label = "HISTORY",
         tokens = "TOKENS",
         cost = "COST",
         agent = "AGENT",
@@ -171,9 +174,9 @@ pub fn list(
     for run in &runs {
         println!(
             "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  {id}",
-            time = format_time(run.started),
+            time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), 14),
-            wave = truncate(run.subject("wave").unwrap_or("-"), 10),
+            wave = truncate(run.wave_name.as_deref().unwrap_or("-"), 10),
             label = truncate(run.label(), 22),
             tokens = run
                 .total_tokens()
@@ -186,33 +189,16 @@ pub fn list(
                 .unwrap_or_else(|| "-".to_string()),
             agent = truncate(&format_agent(Some(&run.harness), run.model.as_deref()), 18),
             status = run.status(),
-            id = short_id(&run.id),
+            id = short_id(run.selector()),
         );
     }
     Ok(())
 }
 
-pub fn resume_run(selector: &str) -> Result<()> {
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let provider_session = crate::run_record::read_provider_session(&dir)
-        .map_err(|error| anyhow!("Run events unavailable: {error}"))?
-        .ok_or_else(|| anyhow!("Run {} has no provider session to resume", manifest.run_id))?;
-    crate::lf::commands::util::resume_session(
-        &manifest.harness,
-        manifest.model.as_deref(),
-        &manifest.cwd,
-        &manifest.run_id,
-        &dir,
-        &provider_session,
-    )
-}
-
 pub fn observe_provider_session() -> Result<()> {
-    let run_dir = std::env::var_os(crate::run_record::RUN_DIR_ENV)
+    let run_dir = std::env::var_os(crate::session_record::RUN_DIR_ENV)
         .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("provider session callback has no active Run"))?;
+        .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
     let mut payload = String::new();
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
@@ -222,50 +208,56 @@ pub fn observe_provider_session() -> Result<()> {
         .and_then(serde_json::Value::as_str)
         .filter(|session_id| !session_id.is_empty())
         .ok_or_else(|| anyhow!("provider session callback has no session_id"))?;
-    let account_id = std::env::var(crate::run_record::PROVIDER_ACCOUNT_ID_ENV)
+    let account_id = std::env::var(crate::session_record::PROVIDER_ACCOUNT_ID_ENV)
         .ok()
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::run_record::write_provider_session(&run_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&run_dir, provider_session_id, account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    let home = crate::store::lf_home_dir();
+    let database = crate::store::database_path_from_env()?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+    let snapshot = store
+        .input_history(selector)
+        .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
+    let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
+    let dir = crate::session_record::record_dir(&home, &input)
+        .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if events {
-        match std::fs::read_to_string(dir.join("events.jsonl")) {
-            Ok(contents) => print!("{contents}"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(anyhow!("Run events unavailable: {error}")),
+        for event in store.input_events(&input)? {
+            match event.get("unparsed").and_then(serde_json::Value::as_str) {
+                Some(bytes) => println!("{bytes}"),
+                None => println!("{}", serde_json::to_string(&event)?),
+            }
         }
         return Ok(());
     }
-    let snapshot = crate::run_record::read_run_snapshot(&dir)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
     if final_answer {
-        let answer = crate::run_record::read_final_answer(&dir)
-            .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
+        let answer = store
+            .input_final_answer(&input)
+            .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {
                 if !answer.exact {
                     eprintln!(
-                        "warning: this Run has no final-answer receipt; showing all streamed prose from its last completed provider turn"
+                        "warning: this capture has no final-answer receipt; showing all streamed prose from its last completed provider turn"
                     );
                 }
                 println!("{}", answer.text);
                 Ok(())
             }
-            None if snapshot.outcome.is_none() => Err(anyhow!(
-                "Run {} is not settled and has no final answer",
-                snapshot.id
+            None if snapshot.recorded_outcome.is_none() => Err(anyhow!(
+                "Capture {} is not settled and has no final answer",
+                snapshot.selector()
             )),
             None => Err(anyhow!(
-                "Run {} settled as {} without a final answer",
-                snapshot.id,
-                snapshot.outcome.as_deref().unwrap_or("unknown")
+                "Capture {} settled as {} without a final answer",
+                snapshot.selector(),
+                snapshot.status()
             )),
         };
     }
@@ -273,8 +265,12 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         println!("{}", serde_json::to_string(&snapshot)?);
         return Ok(());
     }
-    println!("Run {}", snapshot.id);
-    if let Some(parent) = &snapshot.parent_run_id {
+    println!(
+        "Session {} · input {}",
+        snapshot.session_id,
+        snapshot.selector()
+    );
+    if let Some(parent) = &snapshot.caller_artifact_key {
         println!("Parent: {parent}");
     }
     println!("Status: {}", snapshot.status());
@@ -282,36 +278,23 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         "Agent: {}",
         format_agent(Some(&snapshot.harness), snapshot.model.as_deref())
     );
-    println!("Working directory: {}", manifest.cwd.display());
+    println!(
+        "Working directory: {}",
+        snapshot.worktree.as_deref().unwrap_or("unknown")
+    );
+    let manifest = crate::session_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",
-        match manifest.launch.as_ref() {
+        match manifest
+            .as_ref()
+            .and_then(|manifest| manifest.exec.as_ref())
+        {
             Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
             Some(_) | None => "unavailable",
         }
     );
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     Ok(())
-}
-
-fn cap_runs(runs: &mut Vec<RunSnapshot>) -> bool {
-    let truncated = runs.len() > MAX_RUNS;
-    if !truncated {
-        return false;
-    }
-    let unterminated = runs.iter().filter(|run| run.is_unterminated()).count();
-    let mut budget = MAX_RUNS.saturating_sub(unterminated);
-    runs.retain(|run| {
-        if run.is_unterminated() {
-            return true;
-        }
-        if budget == 0 {
-            return false;
-        }
-        budget -= 1;
-        true
-    });
-    true
 }
 
 fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {

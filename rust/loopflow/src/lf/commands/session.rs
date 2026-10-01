@@ -4,23 +4,22 @@ use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
 use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
-use crate::run_record::SessionTitleSource;
+use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let session_id = match command {
-        SessionCommand::Complete { id } => Some(id),
+    let worktree = match command {
+        SessionCommand::Open { json: false, .. }
+        | SessionCommand::ServeAsk { .. }
+        | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
+        SessionCommand::Complete { id } => {
+            let store = runtime.block_on(open_shared_store())?;
+            runtime.block_on(crate::ops::human_session::completion_worktree(&store, id))?
+        }
         _ => None,
     };
-    let Some(session_id) = session_id else {
-        return runtime.block_on(run_async(command));
-    };
-    let store = runtime.block_on(open_shared_store())?;
-    let Some(worktree) = runtime.block_on(crate::ops::human_session::completion_worktree(
-        &store, session_id,
-    ))?
-    else {
+    let Some(worktree) = worktree else {
         return runtime.block_on(run_async(command));
     };
     let argv = std::env::args().collect::<Vec<_>>();
@@ -29,6 +28,32 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::History {
+            id,
+            json,
+            after,
+            limit,
+        } => {
+            let store = open_shared_store().await?;
+            if store.session(id).await?.is_none() {
+                bail!("Session {id} was not found");
+            }
+            let events = store.sqlite.session_history(id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string(&events)?);
+            } else {
+                for event in events {
+                    println!(
+                        "{} {} {} {}",
+                        event.seq,
+                        event.provider_turn.as_deref().unwrap_or("unknown-turn"),
+                        event.kind.as_str(),
+                        event.payload
+                    );
+                }
+            }
+            Ok(())
+        }
         SessionCommand::List {
             json,
             all,
@@ -36,6 +61,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             history,
             limit,
             offset,
+            page,
+            after,
             task,
             search,
         } => {
@@ -51,10 +78,11 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     },
                     task: task.clone(),
                     search: search.clone(),
-                    interactive: Some(*interactive),
+                    interactive: interactive.interactive(),
                     history: *history,
                     limit: *limit,
                     offset: *offset,
+                    after: page.then(|| after.clone().unwrap_or_default()),
                 },
             )
             .await
@@ -81,8 +109,25 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
-        SessionCommand::Bind { id, task, json } => {
+        SessionCommand::Bind {
+            id,
+            task,
+            dry_run,
+            json,
+        } => {
             let store = open_shared_store().await?;
+            if *dry_run {
+                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!(
+                        "{} → {} ({}) [{}]. Not assigned.",
+                        preview.session_id, preview.identifier, preview.title, preview.task_id
+                    );
+                }
+                return Ok(());
+            }
             let session = crate::ops::human_session::bind(&store, id, task).await?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&session)?);
@@ -91,31 +136,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     "Session {} belongs to {}.",
                     session.id,
                     session.work_path.as_deref().unwrap_or(task)
-                );
-            }
-            Ok(())
-        }
-        SessionCommand::Import { dry_run, json } => {
-            let store = open_shared_store().await?;
-            let report = crate::ops::session_import::import(&store, *dry_run).await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-                return Ok(());
-            }
-            println!(
-                "{} {} interactive, {} Ask, {} Flow review and {} Task review Sessions; {} already stored.",
-                if *dry_run { "Would store" } else { "Stored" },
-                report.interactive,
-                report.ask,
-                report.flow_review,
-                report.task_review,
-                report.unchanged
-            );
-            for failure in &report.failed {
-                println!(
-                    "Not imported: {} — {}",
-                    failure.path.display(),
-                    failure.reason
                 );
             }
             Ok(())
@@ -151,7 +171,9 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_ask(&store, run_id).await
         }
-        SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
+        SessionCommand::StopRun { run_id } => {
+            crate::ops::human_session::stop_session_client(run_id)
+        }
     }
 }
 
@@ -160,6 +182,32 @@ async fn list(
     json: bool,
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<()> {
+    if filter.after.is_some() {
+        anyhow::ensure!(
+            filter.limit > 0,
+            "paged Session inventory requires a positive limit"
+        );
+        let mut selection = filter.clone();
+        selection.limit = filter
+            .limit
+            .checked_add(1)
+            .context("Session page limit is too large")?;
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
+        let next = if entries.len() > filter.limit {
+            entries.pop();
+            entries.last().map(|session| session.id.clone())
+        } else {
+            None
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ops::human_session::SessionPage {
+                entries,
+                next
+            })?
+        );
+        return Ok(());
+    }
     let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
@@ -171,6 +219,7 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
+                    SessionState::Unknown => "unknown",
                     SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
                     SessionState::Ready => "ready",

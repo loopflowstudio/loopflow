@@ -8,21 +8,21 @@ use tokio::sync::Mutex;
 use super::{
     classify_task, plan_rotation, rotate, successor_id, TaskDisposition, TaskStartEvidence,
 };
-use crate::durable::FlowInvocation;
+use crate::durable::FlowSession;
 use crate::engine::invocation::QueuedInvocation;
-use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
-use crate::id::WaveId;
-use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
+use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
+use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
-use crate::work::wave::Wave;
-use crate::work::wave::WaveLocator;
+use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
 fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
     PmProject {
+        revision: None,
         id: id.into(),
         name: name.into(),
         slug: name.into(),
@@ -140,6 +140,8 @@ fn lost_creation_has_one_identity_on_every_home() {
 
 fn task(state: &str) -> PmItem {
     PmItem {
+        branch_name: None,
+        revision: None,
         id: "issue".into(),
         identifier: "FIX-1".into(),
         url: None,
@@ -148,8 +150,8 @@ fn task(state: &str) -> PmItem {
         rank: 0,
         completed: state == "completed",
         state: Some(state.into()),
-        project_id: "old".into(),
-        project: "old".into(),
+        project_id: Some("old".into()),
+        project: Some("old".into()),
         team_id: "team-1".into(),
         assignee: None,
     }
@@ -234,8 +236,10 @@ struct Provider {
     projects: BTreeMap<String, Value>,
     issues: BTreeMap<String, Value>,
     mutations: usize,
+    revision: i64,
     interrupt_after: Option<usize>,
     unavailable: bool,
+    status_change_at_final_inventory: Option<(String, String)>,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -253,8 +257,44 @@ async fn graphql(
     if provider.unavailable {
         return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
     }
+    for project in provider.projects.values_mut() {
+        project
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+    }
+    for issue in provider.issues.values_mut() {
+        issue
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+        issue["branchName"] = Value::Null;
+    }
+    let prior_projects = provider.projects.clone();
+    let prior_issues = provider.issues.clone();
+    // Apply an external status change only once the predecessor's dispositions finish.
+    if provider.status_change_at_final_inventory.is_some()
+        && vars["initiativeId"] == "initiative-a"
+        && provider.issues["a-started"]["project"]["id"] != "a-old"
+        && provider.issues["a-backlog"]["state"]["type"] == "canceled"
+    {
+        if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
+            provider.revision += 1;
+            let revision = fixture_revision(provider.revision);
+            let project = provider.projects.get_mut(&id).unwrap();
+            project["status"]["type"] = json!(status);
+            project["updatedAt"] = revision;
+        }
+    }
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
+    } else if query.contains("query ListInitiatives") {
+        json!({"initiatives":page(vec![
+            json!({"id":"initiative-a","name":"A","description":""}),
+            json!({"id":"initiative-b","name":"B","description":""}),
+        ])})
     } else if query.contains("query ListInitiativeProjects") {
         let initiative = &vars["initiativeId"];
         json!({"initiative":{"projects":page(provider.projects.values().filter(|project|
@@ -297,6 +337,15 @@ async fn graphql(
             project["status"]["type"] = status.clone();
         }
         json!({"projectUpdate":{"success":true}})
+    } else if query.contains("mutation RenameProject") {
+        provider.projects.get_mut(id).unwrap()["name"] = vars["name"].clone();
+        json!({"projectUpdate":{"success":true}})
+    } else if query.contains("mutation UpdateProject") {
+        let project = provider.projects.get_mut(id).unwrap();
+        for field in ["name", "description", "content"] {
+            project[field] = vars[field].clone();
+        }
+        json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation SetProjectStatus") {
         provider.projects.get_mut(id).unwrap()["status"]["type"] = vars["statusId"].clone();
         json!({"projectUpdate":{"success":true}})
@@ -313,12 +362,32 @@ async fn graphql(
     };
     if query.starts_with("mutation") {
         provider.mutations += 1;
+        provider.revision += 1;
+        let revision = fixture_revision(provider.revision);
+        for (id, project) in &mut provider.projects {
+            if prior_projects.get(id) != Some(project) {
+                project["updatedAt"] = revision.clone();
+            }
+        }
+        for (id, issue) in &mut provider.issues {
+            if prior_issues.get(id) != Some(issue) {
+                issue["updatedAt"] = revision.clone();
+            }
+        }
         if provider.interrupt_after == Some(provider.mutations) {
             provider.unavailable = true;
             return Json(json!({"errors":[{"message":"fixture lost mutation response"}]}));
         }
     }
     Json(json!({"data":data}))
+}
+
+fn fixture_revision(revision: i64) -> Value {
+    json!(
+        (OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(revision))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    )
 }
 
 fn provider_fixture() -> Provider {
@@ -350,14 +419,7 @@ async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> P
             .unwrap(),
     );
     for name in ["a", "b"] {
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                name.into(),
-                repo.display().to_string(),
-            ))
-            .await
-            .unwrap();
+        ensure_wave_row(&store, repo, name).await.unwrap();
     }
     store
         .upsert_provider_token(&ProviderToken {
@@ -451,7 +513,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, FlowInvocation) {
+) -> (Task, TaskPr, FlowSession) {
     let (task, _) = local_task(
         context,
         repo,
@@ -466,17 +528,15 @@ async fn local_started_task(
         .store
         .start_task_flow(
             &task.id,
-            FlowInvocation {
+            FlowSession {
                 invocation: QueuedInvocation::new(
                     "captured",
                     vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: Skill::named("implement"),
-                        flow_parents: Vec::new(),
-                        policy: OccurrencePolicy {
-                            id: Some("implement".into()),
-                            human: false,
-                            repeat: None,
-                        },
+                        sources: Vec::new(),
+                        id: Some("implement".into()),
+                        human: false,
+                        repeat: None,
                     })],
                 )
                 .unwrap(),
@@ -499,8 +559,28 @@ async fn local_started_task(
         )
         .await
         .unwrap();
+    assert!(!context.store.task_started(&task.id).await.unwrap());
+    let flow = context
+        .store
+        .reserve_attempt(flow.id(), flow.version, None, None)
+        .await
+        .unwrap();
+    assert!(context.store.task_started(&task.id).await.unwrap());
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
+    // Compare persisted values: SQLite stores timestamps at second precision.
+    let task = context.store.get_task(&task.id).await.unwrap().unwrap();
     (task, pr, flow)
+}
+
+fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .expect("reserved Task work has a non-null Started timestamp")
 }
 
 fn clean_checkout(checkout: &std::path::Path) -> String {
@@ -591,6 +671,163 @@ async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::
 }
 
 #[tokio::test]
+async fn rotation_preserves_conflicting_statuses_observed_in_the_final_inventory() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let successor = successor_id("initiative-a", "next");
+    for (index, (id, status)) in [
+        ("a-old", "canceled"),
+        ("a-old", "planned"),
+        (successor.as_str(), "canceled"),
+        (successor.as_str(), "planned"),
+        (successor.as_str(), "completed"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        {
+            let mut state = provider.lock().await;
+            *state = provider_fixture();
+            state.status_change_at_final_inventory = Some((id.into(), status.into()));
+        }
+        let home = context(
+            &directory.path().join(format!("conflict-{index}.db")),
+            &repo,
+            &url,
+        )
+        .await;
+        local_backlog_tasks(&home, &repo).await;
+        let failure = PM_TEST_CONTEXT
+            .scope(home, rotate(&repo, "next", false))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            failure.contains(if id == "a-old" {
+                "predecessor status changed"
+            } else {
+                "successor is no longer the intended In Progress Project"
+            }),
+            "{failure}"
+        );
+        let state = provider.lock().await;
+        assert!(state.status_change_at_final_inventory.is_none());
+        assert_eq!(
+            state.projects["a-old"]["status"]["type"],
+            if id == "a-old" { status } else { "started" }
+        );
+        assert_eq!(
+            state.projects[&successor]["status"]["type"],
+            if id == "a-old" { "started" } else { status }
+        );
+        assert_eq!(state.issues["a-started"]["project"]["id"], successor);
+        assert_eq!(state.issues["a-backlog"]["state"]["type"], "canceled");
+        assert_eq!(state.projects["b-old"]["status"]["type"], "started");
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn rotation_accepts_an_already_completed_predecessor_at_final_inventory() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let mut state = provider_fixture();
+    state.status_change_at_final_inventory = Some(("a-old".into(), "completed".into()));
+    let provider = Arc::new(Mutex::new(state));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("completed.db"), &repo, &url).await;
+    local_backlog_tasks(&home, &repo).await;
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            rotate(&repo, "next", false).await.unwrap();
+            rotate(&repo, "next", false).await.unwrap();
+        })
+        .await;
+    let state = provider.lock().await;
+    assert!(state.status_change_at_final_inventory.is_none());
+    for wave in ["a", "b"] {
+        assert_eq!(
+            state.projects[&format!("{wave}-old")]["status"]["type"],
+            "completed"
+        );
+        let successor = successor_id(&format!("initiative-{wave}"), "next");
+        assert_eq!(state.projects[&successor]["status"]["type"], "started");
+        assert_eq!(
+            state.issues[&format!("{wave}-started")]["project"]["id"],
+            successor
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
+    let mut state = provider_fixture();
+    let old = state.projects.get_mut("a-old").unwrap();
+    old["name"] = json!("previous");
+    old["description"] = json!("Authored summary unrelated to the Flow or KRs.");
+    old["content"] = json!(original);
+    old["status"]["type"] = json!("planned");
+    let mut expected = old.clone();
+    expected["name"] = json!("A — previous");
+    expected["content"] = json!(original.replace("recommended:", "flow:"));
+    expected["status"]["type"] = json!("started");
+    let provider = Arc::new(Mutex::new(state));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("sync.db"), &repo, &url).await;
+    let (task, pr, flow) = local_started_task(&home, &repo).await;
+    rusqlite::Connection::open(&home.path)
+        .unwrap()
+        .execute(
+            "UPDATE projects SET legacy_current=1 WHERE external_project_id='a-old'",
+            [],
+        )
+        .unwrap();
+    let store = home.store.clone();
+    // The public sync entry point owns a runtime; keep the fixture server running separately.
+    tokio::task::spawn_blocking(move || {
+        PM_TEST_CONTEXT.sync_scope(home, || {
+            for _ in 0..2 {
+                pm_sync(
+                    &repo,
+                    &PmSyncOptions {
+                        wave: Some("a".into()),
+                        plan: false,
+                    },
+                    &NullProgress,
+                )
+                .unwrap();
+            }
+        });
+    })
+    .await
+    .unwrap();
+    let mut observed = provider.lock().await.projects["a-old"].clone();
+    assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
+    assert_eq!(observed, expected);
+    let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
+    let snapshot = snapshot.snapshot;
+    let synced = snapshot
+        .projects
+        .iter()
+        .find(|project| project.id == "a-old")
+        .unwrap();
+    assert_eq!(synced.flow, "custom");
+    assert_eq!(synced.krs.len(), 1);
+    assert_eq!(synced.krs[0].text, "Keep this KR");
+    let retained = store.get_task(&task.id).await.unwrap().unwrap();
+    assert_eq!(retained.project_id, task.project_id);
+    assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    server.abort();
+}
+
+#[tokio::test]
 async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
@@ -616,7 +853,9 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
             .await;
             local_backlog_tasks(&first, &repo).await;
             let retained = if stop == 4 {
-                Some(local_started_task(&first, &repo).await)
+                let (task, pr, flow) = local_started_task(&first, &repo).await;
+                let started_at = task_started_at(&first.path, &task.id);
+                Some((task, pr, flow, started_at))
             } else {
                 None
             };
@@ -666,7 +905,8 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                     assert_eq!(provider.lock().await.mutations, mutations);
                 })
                 .await;
-            if let Some((task, pr, flow)) = retained {
+            if let Some((task, pr, flow, started_at)) = retained {
+                let path = original.path.clone();
                 PM_TEST_CONTEXT
                     .scope(original, async {
                         rotate(&repo, "next", false).await.unwrap();
@@ -678,6 +918,7 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                         assert_eq!(moved.plan, task.plan);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
                         assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+                        assert_eq!(task_started_at(&path, &task.id), started_at);
                     })
                     .await;
             }
@@ -748,6 +989,102 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
         provider.lock().await.projects["authored-next"]["content"],
         content
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let first = context(&directory.path().join("rotating.db"), &repo, &url).await;
+    local_backlog_tasks(&first, &repo).await;
+    let second = context(&directory.path().join("syncing.db"), &repo, &url).await;
+    let (task, pr, flow) = local_started_task(&second, &repo).await;
+    let path = second.path.clone();
+    let started_at = task_started_at(&path, &task.id);
+    let store = second.store.clone();
+
+    PM_TEST_CONTEXT
+        .scope(first, rotate(&repo, "next", false))
+        .await
+        .unwrap();
+    assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+    let (mutations, projects, issues) = {
+        let state = provider.lock().await;
+        (
+            state.mutations,
+            state.projects.clone(),
+            state.issues.clone(),
+        )
+    };
+    let sync_repo = repo.clone();
+    // Operation-level sync owns a runtime; this does not invoke the public CLI.
+    tokio::task::spawn_blocking(move || {
+        PM_TEST_CONTEXT.sync_scope(second, || {
+            pm_sync(
+                &sync_repo,
+                &PmSyncOptions {
+                    wave: None,
+                    plan: false,
+                },
+                &NullProgress,
+            )
+            .unwrap();
+        });
+    })
+    .await
+    .unwrap();
+
+    for name in ["a", "b"] {
+        let wave = store
+            .get_wave_at(&WaveLocator::discover(&repo, name).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let snapshot = snapshot.snapshot;
+        let successor = successor_id(&format!("initiative-{name}"), "next");
+        let current = super::select_current(name, &snapshot.projects).unwrap();
+        assert_eq!(current.id, successor);
+        assert_eq!(current.status, ProjectStatus::Started);
+        let previous = store
+            .get_project_by_project(&format!("{name}-old"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(previous.plan.status, ProjectStatus::Completed);
+        let adopted = store
+            .get_project_by_project(&successor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(adopted.wave_id, *wave.id());
+        assert_eq!(adopted.plan.id.as_str(), successor);
+        assert_eq!(adopted.plan.status, ProjectStatus::Started);
+        assert!(snapshot.items.iter().any(|item| {
+            item.id == format!("{name}-started")
+                && item.project_id.as_deref() == Some(successor.as_str())
+        }));
+        if name == "a" {
+            assert_eq!(previous.id, task.project_id);
+            let moved = store.get_task(&task.id).await.unwrap().unwrap();
+            assert_eq!(moved.project_id, adopted.id);
+            assert_ne!(moved.project_id, task.project_id);
+            assert_eq!(moved.id, task.id);
+            assert_eq!(moved.wave_id, task.wave_id);
+            assert_eq!(moved.worktree, task.worktree);
+            assert_eq!(moved.plan, task.plan);
+        }
+    }
+    assert_eq!(task_started_at(&path, &task.id), started_at);
+    assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    let state = provider.lock().await;
+    assert_eq!(state.mutations, mutations);
+    assert_eq!(state.projects, projects);
+    assert_eq!(state.issues, issues);
     server.abort();
 }
 
@@ -837,7 +1174,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert!(snapshot
                 .items
                 .iter()
-                .any(|item| item.id == "a-started" && item.project_id == "a-old"));
+                .any(|item| item.id == "a-started" && item.project_id.as_deref() == Some("a-old")));
             let store = super::pm_store().await.unwrap();
             assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);

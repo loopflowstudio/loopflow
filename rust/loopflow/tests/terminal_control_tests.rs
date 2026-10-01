@@ -11,13 +11,30 @@ fn terminal_control_accepts_a_model_option() {
     fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
 
+    let repo = temp.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    for args in [
+        &["init", "--quiet"][..],
+        &["commit", "--quiet", "--allow-empty", "-m", "start"][..],
+    ] {
+        let status = Command::new("git")
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["-m", "claude"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        // Outside the checkout: the launch prompt carries the working directory's
+        // scratch notes, and a branch with large notes exceeds Linux's argument limit.
+        .current_dir(&repo)
         .env("LF_HOME", temp.path().join("home"))
         .env("PATH", path)
         .output()

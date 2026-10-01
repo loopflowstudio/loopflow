@@ -14,9 +14,6 @@ struct WorkActivityView: View {
             if let reason = model.workActivity.errorMessage {
                 evidenceBanner(reason)
             }
-            if let turnIntentError {
-                evidenceBanner(turnIntentError)
-            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -146,12 +143,6 @@ struct WorkActivityView: View {
         .accessibilityIdentifier("podium-activity-\(entry.id)")
     }
 
-    private var selectedWave: WaveSnapshot? {
-        guard let selection = model.selection else { return nil }
-        guard let waveId = model.waveId(for: selection) else { return nil }
-        return model.wave(id: waveId)?.wave
-    }
-
     private var scopeTitle: String {
         switch model.selection {
         case nil:
@@ -193,8 +184,8 @@ struct WorkActivityView: View {
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
         case .workCreated: ("plus", .statusNeutral)
-        case .runStarted: ("play.fill", .statusInfo)
-        case .runFinished(_, let status):
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", .statusInfo)
+        case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())

@@ -33,10 +33,11 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf auth status
-lf route show
+lf auth status --cached          # cached; no provider request
+lf auth status --json            # inspect accepted managed evidence
+lf auth route show
 lf home id --json
-lf ls --json
+lf wave list --json
 command -v claude
 command -v codex
 command -v opencode
@@ -46,7 +47,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 ```
 
 Do not reconstruct distributed state from processes, worktrees, or provider
-web pages. `lf ls`, `lf status`, and `lf roadmap` are the shared read surfaces.
+web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
 If `lf home id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
@@ -133,20 +134,23 @@ For durable planning and delivery, inspect `lf auth status` and offer only the
 missing connections:
 
 ```bash
-lf auth github
-lf auth linear
-lf auth claude
-lf auth status
+lf auth connect github
+lf auth connect linear
+lf auth connect claude
+lf auth status --cached          # cached; no provider request
+lf auth status --json            # inspect accepted managed evidence
 ```
 
 OAuth client credentials resolve from environment first, with a Doppler fallback
 when configured. If this repository uses Doppler and credentials are missing,
-use `doppler run -- lf auth linear`. Otherwise follow the customer's secret
+use `doppler run -- lf auth connect linear`. Otherwise follow the customer's secret
 manager and the exact missing variable names. Never print credential values.
 
 Account connection is an external side effect. The user must choose it and
-complete the provider flow. Never claim a provider is connected until
-`lf auth status` proves it. Direct skills can proceed with a local agent even
+complete the provider flow. Claim a new connection only after connect completes;
+cached status is retained evidence, not a fresh authorization check. Managed
+verification requires an accepted managed row from `auth status --json`.
+Direct skills can proceed with a local agent even
 when Linear is absent; do not block that path on PM setup.
 
 ## 4. Make one durable path real
@@ -156,9 +160,9 @@ when Linear is absent; do not block that path on PM setup.
 Read its `wave/<name>/GOAL.md`, then verify its shared state:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf roadmap --wave <wave> --json
-lf status <wave> --no-sync
+lf wave status <wave> --no-sync
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:
@@ -187,10 +191,28 @@ in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the
 plan in the goal body.
 
-Then offer Linear binding as above. Initialization provisions one internal
-Project for the first chapter. Subsequent chapters replace it through
-`lf wave new-chapter`; the Wave retains purpose, memory, and conversation.
-Tasks belong to the current chapter automatically.
+Then offer Linear binding as above. Connection creates or links the Initiative
+and preserves existing Projects; it does not provision an initial Project.
+Inspect available Linear status/content: one In Progress Project is the current
+plan, Planned Projects hold future plans, and Completed Projects retain history.
+Tasks use the current Project and its required `flow:` default.
+
+If no current Project exists, report that planning gap. Establishing a chapter
+requires accepted repository-wide direction and plan dispositions: preview with
+`lf repo new-chapter <name> --dry-run --json`, then apply with
+`lf repo new-chapter <name> --json` only under that authorization. Every Wave
+participates; do not rotate the repository merely to initialize one Wave. A Wave
+with no Projects receives an empty plan with `flow: feature`, unless an authored
+Planned successor supplies its content. Existing successors and predecessors
+retain identity; rotation completes predecessors rather than deleting them.
+
+Author future content in the Planned Linear Project through an available
+authorized provider interface. For an existing current Project,
+`lf wave update-plan --wave <wave> --plan <plan.json>` replaces its complete
+content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
+There is no future-plan writer or historical chapter selector in these commands.
+Missing access or competing current Projects stays an explicit next action;
+never invent a local chapter store or guess a plan from the newest name.
 
 ### Existing Linear Task
 
@@ -231,9 +253,9 @@ lf ssh <host> home id --json
 lf home observe <home-id> ssh://<user>@<host>
 lf ssh <home-id> auth status
 lf ssh <home-id> route show
-lf ls --json
+lf wave list --json
 lf wave place <wave-id> <home-id>
-lf status <wave> --json
+lf wave status <wave> --json
 lf ssh <home-id> --wave <wave> wave/operate
 ```
 
@@ -243,25 +265,26 @@ for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf home observe` records the
-mutable SSH route for the stable HomeId. Placement is allowed only while no Run
+mutable SSH route for the stable HomeId. Placement is allowed only while no execution
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
 `lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
 changing placement, or starting a Wave; each changes durable execution state.
 
 ## 6. Prove the result
 
-Run the smallest read-only checks that prove the selected path:
+Run the smallest checks that prove the selected path:
 
 ```bash
-lf auth status
-lf route show
+lf auth status --cached          # cached; no provider request
+lf auth status --json            # inspect accepted managed evidence
+lf auth route show
 lf home id --json
-lf ls --json
+lf wave list --json
 ```
 
-For a selected Wave, also run `lf status <wave> --json` and
+For a selected Wave, also run `lf wave status <wave> --json` and
 `lf roadmap --wave <wave> --json`. After placement, use
-`lf status <wave> --json`. For a selected Task, run
+`lf wave status <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated
 historical problems. Do not start work as a setup test.

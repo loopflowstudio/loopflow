@@ -16,7 +16,7 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task Comments native proof", .serialized)
+@Suite("Task Comments native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskCommentsProofTests {
     @Test("Collapsed count, thread, failure and a late read stay with their own Task beside a live Session")
@@ -69,7 +69,10 @@ struct TaskCommentsProofTests {
         }
         func label(_ id: String) throws -> String { try find(id).accessibilityLabel().string() }
         func waitFor(_ condition: () async throws -> Bool) async throws {
-            for _ in 0..<30 where !(try await condition()) { try await settle(window) }
+            for _ in 0..<30 {
+                if try await condition() { return }
+                try await settle(window)
+            }
         }
 
         // Task A: the count is read on selection, the thread stays collapsed.
@@ -207,9 +210,9 @@ private actor CommentSource {
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _): return roadmap
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):
             reads.append(args)

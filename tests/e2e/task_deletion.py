@@ -7,8 +7,13 @@ import ssl
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+
+def _next_revision(value: str) -> str:
+    return (datetime.fromisoformat(value) + timedelta(seconds=1)).isoformat()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,6 +53,8 @@ class Handler(BaseHTTPRequestHandler):
             data = {"issue": issue if not issue["trashed"] else None}
         elif "query IssueDeletion" in query:
             data = {"issue": {"trashed": issue["trashed"]}}
+        elif "query IssueAttachments" in query:
+            data = {"issue": {"attachments": {"nodes": [], "pageInfo": page}}}
         elif "mutation DeleteIssue" in query:
             assert variables["id"] == issue["id"]
             issue["trashed"] = True
@@ -68,8 +75,13 @@ class Handler(BaseHTTPRequestHandler):
             }
         elif "mutation UpdateInitiative" in query:
             data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
+        elif "mutation RenameProject" in query:
+            project["name"] = variables["name"]
+            project["updatedAt"] = _next_revision(project["updatedAt"])
+            data = {"projectUpdate": {"success": True}}
         elif "mutation UpdateProject" in query:
             project.update({key: variables[key] for key in ["name", "description", "content"]})
+            project["updatedAt"] = _next_revision(project["updatedAt"])
             data = {"projectUpdate": {"project": {"id": variables["id"]}}}
         elif "query ListInitiativeProjects" in query:
             data = {"initiative": {"projects": {"nodes": [project], "pageInfo": page}}}
@@ -179,14 +191,17 @@ def main() -> None:
     authored.write_text("preserve authored work\n")
     project = {
         "id": fixture["project"],
+        "updatedAt": "2026-09-30T00:00:00Z",
         "name": "Task PR Tests",
         "description": "",
-        "content": "",
+        "content": "flow: feature",
+        "status": {"type": "started"},
         "initiatives": {"nodes": [{"id": "initiative-task-pr-tests"}]},
         "teams": {"nodes": [{"id": "team-task-pr-tests"}]},
     }
     issue = {
         "id": fixture["issue"],
+        "updatedAt": "2026-09-30T00:00:00Z",
         "identifier": "INF-123",
         "title": "Keep history",
         "description": "",
@@ -194,7 +209,7 @@ def main() -> None:
         "sortOrder": 1,
         "prioritySortOrder": 1,
         "assignee": None,
-        "state": {"type": "completed"},
+        "state": {"type": "unstarted"},
         "team": {"id": "team-task-pr-tests"},
         "project": project,
         "trashed": False,
@@ -226,13 +241,30 @@ def main() -> None:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
+            # Cancel-before-trash must preserve an unfinished primary checkout.
+            prs = db.execute("SELECT * FROM task_prs").fetchall()
+            result = subprocess.run(
+                [fixture["lf"], "task", "delete", "INF-123"],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode != 0
+            assert "primary checkout or default branch" in result.stderr, result.stderr
+            assert not issue["trashed"] and issue["state"]["type"] == "unstarted"
+            assert db.execute("SELECT work_state FROM tasks").fetchone() == ("ready",)
+            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
+            assert authored.read_text() == "preserve authored work\n"
+            issue["state"]["type"] = "completed"
+            issue["updatedAt"] = _next_revision(issue["updatedAt"])
             db.execute(
                 "UPDATE tasks SET work_state='done',work_terminal_at=123 WHERE id=?",
                 (fixture["task"],),
             )
             db.commit()
             before = db.execute("SELECT * FROM tasks").fetchall()
-            prs = db.execute("SELECT * FROM task_prs").fetchall()
             for selector in ["INF-123", fixture["task"]]:
                 result = subprocess.run(
                     [fixture["lf"], "task", "delete", selector],
@@ -245,7 +277,8 @@ def main() -> None:
                 assert result.returncode == 0, result.stderr
                 assert "INF-123: deleted" in result.stdout
                 assert (
-                    "Retained PR: https://github.com/loopflowstudio/fixture/pull/1" in result.stderr
+                    "Retained PR history: https://github.com/loopflowstudio/fixture/pull/1"
+                    in result.stderr
                 )
             assert server.state["deletes"] == 1 and issue["trashed"]
             assert issue["state"]["type"] == "completed"
@@ -275,26 +308,9 @@ def main() -> None:
                     timeout=30,
                 )
                 assert result.returncode != 0, f"{group} still dispatches"
-            # A separate unfinished fixture keeps the same retained checkout/PR.
-            db.execute("DELETE FROM task_deletions")
-            db.execute("UPDATE tasks SET work_state='ready',work_terminal_at=NULL")
-            db.commit()
-            issue["trashed"], issue["state"]["type"] = False, "unstarted"
-            result = subprocess.run(
-                [fixture["lf"], "task", "delete", "INF-123"],
-                cwd=repo,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            assert result.returncode == 0, result.stderr
-            assert issue["trashed"] and issue["state"]["type"] == "unstarted"
-            assert db.execute("SELECT work_state FROM tasks").fetchone() == ("abandoned",)
-            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
-            assert authored.read_text() == "preserve authored work\n"
             # An unplaced issue uses the identical binary entry point.
             issue["id"], issue["identifier"], issue["trashed"] = "unplaced-issue", "INF-124", False
+            issue["state"]["type"] = "unstarted"
             result = subprocess.run(
                 [fixture["lf"], "task", "delete", "INF-124"],
                 cwd=repo,
@@ -304,7 +320,7 @@ def main() -> None:
                 timeout=30,
             )
             assert result.returncode == 0, result.stderr
-            assert issue["trashed"] and server.state["deletes"] == 3
+            assert issue["trashed"] and server.state["deletes"] == 2
             assert db.execute("SELECT count(*) FROM tasks").fetchone() == (1,)
         finally:
             server.shutdown()

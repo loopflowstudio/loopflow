@@ -69,8 +69,7 @@ public struct WaveLens: Sendable, Hashable {
     }
 
     /// Counts do not establish Task health. Detailed conditions come from status.
-    public static func forWave(enabled: Bool = true, activeTasks: Int) -> WaveLens {
-        if !enabled { return WaveLens(color: .black, reason: "Disabled on this Home") }
+    public static func forWave(activeTasks: Int) -> WaveLens {
         return WaveLens(color: activeTasks > 0 ? .unknown : .black,
                         reason: activeTasks > 0 ? "\(activeTasks) active Tasks" : "No active Tasks")
     }

@@ -1,0 +1,260 @@
+{
+  "forwarded_accounts_diagnostic": "forwarded account identities uninspected; cached status does not contact the origin broker",
+  "accounts": [
+    {
+      "provider": "claude",
+      "account_id": "personal",
+      "login": "someone-with-a-very-long-but-valid-username@engineering.department.example.com",
+      "scope": "managed",
+      "source": "managed_home",
+      "cached_credential_state": "connected",
+      "verification": "accepted",
+      "diagnostic": null,
+      "recovery": null,
+      "observed_plan": null,
+      "configured_plan": "max",
+      "routing": "automatic",
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [
+        {
+          "provider": "claude",
+          "account_id": "personal",
+          "window": "session",
+          "used_percent": 22,
+          "resets_at": 1800003600,
+          "plan": null,
+          "observed_at": 1800000000,
+          "source": "poll"
+        },
+        {
+          "provider": "claude",
+          "account_id": "personal",
+          "window": "weekly:opus",
+          "used_percent": 96,
+          "resets_at": 1799990000,
+          "plan": null,
+          "observed_at": 1799900000,
+          "source": "stream"
+        }
+      ],
+      "verified_windows": [
+        "session"
+      ],
+      "reset_credits": null
+    },
+    {
+      "provider": "codex",
+      "account_id": "empty",
+      "login": "empty@example.com",
+      "scope": "managed",
+      "source": "managed_home",
+      "cached_credential_state": "connected",
+      "verification": "accepted",
+      "diagnostic": "usage response has no recognized percentage windows",
+      "recovery": null,
+      "observed_plan": "team",
+      "configured_plan": null,
+      "routing": "automatic",
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": {
+        "availableCount": 2,
+        "credits": [
+          {
+            "id": "credit-fixture",
+            "resetType": "codexRateLimits",
+            "status": "available",
+            "grantedAt": 1799900000,
+            "expiresAt": 1800100000,
+            "title": null,
+            "description": null
+          }
+        ]
+      }
+    },
+    {
+      "provider": "claude",
+      "account_id": "missing",
+      "login": "missing@example.com",
+      "scope": "managed",
+      "source": "managed_home",
+      "cached_credential_state": "missing",
+      "verification": "not_checked",
+      "diagnostic": null,
+      "recovery": "lf auth connect claude missing@example.com",
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": "automatic",
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": null
+    },
+    {
+      "provider": "claude",
+      "account_id": "rejected",
+      "login": "rejected@example.com",
+      "scope": "managed",
+      "source": "managed_home",
+      "cached_credential_state": "missing",
+      "verification": "rejected",
+      "diagnostic": "refresh grant rejected",
+      "recovery": "lf auth connect claude rejected@example.com",
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": "automatic",
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": null
+    },
+    {
+      "provider": "claude",
+      "account_id": "unavailable",
+      "login": "unavailable@example.com",
+      "scope": "managed",
+      "source": "managed_home",
+      "cached_credential_state": "connected",
+      "verification": "unavailable",
+      "diagnostic": "usage request unavailable (HTTP 429)",
+      "recovery": null,
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": "explicit_only",
+      "cooldown_until": 1800000300,
+      "expires_at": null,
+      "windows": [
+        {
+          "provider": "claude",
+          "account_id": "unavailable",
+          "window": "weekly",
+          "used_percent": 61,
+          "resets_at": null,
+          "plan": null,
+          "observed_at": 1799990000,
+          "source": "poll"
+        }
+      ],
+      "verified_windows": [],
+      "reset_credits": null
+    },
+    {
+      "provider": "codex",
+      "account_id": "remote",
+      "login": "remote@example.com",
+      "scope": "forwarded",
+      "source": "forwarded_origin",
+      "cached_credential_state": "uninspected",
+      "verification": "not_checked",
+      "diagnostic": null,
+      "recovery": null,
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": null,
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": null
+    },
+    {
+      "provider": "claude",
+      "account_id": null,
+      "login": null,
+      "scope": "local",
+      "source": "stored_token",
+      "cached_credential_state": "expired",
+      "verification": "not_checked",
+      "diagnostic": null,
+      "recovery": null,
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": null,
+      "cooldown_until": null,
+      "expires_at": 1790000000,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": null
+    },
+    {
+      "provider": "codex",
+      "account_id": null,
+      "login": null,
+      "scope": "local",
+      "source": "ambient_uninspected",
+      "cached_credential_state": "uninspected",
+      "verification": "not_checked",
+      "diagnostic": null,
+      "recovery": null,
+      "observed_plan": null,
+      "configured_plan": null,
+      "routing": null,
+      "cooldown_until": null,
+      "expires_at": null,
+      "windows": [],
+      "verified_windows": [],
+      "reset_credits": null
+    }
+  ],
+  "browser": {
+    "profiles": [
+      {
+        "id": "personal",
+        "chrome_directory": "Profile 3",
+        "expected_login": "personal@example.com",
+        "created_at": 1799000000,
+        "updated_at": 1799500000
+      },
+      {
+        "id": "work",
+        "chrome_directory": "Profile 7",
+        "expected_login": null,
+        "created_at": 1799100000,
+        "updated_at": 1799100000
+      }
+    ],
+    "bindings": [
+      {
+        "provider": "claude",
+        "account_id": "personal",
+        "position": 0,
+        "profile_id": "personal"
+      },
+      {
+        "provider": "claude",
+        "account_id": "personal",
+        "position": 1,
+        "profile_id": "work"
+      },
+      {
+        "provider": "linear",
+        "account_id": null,
+        "position": 0,
+        "profile_id": "work"
+      }
+    ],
+    "local_choices": [
+      {
+        "directory": "Profile 3",
+        "name": "Personal",
+        "login": "personal@example.com"
+      },
+      {
+        "directory": "Profile 7",
+        "name": "Work",
+        "login": null
+      },
+      {
+        "directory": "Profile 9",
+        "name": "Spare",
+        "login": null
+      }
+    ],
+    "discovery_diagnostic": null
+  }
+}

@@ -15,28 +15,23 @@ lf cron history --wave infrastructure --days 35
 ```
 
 ```bash
-uv run python scripts/install.py local --use  # pin a local build against a disposable Home
-lf install                                   # return to the latest published release
+lf install                                   # install the latest published release
 uv run python scripts/install.py local        # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`scripts/install.py local` builds this worktree's `lf`,
-`lfd`, and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
-migration authority. `local --use` retains the complete published fallback,
-clones the reliable Home into a disposable installed-development Home, and
-promotes the local artifact set through the same lock and drain boundary as a
-release. A compatible later local build reuses that clone; pass `--fresh` to
-fork reliable data again. `lf install` resolves one published tag, verifies its
-installer from `SHA256SUMS`, then returns every installed surface to the
-reliable published Home. Dev data is never imported into it.
+`scripts/install.py local` builds this worktree's `lf`
+and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
+migration authority. Local builds never change the installed CLI or main Home.
+Use an explicit disposable `LF_HOME` for experiments.
 
 Older installed CLIs still call `scripts/install.py refresh` after updating
 main. That upgrade entry point delegates to `release/install.sh`, which verifies
 the published artifacts and promotes them through the same transaction.
 
 Published promotion stops before compilation while draft migrations remain.
-Local promotion applies their exact embedded graph only to the disposable Home.
+Explicit experiments initialize the embedded schema in a fresh directory.
 Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
@@ -54,6 +49,12 @@ intent, an isolated release PR, the tag, and observed completion. This
 repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
+
+Failed release-PR checks enter the same watched CI repair as `lf pr land`.
+Release preparation still rebuilds version metadata when main advances.
+Blocked repairs retain their checkout so `lf release run` can resume the work.
+The scheduled `release-run` Flow executes the release operation directly;
+its failed result cannot be hidden by a successful agent report.
 
 The repository names the logical `loopflow-release-publisher` command. The
 maintained Home supplies that executable on PATH and keeps its credential
@@ -90,8 +91,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local` | Build validation-only `lf`, `lfd`, and `Loopflow.app` into `local-bin/` | No |
-| Local | `scripts/install.py local --use` | Promote the local artifact set against a disposable Home | Yes, disposable Home |
+| Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the

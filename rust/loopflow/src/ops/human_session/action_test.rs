@@ -9,8 +9,6 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
-use crate::durable::RunId;
-
 #[derive(Debug, Clone)]
 pub(crate) struct LookupPause {
     action: &'static str,
@@ -20,7 +18,7 @@ pub(crate) struct LookupPause {
 }
 
 static PAUSE: Mutex<Option<LookupPause>> = Mutex::new(None);
-static CLIENTS: Mutex<Option<HashMap<RunId, (String, bool)>>> = Mutex::new(None);
+static CLIENTS: Mutex<Option<HashMap<String, (String, bool)>>> = Mutex::new(None);
 
 impl LookupPause {
     pub fn at(action: &'static str, selector: &str) -> Self {
@@ -53,7 +51,7 @@ pub(super) async fn after_lookup(action: &str, selector: &str) {
 pub(crate) struct NativeClients;
 
 impl NativeClients {
-    pub fn new(session: &str, runs: &[RunId]) -> Self {
+    pub fn new(session: &str, runs: &[String]) -> Self {
         assert!(CLIENTS
             .lock()
             .unwrap()
@@ -66,16 +64,16 @@ impl NativeClients {
         Self
     }
 
-    pub fn add(&self, session: &str, run: &RunId) {
+    pub fn add(&self, session: &str, run: &str) {
         CLIENTS
             .lock()
             .unwrap()
             .as_mut()
             .unwrap()
-            .insert(run.clone(), (session.into(), true));
+            .insert(run.to_owned(), (session.into(), true));
     }
 
-    pub fn active(&self) -> HashSet<RunId> {
+    pub fn active(&self) -> HashSet<String> {
         CLIENTS
             .lock()
             .unwrap()
@@ -97,7 +95,7 @@ impl Drop for NativeClients {
 
 fn assert_launch_locked(session: &str) {
     let name = hex::encode(&Sha256::digest(session.as_bytes())[..16]);
-    let path = crate::store::current_home_lf_home_dir()
+    let path = crate::store::lf_home_dir()
         .join(super::LAUNCH_LOCK_DIRECTORY)
         .join(format!(".{name}.launch.lock"));
     let probe = OpenOptions::new()
@@ -112,7 +110,7 @@ fn assert_launch_locked(session: &str) {
     );
 }
 
-pub(super) fn resume(run: &RunId, lock: &mut Option<File>) -> Option<Result<bool>> {
+pub(super) fn resume(run: &String, lock: &mut Option<File>) -> Option<Result<bool>> {
     let mut clients = CLIENTS.lock().unwrap();
     let (session, active) = clients.as_mut()?.get_mut(run)?;
     assert!(lock.is_some());
@@ -123,7 +121,7 @@ pub(super) fn resume(run: &RunId, lock: &mut Option<File>) -> Option<Result<bool
     Some(Ok(true))
 }
 
-pub(super) fn stop(run: &RunId) -> bool {
+pub(super) fn stop(run: &String) -> bool {
     let mut clients = CLIENTS.lock().unwrap();
     let Some((session, active)) = clients.as_mut().and_then(|clients| clients.get_mut(run)) else {
         return false;

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
-use crate::engine::{ConcreteStep, OccurrencePolicy};
+use crate::engine::ConcreteStep;
 use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
@@ -65,7 +65,6 @@ pub enum DurableDataError {
 
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
-durable_id!(RunId, "run_");
 durable_id!(HomeId, "home_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
@@ -122,7 +121,6 @@ pub struct Home {
 pub struct Placement {
     pub work: WorkRef,
     pub home_id: HomeId,
-    pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
 }
@@ -145,12 +143,10 @@ pub(crate) fn test_flow_invocation(
             };
             crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
                 skill: crate::engine::Skill::named(&name),
-                policy: crate::engine::OccurrencePolicy {
-                    id: target.then(|| node_id.map(str::to_string)).flatten(),
-                    human: target && human,
-                    repeat: None,
-                },
-                flow_parents: Vec::new(),
+                id: target.then(|| node_id.map(str::to_string)).flatten(),
+                human: target && human,
+                repeat: None,
+                sources: Vec::new(),
             })
         })
         .collect();
@@ -177,7 +173,7 @@ pub struct TaskWorkerClaim {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFlowBlocker {
-    pub run_id: Option<RunId>,
+    pub captured: Option<i64>,
     pub reason: String,
     pub restart_required: bool,
     #[serde(with = "time::serde::rfc3339")]
@@ -187,7 +183,7 @@ pub struct TaskFlowBlocker {
 impl TaskFlowBlocker {
     pub fn now(reason: impl Into<String>) -> Self {
         Self {
-            run_id: None,
+            captured: None,
             reason: reason.into(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),
@@ -195,12 +191,12 @@ impl TaskFlowBlocker {
     }
 }
 
-/// The current attempt at an invocation's cursor: its Run, whether the launch
-/// published it, and once the Run settled, its outcome. A reserved attempt
-/// is a row with `published=0`.
+/// Read projection of the Flow's selected capture and its Session publication.
+/// The recorder outcome is historical evidence, not native turn settlement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowAttempt {
-    pub run_id: RunId,
+    pub captured: i64,
+    pub run_id: String,
     pub published: bool,
     pub outcome: Option<String>,
 }
@@ -211,12 +207,24 @@ impl FlowAttempt {
     }
 }
 
+/// Launch authority captured before starting a native turn. Observers and
+/// conversation continuations do not receive this Flow capability.
+#[derive(Debug, Clone)]
+pub struct FlowTurnSelection {
+    pub output: Option<crate::engine::flow_output::FlowOutput>,
+    pub flow_id: String,
+    pub version: u64,
+    pub claim: Option<TaskWorkerClaim>,
+    pub session_id: String,
+    pub after: i64,
+}
+
 /// One Flow invocation as its row holds it: the captured graph, the cursor,
 /// the launch facts, the current attempt, the worker claim and the failure. A
 /// Task's own invocation and a saved Flow are the same record driven by the
 /// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowInvocation {
+pub struct FlowSession {
     pub invocation: QueuedInvocation,
     pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,
@@ -236,7 +244,7 @@ pub struct FlowInvocation {
     pub updated_at: OffsetDateTime,
 }
 
-impl FlowInvocation {
+impl FlowSession {
     pub fn id(&self) -> &str {
         &self.invocation.id
     }
@@ -252,29 +260,29 @@ impl FlowInvocation {
     }
 
     pub fn current_checked(&self) -> Option<StepRef> {
-        let (step, kind, policy) = match self.current_step()? {
+        let (step, kind, id, human, repeat) = match self.current_step()? {
             ConcreteStep::Skill(skill) => (
                 skill.skill.name.clone(),
                 StepKind::Skill,
-                skill.policy.clone(),
+                skill.id.clone(),
+                skill.human,
+                skill.repeat.clone(),
             ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Op,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
+            ConcreteStep::Command(command) => {
+                (command.item.display_name(), StepKind::Op, None, false, None)
+            }
+            ConcreteStep::Xor(branch) => {
+                (branch.router.name.clone(), StepKind::Xor, None, false, None)
+            }
         };
         Some(StepRef {
             invocation_id: self.invocation.id.clone(),
             flow: self.invocation.flow.clone(),
             step,
             kind,
-            policy,
+            id,
+            human,
+            repeat,
             index: u32::try_from(self.cursor.index).ok()?,
             total: u32::try_from(self.invocation.steps.len()).ok()?,
             iteration: self.cursor.iteration,
@@ -287,13 +295,13 @@ impl FlowInvocation {
     }
 
     pub fn is_human(&self) -> bool {
-        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human)
+        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.human)
     }
 
     pub fn is_decision(&self) -> bool {
         match self.current_step() {
             Some(ConcreteStep::Xor(_)) => true,
-            Some(ConcreteStep::Skill(skill)) => skill.policy.repeat.is_some(),
+            Some(ConcreteStep::Skill(skill)) => skill.repeat.is_some(),
             _ => false,
         }
     }
@@ -303,7 +311,7 @@ impl FlowInvocation {
         let leaf = self.cursor.leaf();
         match self.current_step() {
             Some(ConcreteStep::Skill(skill)) => {
-                skill.policy.repeat.is_some() && leaf.progress.verdict.is_some()
+                skill.repeat.is_some() && leaf.progress.verdict.is_some()
             }
             Some(ConcreteStep::Xor(_)) => leaf.route.is_some(),
             _ => false,
@@ -314,7 +322,7 @@ impl FlowInvocation {
     pub fn step_name(&self) -> Option<String> {
         Some(match self.current_step()? {
             ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
+            ConcreteStep::Command(op) => format!("op: {}", op.item.display_name()),
             ConcreteStep::Xor(branch) => branch.router.name.clone(),
         })
     }
@@ -325,7 +333,7 @@ impl FlowInvocation {
     }
 
     /// The Run a pending review's agent is running in, once launched.
-    pub fn session_run_id(&self) -> Option<&RunId> {
+    pub fn review_artifact_key(&self) -> Option<&String> {
         self.current_attempt
             .as_ref()
             .filter(|attempt| attempt.published)
@@ -333,11 +341,11 @@ impl FlowInvocation {
     }
 
     /// The Work the Flow was launched with, as its Runs declare it.
-    pub fn declared_work(&self) -> Option<crate::session::RunWork> {
+    pub fn declared_work(&self) -> Option<crate::session::SessionWork> {
         if self.task_id.is_none() && self.wave_id.is_none() {
             return None;
         }
-        Some(crate::session::RunWork {
+        Some(crate::session::SessionWork {
             task_id: self.task_id.clone(),
             wave_id: self.wave_id.clone(),
             source: crate::session::WorkSource::Declared,
@@ -357,7 +365,10 @@ pub enum TaskWorkerClaimOutcome {
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
-    Run(RunId),
+    Captured(i64),
+    /// Historical selector preserved from pre-event attribution.
+    #[serde(alias = "run")]
+    Imported(String),
 }
 
 /// A steer projected from a Work's durable comment stream
@@ -441,6 +452,46 @@ pub struct AbandonReceipt {
     pub reason: String,
     #[serde(with = "time::serde::rfc3339")]
     pub abandoned_at: OffsetDateTime,
+}
+
+/// Query values for retained FlowSession discovery; none carries driver authority.
+#[derive(Debug, Clone, Default)]
+pub struct FlowFilter {
+    pub repo: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub taskless: bool,
+    pub managed: Option<bool>,
+    pub state: Option<crate::session::FlowSummaryState>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowInventoryEntry {
+    #[serde(flatten)]
+    pub summary: crate::session::FlowSummary,
+    pub repo: Option<String>,
+    pub managed: bool,
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowPage {
+    pub entries: Vec<FlowInventoryEntry>,
+    pub next: Option<String>,
+}
+
+/// One exact saved capture. History and provider outcomes retain their own APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowDetail {
+    pub entry: FlowInventoryEntry,
+    pub graph: crate::engine::flow_graph::FlowGraph,
+    pub current: Option<u32>,
+    pub completed: Vec<u32>,
+    pub returns: Vec<crate::engine::flow_graph::FlowReturn>,
+    pub version: u64,
+    pub cwd: std::path::PathBuf,
+    pub failure: Option<TaskFlowBlocker>,
 }
 
 #[cfg(test)]

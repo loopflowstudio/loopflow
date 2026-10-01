@@ -10,15 +10,15 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::chat::types::{ConversationEvent, FailureEvidence, Lifecycle};
+use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::engine::agent::{
     opencode_worktree_config, register_interrupt_cleanup, AgentConfig, AgentWriteScope,
 };
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
-    opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
-    SendCurrentOutcome,
+    opencode_history, opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError,
+    RawProviderEvent, SendCurrentOutcome,
 };
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -44,15 +44,11 @@ pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     client: reqwest::Client,
-    approval: ApprovalPolicy,
+    history: Arc<Mutex<opencode_history::History>>,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
     turn_in_progress: Arc<AtomicBool>,
-    /// The mapped turn id of the live turn, written by the SSE reader on
-    /// `TurnStarted`. `send_current` reads it as the steer's provider receipt.
-    current_turn_id: Arc<Mutex<Option<String>>>,
     shutdown_requested: Arc<AtomicBool>,
-    interrupt_requested: Arc<AtomicBool>,
     child: Option<Child>,
     /// The spawned server's process-group id (== its pid under
     /// `process_group(0)`). 0 while no server is running.
@@ -71,18 +67,19 @@ impl std::fmt::Debug for OpenCodeHarness {
 }
 
 impl OpenCodeHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
+    pub fn new(
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        _approval: ApprovalPolicy,
+    ) -> Self {
         Self {
             events,
             raw_provider: None,
             client: reqwest::Client::new(),
-            approval,
+            history: Arc::new(Mutex::new(opencode_history::History::default())),
             config: None,
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
-            current_turn_id: Arc::new(Mutex::new(None)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
-            interrupt_requested: Arc::new(AtomicBool::new(false)),
             child: None,
             child_group: Arc::new(AtomicU32::new(0)),
             interrupt_hook_registered: false,
@@ -94,6 +91,23 @@ impl OpenCodeHarness {
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
+        let owner = config
+            .session_driver
+            .as_ref()
+            .map(|(session, driver)| {
+                Ok::<_, anyhow::Error>((
+                    crate::store::sqlite::SqliteStore::new(
+                        &crate::store::database_path_from_env()?
+                    )?,
+                    session.clone(),
+                    driver.clone(),
+                ))
+            })
+            .transpose()?;
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(
+            owner,
+            config.flow_selection.clone(),
+        )));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -135,31 +149,68 @@ impl OpenCodeHarness {
             return Err(err);
         }
 
-        // Resume the stored session when this serve instance still has it —
-        // a resumed session keeps its conversation history, which providers
-        // serve from prompt cache. Any probe failure falls back to fresh.
-        let resumed =
-            resume_provider_session(&self.client, &base_url, self.provider_session_id.as_deref())
-                .await;
-        let provider_session_id = match resumed {
-            Some(provider_session_id) => provider_session_id,
-            None => match create_provider_session(&self.client, &base_url).await {
-                Ok(provider_session_id) => provider_session_id,
-                Err(err) => {
+        let provider_session_id = match resume_provider_session(
+            &self.client,
+            &base_url,
+            self.provider_session_id.as_deref(),
+        )
+        .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => match create_provider_session(&self.client, &base_url).await {
+                Ok(id) => id,
+                Err(error) => {
                     shutdown_child(&mut child).await;
-                    return Err(err);
+                    return Err(error);
                 }
             },
+            Err(error) => {
+                shutdown_child(&mut child).await;
+                return Err(error);
+            }
         };
+        // The dedicated server answers each native permission once, after the
+        // originating user message has been selected under the Session owner.
+        let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
+        if config.write_scope == AgentWriteScope::Worktree {
+            permissions
+                .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
+        }
+        if let Err(error) = self
+            .client
+            .patch(format!("{base_url}/session/{provider_session_id}"))
+            .json(&json!({"permission":permissions}))
+            .send()
+            .await?
+            .error_for_status()
+        {
+            shutdown_child(&mut child).await;
+            return Err(error.into());
+        }
+        {
+            let history = self.history.lock().expect("OpenCode history lock poisoned");
+            if let Some((store, session, driver)) = &history.owner {
+                if let Some(pid) = child.id() {
+                    if let Some(start) = crate::journal::process_started_at(pid)? {
+                        store.record_session_provider_process(session, driver, pid, start)?;
+                    }
+                }
+                store.record_session_connection(
+                    session,
+                    driver,
+                    &base_url,
+                    &provider_session_id,
+                )?;
+            }
+        }
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
-        let current_turn_id = self.current_turn_id.clone();
-        let interrupt_requested = self.interrupt_requested.clone();
-        let approval = self.approval;
+        let history = self.history.clone();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let reader_base_url = base_url.clone();
         let reader_session_id = provider_session_id.clone();
         let reader_model = opencode_model(config)
@@ -206,6 +257,7 @@ impl OpenCodeHarness {
                 return;
             }
 
+            let _ = ready_tx.send(());
             let mut parser = SseParser::default();
             let mut state = opencode_mapping::ReaderState::new(
                 reader_session_id.clone(),
@@ -258,75 +310,70 @@ impl OpenCodeHarness {
                     };
 
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
-                    for event in mapped.events {
-                        let event = match event {
-                            ConversationEvent::TurnStarted { turn_id } => {
-                                turn_in_progress.store(true, Ordering::SeqCst);
-                                // Record the live turn id so a mid-turn steer
-                                // reports its provider receipt against it.
-                                *current_turn_id
-                                    .lock()
-                                    .expect("opencode turn id lock poisoned") =
-                                    Some(turn_id.clone());
-                                // An abort that raced turn completion must not
-                                // stamp the next turn.
-                                interrupt_requested.store(false, Ordering::SeqCst);
-                                ConversationEvent::TurnStarted { turn_id }
-                            }
-                            ConversationEvent::TurnCompleted { turn_id, status } => {
-                                turn_in_progress.store(false, Ordering::SeqCst);
-                                // opencode's event stream does not distinguish
-                                // aborted turns (it reports idle or error), so
-                                // the first turn boundary after an abort
-                                // request is stamped Interrupted here.
-                                let status = if interrupt_requested.swap(false, Ordering::SeqCst) {
-                                    Lifecycle::Interrupted
-                                } else {
-                                    status
-                                };
-                                ConversationEvent::TurnCompleted { turn_id, status }
-                            }
-                            other => other,
-                        };
-                        let _ = event_tx.send(event);
-                    }
-
-                    for request_id in mapped.permission_requests {
-                        if let Err(err) = answer_permission(
-                            &client,
-                            &reader_base_url,
-                            &reader_session_id,
-                            &request_id,
-                            approval,
+                    // SSE is a wake edge; native messages own request identity,
+                    // completion and usage. Busy/idle cannot supply those facts.
+                    if matches!(
+                        raw["type"].as_str(),
+                        Some(
+                            "message.updated"
+                                | "permission.asked"
+                                | "session.idle"
+                                | "session.status"
+                                | "session.error"
+                                | "message.part.updated"
                         )
-                        .await
-                        {
-                            tracing::warn!(
-                                request_id = %request_id,
-                                error = %err,
-                                "failed to answer OpenCode permission request"
+                    ) {
+                        let observation = async {
+                            let messages = opencode_history::read_messages(&client, &reader_base_url, &reader_session_id).await?;
+                            let events = history.lock().expect("OpenCode history lock poisoned").observe(&reader_session_id, &messages)?;
+                            // Emit native-correlated output before its completion,
+                            // even when a snapshot gets ahead of queued SSE deltas.
+                            for event in events.iter().filter(|event| matches!(event, ConversationEvent::TurnStarted { .. })) {
+                                state.observe_lifecycle(event);
+                                let _ = event_tx.send(event.clone());
+                            }
+                            let current_messages: Vec<_> = messages.iter().filter(|message| message["info"]["parentID"].as_str().is_some_and(|request| history.lock().expect("OpenCode history lock poisoned").admitted(request))).cloned().collect();
+                            for event in state.observe_messages(&current_messages) { let _ = event_tx.send(event); }
+                            for event in events {
+                                if !matches!(event, ConversationEvent::TurnStarted { .. }) { state.observe_lifecycle(&event); }
+                                if matches!(event, ConversationEvent::TurnCompleted { .. }) { turn_in_progress.store(false, Ordering::SeqCst); }
+                                if !matches!(event, ConversationEvent::TurnStarted { .. }) { let _ = event_tx.send(event); }
+                            }
+                            for request_id in &mapped.permission_requests {
+                                let assistant = raw["properties"]["tool"]["messageID"].as_str()
+                                    .ok_or_else(|| anyhow!("OpenCode permission has no originating assistant message"))?;
+                                let request = messages.iter().find(|message| message["info"]["id"] == assistant)
+                                    .and_then(|message| message["info"]["parentID"].as_str())
+                                    .ok_or_else(|| anyhow!("OpenCode permission has no originating request"))?;
+                                if !history.lock().expect("OpenCode history lock poisoned").admitted(request) {
+                                    return Err(anyhow!("OpenCode permission belongs to an unselected request"));
+                                }
+                                let owner = history.lock().expect("OpenCode history lock poisoned").owner.clone();
+                                opencode_history::post(owner, format!("{reader_base_url}/permission/{request_id}/reply"), json!({"reply":"once"})).await?;
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }.await;
+                        if let Err(error) = observation {
+                            send_disconnect_error(
+                                &event_tx,
+                                &shutdown_requested,
+                                format!("OpenCode native history: {error}"),
+                                None,
                             );
+                            return;
                         }
+                    }
+                    for event in mapped.events {
+                        let _ = event_tx.send(event);
                     }
                 }
             }
 
             turn_in_progress.store(false, Ordering::SeqCst);
 
-            // Capture phase before closing the orphaned turn — close_orphaned_turn
-            // takes the turn id, so turn_is_open() would read false afterwards.
+            // Disconnect is command failure; absent native completion stays unknown.
             let turn_was_open = state.turn_is_open();
             let turn_had_content = state.turn_has_content();
-
-            // Close any turn left open when the stream died so every TurnStarted
-            // gets a terminal TurnCompleted and the journal never carries an open
-            // turn past a disconnect. The body still fails once via the Error
-            // handler below — this is ledger honesty, not a second failure.
-            if turn_was_open {
-                for event in state.close_orphaned_turn() {
-                    let _ = event_tx.send(event);
-                }
-            }
 
             // Phase-aware reason so the durable Failed record names where the
             // stream died, not just that it did. A mid-turn disconnect is
@@ -385,6 +432,9 @@ impl OpenCodeHarness {
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
         self.provider_session_id = Some(provider_session_id);
+        ready_rx
+            .await
+            .map_err(|_| anyhow!("OpenCode event stream did not connect"))?;
         Ok(())
     }
 }
@@ -431,8 +481,6 @@ impl Harness for OpenCodeHarness {
             return Ok(());
         };
 
-        self.interrupt_requested.store(false, Ordering::SeqCst);
-
         if self
             .turn_in_progress
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -451,7 +499,12 @@ impl Harness for OpenCodeHarness {
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let payload = build_turn_payload(&turn_content, config, first_turn);
+        let mut payload = build_turn_payload(&turn_content, config, first_turn);
+        let (request, owner) = {
+            let mut history = self.history.lock().expect("OpenCode history lock poisoned");
+            (history.request(), history.owner.clone())
+        };
+        payload["messageID"] = json!(request);
 
         // `prompt_async` enqueues the turn and returns immediately (204); the
         // turn's boundary and output arrive over the `/event` SSE stream. The
@@ -460,7 +513,7 @@ impl Harness for OpenCodeHarness {
         // self` borrow) from returning — leaving no window to call
         // `send_current` mid-turn.
         let message_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
-        send_request_with_retry(&self.client, Method::POST, &message_url, Some(payload)).await?;
+        opencode_history::post(owner, message_url, payload).await?;
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
@@ -487,22 +540,15 @@ impl Harness for OpenCodeHarness {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        // Deliver the steer as another `prompt_async`. opencode keeps the
-        // session `busy` and runs it as a queued continuation of the live turn,
-        // emitting a single `idle` once the queue drains — so the reader still
-        // sees exactly one turn boundary per `send_input`. No coalescing needed.
-        let payload = build_turn_payload(text, &config, false);
+        let mut payload = build_turn_payload(text, &config, false);
+        let (provider_turn_id, owner) = {
+            let mut history = self.history.lock().expect("OpenCode history lock poisoned");
+            (history.request(), history.owner.clone())
+        };
+        payload["messageID"] = json!(provider_turn_id);
         let steer_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
-        match send_request_with_retry(&self.client, Method::POST, &steer_url, Some(payload)).await {
-            Ok(_) => {
-                let provider_turn_id = self
-                    .current_turn_id
-                    .lock()
-                    .expect("opencode turn id lock poisoned")
-                    .clone()
-                    .unwrap_or(provider_session_id);
-                SendCurrentOutcome::Sent { provider_turn_id }
-            }
+        match opencode_history::post(owner, steer_url, payload).await {
+            Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),
             },
@@ -510,10 +556,7 @@ impl Harness for OpenCodeHarness {
     }
 
     async fn interrupt(&mut self) -> Result<()> {
-        // opencode cancels via its session abort endpoint; the server and
-        // session stay up for the next turn. The turn's terminal status is
-        // stamped Interrupted by the SSE task (see the abort note there),
-        // since opencode itself reports the boundary as idle/error.
+        // Native history records the eventual outcome of this abort request.
         if !self.turn_in_progress.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -526,7 +569,6 @@ impl Harness for OpenCodeHarness {
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        self.interrupt_requested.store(true, Ordering::SeqCst);
         let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
         send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({}))).await?;
         Ok(())
@@ -606,23 +648,21 @@ async fn shutdown_child(child: &mut Child) {
     let _ = child.wait().await;
 }
 
-/// Probe a previously stored session id against this serve instance. opencode
-/// persists sessions in its project storage, so a new serve can pick up a
-/// session an earlier one created. `None` (missing id, dead session, or any
-/// transport error) means "create a fresh session instead" — resume is an
-/// optimization, never a failure.
+/// A saved conversation must remain the same conversation after a retry.
 async fn resume_provider_session(
     client: &reqwest::Client,
     base_url: &str,
     stored: Option<&str>,
-) -> Option<String> {
-    let session_id = stored?;
-    let session_url = format!("{base_url}/session/{session_id}");
-    let response = client.get(&session_url).send().await.ok()?;
-    response
-        .status()
-        .is_success()
-        .then(|| session_id.to_string())
+) -> Result<Option<String>> {
+    let Some(session_id) = stored else {
+        return Ok(None);
+    };
+    client
+        .get(format!("{base_url}/session/{session_id}"))
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(Some(session_id.into()))
 }
 
 async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Result<String> {
@@ -800,22 +840,6 @@ async fn send_request_with_retry(
     }
 }
 
-async fn answer_permission(
-    client: &reqwest::Client,
-    base_url: &str,
-    session_id: &str,
-    request_id: &str,
-    approval: ApprovalPolicy,
-) -> Result<()> {
-    let url = format!("{base_url}/session/{session_id}/permissions/{request_id}");
-    let response = match approval {
-        ApprovalPolicy::AutoApprove => "always",
-    };
-    let payload = json!({ "response": response });
-    let _ = send_request_with_retry(client, Method::POST, &url, Some(payload)).await?;
-    Ok(())
-}
-
 fn parse_session_id(value: &Value) -> Option<String> {
     value
         .get("id")
@@ -853,6 +877,9 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
             { "type": "text", "text": content }
         ]
     });
+    if let Some(schema) = config.output_schema() {
+        payload["format"] = json!({"type":"json_schema", "schema":schema, "retryCount":2});
+    }
 
     if first_turn && !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
@@ -1120,14 +1147,14 @@ mod tests {
 
     // -- Fake-SSE disconnect matrix --
 
-    use crate::chat::types::ConversationItem;
+    use crate::chat::types::{ConversationItem, Lifecycle};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     /// A stored session id is reused when the serve instance still has it and
     /// dropped when it's gone — resume is an optimization, never a failure.
     #[tokio::test]
-    async fn resume_probe_reuses_live_sessions_and_drops_dead_ones() {
+    async fn resume_probe_preserves_saved_identity_on_failure() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{port}");
@@ -1151,326 +1178,20 @@ mod tests {
 
         let client = reqwest::Client::new();
         assert_eq!(
-            resume_provider_session(&client, &base_url, Some("live")).await,
+            resume_provider_session(&client, &base_url, Some("live"))
+                .await
+                .unwrap(),
             Some("live".to_string())
         );
-        assert_eq!(
-            resume_provider_session(&client, &base_url, Some("gone")).await,
-            None
-        );
-        assert_eq!(
-            resume_provider_session(&client, &base_url, None).await,
-            None
-        );
-    }
-
-    /// Where the fake SSE stream dies relative to the turn lifecycle.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum DisconnectCase {
-        /// Stream closes before any event — no TurnStarted.
-        PreContent,
-        /// Stream closes after `session.status: active` but before any content.
-        AfterActive,
-        /// Stream closes after a tool call starts but before it completes.
-        MidTool,
-        /// Stream closes after a durable tool completion (Command) — the
-        /// side-effecting case that is NOT replay-safe.
-        AfterDurable,
-    }
-
-    const SESSION_ID: &str = "test_session";
-
-    fn scripted_sse_events(case: DisconnectCase) -> Vec<&'static str> {
-        let active = r#"data: {"type":"session.status","properties":{"sessionID":"test_session","status":"active"}}"#;
-        let text = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"p1","type":"TextPart","delta":"working"}}}"#;
-        let tool_running = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"tool_1","type":"ToolPart","state":"running","name":"Bash","command":["echo","ok"]}}}"#;
-        let tool_completed = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"tool_1","type":"ToolPart","state":"completed","name":"Bash","command":["echo","ok"],"output":"ok"}}}"#;
-
-        match case {
-            DisconnectCase::PreContent => vec![],
-            DisconnectCase::AfterActive => vec![active],
-            DisconnectCase::MidTool => vec![active, tool_running],
-            DisconnectCase::AfterDurable => vec![active, text, tool_completed],
-        }
-    }
-
-    /// Drive the fake SSE stream through the same pipeline the harness SSE task
-    /// uses: SseParser → map_event → close_orphaned_turn + Error on disconnect.
-    async fn process_fake_sse(case: DisconnectCase) -> Vec<ConversationEvent> {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let url = format!("http://127.0.0.1:{port}/event");
-
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buf = vec![0u8; 4096];
-            let _ = socket.read(&mut buf).await;
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
-                .await
-                .unwrap();
-            for event in scripted_sse_events(case) {
-                socket
-                    .write_all(format!("{event}\n\n").as_bytes())
-                    .await
-                    .unwrap();
-            }
-            drop(socket);
-        });
-
-        let client = reqwest::Client::new();
-        let mut response = client
-            .get(&url)
-            .header(reqwest::header::ACCEPT, "text/event-stream")
-            .send()
+        assert!(resume_provider_session(&client, &base_url, Some("gone"))
             .await
-            .unwrap();
-
-        let (tx, mut rx) = mpsc::unbounded_channel::<ConversationEvent>();
-        let mut state =
-            opencode_mapping::ReaderState::new(SESSION_ID.to_string(), None, "opencode");
-        let mut parser = SseParser::default();
-        let stream_started_at = chrono::Utc::now().timestamp_millis();
-
-        while let Ok(Some(chunk)) = response.chunk().await {
-            for payload in parser.push(&chunk) {
-                if payload.trim().is_empty() || payload.trim() == "[DONE]" {
-                    continue;
-                }
-                if let Ok(raw) = serde_json::from_str::<Value>(&payload) {
-                    let mapped = opencode_mapping::map_event(&raw, &mut state);
-                    for event in mapped.events {
-                        let _ = tx.send(event);
-                    }
-                }
-            }
-        }
-
-        let turn_was_open = state.turn_is_open();
-        let turn_had_content = state.turn_has_content();
-        if turn_was_open {
-            for event in state.close_orphaned_turn() {
-                let _ = tx.send(event);
-            }
-        }
-        let reason = if turn_was_open {
-            if turn_had_content {
-                "OpenCode event stream disconnected mid-stream after partial output"
-            } else {
-                "OpenCode event stream disconnected before the turn produced any output"
-            }
-        } else {
-            "OpenCode event stream disconnected"
-        };
-        let evidence = disconnect_evidence(Some(&state), stream_started_at, "stream_eof", None);
-        let _ = tx.send(ConversationEvent::Error {
-            code: OPENCODE_DISCONNECTED_CODE.to_string(),
-            message: reason.to_string(),
-            evidence: Some(evidence),
-        });
-
-        let mut events = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            events.push(event);
-        }
-        events
-    }
-
-    fn assert_no_false_completed(events: &[ConversationEvent]) {
-        let false_completed = events.iter().any(|event| {
-            matches!(
-                event,
-                ConversationEvent::TurnCompleted {
-                    status: Lifecycle::Completed,
-                    ..
-                }
-            )
-        });
-        assert!(
-            !false_completed,
-            "a disconnect must never produce a Completed turn; events: {events:?}"
-        );
-    }
-
-    fn assert_every_started_turn_closed(events: &[ConversationEvent]) {
-        let started = events
-            .iter()
-            .filter(|e| matches!(e, ConversationEvent::TurnStarted { .. }))
-            .count();
-        let closed = events
-            .iter()
-            .filter(|e| matches!(e, ConversationEvent::TurnCompleted { .. }))
-            .count();
+            .is_err());
         assert_eq!(
-            started, closed,
-            "every TurnStarted must get a terminal TurnCompleted; events: {events:?}"
+            resume_provider_session(&client, &base_url, None)
+                .await
+                .unwrap(),
+            None
         );
-    }
-
-    fn assert_disconnect_error_present(events: &[ConversationEvent]) {
-        let has_error = events.iter().any(|event| {
-            matches!(
-                event,
-                ConversationEvent::Error { code, .. }
-                    if code == OPENCODE_DISCONNECTED_CODE
-            )
-        });
-        assert!(
-            has_error,
-            "a disconnect must emit an Error with opencode_disconnected; events: {events:?}"
-        );
-    }
-
-    /// Pull the evidence off the (single) disconnect Error so each fake-SSE
-    /// case can assert the structured fields name the root cause, not just the
-    /// code. The evidence is the durable receipt a post-mortem reads.
-    fn disconnect_evidence_from(events: &[ConversationEvent]) -> Option<&FailureEvidence> {
-        events.iter().find_map(|event| match event {
-            ConversationEvent::Error { evidence, .. } => evidence.as_ref(),
-            _ => None,
-        })
-    }
-
-    /// Assert the harness-disconnect evidence carries the fields every
-    /// disconnect receipt must name: provider, endpoint class, terminal error
-    /// class, and the last event the stream parsed before it died.
-    fn assert_harness_disconnect_evidence(
-        events: &[ConversationEvent],
-        expected_last_event_type: Option<&str>,
-        expected_last_event_seq: Option<u64>,
-    ) {
-        let evidence = disconnect_evidence_from(events)
-            .unwrap_or_else(|| panic!("disconnect Error carries no evidence; events: {events:?}"));
-        assert_eq!(
-            evidence.provider.as_deref(),
-            Some("opencode"),
-            "evidence must name the provider: {evidence:?}"
-        );
-        assert_eq!(
-            evidence.endpoint_class.as_deref(),
-            Some("harness_event_stream"),
-            "evidence must name the harness endpoint class: {evidence:?}"
-        );
-        assert_eq!(
-            evidence.terminal_error_class.as_deref(),
-            Some("stream_eof"),
-            "fake SSE ends by dropping the socket -> clean stream_eof: {evidence:?}"
-        );
-        assert_eq!(
-            evidence.last_event_type.as_deref(),
-            expected_last_event_type,
-            "evidence last_event_type mismatch: {evidence:?}"
-        );
-        assert_eq!(
-            evidence.last_event_seq, expected_last_event_seq,
-            "evidence last_event_seq mismatch: {evidence:?}"
-        );
-        assert!(
-            evidence.stream_started_at.is_some() && evidence.stream_ended_at.is_some(),
-            "evidence must carry timing: {evidence:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn fake_sse_pre_content_disconnect() {
-        let events = process_fake_sse(DisconnectCase::PreContent).await;
-        assert_no_false_completed(&events);
-        assert_every_started_turn_closed(&events);
-        assert_disconnect_error_present(&events);
-        // No turn was started, so no TurnCompleted.
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. })),
-            "pre-content disconnect should not close a turn that never started"
-        );
-        // No SSE event parsed before the drop — the receipt must show that.
-        assert_harness_disconnect_evidence(&events, None, None);
-    }
-
-    #[tokio::test]
-    async fn fake_sse_after_active_disconnect() {
-        let events = process_fake_sse(DisconnectCase::AfterActive).await;
-        assert_no_false_completed(&events);
-        assert_every_started_turn_closed(&events);
-        assert_disconnect_error_present(&events);
-        // Turn started but produced no content → pre-content reason.
-        let error = events.iter().find_map(|e| match e {
-            ConversationEvent::Error { message, .. } => Some(message.as_str()),
-            _ => None,
-        });
-        assert!(
-            error.is_some_and(|m| m.contains("before the turn")),
-            "pre-content disconnect reason, got: {error:?}"
-        );
-        // One event (session.status) parsed before the drop.
-        assert_harness_disconnect_evidence(&events, Some("session.status"), Some(0));
-    }
-
-    #[tokio::test]
-    async fn fake_sse_mid_tool_disconnect() {
-        let events = process_fake_sse(DisconnectCase::MidTool).await;
-        assert_no_false_completed(&events);
-        assert_every_started_turn_closed(&events);
-        assert_disconnect_error_present(&events);
-        // Tool started → content seen → mid-stream reason.
-        let error = events.iter().find_map(|e| match e {
-            ConversationEvent::Error { message, .. } => Some(message.as_str()),
-            _ => None,
-        });
-        assert!(
-            error.is_some_and(|m| m.contains("mid-stream")),
-            "mid-stream disconnect reason, got: {error:?}"
-        );
-        // The tool item was started but not completed.
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, ConversationEvent::ItemStarted { .. })),
-            "tool start should be visible before the disconnect"
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, ConversationEvent::ItemCompleted { .. })),
-            "tool should not have completed before the mid-tool disconnect"
-        );
-        // Two events parsed; the last was the tool part update.
-        assert_harness_disconnect_evidence(&events, Some("message.part.updated"), Some(1));
-    }
-
-    #[tokio::test]
-    async fn fake_sse_after_durable_disconnect() {
-        let events = process_fake_sse(DisconnectCase::AfterDurable).await;
-        assert_no_false_completed(&events);
-        assert_every_started_turn_closed(&events);
-        assert_disconnect_error_present(&events);
-        // A durable tool (Command) completed before the disconnect.
-        let has_completed_command = events.iter().any(|e| {
-            matches!(
-                e,
-                ConversationEvent::ItemCompleted {
-                    item: ConversationItem::Command { .. },
-                    ..
-                }
-            )
-        });
-        assert!(
-            has_completed_command,
-            "the durable Command completion must be visible before the disconnect; events: {events:?}"
-        );
-        // Still no false Completed — the turn closes Failed.
-        let turn_close = events.iter().find_map(|e| match e {
-            ConversationEvent::TurnCompleted { status, .. } => Some(*status),
-            _ => None,
-        });
-        assert_eq!(
-            turn_close,
-            Some(Lifecycle::Failed),
-            "turn must close Failed even after a durable completion"
-        );
-        // Three events parsed; the last was the tool completion part update.
-        assert_harness_disconnect_evidence(&events, Some("message.part.updated"), Some(2));
     }
 
     // -- Live checks against the real `opencode serve` --
@@ -1482,6 +1203,9 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
+            chrome: false,
+            session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: Some("opencode".to_string()),

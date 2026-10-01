@@ -9,10 +9,51 @@ use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
+use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
 mod ambient;
+
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
+    let nodes: Vec<_> = checks
+        .iter()
+        .map(|(name, conclusion, required)| {
+            serde_json::json!({
+                "__typename":"CheckRun", "name":name, "status":"COMPLETED",
+                "conclusion":conclusion, "isRequired":required,
+                "startedAt":"2026-09-29T00:00:00Z", "detailsUrl":format!("https://ci/{name}"),
+                "checkSuite":{"workflowRun":null}
+            })
+        })
+        .collect();
+    serde_json::json!({"head":head,"commit":head,"contexts":{
+        "nodes":nodes,"pageInfo":{"hasNextPage":false,"endCursor":null}
+    }})
+    .to_string()
+}
+
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_merge_response(
+    number: u64,
+    head: &str,
+    state: &str,
+    merge_state: &str,
+    request: Option<&str>,
+) -> String {
+    let queued = request.and_then(|request| request.strip_prefix("queued:"));
+    serde_json::json!({"data":{"repository":{"pullRequest":{
+        "id":queued.unwrap_or("PR_fixture"), "number":number,
+        "url":format!("https://example.com/pr/{number}"),
+        "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,
+        "mergedAt":if state == "MERGED" { Some("2026-09-29T00:00:00Z") } else { None },
+        "mergeCommit":if state == "MERGED" { Some(serde_json::json!({"oid":head})) } else { None },
+        "mergeStateStatus":merge_state, "isMergeQueueEnabled":request == Some("awaiting_queue") || queued.is_some(),
+        "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
+        "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"}))
+    }}}}).to_string()
+}
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -69,7 +110,7 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
-    r#"#!/bin/sh
+    codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -81,10 +122,28 @@ echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
-    .replace("__OUTPUT__", &output)
+    .replace("__OUTPUT__", &output))
+}
+
+#[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
+pub fn codex_socket_script(script: &str) -> String {
+    let bridge = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
+        .replace('\'', r#"'"'"'"#);
+    format!(
+        r#"#!/bin/sh
+if [ -z "$LF_TEST_CODEX_STDIO" ]; then
+    case "$*" in
+        *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
+    esac
+fi
+{script}
+"#,
+        script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
 }
 
 pub struct EnvGuard {
@@ -140,8 +199,9 @@ impl EnvGuard {
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
-        if home.is_some() {
+        if let Some(home) = home {
             // Keep HOME-based config discovery intact while isolating its store.
+            env::set_var("LF_HOME", home.join(".lf"));
             env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
         } else {
             env::set_var("LF_HOME", lf_home.path());
@@ -187,6 +247,20 @@ impl Drop for EnvGuard {
             None => env::remove_var("LF_DB_PATH"),
         }
     }
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub fn bind_task_planning(repo: &TestRepo) {
+    repo.create_file(
+        ".lf/config.yaml",
+        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n",
+    );
+    repo.create_file(
+        "wave/task-pr-tests/GOAL.md",
+        "---\npm:\n  linear_initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+    );
+    repo.stage_all();
+    repo.commit("Bind fixture planning before creating Task checkouts");
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
@@ -299,8 +373,8 @@ fn register_task_fixture(
                 "name": project.plan.name.as_str(),
                 "summary": "",
                 "metric_targets": [],
-                "flow": "feature",
-                "status": "started",
+                "flow": project.plan.flow,
+                "status": project.plan.status,
                 "krs": [],
                 "initiative_ids": ["initiative-task-pr-tests"],
                 "team_ids": ["team-task-pr-tests"]
@@ -318,15 +392,14 @@ fn register_task_fixture(
                 "team_id": "team-task-pr-tests",
                 "assignee": null
             }]
-        })
-        .to_string();
+        });
         store
             .put_pm_snapshot(PmSnapshotRow {
                 wave_id: wave.id().clone(),
                 provider: "linear".to_string(),
                 initiative: "initiative-task-pr-tests".to_string(),
                 synced_at: now.unix_timestamp(),
-                payload: pm_payload,
+                snapshot: serde_json::from_value(pm_payload).unwrap(),
             })
             .await
             .expect("cache Task PR context");

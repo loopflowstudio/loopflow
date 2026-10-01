@@ -219,7 +219,9 @@ pub fn add_cron(
     launchctl: &dyn Launchctl,
 ) -> OpsResult<InstalledCron> {
     fs::create_dir_all(launch_agents_dir)?;
-    fs::create_dir_all(spec.working_directory.join(".lf/logs"))?;
+    if let Some(parent) = spec.log_path().parent() {
+        fs::create_dir_all(parent)?;
+    }
     let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
@@ -775,6 +777,7 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
             &spec.wave,
             "--batch",
             spec.target_kind.as_str(),
+            "--",
             &spec.flow,
         ])
         .current_dir(&spec.working_directory)
@@ -1106,6 +1109,10 @@ fn status_label(status: &std::process::ExitStatus) -> String {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    use clap::Parser;
+
+    use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
 
     #[derive(Debug, Default)]
     struct FakeLaunchctl {
@@ -1457,23 +1464,55 @@ mod tests {
 
         let agents = temp.path().join("agents");
         let launchctl = FakeLaunchctl::default();
-        let cron = spec(temp.path(), &executable);
-        fs::create_dir_all(&cron.working_directory).unwrap();
-        add_cron(&agents, &cron, &launchctl).unwrap();
-        run_cron(
-            &agents,
-            &cron.wave,
-            &cron.flow,
-            &cron.host.home_id,
-            &cron.host.home_id,
-            CronSource::Scheduled,
-        )
-        .unwrap();
+        for (kind, name) in [
+            (CronTargetKind::Flow, "show"),
+            (CronTargetKind::Skill, "list"),
+        ] {
+            let cron = named_spec(
+                temp.path(),
+                &executable,
+                "infrastructure/release",
+                name,
+                "0 0 3 * * *",
+                kind,
+            );
+            fs::create_dir_all(&cron.working_directory).unwrap();
+            add_cron(&agents, &cron, &launchctl).unwrap();
+            assert!(cron.log_path().parent().unwrap().is_dir());
+            run_cron(
+                &agents,
+                &cron.wave,
+                &cron.flow,
+                &cron.host.home_id,
+                &cron.host.home_id,
+                CronSource::Scheduled,
+            )
+            .unwrap();
 
-        assert_eq!(
-            fs::read_to_string(cron.log_path()).unwrap(),
-            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_ID=unset\n"
-        );
+            let output = fs::read_to_string(cron.log_path()).unwrap();
+            let lines: Vec<_> = output.lines().collect();
+            let (authority, args) = lines.split_last().unwrap();
+            assert_eq!(*authority, "LF_RUN_ID=unset");
+            let cli =
+                Cli::try_parse_from(std::iter::once("lf").chain(args.iter().copied())).unwrap();
+            match (kind, cli.command) {
+                (
+                    CronTargetKind::Flow,
+                    Some(Commands::Flow {
+                        cmd: FlowCommand::External(args),
+                    }),
+                )
+                | (
+                    CronTargetKind::Skill,
+                    Some(Commands::Skill {
+                        cmd: SkillCommand::External(args),
+                    }),
+                ) => {
+                    assert_eq!(args, [name]);
+                }
+                (_, command) => panic!("scheduled definition became a command: {command:?}"),
+            }
+        }
     }
 
     #[test]

@@ -46,7 +46,7 @@ impl SqliteStore {
         insert_initial_task(&transaction, task, pr)?;
         insert_task_event_in(
             &transaction,
-            task,
+            &task.id,
             &TaskEventKind::WorktreeInitializing {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
@@ -121,7 +121,7 @@ impl SqliteStore {
     pub(crate) fn restart_task_flow(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowInvocation>,
+        expected: Option<&crate::durable::FlowSession>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         validate_task(task)?;
@@ -148,10 +148,9 @@ impl SqliteStore {
             ));
         }
         validate_task_project(&transaction, task)?;
-        let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
             &format!(
-                "UPDATE flow_invocations SET state='replaced', ended_at=?2 WHERE {}",
+                "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {}",
                 super::flows::TASK_INVOCATION
             ),
             params![task.id.as_str(), now_unix()],
@@ -167,7 +166,7 @@ impl SqliteStore {
         )?;
         insert_task_event_in(
             &transaction,
-            &task_work,
+            &task.id,
             &TaskEventKind::Progress {
                 summary: format!("Task restarted from checkpoint {checkpoint_head}"),
             },
@@ -234,11 +233,11 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         if let Some(pr) = skipped_pr {
             if transaction.execute(
-                "DELETE FROM task_prs
+                "UPDATE task_prs SET abandoned_at=?3, updated_at=?3
                  WHERE id=?1 AND task_id=?2
                    AND publication_requested_at IS NULL
                    AND merge_commit IS NULL AND abandoned_at IS NULL",
-                params![pr.id.as_str(), pr.task_id.as_str()],
+                params![pr.id.as_str(), pr.task_id.as_str(), now_unix()],
             )? == 0
             {
                 return Err(StoreError::NotFound);
@@ -246,6 +245,7 @@ impl SqliteStore {
         }
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         complete_task_work_in(&transaction, task)?;
+        // Cleanup settles the selected Flow after both driver and step exit.
         transaction.commit()?;
         Ok(())
     }
@@ -355,7 +355,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let claimed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_invocations WHERE task_id=?1 AND claim_json IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1 AND claim_json IS NOT NULL)",
             [child.task_id.as_str()], |row| row.get(0),
         )?;
         if !ready || claimed {
@@ -463,7 +463,7 @@ impl SqliteStore {
     /// Move a stacked Task PR to its parent's current tip, or clear the parent
     /// after that work reaches the default branch. This deliberately moves the
     /// otherwise-immutable `base_commit` through a dedicated transition.
-    pub fn rebase_task_pr(
+    pub fn sync_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,
@@ -676,8 +676,7 @@ impl SqliteStore {
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = task_on(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
-        let event = insert_task_event_in(&transaction, &task, kind)?;
+        let event = insert_task_event_in(&transaction, task_id, kind)?;
         transaction.commit()?;
         Ok(event)
     }
@@ -970,7 +969,7 @@ fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     }
     insert_task_event_in(
         conn,
-        task,
+        &task.id,
         &TaskEventKind::Completed {
             summary: "Task completed".to_string(),
         },
@@ -994,9 +993,9 @@ fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
 
 fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
-    if pr.task_id != task.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
+    if pr.task_id != task.id || pr.sequence != 1 || !pr.is_active() {
         return Err(StoreError::InvalidData(
-            "Task requires its sequence-1 Working PR".to_string(),
+            "Task requires its sequence-1 active PR".to_string(),
         ));
     }
     Ok(())
@@ -1842,18 +1841,22 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
 
 pub(super) fn insert_task_event_in(
     conn: &Connection,
-    task: &Task,
+    task_id: &TaskId,
     kind: &TaskEventKind,
 ) -> StoreResult<TaskEvent> {
     let created_at = now_unix();
-    conn.execute(
-        "INSERT INTO task_events (task_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
-        params![task.id.as_str(), serde_json::to_string(kind)?, created_at],
-    )?;
+    if conn.execute(
+        "INSERT INTO task_events (task_id, kind_json, created_at)
+         SELECT id,?2,?3 FROM tasks WHERE id=?1",
+        params![task_id.as_str(), serde_json::to_string(kind)?, created_at],
+    )? == 0
+    {
+        return Err(StoreError::NotFound);
+    }
     let event_id = conn.last_insert_rowid();
     Ok(TaskEvent {
         id: event_id,
-        task_id: task.id.clone(),
+        task_id: task_id.clone(),
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })

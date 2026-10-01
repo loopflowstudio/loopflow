@@ -47,8 +47,8 @@ struct LocalWaveAgentLauncherTests {
             "--notes", "Refine text for LOOPFLOW.md.",
             "--json",
         ])
-        #expect(LocalWaveAgentLauncher.taskResumeCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "resume", "W2-131",
+        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "run", "W2-131",
         ])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
@@ -85,14 +85,14 @@ struct LocalWaveAgentLauncherTests {
     }
 
     @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
-    func taskPrepareUsesReceiptWorktree() throws {
-        #expect(LocalWaveAgentLauncher.taskPrepareCommand(lfPath: "/bin/lf", issue: "LOO-291")
-            == ["/bin/lf", "task", "prepare", "LOO-291", "--json"])
-        let worktree = try LocalWaveAgentLauncher.taskPrepareWorktree("""
+    func taskCheckoutUsesReceiptWorktree() throws {
+        #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
+            == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])
+        let worktree = try LocalWaveAgentLauncher.taskCheckoutWorktree("""
         {"id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
         """)
         #expect(worktree == "/src/loopflow.main-view-task")
-        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskPrepareWorktree("not json") }
+        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorktree("not json") }
     }
 
     // MARK: - Bundled binary boundary
@@ -148,4 +148,5 @@ struct LocalWaveAgentLauncherTests {
     // MARK: - Not-running copy
 
 }
+
 #endif

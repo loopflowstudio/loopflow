@@ -2,58 +2,37 @@
 
 use std::time::Duration;
 
-use crate::child::ChildRef;
 use crate::durable::WorkRef;
+use crate::engine::config::load_config;
+use crate::engine::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
-use crate::work::task::Task;
-
-use super::{OpsError, OpsResult};
 
 pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
     Interrupt { work: WorkRef },
-    Resume { work: WorkRef },
 }
 
 impl WorkControlReceipt {
     pub fn label(&self) -> String {
         match self {
             Self::Interrupt { work } => work.id().to_string(),
-            Self::Resume { work } => work.id().to_string(),
         }
     }
 
     pub fn action(&self) -> &'static str {
         match self {
             Self::Interrupt { .. } => "interrupted",
-            Self::Resume { .. } => "resumed",
         }
     }
-}
-
-pub(crate) async fn resume_task(store: &SharedStore, mut task: Task) -> OpsResult<WorkRef> {
-    let label = format!("Task {}", task.plan.identifier);
-    if let Some(intent) = &task.abandon_intent {
-        return Err(child_error(format!(
-            "{label} is being abandoned: {}",
-            intent.reason
-        )));
-    }
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(child_error)?;
-    super::task::resume_inactive_process(store, &mut task).await?;
-    Ok(work)
 }
 
 /// Inject steer comments newer than `*cursor` into the live provider turn. A
 /// comment the provider takes (`Sent`) advances the cursor; one it can't take
 /// right now (`NotSteerable` — no active turn, or a driver without live input)
-/// stays for the next skill boundary, whose seed re-reads every steer. Steering
+/// stays for the next skill boundary, whose seed reads unconsumed steers. Steering
 /// is best-effort live and durable at the boundary, so this never fails the run.
 pub(crate) async fn inject_live_steers(
     store: &SharedStore,
@@ -62,21 +41,51 @@ pub(crate) async fn inject_live_steers(
     cursor: &mut i64,
 ) -> Vec<crate::durable::Steer> {
     let mut delivered = Vec::new();
-    let steers = match store.task_steers(task_id).await {
+    let mut steers = match store.task_steers(task_id).await {
         Ok(steers) => steers,
         Err(error) => {
             tracing::warn!(%error, "failed to read steers for live injection");
             return delivered;
         }
     };
-    for steer in &steers {
-        if steer.id <= *cursor {
-            continue;
+    steers.retain(|steer| steer.id > *cursor);
+    if steers.is_empty() {
+        return delivered;
+    }
+    let context = async {
+        let task = store
+            .get_task(task_id)
+            .await?
+            .ok_or(crate::store::StoreError::NotFound)?;
+        let wave = store.get_wave(&task.wave_id).await?;
+        let config = load_config(Some(&task.worktree))?.unwrap_or_default();
+        let budgets = ContextBudgets::resolve(
+            &config,
+            &task.worktree,
+            wave.as_ref().map(|wave| wave.name()),
+        )?;
+        Ok::<_, anyhow::Error>((task.worktree, budgets))
+    }
+    .await;
+    let (worktree, budgets) = match context {
+        Ok(context) => context,
+        Err(error) => {
+            tracing::warn!(%error, "failed to resolve live direction budgets; deferring delivery");
+            return delivered;
+        }
+    };
+    for mut steer in steers {
+        match bound_message(&steer.text, &worktree, &budgets) {
+            Ok(text) => steer.text = text,
+            Err(error) => {
+                tracing::warn!(%error, "failed to preserve oversized live direction; deferring delivery");
+                break;
+            }
         }
         match harness.send_current(&steer.text).await {
             crate::harness::SendCurrentOutcome::Sent { .. } => {
                 *cursor = steer.id;
-                delivered.push(steer.clone());
+                delivered.push(steer);
             }
             crate::harness::SendCurrentOutcome::NotSteerable => break,
             crate::harness::SendCurrentOutcome::Failed { error }
@@ -112,8 +121,4 @@ pub(crate) async fn observe_interrupt(
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "failed to read interrupt requests"),
     }
-}
-
-fn child_error(error: impl std::fmt::Display) -> OpsError {
-    OpsError::Message(error.to_string())
 }

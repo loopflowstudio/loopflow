@@ -1,108 +1,35 @@
 ---
-requires: code on branch
+requires: a reviewable change and authority to merge
 produces: recorded PR delivery with auto-merge requested
 ---
-Prepare the current branch and hand off delivery through verified merge.
+Land the current change through Loopflow's delivery operation.
 
-## Orientation
+Inspect the intended outcome, diff, proof and repository delivery requirements.
+Fix readiness gaps and preserve useful design conclusions before scratch cleanup.
+Keep unrelated active contributions out of this change.
 
-Before starting, orient yourself in this branch:
-
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## API
-
-`lf pr land` stages uncommitted changes, rebases, creates or updates the PR,
-requests exact-head auto-merge, records its settlement intent, and returns.
-Success means handoff. `lf pr reconcile` checks this repository's recorded
-landings once, repairs actionable CI failures, and settles verified merges.
-An unchanged incident receives one repair; unresolved evidence stays visible.
-Repair conclusions remain in ordinary Runs (`lf runs <run> --final`).
-In a Task worktree, bare land keeps the Task open; `-c` requests completion
-only after verified merge and local/Linear settlement. `--next` retains rotation.
-
-`lf pr arm` uses the same handoff. Neither command waits for CI or merge.
-
-```
-lf pr land [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
-```
-
-**Do not run git commit, git push, gh pr create, or gh pr merge directly.**
-`lf pr land` owns those mutations and the durable delivery handoff.
-
-## Workflow
-
-### 1. Understand the branch
+Run `lf pr land` with the caller's requested disposition:
 
 ```bash
-git log origin/main..HEAD --oneline
-git diff origin/main...HEAD --stat
+lf pr land                 # hand off this PR; keep the Task open
+lf pr land -c              # complete the Task after merge
+lf pr land --next <slug>   # continue its serial PR chain
 ```
 
-Check `scratch/` for context. If `scratch/<branch>-review.md` exists (from gate), use it to understand the change and inform the PR body.
+The operation owns preparation, sync, publication, and exact-head auto-merge.
+It records the settlement intent and returns. Later `lf pr reconcile` invocations
+check recorded repository landings once, repair actionable CI, and settle verified
+merges. An unchanged incident receives one repair; unresolved evidence stays visible.
+A successful handoff does not prove merge or Task completion. It consumes valid prepared copy or generates it
+through pr-message; use explicit title/body only for an intentional override.
+Check the resulting PR's scope, claims and evidence limits. Do not duplicate
+its Git/GitHub mutations or launch another landing watcher.
 
-Stage and include all changes — committed and uncommitted — in the PR. If the working tree is dirty, compose a commit message for the uncommitted changes (pass it as `-m` in step 3). Never ask which files to include; everything on the branch ships together.
+If sync or CI fails, use the named recovery path in this checkout and retry
+with the same disposition. Rerunning land resumes a retained blocker without
+inventing an empty commit. Preserve uncertainty about external effects and
+require authoritative merge evidence before reporting success or completion.
 
-### 2. Prepare PR copy
-
-If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf pr land` reuses them automatically.
-
-If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
-
-Keep the title and opening summary focused on the benefit of this PR's actual
-change. Preserve command spelling and proper names; use an area prefix only
-when it helps recognition. Follow with minimal **What changes**, then **Why it
-matters** only if needed, and material limits. Keep automated test and lint results
-in **Checks** or CI. Put **Try it** last when useful: a user action and its visible
-result, never tests, test commands, or test results. Distinguish suggested steps
-from observed behavior and label simulations. Small changes may need only a summary
-and walkthrough. Reconcile changed scope instead of appending history. Loopflow adds
-Task identity and merge consequences; do not repeat or invent them.
-
-### 3. Land
-
-```bash
-lf pr land
-```
-
-Inside a Task, choose the disposition explicitly:
-
-```bash
-lf pr land -c    # this merge completes the Task
-```
-
-Task completion happens only after a later reconciliation verifies the merge.
-Run `lf pr reconcile` for a finite check; do not report handoff as a merged PR.
-
-If you wrote title/body manually, include them:
-
-```bash
-lf pr land --title "<title>" --body "<body>"
-```
-
-Include `-m "<message>"` if the working tree was dirty in step 1.
-
-If `lf pr land` fails due to rebase conflicts, launch a sub-agent to run the
-`rebase-conflicts` skill, then retry `lf pr land`.
-
-## Notes
-
-- If the PR already has a good title and body, run `lf pr land` without `--title`/`--body` to keep existing content.
-- Explicit `-c` can complete over already-merged work when PR rotation left a
-  provably empty unpublished successor. It does not create an empty PR.
-
-## Adaptation
-
-If you discovered repo-specific landing conventions — merge strategy, branch
-protection rules, CI wait behavior, cleanup steps — encode them. Most belong in
-repo docs where all skills benefit. Copy this skill to `.lf/skills/pr-land.md`
-when the repo needs landing to work differently.
+`lf pr arm` uses the same prepare/request/return operation. Reviewer-owned merge
+uses `lf pr submit`. Neither arm nor land waits for CI or merge. Report the
+handoff and any known blocker; report merge only from authoritative evidence.

@@ -162,7 +162,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
     match predecessor {
         Some(PrPhase::Abandoned) => action(
             TaskAction::Resume,
-            "parent PR was abandoned; rebase or abandon this stack",
+            "parent PR was abandoned; sync or abandon this stack",
         ),
         Some(PrPhase::Merged) | None => model,
         Some(_)
@@ -252,7 +252,7 @@ mod tests {
                 state,
                 reason: "Inspect the existing worker".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             };
             let mut evidence = evidence(PrPhase::Open, None, None);
             evidence.execution = Some(&execution);

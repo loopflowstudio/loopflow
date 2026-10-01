@@ -94,7 +94,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-/// Stable Task references shared by `lf status` and `lf roadmap`. The issue URL
+/// Stable Task references shared by `lf wave status` and `lf roadmap`. The issue URL
 /// comes from the cached PM snapshot; workspace evidence comes from durable
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
@@ -315,7 +315,7 @@ public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
     public let url: URL
 }
 
-/// A reading from `lf status`, or the reason there is none. Mirrors Rust
+/// A reading from `lf wave status`, or the reason there is none. Mirrors Rust
 /// `Evidence<T>` (`lf/commands/waves.rs`): "we looked and found nothing" and "we
 /// could not look" are different facts, and a surface that renders them the same
 /// is lying. `truncated` says a cap hid older items.

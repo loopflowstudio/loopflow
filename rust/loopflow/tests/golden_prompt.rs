@@ -54,6 +54,7 @@ fn golden_prompts_match_python() {
     // test process (workers run this suite) must not leak ambient Wave context
     // into them. Safe to set here — this binary runs exactly one test.
     std::env::remove_var("LF_WAVE_ID");
+    std::env::set_var("LF_USER_NAME", "Fixture Participant");
 
     let root = repo_root();
     for case_path in load_cases() {
@@ -61,10 +62,6 @@ fn golden_prompts_match_python() {
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
         let repo = root.join(&case.repo);
-        let wave_memory = case
-            .wave
-            .as_deref()
-            .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&repo, wave));
         let opts = GatherContextOpts {
             repo_root: repo.clone(),
             skill: case.skill.clone(),
@@ -77,7 +74,6 @@ fn golden_prompts_match_python() {
             include_diff_files: case.diff_files,
             include_clipboard: case.clipboard,
             wave: case.wave.clone(),
-            wave_memory,
             related_repos: Vec::new(),
         };
 

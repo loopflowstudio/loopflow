@@ -61,7 +61,7 @@ enum MockWaveFixture {
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  activeTasks: 2),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 enabled: false, activeTasks: 0),
+                 activeTasks: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
                  status: .ready,
                  activeTasks: 0, parentWaveId: "wave-1"),
@@ -91,7 +91,7 @@ enum MockWaveFixture {
     }
 
     /// The selected Wave's populated detail, decoded from the same wire shape
-    /// `lf status --json` emits (the round-tripped `wave_detail.json` fixture).
+    /// `lf wave status --json` emits (the round-tripped `wave_detail.json` fixture).
     static func selectedWaveDetail() -> WaveDetailSnapshot? {
         try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
     }
@@ -129,7 +129,6 @@ enum MockWaveFixture {
             "goal": "Make releases boring.",
             "repo": "/src/loopflow",
             "active_tasks": 1,
-            "enabled": true,
             "created_at": "2026-07-01T00:00:00Z",
             "parent_wave_id": null,
             "retired_at": null,
@@ -248,24 +247,9 @@ enum MockWaveFixture {
             "truncated": false,
             "items": [
               {
-                "id": "run_00000000000000000000000000000001",
-                "parent_run_id": null,
                 "repo": "/src/loopflow",
                 "worktree": "/src/loopflow.task",
-                "subjects": [
-                  {
-                    "selector": "wave:infrastructure",
-                    "source": "declared"
-                  },
-                  {
-                    "selector": "task:INF-123",
-                    "source": "declared"
-                  }
-                ],
                 "skill": "task/pursue",
-                "outcome": "completed",
-                "started": 1784052000,
-                "ended": 1784052600,
                 "usage": {
                   "streams": 1,
                   "final_streams": 1,
@@ -283,7 +267,22 @@ enum MockWaveFixture {
                 "evidence_gaps": 0,
                 "harness": "codex",
                 "model": "gpt-5",
-                "surface": "headless"
+                "surface": "headless",
+                "first_provider_attempt_at": 1784052010,
+                "task_pr_id": "pr_33333333333333333333333333333333",
+                "session_id": "run_00000000000000000000000000000001",
+                "providers": [],
+                "task_id": "task_22222222222222222222222222222222",
+                "wave_id": "11111111-1111-4111-8111-111111111111",
+                "task_identifier": "INF-123",
+                "wave_name": "infrastructure",
+                "work_source": null,
+                "artifact_key": "run_00000000000000000000000000000001",
+                "captured": 12,
+                "caller_artifact_key": null,
+                "observed_at": 1784052000,
+                "recorded_outcome": "completed",
+                "recorded_at": 1784052600
               }
             ]
           },

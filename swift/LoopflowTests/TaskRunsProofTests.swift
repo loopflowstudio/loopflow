@@ -16,7 +16,7 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task recent Runs and Session rows native proof", .serialized)
+@Suite("Task recent Runs and Session rows native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskRunsProofTests {
     @Test("Recent Runs load on demand for their own Task; Session rows show recorded provider and summary")
@@ -76,7 +76,10 @@ struct TaskRunsProofTests {
         }
         func label(_ id: String) throws -> String { try find(id).accessibilityLabel().string() }
         func waitFor(_ condition: () async throws -> Bool) async throws {
-            for _ in 0..<30 where !(try await condition()) { try await settle(window) }
+            for _ in 0..<30 {
+                if try await condition() { return }
+                try await settle(window)
+            }
         }
 
         // Task A overview: Session rows carry only what their Runs recorded,
@@ -95,11 +98,11 @@ struct TaskRunsProofTests {
         // Expanding reads that Task's exact identifier through the shared reader.
         await source.reply("W2-131", with: .runs(["run_a1", "run_a2"]))
         try find("task-runs-toggle").button().tap()
-        try await waitFor { (try? find("task-run-run_a2")) != nil && !model.recentRuns.inFlight.contains("issue-review") }
+        try await waitFor { (try? find("task-run-run_a2:12")) != nil && !model.recentRuns.inFlight.contains("issue-review") }
         #expect(await source.reads == [["runs", "--task", "W2-131", "--json"]])
         #expect(try label("task-runs-toggle") == "Recent runs, expanded")
-        _ = try find("task-run-run_a1")
-        #expect((try? find("task-run-run_a2").find(text: "No outcome recorded")) != nil)
+        _ = try find("task-run-run_a1:12")
+        #expect((try? find("task-run-run_a2:12").find(text: "Unknown")) != nil)
         try captureIfRequested(window, name: "task-runs-expanded")
 
         // A failed refresh keeps the last Runs and says they may be out of date.
@@ -110,7 +113,7 @@ struct TaskRunsProofTests {
         try await waitFor { model.recentRuns["issue-review"].errorMessage != nil }
         try await settle(window)
         #expect(try find("task-runs-stale").text().string() == "May be out of date")
-        _ = try find("task-run-run_a1")
+        _ = try find("task-run-run_a1:12")
         #expect(try find("task-runs-status").text().string().contains("Run records unavailable"))
 
         // A late read of A cannot publish into B; B reads only when expanded.
@@ -126,13 +129,13 @@ struct TaskRunsProofTests {
         await source.reply("W2-156", with: .runs([]))
         try find("task-runs-toggle").button().tap()
         try await waitFor { (try? find("task-runs-empty")) != nil }
-        #expect(try find("task-runs-empty").text().string() == "No Runs recorded for this Task in the last 7 days.")
+        #expect(try find("task-runs-empty").text().string() == "No Session history recorded for this Task.")
         await source.release()
         try await waitFor { !model.recentRuns.inFlight.contains("issue-review") }
         try await settle(window)
-        #expect(model.recentRuns["issue-review"].value?.map(\.id) == ["run_a3"])
+        #expect(model.recentRuns["issue-review"].value?.map(\.id) == ["run_a3:12"])
         #expect(model.recentRuns["issue-available"].value?.isEmpty == true)
-        #expect((try? find("task-run-run_a3")) == nil)
+        #expect((try? find("task-run-run_a3:12")) == nil)
         #expect(await source.mutations.isEmpty)
 
         // The Session and its companion survived every interaction.
@@ -211,9 +214,9 @@ private actor RunSource {
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _): return roadmap
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):
             return #"{"identifier":"fixture","comments":[]}"#
@@ -231,9 +234,9 @@ private actor RunSource {
             }
             let runs = ids.enumerated().map { index, id -> [String: Any] in
                 var run = template
-                run["id"] = id
-                run["subjects"] = [["selector": "task:\(task)", "source": "declared"]]
-                if index == 1 { run["outcome"] = NSNull(); run["ended"] = NSNull() }
+                run["artifact_key"] = id; run["session_id"] = id
+                run["task_identifier"] = task
+                if index == 1 { run["recorded_outcome"] = NSNull(); run["recorded_at"] = NSNull() }
                 return run
             }
             return String(decoding: try JSONSerialization.data(withJSONObject: runs), as: UTF8.self)

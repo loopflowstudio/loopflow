@@ -2,7 +2,7 @@
 """Changed-aware test runner.
 
 Runs only the CI suites the branch actually touches, so the iterative
-`lf gate` loop (rebase -> gate -> bugfix -> gate) doesn't pay for the whole
+`lf gate` loop (sync -> gate -> bugfix -> gate) doesn't pay for the whole
 matrix every pass. Stdlib only.
 
     uv run python scripts/test.py            # run suites the branch touched
@@ -73,7 +73,7 @@ def _run_artifact_root() -> Path:
     Scoping it by pid keeps successive gate runs from colliding — notably the
     UI-host `.xcresult`, which `xcodebuild test` refuses to overwrite (it exits
     64 on an existing `-resultBundlePath`). A fresh pid-scoped path per run means
-    `--ui-host` can run back-to-back, which the 5/5 host proof requires.
+    optional `--ui-host` diagnostics can run back-to-back.
     """
     return GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
 
@@ -90,8 +90,6 @@ PHASE_BUDGETS: dict[str, int] = {
     "website": 900,
     "swift": 1200,
     "swift-boundaries": 120,
-    "swift-build": 900,
-    "swift-surface": 900,
     "xcodegen": 180,
     "xcodebuild": 1200,
     "e2e-smoke": 600,
@@ -193,10 +191,10 @@ class Suite:
     # gate never over-claims (e.g. loopflow compiles the app; it does not run
     # hosted UI). None => a pass means the suite's commands passed, nothing more.
     proves: Optional[str] = None
-    # A required gate that runs only when named explicitly (never under --all),
+    # An optional diagnostic that runs only when named explicitly (never under --all),
     # because it needs a permissioned host. Absence of that host is a failure,
     # never a silent skip.
-    host_gate: bool = False
+    explicit_only: bool = False
     # Runs before the suite's commands. A returned string is an immediate,
     # actionable failure (e.g. wrong platform, simulated capability gap).
     precheck: Optional[Callable[[], Optional[str]]] = None
@@ -231,6 +229,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "nextest",
             "run",
             "--all",
+            "--no-fail-fast",
             "--build-jobs",
             str(MAX_PARALLEL_JOBS),
             "--test-threads",
@@ -241,6 +240,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "cargo",
             "test",
             "--all",
+            "--no-fail-fast",
             "--jobs",
             str(MAX_PARALLEL_JOBS),
             "--",
@@ -319,11 +319,7 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
         ),
         Command(
             [
-                "swift",
-                "test",
-                "--package-path",
-                "swift",
-                "--no-parallel",
+                "scripts/test_desktop.sh",
                 "--jobs",
                 str(MAX_PARALLEL_JOBS),
                 "-Xswiftc",
@@ -336,25 +332,6 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             ["uv", "run", "python", "scripts/check_swift_multiplatform_boundaries.py"],
             REPO_ROOT,
             "swift-boundaries",
-        ),
-        Command(
-            [
-                "swift",
-                "build",
-                "--package-path",
-                "swift",
-                "--product",
-                "LoopflowMac",
-                "--jobs",
-                str(MAX_PARALLEL_JOBS),
-            ],
-            REPO_ROOT,
-            "swift-build",
-        ),
-        Command(
-            ["scripts/prove_wave_surface_states.sh"],
-            REPO_ROOT,
-            "swift-surface",
         ),
     ]
 
@@ -392,14 +369,12 @@ def _e2e_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
-# --- Required-host UI gate ----------------------------------------------
+# --- Optional hosted UI diagnostics ---------------------------------------
 #
-# The ordinary gate compiles the app but never runs a hosted UI test: the test
-# host launches the real app and needs macOS UI-automation permission, which a
-# headless/unpermissioned host lacks. Rather than silently skip UI behaviour,
-# the real run lives here as a separately named REQUIRED gate: it runs only when
-# invoked explicitly (`--ui-host`), never under `--all`, and its absence is a
-# failure that names the missing capability, not a silent pass.
+# Required Desktop checks build the app and inspect production views headless.
+# These extra integration tests launch the app and need a permissioned display
+# session. They run only with --ui-host; capability failure is diagnostic, never
+# a requirement for a headless Task Flow.
 
 # Markers in xcodebuild output that mean the test *runner* failed to bootstrap
 # (a capability gap) rather than a test assertion failing (a real red).
@@ -612,11 +587,13 @@ SUITES: list[Suite] = [
     Suite(
         name="swift",
         slow=False,
-        trigger_desc="swift/ or the headless surface proof",
+        trigger_desc="swift/ (headless app build and view tests)",
         match=lambda c: (
-            _touches(c, "swift/") or _touches_exact(c, "scripts/prove_wave_surface_states.sh")
+            _touches(c, "swift/")
+            or _touches_exact(c, "scripts/test_desktop.sh", "scripts/desktop-headless.sb")
         ),
         build=_swift_commands,
+        proves="app builds; model and view/interaction tests run without a display session.",
     ),
     Suite(
         name="e2e",
@@ -641,7 +618,7 @@ SUITES: list[Suite] = [
         build=_loopflow_commands,
         proves=(
             "app + UI-test runners COMPILE (build-for-testing). Hosted UI "
-            "behaviour is NOT run here; the required `--ui-host` gate owns it."
+            "behaviour is optional via `--ui-host`; headless view tests run in swift."
         ),
     ),
     Suite(
@@ -650,8 +627,8 @@ SUITES: list[Suite] = [
         trigger_desc="never auto-selected; explicit --ui-host only",
         match=lambda _c: False,
         build=_ui_host_commands,
-        proves="hosted LoopflowUITests actually EXECUTE on a permissioned host.",
-        host_gate=True,
+        proves="optional hosted LoopflowUITests execute on a permissioned display host.",
+        explicit_only=True,
         precheck=_ui_host_precheck,
         classify=_ui_host_classify,
         machine_lock="ui-host",
@@ -678,11 +655,16 @@ def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
             continue
-        if suite.host_gate:
-            # Required host gate: never auto-run (not even under --all); it
+        if suite.explicit_only:
+            # Optional host diagnostic: never auto-run (not even under --all); it
             # needs a permissioned host and is named explicitly.
             plans.append(
-                Plan(suite, False, f"required host gate (run --{suite.name} on its host)", [])
+                Plan(
+                    suite,
+                    False,
+                    f"optional display diagnostic (run --{suite.name} on its host)",
+                    [],
+                )
             )
             continue
         if run_all:
@@ -783,11 +765,19 @@ def _resource_summary(report: dict[str, object], label: str) -> str:
     nice = after.get("process_nice")
     if not isinstance(free, int) or not isinstance(floor, int):
         return f"Resource {label}: UNKNOWN"
+    status = "PASS" if report.get("ok") is True else "FAIL"
     summary = (
-        f"Resource {label}: PASS · {free / 2**30:.1f} GiB free / "
+        f"Resource {label}: {status} · {free / 2**30:.1f} GiB free / "
         f"{floor / 2**30:.1f} GiB floor · {jobs} workers · nice +{nice}"
     )
-    return "\n".join([summary, *(f"warning: {warning}" for warning in after.get("warnings", []))])
+    lines = [summary]
+    for action in report.get("recovery", []):
+        lines.append(
+            f"recover: {action['source']} · {action['removed_bytes'] / 2**30:.1f} GiB · "
+            f"{action['status']}: {action['detail']}"
+        )
+    lines.extend(f"warning: {warning}" for warning in after.get("warnings", []))
+    return "\n".join(lines)
 
 
 # --- Durable evidence ----------------------------------------------------
@@ -1520,16 +1510,10 @@ def run_plans(
     kind: str = "changed",
     reuse_passing: bool = False,
 ) -> int:
-    artifact_root = _run_artifact_root()
-    total_budget = sum(_plan_budget(p) for p in plans if p.run)
     running = [p.suite.name for p in plans if p.run]
-    if running:
-        print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
-        print(f"Artifacts on failure: {artifact_root}")
-
-    preflight, preflight_failure = _run_resource_check(True)
-    if preflight is not None and preflight_failure is None:
-        print(_resource_summary(preflight, "preflight"))
+    if not running:
+        print("No suites ran (nothing changed). Use --all to force the full matrix.")
+        return 0
 
     try:
         tree_fingerprint = _tree_fingerprint()
@@ -1537,6 +1521,28 @@ def run_plans(
         tree_fingerprint = None
         print(f"MEASUREMENT WARNING: cannot fingerprint the working tree: {exc}", file=sys.stderr)
     plan_fingerprint = _plan_fingerprint(plans)
+
+    if reuse_passing and kind == "changed" and tree_fingerprint is not None:
+        try:
+            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reusable = None
+            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
+        if reusable is not None:
+            print(
+                "Result: REUSED passing affected-suite evidence for the identical "
+                f"tree and plan ({reusable.name})"
+            )
+            return 0
+
+    artifact_root = _run_artifact_root()
+    total_budget = sum(_plan_budget(p) for p in plans if p.run)
+    print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
+    print(f"Artifacts on failure: {artifact_root}")
+
+    preflight, preflight_failure = _run_resource_check(True)
+    if preflight is not None:
+        print(_resource_summary(preflight, "preflight"))
 
     initial_resources = _resource_receipt(preflight, None, [])
     if preflight_failure is not None:
@@ -1554,19 +1560,6 @@ def run_plans(
         print(f"\n{preflight_failure}")
         print("\nResult: FAIL (resource preflight; product suites not run)")
         return 1
-
-    if reuse_passing and kind == "changed" and running and tree_fingerprint is not None:
-        try:
-            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
-        except (OSError, subprocess.SubprocessError) as exc:
-            reusable = None
-            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
-        if reusable is not None:
-            print(
-                "Result: REUSED passing affected-suite evidence for the identical "
-                f"tree and plan ({reusable.name})"
-            )
-            return 0
 
     recorder = _start_recorder(
         kind,
@@ -1592,7 +1585,7 @@ def run_plans(
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
     postflight, postflight_failure = _run_resource_check(False)
     resource_breach = postflight_failure if postflight is not None else None
-    if postflight is not None and postflight_failure is None:
+    if postflight is not None:
         print(_resource_summary(postflight, "postflight"))
     elif postflight is None and postflight_failure is not None:
         print(f"MEASUREMENT WARNING: {postflight_failure}", file=sys.stderr)
@@ -1635,9 +1628,6 @@ def run_plans(
     passed = [name for name, o in outcomes.items() if o.ok]
     total_elapsed = sum(o.elapsed_s for o in outcomes.values())
     print()
-    if not outcomes and resource_breach is None:
-        print("No suites ran (nothing changed). Use --all to force the full matrix.")
-        return 0
     if failed or resource_breach is not None:
         for name, outcome in failed:
             print(f"[{name}] {outcome.failure}")
@@ -1713,7 +1703,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.all:
         kind = "full"
     elif "ui-host" in forced:
-        kind = "required_host"
+        kind = "hosted_ui"
     else:
         kind = "changed"
     return run_plans(plans, kind=kind, reuse_passing=args.reuse_passing)

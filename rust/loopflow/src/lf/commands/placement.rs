@@ -1,4 +1,4 @@
-use crate::durable::{Placement, WorkRef};
+use crate::durable::WorkRef;
 use crate::id::WaveId;
 use crate::lf::WaveCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -6,35 +6,12 @@ use anyhow::{anyhow, Context};
 use std::path::Path;
 use std::sync::Arc;
 
-pub fn task_enabled(repo: &Path, issue: &str, enabled: bool, json: bool) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_shared_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await?
-            .ok_or_else(|| anyhow!("Task {issue} is not registered"))?;
-        let work = WorkRef::Task(task.id);
-        require_work_repository(&store, &work, repo).await?;
-        let placement = set_local_work_enabled(&store, &work, enabled).await?;
-        print(
-            &placement,
-            json,
-            &format!(
-                "Task {issue}: {}",
-                if enabled { "enabled" } else { "disabled" }
-            ),
-        )
-    })
-}
-
 pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         let name = match command {
             WaveCommand::Forget { name, .. }
             | WaveCommand::Place { name, .. }
-            | WaveCommand::Enable { name, .. }
-            | WaveCommand::Disable { name, .. }
             | WaveCommand::Retire { name, .. } => name,
             WaveCommand::Relocate { wave, .. } => wave,
             _ => unreachable!("Wave placement dispatcher"),
@@ -52,9 +29,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             .clone(),
         };
         let work = WorkRef::Wave(wave_id.clone());
-        if matches!(command, WaveCommand::Disable { .. }) {
-            require_disable_repository(&store, &work, repo).await?;
-        } else if !matches!(command, WaveCommand::Relocate { .. }) {
+        if !matches!(command, WaveCommand::Relocate { .. }) {
             require_work_repository(&store, &work, repo).await?;
         }
         match command {
@@ -64,18 +39,15 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     .await?
                     .ok_or_else(|| anyhow!("Wave {name} not found"))?;
                 let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
-                if snapshot.enabled {
-                    return Err(anyhow!("disable Wave {} before forgetting it", wave.name()));
-                }
                 if Path::new(wave.repo())
                     .join("wave")
-                    .join(wave.name())
+                    .join(wave.slug())
                     .join("GOAL.md")
                     .exists()
                 {
                     return Err(anyhow!(
                         "Wave {} still has an authored GOAL.md",
-                        wave.name()
+                        wave.slug()
                     ));
                 }
                 store.forget_wave(&wave_id, *dry_run).await?;
@@ -85,7 +57,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     &format!(
                         "{} Wave {}",
                         if *dry_run { "Would forget" } else { "Forgot" },
-                        wave.name()
+                        wave.slug()
                     ),
                 )
             }
@@ -110,23 +82,6 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 .await?,
                 *json,
                 &format!("Wave {wave_id}: relocated"),
-            ),
-            WaveCommand::Enable { json, .. } | WaveCommand::Disable { json, .. } => print(
-                &set_local_work_enabled(
-                    &store,
-                    &work,
-                    matches!(command, WaveCommand::Enable { .. }),
-                )
-                .await?,
-                *json,
-                &format!(
-                    "Wave {name}: {}",
-                    if matches!(command, WaveCommand::Enable { .. }) {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                ),
             ),
             WaveCommand::Retire { reason, json, .. } => print(
                 &store.abandon(&work, reason).await?,
@@ -155,27 +110,6 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
         .context("open the shared Loopflow store")
 }
 
-async fn set_local_work_enabled(
-    store: &Store,
-    work: &WorkRef,
-    enabled: bool,
-) -> anyhow::Result<Placement> {
-    let placement = store.placement(work).await?;
-    let local = store.local_home().await?;
-    if placement.home_id != local.id {
-        return Err(anyhow!(
-            "{} {} is placed on {}; run this command through that Home",
-            work.kind(),
-            work.id(),
-            placement.home_id
-        ));
-    }
-    store
-        .set_work_enabled(work, enabled)
-        .await
-        .map_err(anyhow::Error::from)
-}
-
 async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> anyhow::Result<()> {
     let wave_id = match work {
         WorkRef::Wave(wave_id) => wave_id.clone(),
@@ -198,7 +132,7 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
         .get_wave(&wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave.slug())?;
     let local = store.get_wave_at(&locator).await?;
     if local.as_ref().map(crate::work::wave::Wave::id) != Some(&wave_id) {
         return Err(anyhow!(
@@ -210,22 +144,4 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
         ));
     }
     Ok(())
-}
-
-async fn require_disable_repository(
-    store: &Store,
-    work: &WorkRef,
-    repo: &Path,
-) -> anyhow::Result<()> {
-    if let WorkRef::Wave(wave_id) = work {
-        let wave = store
-            .get_wave(wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-        if crate::repository::CanonicalRepo::discover(Path::new(wave.repo())).is_err() {
-            crate::repository::CanonicalRepo::discover(repo)?;
-            return Ok(());
-        }
-    }
-    require_work_repository(store, work, repo).await
 }

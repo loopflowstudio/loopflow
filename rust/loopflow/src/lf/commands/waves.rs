@@ -1,11 +1,11 @@
-//! `lf ls`, `lf status`, and `lf roadmap` — read the wave registry (`store`).
+//! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
-//! `lf ls` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf status [wave]` adds the
+//! `lf wave list` lists every durable Wave registry row and projects authored policy
+//! from `GOAL.md` plus current listener presence. `lf wave status [wave]` adds the
 //! Wave's current chapter and Tasks, the runs it has produced, what is waiting on
 //! somebody, and live loop state; with no argument it reports the Wave this
 //! process is running inside. Both are read-only; `--json` is the dashboard
-//! contract. A stopped Wave remains visible, inert, and restartable.
+//! contract. A Wave remains visible when its chat is disconnected.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
 use crate::durable::{Home, WorkRef, WorkStatus};
-use crate::lf::commands::runs::{format_tokens, RunSnapshot};
+use crate::lf::commands::runs::{format_tokens, SessionHistory};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
@@ -34,8 +34,8 @@ use crate::work::wave::metrics::{
 };
 use crate::work::wave::Wave;
 
-/// One wave's registry snapshot — the `lf ls` row and the `wave` field of
-/// `lf status`. Wire type consumed by Loopflow: every field is required or
+/// One wave's registry snapshot — the `lf wave list` row and the `wave` field of
+/// `lf wave status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveSnapshot {
@@ -48,8 +48,6 @@ pub struct WaveSnapshot {
     pub repo: String,
     /// Non-terminal Tasks owned by this Wave.
     pub active_tasks: u32,
-    /// Whether Wave work is enabled on this Home.
-    pub enabled: bool,
     /// RFC3339 creation time, `null` when the row predates the column.
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
@@ -62,7 +60,7 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
+/// `lf wave status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
 /// when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
@@ -75,7 +73,7 @@ pub struct WaveDetailSnapshot {
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Home-local Run records, newest first.
-    pub runs: Evidence<RunSnapshot>,
+    pub runs: Evidence<SessionHistory>,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -210,7 +208,7 @@ pub struct TaskConditionSnapshot {
     pub local_progress: LocalProgressEvidence,
 }
 
-/// Stable references for one Task, shared verbatim by `lf status` and
+/// Stable references for one Task, shared verbatim by `lf wave status` and
 /// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -402,7 +400,8 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
         let registered = store.list_projects(Some(wave.id())).await?;
-        let projects = decode_pm_planning(wave, &row.payload)?
+        let projects = row
+            .snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
@@ -460,7 +459,7 @@ pub struct RoadmapTask {
     pub section: RoadmapSection,
 }
 
-/// `lf ls` — every wave the registry knows, running and stopped alike.
+/// `lf wave list` — every wave the registry knows, running and stopped alike.
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
@@ -509,7 +508,7 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
+/// `lf wave status [wave]` — one Wave's Work hierarchy, Runs, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -523,13 +522,13 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
         validate_pm_portfolio(&store, &repository_waves).await?;
         let snapshot = snapshot_wave(&store, &wave).await?;
-        let task_snapshots = wave_tasks(&store, &wave, true).await?;
+        let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
                 crate::lf::commands::WorkFilter {
-                    wave: Some(wave.name()),
+                    wave: Some(wave.slug()),
                     project: None,
                     task: None,
                 },
@@ -552,15 +551,18 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
-/// read, bounded Git probes for Task Work, and no network. `lf status`
+/// read, bounded Git probes for Task Work, and no network. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
-pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
-    let include_history = wave.is_some();
+pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
+    let include_history = wave.is_some() || task.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+            if task.is_some() {
+                anyhow::bail!("Task lookup unavailable: local registry could not be opened");
+            }
             let roadmap = RoadmapSnapshot {
                 generated_at: format_time(evaluation_time)
                     .expect("current timestamp formats as RFC 3339"),
@@ -575,7 +577,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         };
         // An explicit all-repositories query must not inherit the Wave of
         // the process that launched the GUI. An explicit --wave still wins.
-        let env_wave_id = if all {
+        let env_wave_id = if all || task.is_some() {
             None
         } else {
             std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
@@ -595,7 +597,18 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
                     .list_waves(None)
                     .await
                     .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-                scope_waves_to_repo(waves, all)?
+                if task.is_some() && !all {
+                    // Exact destinations carry a repository even when only its
+                    // cached registration survives, without Git metadata.
+                    let scope =
+                        crate::repository::CanonicalRepo::discover(&std::env::current_dir()?)?;
+                    waves
+                        .into_iter()
+                        .filter(|wave| scope.contains(Path::new(wave.repo())))
+                        .collect()
+                } else {
+                    scope_waves_to_repo(waves, all)?
+                }
             }
             Err(other) => return Err(anyhow!(other)),
         };
@@ -615,14 +628,20 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
             if !include_history && !current_wave(&snapshot) {
                 continue;
             }
-            let task_snapshots = wave_tasks(&store, wave, false)
-                .await
-                .unwrap_or_else(|error| WaveTasks {
-                    tasks: Evidence::Unavailable {
-                        reason: error.to_string(),
-                    },
-                    unavailable_tasks: Vec::new(),
-                });
+            let task_snapshots =
+                wave_tasks(&store, wave, false, task)
+                    .await
+                    .unwrap_or_else(|error| WaveTasks {
+                        tasks: Evidence::Unavailable {
+                            reason: error.to_string(),
+                        },
+                        unavailable_tasks: Vec::new(),
+                    });
+            if task.is_some()
+                && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
+            {
+                continue;
+            }
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
                 projects: project_planning(&store, wave).await,
@@ -664,10 +683,24 @@ struct WaveTasks {
 }
 
 /// Both views retain durable Tasks when the current plan cannot be read.
-async fn wave_tasks(store: &SharedStore, wave: &Wave, probe_pr_empty: bool) -> Result<WaveTasks> {
+async fn wave_tasks(
+    store: &SharedStore,
+    wave: &Wave,
+    probe_pr_empty: bool,
+    identifier: Option<&str>,
+) -> Result<WaveTasks> {
     let projects = store.list_projects(Some(wave.id())).await?;
-    let tasks = store.list_tasks(Some(wave.id())).await?;
-    let (planning, unavailable) = match read_pm_planning(store, wave).await {
+    let mut tasks = store.list_tasks(Some(wave.id())).await?;
+    let planning_read = if identifier.is_some() {
+        store
+            .pm_snapshot(wave.id())
+            .await
+            .map(|row| row.map(|row| row.snapshot))
+            .map_err(anyhow::Error::from)
+    } else {
+        read_pm_planning(store, wave).await
+    };
+    let (mut planning, unavailable) = match planning_read {
         Ok(Some(planning)) => (planning, None),
         result => (
             PmSnapshot {
@@ -678,17 +711,37 @@ async fn wave_tasks(store: &SharedStore, wave: &Wave, probe_pr_empty: bool) -> R
                 Err(error) => error.to_string(),
                 _ => format!(
                     "no local chapter plan; run `lf wave sync --wave {}`",
-                    wave.name()
+                    wave.slug()
                 ),
             }),
         ),
     };
-    let (details, unavailable_tasks) =
-        snapshot_tasks(store, projects, tasks, planning, probe_pr_empty).await?;
+    if let Some(identifier) = identifier {
+        tasks.retain(|task| task.plan.identifier == identifier);
+        planning.items.retain(|item| item.identifier == identifier);
+        // A failed read cannot establish that an unregistered planning Task is absent.
+        if let Some(reason) = unavailable.as_ref().filter(|_| tasks.is_empty()) {
+            return Ok(WaveTasks {
+                tasks: Evidence::Unavailable {
+                    reason: reason.clone(),
+                },
+                unavailable_tasks: Vec::new(),
+            });
+        }
+    }
+    let (details, unavailable_tasks) = snapshot_tasks(
+        store,
+        projects,
+        tasks,
+        planning,
+        probe_pr_empty,
+        identifier.is_some(),
+    )
+    .await?;
     Ok(WaveTasks {
         tasks: match unavailable {
-            Some(reason) => Evidence::Unavailable { reason },
-            None => Evidence::complete(details),
+            Some(reason) if identifier.is_none() => Evidence::Unavailable { reason },
+            _ => Evidence::complete(details),
         },
         unavailable_tasks,
     })
@@ -731,7 +784,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     }
 }
 
-/// The wave `lf status` is about: the name the caller typed, else the wave this
+/// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
@@ -788,17 +841,16 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
-        name: wave.name().to_string(),
+        name: wave.slug().to_string(),
         status,
         goal: if wave.is_retired() {
-            wave.name().to_string()
+            wave.slug().to_string()
         } else {
-            crate::work::wave::config::read_wave_summary(&goal_repo, wave.name())
-                .unwrap_or_else(|_| wave.name().to_string())
+            crate::work::wave::config::read_wave_summary(&goal_repo, wave.slug())
+                .unwrap_or_else(|_| wave.slug().to_string())
         },
         repo,
         active_tasks,
-        enabled: placement.enabled,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
         retired_at: wave.retired_at().and_then(format_time),
@@ -832,7 +884,7 @@ fn snapshot_task_runtime(
 
 /// The wave's local PM snapshot, or `None` when none has been synced. `None` is
 /// a real, readable state ("no plan on this machine yet") — a caller that must
-/// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
+/// tell it apart from "the plan is empty" keeps the `Option`; `lf wave status`
 /// and `lf roadmap` both render it as unavailable.
 async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
     let Some(row) = store
@@ -842,20 +894,13 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     else {
         return Ok(None);
     };
-    let mut planning = decode_pm_planning(wave, &row.payload)?;
-    let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
+    let mut planning = row.snapshot;
+    let current = crate::ops::chapter::select_current(wave.slug(), &planning.projects)?;
     planning.projects.retain(|project| project.id == current.id);
-    planning.items.retain(|item| item.project_id == current.id);
+    planning
+        .items
+        .retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
     Ok(Some(planning))
-}
-
-fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
-    serde_json::from_str(payload).map_err(|err| {
-        anyhow!(
-            "invalid PM snapshot for wave/{}; run `lf wave sync`: {err}",
-            wave.name()
-        )
-    })
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
@@ -864,22 +909,16 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-        let Some(row) = store
-            .pm_snapshot(wave.id())
-            .await
-            .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
-        else {
-            continue;
+        let row = match store.pm_snapshot(wave.id()).await {
+            Ok(Some(row)) => row,
+            // Each Wave reports its own unavailable planning. A malformed
+            // entity must not hide that Wave's execution or readable siblings.
+            Ok(None) | Err(_) => continue,
         };
-        let Ok(planning) = decode_pm_planning(wave, &row.payload) else {
-            // The Wave's own roadmap row reports its unreadable planning as
-            // unavailable. Keep validating every readable sibling so one stale
-            // snapshot cannot erase unrelated Work from the machine view.
-            continue;
-        };
+        let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
         ownership.validate(
-            wave.name(),
+            wave.slug(),
             &row.initiative,
             expected_team.as_deref(),
             &planning.projects,
@@ -895,6 +934,7 @@ async fn snapshot_tasks(
     tasks: Vec<Task>,
     planning: PmSnapshot,
     probe_pr_empty: bool,
+    include_retained: bool,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
@@ -902,7 +942,7 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        let recommended = recommended_flow(&planning.projects, &item.project_id);
+        let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         details.push(
             snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
         );
@@ -925,13 +965,19 @@ async fn snapshot_tasks(
                 .iter()
                 .find(|plan| plan.id == parent.plan.id.as_str())
         });
-        let Some(plan) = current_plan else {
-            if !work_status_is_terminal(&status) {
-                unavailable_tasks.push(unavailable_task(task, status));
+        if current_plan.is_none() {
+            if include_retained || !work_status_is_terminal(&status) {
+                unavailable_tasks.push(unavailable_task(task, status.clone()));
             }
-            continue;
-        };
+            if !include_retained {
+                continue;
+            }
+        }
+        let parent = parent
+            .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
         let item = PmItem {
+            branch_name: None,
+            revision: None,
             id: task.plan.id.as_str().to_string(),
             identifier: task.plan.identifier.clone(),
             url: None,
@@ -940,12 +986,14 @@ async fn snapshot_tasks(
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
             state: None,
-            project_id: plan.id.clone(),
-            project: plan.slug.clone(),
+            project_id: Some(parent.plan.id.as_str().to_string()),
+            project: Some(parent.plan.slug.clone()),
             team_id: String::new(),
             assignee: None,
         };
-        let recommended = plan.flow.clone();
+        let recommended = current_plan
+            .map_or("feature", |plan| plan.flow.as_str())
+            .to_string();
         details.push(
             snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
         );
@@ -978,10 +1026,10 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
     }
 }
 
-fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
+fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>) -> String {
     projects
         .iter()
-        .find(|project| project.id == project_id)
+        .find(|project| Some(project.id.as_str()) == project_id)
         .map_or("feature", |project| project.flow.as_str())
         .to_string()
 }
@@ -1023,7 +1071,7 @@ async fn snapshot_task_detail(
         None => None,
     };
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_launch_refusal(store, task).await?,
+        (Some(task), None) => crate::ops::task::task_exec_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {
@@ -1159,7 +1207,7 @@ async fn snapshot_task_detail(
         prs: prs
             .iter()
             .map(|pr| {
-                // PR emptiness is an execution-plane fact (`lf status`); it costs
+                // PR emptiness is an execution-plane fact (`lf wave status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
                 // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
@@ -1507,7 +1555,7 @@ fn format_time(ts: time::OffsetDateTime) -> Option<String> {
         .ok()
 }
 
-/// With no registry on this machine, `lf ls`/`status` have nothing to read —
+/// With no registry on this machine, `lf wave list`/`status` have nothing to read —
 /// emit the empty snapshot (`[]`/`null`) or a User note, and succeed.
 fn no_registry(json: bool, empty: &str) -> Result<()> {
     if json {
@@ -1525,23 +1573,21 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {tasks:>5}  {home:<16}{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
-        enabled = "ENABLED",
         tasks = "TASKS",
         home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {tasks:>5}  {home:<16}",
+            "{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
-            enabled = if wave.enabled { "yes" } else { "no" },
             tasks = wave.active_tasks,
             home = truncate(&wave.home.route, 16),
         );
@@ -1585,7 +1631,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!("  enabled   {}", wave.enabled);
     println!("  home      {} ({})", wave.home.id, wave.home.route);
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
@@ -1661,7 +1706,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
             .then(left.name.cmp(&right.name))
     });
     for metric in official {
-        append_metric_lines(&mut lines, metric, "Wave", "    ");
+        append_metric_lines(&mut lines, metric, portfolio, "    ");
     }
 
     let mut candidates = portfolio
@@ -1673,7 +1718,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
     if !candidates.is_empty() {
         lines.push("    Instrumenting".to_string());
         for metric in candidates {
-            append_metric_lines(&mut lines, metric, "Wave", "      ");
+            append_metric_lines(&mut lines, metric, portfolio, "      ");
         }
     }
     if !portfolio.contract_issues.is_empty() {
@@ -1688,7 +1733,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
 fn append_metric_lines(
     lines: &mut Vec<String>,
     metric: &MetricReadingDto,
-    owner: &str,
+    portfolio: &MetricPortfolioDto,
     indent: &str,
 ) {
     lines.push(format!(
@@ -1697,9 +1742,9 @@ fn append_metric_lines(
         metric_evidence_label(&metric.evidence),
     ));
     lines.push(format!(
-        "{indent}  Owner {owner} · Value {value} · Target {target} over {window} · {freshness}",
+        "{indent}  Owner Wave · Value {value} · Target {target} over {window} · {freshness}",
         value = metric_value(metric),
-        target = metric_target(metric),
+        target = metric_target(metric, portfolio),
         window = metric.window,
         freshness = metric_freshness(&metric.freshness),
     ));
@@ -1732,10 +1777,13 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         | MetricEvidenceDto::Met { value, .. }
         | MetricEvidenceDto::Missed { value, .. } => Some(*value),
         MetricEvidenceDto::Unknown { cause } => match cause {
-            MetricUnknownCauseDto::Incomplete { value, .. }
+            MetricUnknownCauseDto::TargetUnavailable { value, .. }
+            | MetricUnknownCauseDto::Incomplete { value, .. }
             | MetricUnknownCauseDto::WindowMismatch { value, .. }
             | MetricUnknownCauseDto::StaleObservation { value, .. } => Some(*value),
-            _ => None,
+            MetricUnknownCauseDto::Never
+            | MetricUnknownCauseDto::RevisionMismatch { .. }
+            | MetricUnknownCauseDto::StaleUnavailable { .. } => None,
         },
         MetricEvidenceDto::Unavailable { .. } => None,
     };
@@ -1744,7 +1792,15 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn metric_target(metric: &MetricReadingDto) -> String {
+fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
+    if portfolio.contract_issues.iter().any(|issue| {
+        matches!(issue,
+            MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
+            if wave_id == &metric.identity.wave_id
+        )
+    }) {
+        return "unavailable for this chapter".into();
+    }
     match metric.target {
         None => "unset for this chapter".into(),
         Some(MetricTarget::AtLeast { value }) => {
@@ -1792,6 +1848,9 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
         )),
         MetricEvidenceDto::Unknown { cause } => Some(match cause {
             MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
+            MetricUnknownCauseDto::TargetUnavailable { .. } => {
+                "chapter target planning is unavailable".to_string()
+            }
             MetricUnknownCauseDto::RevisionMismatch {
                 expected_contract_revision,
                 observed_contract_revision,
@@ -1846,7 +1905,7 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     }
 }
 
-fn print_runs(runs: &Evidence<RunSnapshot>) {
+fn print_runs(runs: &Evidence<SessionHistory>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
@@ -1863,7 +1922,7 @@ fn print_runs(runs: &Evidence<RunSnapshot>) {
                         .total_tokens()
                         .map(format_tokens)
                         .unwrap_or_else(|| "-".to_string()),
-                    age = format_age(now().unix_timestamp() - run.started),
+                    age = format_age(now().unix_timestamp() - run.observed_at),
                 );
             }
             if *truncated {
@@ -2120,6 +2179,8 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let mut item = crate::pm::PmItem {
+            branch_name: None,
+            revision: None,
             id: "removed".into(),
             identifier: "FIX-1".into(),
             url: None,
@@ -2128,8 +2189,8 @@ mod tests {
             rank: 1,
             completed: false,
             state: Some("unstarted".into()),
-            project_id: "current".into(),
-            project: "current".into(),
+            project_id: Some("current".into()),
+            project: Some("current".into()),
             team_id: "team".into(),
             assignee: None,
         };
@@ -2144,16 +2205,16 @@ mod tests {
             provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":items})
-            .to_string(),
+            }], "items":items}))
+            .unwrap(),
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
-        let before = super::wave_tasks(&store, &wave, false).await.unwrap();
+        let before = super::wave_tasks(&store, &wave, false, None).await.unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
         store
             .confirm_task_deletion(wave.id(), "removed", "FIX-1")
@@ -2161,12 +2222,19 @@ mod tests {
             .unwrap();
         for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
-            let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
-            payload["projects"][0]["id"] = serde_json::json!(project_id);
-            for item in payload["items"].as_array_mut().unwrap() {
-                item["project_id"] = serde_json::json!(project_id);
+            if project_id == "next" {
+                let mut successor = stale.snapshot.projects[0].clone();
+                successor.id = "next".into();
+                successor.slug = "next".into();
+                successor.name = "Next chapter".into();
+                stale.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
+                stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
+                stale.snapshot.projects.push(successor);
+                for item in &mut stale.snapshot.items {
+                    item.project_id = Some(project_id.to_string());
+                    item.revision = Some("2026-09-30T00:00:01Z".into());
+                }
             }
-            stale.payload = payload.to_string();
             store.put_pm_snapshot(stale).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2175,7 +2243,9 @@ mod tests {
                 .await
                 .unwrap(),
             );
-            let detail = super::wave_tasks(&reopened, &wave, false).await.unwrap();
+            let detail = super::wave_tasks(&reopened, &wave, false, None)
+                .await
+                .unwrap();
             let super::Evidence::Ok { items, .. } = detail.tasks else {
                 panic!("planning unavailable");
             };
@@ -2220,11 +2290,11 @@ mod tests {
         ));
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":[]}).to_string(),
+            }], "items":[]})).unwrap(),
         }).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
@@ -2233,8 +2303,18 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        unreadable.payload = "{}".into();
-        store.put_pm_snapshot(unreadable).await.unwrap();
+        unreadable.snapshot.projects.clear();
+        unreadable.snapshot.items.clear();
+        assert!(store.put_pm_snapshot(unreadable).await.is_err());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Ok { items, .. } if items.len() == 1
+        ));
+        // Corrupt the stored entity directly; ingestion rejects malformed plans.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute("UPDATE pm_projects SET body='not-json'", [])
+            .unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Unavailable { .. }
@@ -2256,6 +2336,73 @@ mod tests {
             "\u{2026}fix/alpha"
         );
         assert_eq!(truncate_start("beta", 10), "beta");
+    }
+
+    #[test]
+    fn text_metrics_preserve_values_when_chapter_targets_are_unavailable() {
+        let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/metric_portfolio.json"
+        ))
+        .unwrap();
+        let observed = fixture
+            .metrics
+            .iter()
+            .find(|metric| {
+                matches!(
+                    metric.evidence,
+                    MetricEvidenceDto::Unknown {
+                        cause: MetricUnknownCauseDto::TargetUnavailable { .. }
+                    }
+                )
+            })
+            .unwrap();
+        for cause in [
+            MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::StaleObservation {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::Never,
+        ] {
+            let never = matches!(cause, MetricUnknownCauseDto::Never);
+            let mut metric = observed.clone();
+            metric.evidence = MetricEvidenceDto::Unknown { cause };
+            let portfolio = MetricPortfolioDto {
+                contract_issues: vec![
+                    crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                        wave_id: metric.identity.wave_id.clone(),
+                        reason: "current Project is ambiguous".into(),
+                    },
+                ],
+                metrics: vec![metric],
+            };
+            let text = metric_portfolio_text(&portfolio);
+            assert!(text.contains("Target unavailable for this chapter"));
+            assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
+            assert!(!text.contains("unset for this chapter"));
+        }
+        let mut known_empty = observed.clone();
+        known_empty.evidence = MetricEvidenceDto::Untargeted {
+            value: 1.0,
+            source_window_start: OffsetDateTime::UNIX_EPOCH,
+            source_window_end: OffsetDateTime::UNIX_EPOCH,
+        };
+        let text = metric_portfolio_text(&MetricPortfolioDto {
+            metrics: vec![known_empty],
+            contract_issues: vec![
+                crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                    wave_id: "another-wave".into(),
+                    reason: "no saved plan".into(),
+                },
+            ],
+        });
+        assert!(text.contains("[no target]"));
+        assert!(text.contains("Target unset for this chapter"));
     }
 
     #[test]
@@ -2407,7 +2554,7 @@ mod tests {
                 state,
                 reason: "worker evidence".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,

@@ -92,7 +92,7 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/store/migrations.rs",
+        "rust/loopflow/src/store/migration_catalog.rs",
         """const MIGRATIONS: &[Migration] = &[
     Migration {
         sql: include_str!("migrations/0.1.001_initial.sql"),
@@ -159,7 +159,7 @@ def test_hidden_flow_command_is_internal_not_public(repo: Path) -> None:
     assert "public API missing from map: lf __telemetry-scorecard" not in errors
     assert "process boundary missing from map: lf __telemetry-scorecard" in errors
 
-    _write(repo, ".lf/flows/telemetry-daily.yaml", "- op: __telemetry-scorecard\n")
+    _write(repo, ".lf/flows/telemetry-daily.yaml", "- cmd: __telemetry-scorecard\n")
 
     assert architecture.check_repository(repo).ok
 
@@ -236,10 +236,13 @@ def test_generated_website_docs_do_not_duplicate_the_authoritative_scan(repo: Pa
     assert architecture.check_repository(repo).ok
 
 
-def test_chapter_evidence_does_not_define_current_architecture(repo: Path) -> None:
+@pytest.mark.parametrize("directory", [".lf/chapters/baseline", ".lf/tmp/archive", ".lf/log"])
+def test_historical_evidence_does_not_define_current_architecture(
+    repo: Path, directory: str
+) -> None:
     _write(
         repo,
-        ".lf/chapters/baseline/review.md",
+        f"{directory}/review.md",
         "Project Session\n# architecture-shim: retired-bridge\n",
     )
 

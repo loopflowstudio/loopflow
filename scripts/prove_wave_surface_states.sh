@@ -20,7 +20,22 @@ if [ ! -x "$BIN" ]; then
 fi
 
 OUT="$(mktemp -d -t wave_surface_states.XXXXXX)"
-trap 'rm -rf "$OUT"' EXIT
+PIDS=()
+stop_captures() {
+  local pid
+  if [ "${#PIDS[@]}" -gt 0 ]; then
+    for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+    for pid in "${PIDS[@]}"; do wait "$pid" 2>/dev/null || true; done
+  fi
+  PIDS=()
+}
+cleanup() {
+  stop_captures
+  rm -rf "$OUT"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # state|mode|detail_state|select_branch
 STATES=(
@@ -31,33 +46,43 @@ STATES=(
 )
 WIDTHS=(900 1440)
 
-capture() {
-  local name="$1" mode="$2" detail="$3" branch="$4" width="$5" out="$6"
+start_capture() {
+  local mode="$1" detail="$2" branch="$3" width="$4" out="$5"
   LOOPFLOW_UI_TEST_DETAIL_STATE="$detail" \
   LOOPFLOW_UI_TEST_SELECT_BRANCH="$branch" \
   LOOPFLOW_UI_TEST_WIDTH="$width" \
   LOOPFLOW_UI_TEST_SNAPSHOT_PATH="$out" \
     "$BIN" -ui-test-mode "$mode" >/dev/null 2>&1 &
-  local pid=$!
+  PIDS+=("$!")
+}
+
+wait_for_captures() {
+  local pid alive
   # The app snapshots ~2.5s in, then self-terminates; wait it out with a cap
   # generous enough for a cold CI runner's first render.
   for _ in $(seq 1 60); do
-    kill -0 "$pid" 2>/dev/null || break
+    alive=0
+    for pid in "${PIDS[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    done
+    if [ "$alive" -eq 0 ]; then break; fi
     sleep 0.5
   done
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  stop_captures
 }
 
-echo "Capturing 4 states × 2 widths through the app's own renderer…"
+echo "Capturing 4 states × 2 widths through the app's own renderer, two at a time…"
 declare -a HASHES=()
 declare -a LABELS=()
 fail=0
-for width in "${WIDTHS[@]}"; do
-  for entry in "${STATES[@]}"; do
-    IFS='|' read -r name mode detail branch <<<"$entry"
+for entry in "${STATES[@]}"; do
+  IFS='|' read -r name mode detail branch <<<"$entry"
+  for width in "${WIDTHS[@]}"; do
+    start_capture "$mode" "$detail" "$branch" "$width" "$OUT/${name}-${width}.png"
+  done
+  wait_for_captures
+  for width in "${WIDTHS[@]}"; do
     png="$OUT/${name}-${width}.png"
-    capture "$name" "$mode" "$detail" "$branch" "$width" "$png"
     if [ ! -s "$png" ]; then
       echo "  FAIL — no snapshot for $name @ ${width}px"
       fail=1

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::{ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor};
+use crate::engine::flow::{ConcreteCommand, ConcreteSkill, ConcreteStep, ConcreteXor};
 use crate::engine::transitions::{
     finish_step, FlowProgress as TransitionProgress, FlowTransition, FlowVerdict,
 };
@@ -67,7 +67,11 @@ pub trait SkillExecutor: Send + Sync {
     async fn run_skill(&self, skill: &ConcreteSkill, ctx: ExecutionContext)
         -> Result<SkillOutcome>;
 
-    async fn run_op(&self, ops: &ConcreteOp, ctx: ExecutionContext) -> Result<SkillOutcome>;
+    async fn run_command(
+        &self,
+        ops: &ConcreteCommand,
+        ctx: ExecutionContext,
+    ) -> Result<SkillOutcome>;
 }
 
 #[derive(Debug, Clone)]
@@ -105,7 +109,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
         Ok(FlowOutcome::Completed)
     }
 
-    async fn tick(
+    pub(crate) async fn tick(
         &self,
         items: &[ConcreteStep],
         cursor: &mut ExecutionCursor,
@@ -131,7 +135,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
             ConcreteStep::Xor(branch) => {
                 self.executor.run_skill(&branch.router_skill(), ctx).await?
             }
-            ConcreteStep::Op(op) => self.executor.run_op(op, ctx).await?,
+            ConcreteStep::Command(op) => self.executor.run_command(op, ctx).await?,
         };
         match outcome {
             SkillOutcome::Completed { feedback } => {
@@ -158,8 +162,10 @@ impl ConcreteXor {
     pub fn router_skill(&self) -> ConcreteSkill {
         ConcreteSkill {
             skill: self.router.clone(),
-            policy: crate::engine::OccurrencePolicy::default(),
-            flow_parents: self.flow_parents.clone(),
+            id: None,
+            human: false,
+            repeat: None,
+            sources: self.sources.clone(),
         }
     }
 }
@@ -349,7 +355,8 @@ mod tests {
         SkillExecutor, SkillOutcome,
     };
     use crate::engine::flow::{
-        ConcreteOp, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Op, RepeatPolicy, Skill,
+        Command, ConcreteCommand, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor,
+        RepeatPolicy, Skill,
     };
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
     use anyhow::{anyhow, Result};
@@ -466,7 +473,11 @@ mod tests {
             }
         }
 
-        async fn run_op(&self, ops: &ConcreteOp, ctx: ExecutionContext) -> Result<SkillOutcome> {
+        async fn run_command(
+            &self,
+            ops: &ConcreteCommand,
+            ctx: ExecutionContext,
+        ) -> Result<SkillOutcome> {
             let name = format!("op:{}", ops.item.display_name());
             self.contexts.lock().unwrap().push((name.clone(), ctx));
             self.calls.lock().unwrap().push(name);
@@ -497,15 +508,17 @@ mod tests {
     fn skill(name: &str) -> ConcreteSkill {
         ConcreteSkill {
             skill: Skill::named(name),
-            policy: crate::engine::OccurrencePolicy::default(),
-            flow_parents: vec!["test".to_string()],
+            id: None,
+            human: false,
+            repeat: None,
+            sources: vec!["test".to_string()],
         }
     }
 
     fn step(name: &str, edge: Option<&str>) -> ConcreteStep {
         let mut value = skill(name);
-        value.policy.id = Some(name.to_owned());
-        value.policy.repeat = edge.map(|from| RepeatPolicy {
+        value.id = Some(name.to_owned());
+        value.repeat = edge.map(|from| RepeatPolicy {
             from: from.to_owned(),
         });
         ConcreteStep::Skill(value)
@@ -524,7 +537,7 @@ mod tests {
             paths: HashMap::from([(
                 "selected".to_owned(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow(flow, repo).unwrap(),
                         repo,
                     )
@@ -532,7 +545,7 @@ mod tests {
                     description: "selected path".to_owned(),
                 },
             )]),
-            flow_parents: vec!["test".to_owned()],
+            sources: vec!["test".to_owned()],
         })
     }
 
@@ -858,12 +871,12 @@ mod tests {
         .unwrap();
         let items = vec![
             step("work", None),
-            ConcreteStep::Op(ConcreteOp {
-                item: Op {
+            ConcreteStep::Command(ConcreteCommand {
+                item: Command {
                     command: "check".to_owned(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             }),
             xor("branch", repo.path()),
             step("decide", Some("work")),
@@ -916,7 +929,7 @@ mod tests {
         let items = vec![
             ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("xor-route"),
-                flow_parents: vec![],
+                sources: vec![],
                 paths: HashMap::from([(
                     "silence".to_owned(),
                     ConcretePath {
@@ -988,7 +1001,7 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
         std::fs::write(
             repo.path().join(".lf/flows/branch.yaml"),
-            "- selected-skill\n- op: next\n",
+            "- selected-skill\n- cmd: next\n",
         )
         .expect("write flow");
 
@@ -999,7 +1012,7 @@ mod tests {
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
@@ -1007,7 +1020,7 @@ mod tests {
                     description: "ship it".to_string(),
                 },
             )]),
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");
@@ -1052,7 +1065,7 @@ mod tests {
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
@@ -1060,7 +1073,7 @@ mod tests {
                     description: "ship it".to_string(),
                 },
             )]),
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let mut cursor = ExecutionCursor::default();
@@ -1106,7 +1119,7 @@ mod tests {
                     },
                 )]
                 .into(),
-                flow_parents: vec![],
+                sources: vec![],
             }),
             step("suffix", None),
         ];
@@ -1155,7 +1168,7 @@ mod tests {
                     },
                 )]
                 .into(),
-                flow_parents: vec![],
+                sources: vec![],
             })
         };
         for items in [
@@ -1198,12 +1211,12 @@ mod tests {
         let repo = fixture_repo().expect("tempdir");
         let executor = RecordingExecutor::new(repo.path().to_path_buf());
         let engine = FlowEngine::new(executor.clone());
-        let items = vec![ConcreteStep::Op(ConcreteOp {
-            item: Op {
+        let items = vec![ConcreteStep::Command(ConcreteCommand {
+            item: Command {
                 command: "sync".to_string(),
                 args: vec!["--fast".to_string()],
             },
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");

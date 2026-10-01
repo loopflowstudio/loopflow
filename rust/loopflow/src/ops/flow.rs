@@ -1,62 +1,58 @@
 use std::path::Path;
+use std::process::Stdio;
 
 use clap::Parser;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::engine::flow::Op;
-use crate::engine::git::get_default_branch;
+use crate::engine::flow::Command as FlowCommand;
+use crate::engine::process::ProcessGroupGuard;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, arm, commit_workflow, create_or_update_pr, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_publish, release_run, release_status, release_tag,
-    submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    abandon_branch, arm, commit_workflow, create_or_update_pr, release_bump, release_check,
+    release_notes, release_publish, release_run, release_status, release_tag, submit,
+    AbandonOptions, CommitOptions, LandOptions, PrOptions,
 };
 
-pub fn execute_flow_ops(
+pub fn execute_flow_command(
     repo: &Path,
-    item: &Op,
+    item: &FlowCommand,
     progress: &impl Progress,
 ) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
-    let mut argv = vec!["lf".to_string(), item.command.clone()];
-    argv.extend(item.args.iter().cloned());
-
+    let argv = crate::lf::navigation::normalize_args(item.argv())
+        .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
     let cli = Cli::try_parse_from(argv)
-        .map_err(|err| OpsError::Message(format!("invalid op item: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
     let result = match cli.command {
         Some(Commands::Pr { cmd: Some(pr) }) => return execute_pr(repo, pr, progress),
-        Some(Commands::Rebase {
+        Some(Commands::Sync {
             plan,
             manual,
-            continue_rebase,
+            continue_sync,
             abort,
             adopt,
             onto,
         }) => {
-            if manual || continue_rebase || abort || adopt {
+            if manual || continue_sync || abort || adopt {
                 return Err(OpsError::Message(
-                    "manual rebase recovery is only available from the CLI".to_string(),
+                    "manual sync recovery is only available from the CLI".to_string(),
                 ));
             }
-            if plan {
-                return Ok(None);
-            }
-            let base = get_default_branch(repo)?;
-            let onto_ref = onto.unwrap_or_else(|| format!("origin/{base}"));
-            rebase_with_recovery(
+            crate::lf::commands::ops::run_sync_in(
                 repo,
-                &RebaseOptions {
-                    onto: onto_ref,
-                    push: true,
-                    fork_base: None,
-                },
-                progress,
-            )?;
-            Ok(())
+                onto.as_deref(),
+                plan,
+                false,
+                false,
+                false,
+                false,
+            )
+            .map_err(|error| OpsError::Message(error.to_string()))
         }
+
         Some(Commands::Commit {
             message,
             push,
@@ -98,6 +94,21 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
     }
     let database = crate::store::database_path_from_env()
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
+    // Earlier and unfinished Runs can contain the first attempt on a PR merged
+    // inside the window. Python windows Run statistics and PR intervals separately.
+    let runs = crate::lf::commands::runs::collect_runs_started_since(
+        crate::lf::commands::WorkFilter {
+            wave: None,
+            project: None,
+            task: None,
+        },
+        0,
+    )
+    .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
+    let mut run_input = tempfile::NamedTempFile::new()
+        .map_err(|error| OpsError::Message(format!("create telemetry input: {error}")))?;
+    serde_json::to_writer(run_input.as_file_mut(), &runs)
+        .map_err(|error| OpsError::Message(format!("serialize telemetry Runs: {error}")))?;
     let mut command = std::process::Command::new("python3");
     command
         .arg(script)
@@ -105,10 +116,26 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg(repo)
         .arg("--database")
         .arg(database)
+        .arg("--runs")
+        .arg(run_input.path())
         .arg("--envelope");
-    let output = command
-        .output()
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let child = command
+        .spawn()
         .map_err(|error| OpsError::Message(format!("launch telemetry scorecard: {error}")))?;
+    let process_group = ProcessGroupGuard::new(child.id());
+    let output = child
+        .wait_with_output()
+        .map_err(|error| OpsError::Message(format!("wait for telemetry scorecard: {error}")))?;
+    process_group.disarm();
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(OpsError::Message(format!(
@@ -181,6 +208,7 @@ fn execute_pr(
     cmd: PrCommand,
     progress: &impl Progress,
 ) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
+    let draft = matches!(&cmd, PrCommand::Open { .. });
     let result = match cmd {
         PrCommand::Arm {
             strict,
@@ -266,8 +294,8 @@ fn execute_pr(
             )?;
             Ok(())
         }
-        // A flow `op:` runs headless, so both publish and open only publish —
-        // presentation is an explicitly requested CLI action, never an automation step.
+        // Headless operations preserve the command's draft/ready policy but
+        // leave browser presentation to an explicitly requested CLI action.
         PrCommand::Publish {
             model: _,
             title,
@@ -281,6 +309,7 @@ fn execute_pr(
             create_or_update_pr(
                 repo,
                 &PrOptions {
+                    draft,
                     title,
                     body,
                     agent: None,
@@ -297,7 +326,7 @@ fn execute_pr(
             crate::ops::task::pr_next(repo, slug.as_deref())?;
             Ok(())
         }
-        PrCommand::Status | PrCommand::Reconcile => Err(unsupported()),
+        PrCommand::Status | PrCommand::Checks { .. } | PrCommand::Reconcile => Err(unsupported()),
     };
     result.map(|()| None)
 }
@@ -360,40 +389,75 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
     }
 }
 
-/// Flow `op:` items drive the mechanical verbs only; anything that launches an
+/// Flow `cmd:` items drive the mechanical verbs only; anything that launches an
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
+        "cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, sync, commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
+    use time::OffsetDateTime;
+
+    use super::{execute_flow_command, TelemetryScorecardEnvelope};
+    use crate::engine::flow::Command as FlowCommand;
+    use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::{open_store, storage_config_from_env};
     use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::work::wave::Wave;
 
     #[test]
     fn authored_flow_cannot_dispatch_evidence_receipt_command() {
-        let item = Op {
+        let item = FlowCommand {
             command: "receipt".to_string(),
             args: vec!["show".to_string(), "chat_turn:turn-3".to_string()],
         };
 
-        let error = execute_flow_ops(Path::new("."), &item, &NullProgress)
+        let error = execute_flow_command(Path::new("."), &item, &NullProgress)
             .expect_err("removed evidence command must not dispatch");
-        assert!(error.to_string().contains("op item must be one of"));
+        assert!(error.to_string().contains("cmd item must be one of"));
     }
 
     #[test]
     fn telemetry_flow_op_runs_internal_scorecard() {
-        let _ledger = crate::journal::TestLedgerGuard::new();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().expect("temp repo");
+        let capture = CaptureHandle::begin_at(
+            ledger.home(),
+            SessionCaptureSpec {
+                harness: "codex".to_string(),
+                model: None,
+                surface: "headless".to_string(),
+                cwd: repo.path().to_path_buf(),
+                repo: Some(repo.path().to_path_buf()),
+                worktree: Some(repo.path().to_path_buf()),
+                skill: Some("implement".to_string()),
+                subjects: Vec::new(),
+                work: None,
+                flow: SessionFlowMembership::Independent,
+            },
+        )
+        .unwrap();
+        capture.record_stream_event(&StreamEvent::Usage {
+            input_tokens: Some(12),
+            output_tokens: None,
+            cache_read_tokens: None,
+        });
+        capture.finish("completed").unwrap();
+        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
+            &ledger.home().join("loopflow.db"),
+        )
+        .unwrap();
+        store.assert_no_historical_runs();
+        std::fs::remove_dir_all(capture.artifact_dir()).unwrap();
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::write(
@@ -403,23 +467,28 @@ import pathlib
 import sys
 
 repo = pathlib.Path(sys.argv[2])
-repo.joinpath("scorecard-ran").write_text("envelope" if "--envelope" in sys.argv else "direct")
+runs = json.loads(pathlib.Path(sys.argv[sys.argv.index("--runs") + 1]).read_text())
+repo.joinpath("scorecard-ran").write_text(json.dumps(runs))
 print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard text\n"}))
 "#,
         )
         .expect("write scorecard fixture");
-        let item = Op {
+        let item = FlowCommand {
             command: "__telemetry-scorecard".to_string(),
             args: vec!["--json".to_string()],
         };
 
-        execute_flow_ops(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
+        execute_flow_command(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("scorecard-ran"))
-                .expect("read scorecard receipt"),
-            "envelope"
-        );
+        let runs: Vec<crate::session_record::SessionHistory> = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].usage.input_tokens, Some(12));
+        assert_eq!(runs[0].usage.cost_usd, None);
+        assert_eq!(runs[0].usage.final_streams, 0);
+        assert_eq!(runs[0].recorded_outcome.as_deref(), Some("completed"));
     }
 
     #[test]
@@ -502,9 +571,9 @@ print(json.dumps({
         drop(store);
         drop(runtime);
 
-        execute_flow_ops(
+        execute_flow_command(
             repo.path(),
-            &Op {
+            &FlowCommand {
                 command: "__telemetry-scorecard".to_string(),
                 args: Vec::new(),
             },
@@ -526,9 +595,14 @@ print(json.dumps({
         assert!(portfolio.metrics[0].instrumented);
         assert!(matches!(
             portfolio.metrics[0].evidence,
-            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+            MetricEvidenceDto::Unknown {
+                cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
+            }
         ));
         let prompt = crate::ops::metrics::metric_prompt_section("wave-metrics", Ok(portfolio));
-        assert!(prompt.contains("\"kind\":\"untargeted\",\"value\":1.0"));
+        assert!(prompt.contains("\"kind\":\"target_unavailable\",\"value\":1.0"));
     }
 }

@@ -79,12 +79,13 @@ const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $f
   }
 }"#;
 
-const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!) {
+const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
   initiative(id: $initiativeId) {
-    projects(after: $after, first: $first, includeSubInitiatives: false) {
+    projects(after: $after, first: $first, includeSubInitiatives: false, includeArchived: $includeArchived) {
       nodes {
         id
         name
+        updatedAt
         description
         content
         archivedAt
@@ -149,6 +150,27 @@ const ARCHIVE_PROJECT_MUTATION: &str = r#"mutation ArchiveProject($id: String!) 
   }
 }"#;
 
+const PROJECT_LIFECYCLE_QUERY: &str = r#"query ProjectLifecycle($id: String!) {
+  project(id: $id) {
+    archivedAt
+    status { id type teamId }
+  }
+}"#;
+
+const PROJECT_STATUSES_QUERY: &str = r#"query ProjectStatuses($after: String, $first: Int!) {
+  projectStatuses(after: $after, first: $first) {
+    nodes { id type teamId position }
+    pageInfo { hasNextPage endCursor }
+  }
+}"#;
+
+const COMPLETE_PROJECT_MUTATION: &str = r#"mutation CompleteProject($id: String!, $statusId: String!) {
+  projectUpdate(id: $id, input: { statusId: $statusId }) {
+    success
+    project { status { id type teamId } }
+  }
+}"#;
+
 const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
   initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
     initiativeToProject {
@@ -157,12 +179,14 @@ const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: S
   }
 }"#;
 
-const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!) {
+const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
   project(id: $projectId) {
-    issues(first: $first, after: $after) {
+    issues(first: $first, after: $after, includeArchived: $includeArchived) {
       nodes {
         id
         identifier
+        branchName
+        updatedAt
         url
         title
         description
@@ -194,6 +218,8 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
   issue(id: $id) {
     id
     identifier
+    branchName
+    updatedAt
     url
     title
     description
@@ -205,6 +231,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
     project {
       id
       name
+      updatedAt
       description
       content
       status { type }
@@ -218,6 +245,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   project(id: $id) {
     id
     name
+    updatedAt
     archivedAt
     description
     content
@@ -754,51 +782,20 @@ impl LinearClient {
 
     async fn project_status_id(&self, status: crate::pm::ProjectStatus) -> PmResult<String> {
         let team = self.require_team_id()?;
-        let mut after: Option<String> = None;
-        let mut choices = Vec::new();
-        loop {
-            let response: ProjectStatusesData = self
-                .graphql(
-                    r#"query ProjectStatuses($after: String) {
-                    projectStatuses(first: 100, after: $after) {
-                        nodes { id type position teamId }
-                        pageInfo { hasNextPage endCursor }
-                    }
-                }"#,
-                    json!({ "after": after }),
-                )
-                .await?;
-            choices.extend(
-                response
-                    .project_statuses
-                    .nodes
-                    .into_iter()
-                    .filter(|choice| {
-                        choice.type_ == status
-                            && choice.team_id.as_deref().is_none_or(|id| id == team)
-                    }),
-            );
-            if !response.project_statuses.page_info.has_next_page {
-                break;
-            }
-            after = response.project_statuses.page_info.end_cursor;
-            if after.is_none() {
-                return Err(PmError::Message(
-                    "Linear Project status page has no continuation".into(),
-                ));
-            }
-        }
-        choices.sort_by(|left, right| {
-            right
-                .team_id
-                .is_some()
-                .cmp(&left.team_id.is_some())
-                .then_with(|| left.position.total_cmp(&right.position))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        choices
+        self.project_statuses()
+            .await?
             .into_iter()
-            .next()
+            .filter(|choice| {
+                choice.type_ == status && choice.team_id.as_deref().is_none_or(|id| id == team)
+            })
+            .min_by(|left, right| {
+                right
+                    .team_id
+                    .is_some()
+                    .cmp(&left.team_id.is_some())
+                    .then_with(|| left.position.total_cmp(&right.position))
+                    .then_with(|| left.id.cmp(&right.id))
+            })
             .map(|choice| choice.id)
             .ok_or_else(|| {
                 PmError::Message(format!(
@@ -806,6 +803,23 @@ impl LinearClient {
                     status.as_str()
                 ))
             })
+    }
+
+    pub async fn rename_project(&self, project_id: &str, name: &str) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                r#"mutation RenameProject($id: String!, $name: String!) {
+                projectUpdate(id: $id, input: { name: $name }) { success }
+            }"#,
+                json!({ "id": project_id, "name": name }),
+            )
+            .await?;
+        if response["projectUpdate"]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm Project rename".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn set_project_status(
@@ -827,33 +841,6 @@ impl LinearClient {
                 "Linear did not confirm Project status update".into(),
             ));
         }
-        Ok(())
-    }
-
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let response: WorkflowStatesData = self.graphql(
-            r#"query CanceledWorkflowStates($teamId: ID!) {
-                workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                    nodes { id position }
-                }
-            }"#,
-            json!({ "teamId": team_id }),
-        ).await?;
-        let state = response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .ok_or_else(|| {
-                PmError::Message(format!("no canceled issue state for team {team_id}"))
-            })?;
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state.id }),
-            )
-            .await?;
         Ok(())
     }
 
@@ -925,8 +912,33 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn archive_project(&self, project_id: &str) -> PmResult<()> {
-        if self.project_node(project_id).await?.archived_at.is_some() {
+    pub async fn complete_and_archive_project(&self, project_id: &str) -> PmResult<()> {
+        let response: ProjectLifecycleData = self
+            .graphql(PROJECT_LIFECYCLE_QUERY, json!({ "id": project_id }))
+            .await?;
+        let project = response.project.ok_or_else(|| {
+            PmError::Message(format!("Linear Project {project_id} is unavailable"))
+        })?;
+        if project.status.r#type != COMPLETED_STATE_TYPE {
+            let status = self.completed_project_status(&project.status).await?;
+            let response: ProjectCompleteData = self
+                .graphql(
+                    COMPLETE_PROJECT_MUTATION,
+                    json!({ "id": project_id, "statusId": status }),
+                )
+                .await?;
+            if !response.project_update.success
+                || !response
+                    .project_update
+                    .project
+                    .is_some_and(|project| project.status.r#type == COMPLETED_STATE_TYPE)
+            {
+                return Err(PmError::Message(format!(
+                    "Linear did not complete Project {project_id}"
+                )));
+            }
+        }
+        if project.archived_at.is_some() {
             return Ok(());
         }
         let response: ProjectArchiveData = self
@@ -945,7 +957,65 @@ impl LinearClient {
         Ok(())
     }
 
+    async fn completed_project_status(&self, current: &ProjectStatusRef) -> PmResult<String> {
+        self.project_statuses()
+            .await?
+            .into_iter()
+            .filter(|status| {
+                status.type_ == crate::pm::ProjectStatus::Completed
+                    && status.team_id == current.team_id
+            })
+            .min_by(|left, right| {
+                left.position
+                    .total_cmp(&right.position)
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+            .map(|status| status.id)
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "Linear has no completed Project status in the scope of status {}",
+                    current.id
+                ))
+            })
+    }
+
+    async fn project_statuses(&self) -> PmResult<Vec<ProjectStatusChoice>> {
+        let mut after = None;
+        let mut statuses = Vec::new();
+        loop {
+            let response: ProjectStatusesData = self
+                .graphql(
+                    PROJECT_STATUSES_QUERY,
+                    json!({ "after": after, "first": LIST_PROJECTS_PAGE_SIZE }),
+                )
+                .await?;
+            let page = response.project_statuses;
+            statuses.extend(page.nodes);
+            if !page.page_info.has_next_page {
+                return Ok(statuses);
+            }
+            let cursor = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("Linear Project statuses have no next-page cursor".into())
+            })?;
+            if after.as_ref() == Some(&cursor) {
+                return Err(PmError::Message(
+                    "Linear Project statuses repeated a page cursor".into(),
+                ));
+            }
+            after = Some(cursor);
+        }
+    }
+
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
+        self.list_projects_including_archived(initiative_id, false)
+            .await
+    }
+
+    pub(crate) async fn list_projects_including_archived(
+        &self,
+        initiative_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<PmProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -956,6 +1026,7 @@ impl LinearClient {
                         "initiativeId": initiative_id,
                         "after": after,
                         "first": LIST_PROJECTS_PAGE_SIZE,
+                        "includeArchived": include_archived,
                     }),
                 )
                 .await?;
@@ -974,7 +1045,15 @@ impl LinearClient {
     }
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
-        self.list_issue_nodes(project_id)
+        self.list_items_including_archived(project_id, false).await
+    }
+
+    pub(crate) async fn list_items_including_archived(
+        &self,
+        project_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<PmItem>> {
+        self.list_issue_nodes(project_id, include_archived)
             .await?
             .into_iter()
             .enumerate()
@@ -982,7 +1061,11 @@ impl LinearClient {
             .collect()
     }
 
-    async fn list_issue_nodes(&self, project_id: &str) -> PmResult<Vec<IssueNode>> {
+    async fn list_issue_nodes(
+        &self,
+        project_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<IssueNode>> {
         let mut after = None;
         let mut issues = Vec::new();
 
@@ -994,6 +1077,7 @@ impl LinearClient {
                         "projectId": project_id,
                         "after": after,
                         "first": LIST_ITEMS_PAGE_SIZE,
+                        "includeArchived": include_archived,
                     }),
                 )
                 .await?;
@@ -1003,9 +1087,10 @@ impl LinearClient {
 
             if !page.page_info.has_next_page {
                 issues.sort_by(|left, right| {
-                    left.priority_sort_order
-                        .total_cmp(&right.priority_sort_order)
-                        .then_with(|| left.sort_order.total_cmp(&right.sort_order))
+                    left.fields
+                        .priority_sort_order
+                        .total_cmp(&right.fields.priority_sort_order)
+                        .then_with(|| left.fields.sort_order.total_cmp(&right.fields.sort_order))
                 });
                 return Ok(issues);
             }
@@ -1115,14 +1200,14 @@ impl LinearClient {
 
     /// Resolve one Issue directly by UUID or identifier, including its owning
     /// Project and Team. This is the online Task-to-Wave ownership edge.
-    pub async fn issue_ownership(&self, issue_id: &str) -> PmResult<(PmItem, PmProject)> {
+    pub async fn issue_ownership(
+        &self,
+        issue_id: &str,
+    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
-        let issue = response.issue.ok_or_else(|| {
-            PmError::Message(format!("no Linear issue with id or identifier {issue_id}"))
-        })?;
-        issue.into_ownership()
+        response.issue.map(IssueNode::into_ownership).transpose()
     }
 
     pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
@@ -1186,7 +1271,7 @@ impl LinearClient {
         if promote {
             node.status.type_ = crate::pm::ProjectStatus::Started;
         }
-        let project = node.into_pm_project()?;
+        let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
         if project.flow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started {
             return Err(PmError::Message(format!("Project {project_id} has no recorded default Flow; set flow: in Linear before adoption")));
@@ -1215,6 +1300,9 @@ impl LinearClient {
         }
         if apply {
             let confirmed = self.project_ownership(project_id).await?;
+            // The accepted write advances updatedAt; compare authored facts and
+            // retain the provider's confirmed revision for subsequent ingestion.
+            project.revision.clone_from(&confirmed.revision);
             if confirmed != project {
                 return Err(PmError::Message(format!(
                     "Project {project_id} changed during adoption; refresh and retry"
@@ -1288,6 +1376,60 @@ impl LinearClient {
             )
             .await?;
         Ok(())
+    }
+
+    /// Preserve the issue and its history while recording a canceled outcome.
+    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
+        let (item, _) = self
+            .issue_ownership(item_id)
+            .await?
+            .ok_or_else(|| PmError::Message(format!("Linear issue {item_id} is unavailable")))?;
+        match item.state.as_deref() {
+            Some("canceled") => return Ok(()),
+            Some("completed" | "duplicate") => {
+                return Err(PmError::Message(format!(
+                    "{} is already terminal; cancellation would replace its outcome",
+                    item.identifier
+                )));
+            }
+            None => {
+                return Err(PmError::Message(format!(
+                    "{} has no observed workflow state",
+                    item.identifier
+                )))
+            }
+            Some(_) => {}
+        }
+        let response: WorkflowStatesData = self
+            .graphql(
+                r#"query CanceledWorkflowStates($teamId: ID!) {
+              workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+                nodes { id position }
+              }
+            }"#,
+                json!({ "teamId": item.team_id }),
+            )
+            .await?;
+        let state = response
+            .workflow_states
+            .nodes
+            .into_iter()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
+            .ok_or_else(|| PmError::Message("no canceled Linear workflow state found".into()))?;
+        let result: PmResult<Value> = self
+            .graphql(
+                SET_ITEM_STATE_MUTATION,
+                json!({ "id": item.id, "stateId": state.id }),
+            )
+            .await;
+        // Read back even after an uncertain mutation response. HTTP success alone
+        // is not evidence that Linear accepted the state transition.
+        match self.issue_ownership(&item.id).await {
+            Ok(Some((confirmed, _))) if confirmed.state.as_deref() == Some("canceled") => Ok(()),
+            confirmation => Err(PmError::Message(format!("cancellation of {} is unconfirmed (mutation: {}; readback: {}); retry task abandon", item.identifier,
+                result.err().map_or_else(|| "acknowledged".into(), |error| error.to_string()),
+                confirmation.err().map_or_else(|| "issue is not canceled".into(), |error| error.to_string())))),
+        }
     }
 
     /// Reopen a completed issue by moving it back to the team's default active
@@ -1385,6 +1527,60 @@ impl LinearClient {
             )
             .await?;
         Ok(())
+    }
+
+    pub(crate) async fn item_attachment_urls(&self, item_id: &str) -> PmResult<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Data {
+            issue: Option<Issue>,
+        }
+        #[derive(Deserialize)]
+        struct Issue {
+            attachments: Attachments,
+        }
+        #[derive(Deserialize)]
+        struct Attachments {
+            nodes: Vec<Attachment>,
+            #[serde(rename = "pageInfo")]
+            page_info: PageInfo,
+        }
+        #[derive(Deserialize)]
+        struct Attachment {
+            url: String,
+        }
+        let mut after = None;
+        let mut urls = Vec::new();
+        loop {
+            let response: Data = self
+                .graphql(
+                    r#"query IssueAttachments($id: String!, $after: String) {
+                issue(id: $id) { attachments(first: 100, after: $after) {
+                    nodes { url } pageInfo { hasNextPage endCursor }
+                } }
+            }"#,
+                    json!({ "id": item_id, "after": after }),
+                )
+                .await?;
+            let page = response
+                .issue
+                .ok_or_else(|| {
+                    PmError::Message(format!("issue {item_id} attachments are unavailable"))
+                })?
+                .attachments;
+            urls.extend(page.nodes.into_iter().map(|node| node.url));
+            if !page.page_info.has_next_page {
+                return Ok(urls);
+            }
+            let cursor = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("attachment pagination omitted its continuation".into())
+            })?;
+            if after.as_ref() == Some(&cursor) {
+                return Err(PmError::Message(
+                    "attachment pagination did not advance".into(),
+                ));
+            }
+            after = Some(cursor);
+        }
     }
 
     /// Link an external URL to an issue as a first-class attachment. Returns the
@@ -1707,31 +1903,49 @@ struct CommentUser {
 }
 
 #[derive(Deserialize)]
-struct IssueNode {
+#[serde(bound(deserialize = "P: Deserialize<'de>"))]
+struct IssueNode<P = ProjectRef> {
+    #[serde(flatten)]
+    fields: IssueFields,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<P>,
+}
+
+// List and detail observations require the same complete issue fields.
+// Nullable fields must be present; omission is not a value to store.
+#[derive(Deserialize)]
+struct IssueFields {
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
     id: String,
-    #[serde(default)]
     identifier: String,
+    #[serde(rename = "branchName")]
+    branch_name: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
     url: Option<String>,
-    #[serde(default)]
     title: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
-    #[serde(rename = "prioritySortOrder", default)]
+    #[serde(rename = "prioritySortOrder")]
     priority_sort_order: f64,
-    #[serde(rename = "sortOrder", default)]
+    #[serde(rename = "sortOrder")]
     sort_order: f64,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     assignee: Option<IdNode>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     state: Option<WorkflowStateRef>,
-    #[serde(default)]
-    project: Option<ProjectRef>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     team: Option<IdNode>,
 }
 
 impl IssueNode {
     fn into_pm_item(self, rank: u32) -> PmResult<PmItem> {
+        self.fields.into_pm_item(rank, self.project)
+    }
+}
+
+impl IssueFields {
+    fn into_pm_item(self, rank: u32, project: Option<ProjectRef>) -> PmResult<PmItem> {
         let completed = self
             .state
             .as_ref()
@@ -1742,23 +1956,30 @@ impl IssueNode {
         } else {
             self.identifier
         };
-        let project = self
-            .project
-            .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Project")))?;
+        let project_id = project.as_ref().map(|project| project.id.clone());
+        let project = project.map(|project| project_slug(&project.name));
         let team = self
             .team
             .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
+        // Validate revision precision before admitting provider facts.
+        time::OffsetDateTime::parse(
+            &self.updated_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|error| PmError::Message(format!("invalid Linear issue revision: {error}")))?;
         Ok(PmItem {
+            revision: Some(self.updated_at),
             id: self.id,
             identifier,
+            branch_name: self.branch_name,
             url: self.url,
             name: self.title,
             description: self.description.unwrap_or_default(),
             rank,
             completed,
             state: self.state.map(|state| state.r#type),
-            project_id: project.id,
-            project: project_slug(&project.name),
+            project_id,
+            project,
             team_id: team.id,
             assignee: self.assignee.map(|assignee| assignee.id),
         })
@@ -1773,56 +1994,23 @@ struct ProjectRef {
 
 #[derive(Deserialize)]
 struct IssueOwnershipData {
-    issue: Option<OwnedIssueNode>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    issue: Option<IssueNode<ProjectNode>>,
 }
 
-#[derive(Deserialize)]
-struct OwnedIssueNode {
-    id: String,
-    #[serde(default)]
-    identifier: String,
-    url: Option<String>,
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(rename = "prioritySortOrder", default)]
-    priority_sort_order: f64,
-    #[serde(rename = "sortOrder", default)]
-    sort_order: f64,
-    #[serde(default)]
-    assignee: Option<IdNode>,
-    #[serde(default)]
-    state: Option<WorkflowStateRef>,
-    #[serde(default)]
-    team: Option<IdNode>,
-    #[serde(default)]
-    project: Option<ProjectNode>,
-}
-
-impl OwnedIssueNode {
-    fn into_ownership(self) -> PmResult<(PmItem, PmProject)> {
-        let project = self.project.ok_or_else(|| {
-            PmError::Message(format!("Linear issue {} has no Project", self.identifier))
-        })?;
-        let item = IssueNode {
-            id: self.id,
-            identifier: self.identifier,
-            url: self.url,
-            title: self.title,
-            description: self.description,
-            priority_sort_order: self.priority_sort_order,
-            sort_order: self.sort_order,
-            assignee: self.assignee,
-            state: self.state,
-            project: Some(ProjectRef {
+impl IssueNode<ProjectNode> {
+    fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
+        let item = self.fields.into_pm_item(
+            0,
+            self.project.as_ref().map(|project| ProjectRef {
                 id: project.id.clone(),
                 name: project.name.clone(),
             }),
-            team: self.team,
-        }
-        .into_pm_item(0)?;
-        Ok((item, project.into_pm_project()?))
+        )?;
+        Ok((
+            item,
+            self.project.map(ProjectNode::into_pm_project).transpose()?,
+        ))
     }
 }
 
@@ -1936,17 +2124,17 @@ struct ProjectStatusesConnection {
 #[derive(Deserialize)]
 struct ProjectNode {
     id: String,
+    #[serde(rename = "updatedAt")]
+    revision: Option<String>,
     name: String,
     #[serde(rename = "archivedAt")]
     archived_at: Option<String>,
     status: ProjectStatusNode,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     content: Option<String>,
-    #[serde(default)]
     initiatives: IdConnection,
-    #[serde(default)]
     teams: IdConnection,
 }
 
@@ -1981,11 +2169,51 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
     Ok(converted)
 }
 
+#[derive(Deserialize)]
+struct ProjectLifecycleData {
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<ProjectLifecycle>,
+}
+
+#[derive(Deserialize)]
+struct ProjectLifecycle {
+    #[serde(rename = "archivedAt", deserialize_with = "Option::deserialize")]
+    archived_at: Option<String>,
+    status: ProjectStatusRef,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatusRef {
+    id: String,
+    r#type: String,
+    #[serde(rename = "teamId", deserialize_with = "Option::deserialize")]
+    team_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProjectCompleteData {
+    #[serde(rename = "projectUpdate")]
+    project_update: ProjectCompletePayload,
+}
+
+#[derive(Deserialize)]
+struct ProjectCompletePayload {
+    success: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<ProjectWithStatus>,
+}
+
+#[derive(Deserialize)]
+struct ProjectWithStatus {
+    status: ProjectStatusRef,
+}
+
 impl ProjectNode {
     fn into_pm_project(self) -> PmResult<PmProject> {
         let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
         Ok(PmProject {
             id: self.id,
+            revision: self.revision,
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
@@ -2428,7 +2656,7 @@ mod tests {
                                     "title": "First",
                                     "description": "one",
                                     "prioritySortOrder": 10.0,
-                                    "sortOrder": 10.0,
+                                    "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
                                     "project": { "id": "project-123", "name": "Scan" },
@@ -2437,10 +2665,12 @@ mod tests {
                                 {
                                     "id": "issue-2",
                                     "identifier": "LOO-2",
+                                    "url": null,
+                                    "assignee": null,
                                     "title": "Second",
                                     "description": "two",
                                     "prioritySortOrder": 0.0,
-                                    "sortOrder": 0.0,
+                                    "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
                                     "project": { "id": "project-123", "name": "Scan" },
                                     "team": { "id": "team-9" }
@@ -2623,11 +2853,88 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_project_reports_provider_refusal() {
+    async fn project_status_selection_preserves_team_preference_and_completion_scope() {
+        let pages = [
+            json!({"data":{"projectStatuses":{"nodes":[
+                {"id":"workspace", "type":"completed", "teamId":null, "position":0.0},
+                {"id":"later", "type":"completed", "teamId":"selected", "position":10.0}
+            ], "pageInfo":{"hasNextPage":true, "endCursor":"page-2"}}}}),
+            json!({"data":{"projectStatuses":{"nodes":[
+                {"id":"z-tie", "type":"completed", "teamId":"selected", "position":5.0},
+                {"id":"a-tie", "type":"completed", "teamId":"selected", "position":5.0},
+                {"id":"current-done", "type":"completed", "teamId":"current", "position":1.0},
+                {"id":"started", "type":"started", "teamId":"selected", "position":0.0}
+            ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
+        ];
+        for (team, preferred, scope, expected) in [
+            ("selected", "a-tie", Some("selected"), Some("a-tie")),
+            ("selected", "a-tie", Some("current"), Some("current-done")),
+            ("selected", "a-tie", None, Some("workspace")),
+            ("missing", "workspace", Some("missing"), None),
+        ] {
+            let responses = pages
+                .iter()
+                .cycle()
+                .take(4)
+                .map(|page| json_response(StatusCode::OK, page.clone()))
+                .collect();
+            let (base_url, _) = test_server::spawn(responses).await;
+            let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
+            assert_eq!(
+                client
+                    .project_status_id(crate::pm::ProjectStatus::Completed)
+                    .await
+                    .unwrap(),
+                preferred
+            );
+            let completion = client
+                .completed_project_status(&ProjectStatusRef {
+                    id: "current-status".into(),
+                    r#type: "started".into(),
+                    team_id: scope.map(str::to_string),
+                })
+                .await;
+            match expected {
+                Some(id) => assert_eq!(completion.unwrap(), id),
+                None => assert!(completion
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no completed Project status in the scope of status current-status")),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn project_status_selection_rejects_incomplete_pagination() {
+        for cursor in [Value::Null, json!("page-2")] {
+            let responses = [json!("page-2"), cursor]
+                .into_iter()
+                .map(|cursor| {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data":{"projectStatuses":{"nodes":[],
+                            "pageInfo":{"hasNextPage":true, "endCursor":cursor}}}}),
+                    )
+                })
+                .collect();
+            let (base_url, _) = test_server::spawn(responses).await;
+            let client =
+                LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
+            let error = client
+                .project_status_id(crate::pm::ProjectStatus::Completed)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("cursor"));
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_and_archive_project_reports_provider_refusal() {
         let (base_url, _requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "project": { "id": "project-1", "name": "Chapter one", "archivedAt": null, "status": {"type":"started"} } } }),
+                json!({ "data": { "project": { "archivedAt": null,
+                    "status": { "id": "done", "type": "completed", "teamId": null } } } }),
             ),
             json_response(
                 StatusCode::OK,
@@ -2642,12 +2949,47 @@ mod tests {
         );
 
         let error = client
-            .archive_project("project-1")
+            .complete_and_archive_project("project-1")
             .await
             .expect_err("provider refused archive");
         assert!(error
             .to_string()
             .contains("Linear did not archive Project project-1"));
+    }
+
+    #[tokio::test]
+    async fn complete_and_archive_project_requires_confirmed_completion() {
+        for project in [
+            Value::Null,
+            json!({"status":{"id":"started", "type":"started", "teamId":null}}),
+        ] {
+            let (base_url, _) = test_server::spawn(vec![
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"project":{"archivedAt":null,
+                        "status":{"id":"started", "type":"started", "teamId":null}}}}),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"projectStatuses":{"nodes":[
+                        {"id":"done", "type":"completed", "teamId":null, "position":0.0}
+                    ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"projectUpdate":{"success":true, "project":project}}}),
+                ),
+            ])
+            .await;
+            let client = LinearClient::with_base_url("fixture".into(), None, base_url);
+            let error = client
+                .complete_and_archive_project("project-1")
+                .await
+                .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("did not complete Project project-1"));
+        }
     }
 
     #[tokio::test]
@@ -3139,7 +3481,7 @@ mod tests {
             json!({ "data": { "issue": {
                 "id": "issue-uuid", "identifier": "LOO-42", "url": null,
                 "title": "Resolve ownership", "description": "",
-                "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                 "assignee": null, "state": { "type": "unstarted" },
                 "team": { "id": "team-loo" },
                 "project": {
@@ -3158,8 +3500,9 @@ mod tests {
             base_url,
         );
 
-        let (item, project) = client.issue_ownership("LOO-42").await.unwrap();
-        assert_eq!(item.project_id, "project-api");
+        let (item, project) = client.issue_ownership("LOO-42").await.unwrap().unwrap();
+        let project = project.unwrap();
+        assert_eq!(item.project_id.as_deref(), Some("project-api"));
         assert_eq!(item.team_id, "team-loo");
         assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);

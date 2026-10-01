@@ -4,13 +4,13 @@ import Foundation
 import Loopflow
 
 /// All mutable state and pipe I/O belong to queue. No callback touches AppKit.
-final class LocalActiveRunsObservation: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "studio.loopflow.active-runs", qos: .utility)
+final class LocalActiveSessionsObservation: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "studio.loopflow.active-sessions", qos: .utility)
     private let process: Process
     private let input = Pipe()
     private let output = Pipe()
     private let diagnostics = Pipe()
-    private let continuation: AsyncThrowingStream<ActiveRunsSnapshot, any Error>.Continuation
+    private let continuation: AsyncThrowingStream<ActiveSessionsSnapshot, any Error>.Continuation
     private let configurationChanged: @Sendable () throws -> Bool
     private var outputSource: DispatchSourceRead?
     private var errorSource: DispatchSourceRead?
@@ -18,7 +18,7 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
     private var bytes = Data()
     private var searchedBytes = 0
     private var stderr = Data()
-    private var pendingRequest: ActiveRunsObservation.Request?
+    private var pendingRequest: ActiveSessionsObservation.Request?
     private var home: String?
     private var lastFrame = ProcessInfo.processInfo.systemUptime
     private var lastConfigurationCheck = ProcessInfo.processInfo.systemUptime
@@ -31,16 +31,16 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
     static func start(
         process: Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
-    ) throws -> ActiveRunsObservation {
-        let (stream, continuation) = AsyncThrowingStream<ActiveRunsSnapshot, any Error>
+    ) throws -> ActiveSessionsObservation {
+        let (stream, continuation) = AsyncThrowingStream<ActiveSessionsSnapshot, any Error>
             .makeStream(bufferingPolicy: .bufferingNewest(1))
-        let reader = LocalActiveRunsObservation(process, continuation, configurationChanged)
+        let reader = LocalActiveSessionsObservation(process, continuation, configurationChanged)
         // Stream cancellation also covers a consumer disappearing without an explicit stop.
         continuation.onTermination = { [weak reader] _ in
             reader?.queue.async { [weak reader] in reader?.stop() }
         }
         try reader.queue.sync { try reader.launch() }
-        return ActiveRunsObservation(snapshots: stream, request: { request in
+        return ActiveSessionsObservation(snapshots: stream, request: { request in
             reader.queue.async { reader.enqueue(request) }
         }, cancel: {
             await withCheckedContinuation { waiter in
@@ -55,14 +55,14 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
 
     private init(
         _ process: Process,
-        _ continuation: AsyncThrowingStream<ActiveRunsSnapshot, any Error>.Continuation,
+        _ continuation: AsyncThrowingStream<ActiveSessionsSnapshot, any Error>.Continuation,
         _ configurationChanged: @escaping @Sendable () throws -> Bool
     ) {
         self.process = process
         self.continuation = continuation
         self.configurationChanged = configurationChanged
         let environment = process.environment ?? ProcessInfo.processInfo.environment
-        if let selected = environment["LF_CONTROL_HOME"] ?? environment["LF_HOME"], !selected.isEmpty {
+        if let selected = environment["LF_HOME"], !selected.isEmpty {
             home = URL(fileURLWithPath: selected).resolvingSymlinksInPath().standardizedFileURL.path
         }
     }
@@ -107,13 +107,13 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
             let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
             if count < 0 {
                 if errno == EAGAIN || errno == EINTR { return }
-                fail(RegistryQueryError("Active Run reader pipe failed"))
+                fail(RegistryQueryError("Active Session reader pipe failed"))
                 return
             }
             if count == 0 {
                 if isOutput {
                     outputSource?.cancel()
-                    if stoppingAt == nil { readerEnded("Active Run reader closed its output") }
+                    if stoppingAt == nil { readerEnded("Active Session reader closed its output") }
                 } else { errorSource?.cancel() }
                 return
             }
@@ -126,20 +126,20 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
             bytes.append(contentsOf: buffer.prefix(count))
             while let end = bytes.dropFirst(searchedBytes).firstIndex(of: 10) {
                 guard bytes.distance(from: bytes.startIndex, to: end) <= Self.frameLimit else {
-                    fail(RegistryQueryError("Active Run frame exceeds 16 MiB")); return
+                    fail(RegistryQueryError("Active Session frame exceeds 16 MiB")); return
                 }
                 let frame = bytes[..<end]
                 do {
-                    let snapshot = try JSONDecoder().decode(ActiveRunsSnapshot.self, from: frame)
+                    let snapshot = try JSONDecoder().decode(ActiveSessionsSnapshot.self, from: frame)
                     let observedHome = URL(fileURLWithPath: snapshot.home).resolvingSymlinksInPath().standardizedFileURL.path
                     guard home == nil || home == observedHome, snapshot.task == nil else {
-                        throw RegistryQueryError("Active Run reader changed Home or returned a Task-scoped frame")
+                        throw RegistryQueryError("Active Session reader changed Home or returned a Task-scoped frame")
                     }
                     home = observedHome
                     lastFrame = ProcessInfo.processInfo.systemUptime
                     continuation.yield(snapshot)
                 } catch {
-                    fail(RegistryQueryError("Invalid active Run observation: \(error.localizedDescription)"))
+                    fail(RegistryQueryError("Invalid active Session observation: \(error.localizedDescription)"))
                     return
                 }
                 bytes.removeSubrange(...end)
@@ -147,12 +147,12 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
             }
             searchedBytes = bytes.count
             if bytes.count > Self.frameLimit {
-                fail(RegistryQueryError("Active Run frame exceeds 16 MiB")); return
+                fail(RegistryQueryError("Active Session frame exceeds 16 MiB")); return
             }
         }
     }
 
-    private func enqueue(_ request: ActiveRunsObservation.Request) {
+    private func enqueue(_ request: ActiveSessionsObservation.Request) {
         guard stoppingAt == nil else { return }
         if pendingRequest != .rescan { pendingRequest = request }
         flushRequest()
@@ -165,7 +165,7 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
         // Each request fits PIPE_BUF, so a nonblocking pipe write is all or nothing.
         if count == data.count { pendingRequest = nil }
         else if count < 0 && (errno == EAGAIN || errno == EINTR) { return }
-        else { fail(RegistryQueryError("Active Run reader stopped accepting requests")) }
+        else { fail(RegistryQueryError("Active Session reader stopped accepting requests")) }
     }
 
     private func tick() {
@@ -185,12 +185,12 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
             if now - lastConfigurationCheck >= 2 {
                 lastConfigurationCheck = now
                 if try configurationChanged() {
-                    fail(ActiveRunsObservationError.configurationChanged)
+                    fail(ActiveSessionsObservationError.configurationChanged)
                     return
                 }
             }
             if now - lastFrame >= 10 {
-                fail(RegistryQueryError("Active Run reader sent no observation for ten seconds"))
+                fail(RegistryQueryError("Active Session reader sent no observation for ten seconds"))
                 return
             }
             flushRequest()
@@ -214,7 +214,7 @@ final class LocalActiveRunsObservation: @unchecked Sendable {
 
     private func didExit() {
         if stoppingAt == nil {
-            readerEnded("Active Run reader exited (\(process.terminationStatus))")
+            readerEnded("Active Session reader exited (\(process.terminationStatus))")
         }
         exited = true
         outputSource?.cancel()

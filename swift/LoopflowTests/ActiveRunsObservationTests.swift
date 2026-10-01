@@ -5,14 +5,14 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Active Run transport", .serialized)
-struct ActiveRunsObservationTests {
+@Suite("Active Session transport", .serialized)
+struct ActiveSessionsObservationTests {
     @Test("Reader startup failure preserves the CLI diagnostic", arguments: [false, true])
     func startupFailure(closesOutputFirst: Bool) async throws {
         let diagnosis = "Selected Home has an incompatible migration frontier"
         let shutdown = closesOutputFirst ? "exec 1>&-; IFS= read -r request; exit 23" : "exit 23"
         let process = shell("printf '%s\\n' '\(diagnosis)' >&2; \(shutdown)")
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         do {
             for try await _ in reader.snapshots {
                 Issue.record("Failed reader supplied an observation")
@@ -33,7 +33,7 @@ struct ActiveRunsObservationTests {
         let payload = (1...200).map { frame(time: $0) }.joined()
         try Data(payload.utf8).write(to: directory.appendingPathComponent("frames"))
         let process = shell("/bin/cat frames; /usr/bin/touch delivered; IFS= read -r request", cwd: directory)
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         let deadline = ContinuousClock.now + .seconds(3)
         while !FileManager.default.fileExists(atPath: directory.appendingPathComponent("delivered").path), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
@@ -66,7 +66,7 @@ struct ActiveRunsObservationTests {
             esac
         done
         """, cwd: directory)
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         var frames = reader.snapshots.makeAsyncIterator()
         #expect(try await frames.next()?.observedAt == 1)
         await reader.request(.refresh)
@@ -83,11 +83,12 @@ struct ActiveRunsObservationTests {
         let survivor = Process()
         survivor.executableURL = URL(fileURLWithPath: "/bin/sleep")
         survivor.arguments = ["30"]
+        var survivorExit = exits(survivor).makeAsyncIterator()
         try survivor.run()
-        defer { survivor.terminate(); survivor.waitUntilExit() }
+        defer { if survivor.isRunning { survivor.terminate() } }
         // exec preserves the ignored TERM disposition; KILL must be the fallback.
         let process = shell("trap '' TERM; exec /bin/sleep 30")
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         try await Task.sleep(for: .milliseconds(100))
         let start = ContinuousClock.now
         await reader.cancel()
@@ -95,12 +96,14 @@ struct ActiveRunsObservationTests {
         #expect(process.terminationStatus == SIGKILL)
         #expect(ContinuousClock.now - start < .seconds(4))
         #expect(survivor.isRunning)
+        survivor.terminate()
+        #expect(await survivorExit.next() == SIGTERM)
     }
 
     @Test("Silence expires the reading and stops the reader")
     func stalled() async throws {
         let process = shell("exec /bin/sleep 30")
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         var iterator = reader.snapshots.makeAsyncIterator()
         do {
             _ = try await iterator.next()
@@ -128,7 +131,7 @@ struct ActiveRunsObservationTests {
         try Data(payload.utf8).write(to: directory.appendingPathComponent("frame"))
         let process = shell("/bin/cat frame; IFS= read -r request", cwd: directory)
         if kind == "partial-exit" { process.arguments = ["-c", "/bin/cat frame"] }
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
         do {
             for try await snapshot in reader.snapshots {
                 #expect(kind == "home-change")
@@ -139,7 +142,7 @@ struct ActiveRunsObservationTests {
             #expect(error is RegistryQueryError)
             if kind == "oversized" { #expect(error.localizedDescription.contains("16 MiB")) }
             if kind == "wrong-home" || kind == "home-change" { #expect(error.localizedDescription.contains("changed Home")) }
-            if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid active Run observation")) }
+            if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid active Session observation")) }
             if kind == "partial-exit" { #expect(!error.localizedDescription.contains("ten seconds")) }
         }
         await reader.cancel()
@@ -153,7 +156,7 @@ struct ActiveRunsObservationTests {
         let marker = directory.appendingPathComponent("changed")
         try Data(frame().utf8).write(to: directory.appendingPathComponent("frame"))
         let process = shell("/bin/cat frame; IFS= read -r request", cwd: directory)
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: {
+        let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: {
             FileManager.default.fileExists(atPath: marker.path)
         })
         var iterator = reader.snapshots.makeAsyncIterator()
@@ -162,7 +165,7 @@ struct ActiveRunsObservationTests {
         do {
             _ = try await iterator.next()
             Issue.record("Configuration change was ignored")
-        } catch { #expect(error is ActiveRunsObservationError) }
+        } catch { #expect(error is ActiveSessionsObservationError) }
         await reader.cancel()
         #expect(!process.isRunning)
     }
@@ -176,77 +179,99 @@ struct ActiveRunsObservationTests {
         let clientInput = Pipe()
         client.standardInput = clientInput
         client.standardOutput = FileHandle.nullDevice
+        var clientExit = exits(client).makeAsyncIterator()
         try client.run()
         defer {
             try? clientInput.fileHandleForWriting.close()
-            client.waitUntilExit()
+            if client.isRunning { client.terminate() }
         }
-        let firstID = "run_00000000000000000000000000000001"
-        let secondID = "run_00000000000000000000000000000002"
-        try publishClient(client, id: firstID, home: home)
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let process = LocalWaveAgentLauncher.queryProcess([
-            root.appendingPathComponent("target/debug/lf").path, "runs", "--active", "--watch", "--json",
-        ])
-        var environment = process.environment ?? [:]
-        for key in ["LF_HOME", "LF_CONTROL_HOME"] { environment[key] = home.path }
-        for key in ["LF_DB_PATH", "LF_CONTROL_DB_PATH"] { environment[key] = home.appendingPathComponent("loopflow.db").path }
-        process.environment = environment
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
-        var iterator = reader.snapshots.makeAsyncIterator()
-        let first = try await nextReady(&iterator, count: 1)
-        #expect(URL(fileURLWithPath: first.home).resolvingSymlinksInPath().standardizedFileURL.path
-                == home.standardizedFileURL.path)
-        #expect(first.gaps.isEmpty)
-        #expect(first.runs.map(\.id) == [firstID])
-        let next = try await nextReady(&iterator, count: 1)
-        #expect(next.observedAt > first.observedAt)
-        let secondClient = Process()
-        secondClient.executableURL = URL(fileURLWithPath: "/bin/cat")
-        let secondInput = Pipe()
-        secondClient.standardInput = secondInput
-        secondClient.standardOutput = FileHandle.nullDevice
-        try secondClient.run()
-        defer {
-            try? secondInput.fileHandleForWriting.close()
-            secondClient.waitUntilExit()
+        var observation: ActiveSessionsObservation?
+        do {
+            let firstID = "run_00000000000000000000000000000001"
+            let secondID = "run_00000000000000000000000000000002"
+            try await publishClient(client, id: firstID, home: home)
+            let process = fixtureProcess(["runs", "--active", "--watch", "--json"], home: home)
+            let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
+            observation = reader
+            var iterator = reader.snapshots.makeAsyncIterator()
+            let first = try await nextReady(&iterator, count: 1)
+            #expect(URL(fileURLWithPath: first.home).resolvingSymlinksInPath().standardizedFileURL.path
+                    == home.standardizedFileURL.path)
+            #expect(first.gaps.isEmpty)
+            #expect(first.sessions.map(\.id) == [firstID])
+            let next = try await nextReady(&iterator, count: 1)
+            #expect(next.observedAt > first.observedAt)
+            let secondClient = Process()
+            secondClient.executableURL = URL(fileURLWithPath: "/bin/cat")
+            let secondInput = Pipe()
+            secondClient.standardInput = secondInput
+            secondClient.standardOutput = FileHandle.nullDevice
+            var secondExit = exits(secondClient).makeAsyncIterator()
+            try secondClient.run()
+            defer {
+                try? secondInput.fileHandleForWriting.close()
+                if secondClient.isRunning { secondClient.terminate() }
+            }
+            do {
+                try await publishClient(secondClient, id: secondID, home: home)
+                let published = try await nextReady(&iterator, count: 2)
+                #expect(Set(published.sessions.map(\.id)) == [firstID, secondID])
+                await reader.request(.rescan)
+                let recovered = try await nextReady(&iterator, count: 2)
+                #expect(recovered.gaps.isEmpty)
+                #expect(recovered.home == first.home)
+                try secondInput.fileHandleForWriting.close()
+                #expect(await secondExit.next() == 0)
+                let afterExit = try await nextReady(&iterator, count: 1)
+                #expect(afterExit.sessions.map(\.id) == [firstID])
+                await reader.cancel()
+                #expect(!process.isRunning)
+                #expect(process.terminationStatus == 0)
+                #expect(client.isRunning)
+                try clientInput.fileHandleForWriting.close()
+                #expect(await clientExit.next() == 0)
+            } catch {
+                try? secondInput.fileHandleForWriting.close()
+                if secondClient.isRunning { secondClient.terminate() }
+                _ = await secondExit.next()
+                throw error
+            }
+        } catch {
+            await observation?.cancel()
+            try? clientInput.fileHandleForWriting.close()
+            if client.isRunning { client.terminate() }
+            _ = await clientExit.next()
+            throw error
         }
-        try publishClient(secondClient, id: secondID, home: home)
-        let published = try await nextReady(&iterator, count: 2)
-        #expect(Set(published.runs.map(\.id)) == [firstID, secondID])
-        await reader.request(.rescan)
-        let recovered = try await nextReady(&iterator, count: 2)
-        #expect(recovered.gaps.isEmpty)
-        #expect(recovered.home == first.home)
-        try secondInput.fileHandleForWriting.close()
-        secondClient.waitUntilExit()
-        let afterExit = try await nextReady(&iterator, count: 1)
-        #expect(afterExit.runs.map(\.id) == [firstID])
-        await reader.cancel()
-        #expect(!process.isRunning)
-        #expect(process.terminationStatus == 0)
-        #expect(client.isRunning)
     }
 
-    private func nextReady(_ iterator: inout AsyncThrowingStream<ActiveRunsSnapshot, any Error>.Iterator, count: Int) async throws -> ActiveRunsSnapshot {
+    private func exits(_ process: Process) -> AsyncStream<Int32> {
+        AsyncStream { continuation in
+            process.terminationHandler = { process in
+                continuation.yield(process.terminationStatus)
+                continuation.finish()
+            }
+        }
+    }
+
+    private func nextReady(_ iterator: inout AsyncThrowingStream<ActiveSessionsSnapshot, any Error>.Iterator, count: Int) async throws -> ActiveSessionsSnapshot {
         let deadline = ContinuousClock.now + .seconds(12)
         while let value = try await iterator.next() {
             try #require(ContinuousClock.now < deadline)
             try #require(value.discovery != .unavailable)
-            if value.discovery == .ready && value.runs.count == count { return value }
+            if value.discovery == .ready && value.sessions.count == count { return value }
         }
         throw RegistryQueryError("Reader ended before a complete observation")
     }
 
-    private func publishClient(_ client: Process, id: String, home: URL) throws {
+    private func publishClient(_ client: Process, id: String, home: URL) async throws {
         let directory = home.appendingPathComponent("runs/00/\(id)")
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("provider-clients"), withIntermediateDirectories: true)
         let manifest: [String: Any] = [
-            "schema_version": 1, "run_id": id, "parent_run_id": NSNull(),
+            "schema_version": 1, "artifact_key": id, "caller_artifact_key": NSNull(),
             "created_at": "2020-01-01T00:00:00Z", "harness": "cat", "model": NSNull(),
             "surface": "tui", "cwd": home.path, "repo": NSNull(), "worktree": NSNull(),
-            "skill": NSNull(), "subjects": [], "launch": NSNull(), "context": NSNull(),
+            "skill": NSNull(), "subjects": [], "exec": NSNull(), "context": NSNull(),
             "runtime_path": NSNull(), "runtime_digest": NSNull(), "host": "fixture", "boot_id": NSNull(),
         ]
         try JSONSerialization.data(withJSONObject: manifest).write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
@@ -254,6 +279,54 @@ struct ActiveRunsObservationTests {
                                       "terminal_id": NSNull(), "started_at": Date().ISO8601Format(.init(includingFractionalSeconds: true))]
         try JSONSerialization.data(withJSONObject: receipt).write(
             to: directory.appendingPathComponent("provider-clients/\(client.processIdentifier).json"), options: .atomic)
+        let initialize = fixtureProcess(["session", "list", "--json"], home: home)
+        initialize.standardOutput = FileHandle.nullDevice
+        try await runFixture(initialize)
+
+        let capture = try JSONSerialization.data(withJSONObject: [
+            "artifact_key": id, "cwd": home.path, "provider": "cat",
+        ])
+        let payload = try #require(String(data: capture, encoding: .utf8))
+        func literal(_ value: String) -> String {
+            "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+        }
+        let seed = Process()
+        seed.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        seed.arguments = [home.appendingPathComponent("loopflow.db").path, """
+            PRAGMA foreign_keys=ON;
+            BEGIN;
+            INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published)
+            VALUES(\(literal(id)),'Watch','generated',1577836800,'cat',\(literal("fixture-" + id)),\(literal(home.path)),1);
+            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES(\(literal(id)),'captured',\(literal(id)),1577836800,\(literal(payload)));
+            UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=\(literal(id));
+            COMMIT;
+            """]
+        try await runFixture(seed)
+    }
+
+    private func runFixture(_ command: Process) async throws {
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
+            command.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+            do { try command.run() }
+            catch { command.terminationHandler = nil; continuation.resume(throwing: error) }
+        }
+        try #require(status == 0)
+    }
+
+    private func fixtureProcess(_ arguments: [String], home: URL) -> Process {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let binary = root.appendingPathComponent("target/debug/lf").path
+        let process = LocalWaveAgentLauncher.queryProcess([binary] + arguments, cwd: home.path)
+        var environment = (process.environment ?? [:]).filter {
+            !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_")
+        }
+        for key in ["LF_BIN", "LF_CONTROL_BIN"] { environment[key] = binary }
+        for key in ["LF_HOME", "LF_CONTROL_HOME"] { environment[key] = home.path }
+        for key in ["LF_DB_PATH", "LF_CONTROL_DB_PATH"] { environment[key] = home.appendingPathComponent("loopflow.db").path }
+        process.environment = environment
+        return process
     }
 
     private func directory() throws -> URL {
@@ -263,7 +336,7 @@ struct ActiveRunsObservationTests {
     }
 
     private func frame(time: Int = 1, home: String = "/fixture") -> String {
-        "{\"discovery\":\"ready\",\"home\":\"\(home)\",\"observed_at\":\(time),\"task\":null,\"runs\":[],\"gaps\":[]}\n"
+        "{\"discovery\":\"ready\",\"home\":\"\(home)\",\"observed_at\":\(time),\"task\":null,\"sessions\":[],\"gaps\":[]}\n"
     }
 
     private func shell(_ script: String, cwd: URL? = nil) -> Process {
@@ -271,7 +344,7 @@ struct ActiveRunsObservationTests {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script]
         process.currentDirectoryURL = cwd
-        process.environment = ["PATH": "/usr/bin:/bin", "LF_CONTROL_HOME": "/fixture"]
+        process.environment = ["PATH": "/usr/bin:/bin", "LF_HOME": "/fixture"]
         return process
     }
 }

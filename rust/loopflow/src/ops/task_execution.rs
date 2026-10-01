@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowInvocation, RunId, TaskId};
+use crate::durable::{FlowSession, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
+use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreError, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +26,7 @@ pub struct TaskExecutionSnapshot {
     pub state: TaskExecutionState,
     pub reason: String,
     pub step: Option<StepRef>,
-    pub run_id: Option<RunId>,
+    pub captured: Option<i64>,
 }
 
 pub(crate) async fn task_execution(
@@ -46,6 +47,22 @@ pub(crate) async fn task_execution_and_flow(
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
+    if let Some(position) = position.as_ref().filter(|flow| flow.failure.is_none()) {
+        if let Some(exec) = store.sqlite.pending_flow_step_exec(position.id())? {
+            match crate::journal::exec_process_evidence(&store.sqlite, &exec) {
+                ProcessIdentityEvidence::Live => {
+                    snapshot.state = TaskExecutionState::Running;
+                    snapshot.reason =
+                        format!("Step Exec {exec} is running {}", position.current().step);
+                }
+                ProcessIdentityEvidence::Unknown => {
+                    snapshot.state = TaskExecutionState::Unknown;
+                    snapshot.reason = format!("Step Exec {exec} has unknown process identity; inspect its pending effect before recovery");
+                }
+                ProcessIdentityEvidence::Dead => {}
+            }
+        }
+    }
     if let (TaskExecutionState::Running, Some(position)) = (snapshot.state, position.as_ref()) {
         if let Some(reason) = crate::ops::human_session::task_waiting_unblock(store, position)
             .await
@@ -56,17 +73,21 @@ pub(crate) async fn task_execution_and_flow(
         }
     }
     if snapshot.state == TaskExecutionState::Running {
-        if let Some(run) = snapshot.run_id.as_ref() {
-            match crate::run_record::activity::read(&crate::store::lf_home_dir(), run).await {
-                crate::run_record::activity::Activity::Stalled => {
+        if let Some(attempt) = position
+            .as_ref()
+            .and_then(|flow| flow.current_attempt.as_ref())
+        {
+            let captured = attempt.captured;
+            match activity::read(&crate::store::lf_home_dir(), &attempt.run_id).await {
+                Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
-                    snapshot.reason = format!("Run {run} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
+                    snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
                 }
-                crate::run_record::activity::Activity::Unknown => {
+                Activity::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
-                    snapshot.reason = format!("Run {run} is alive; activity samples are unavailable or stale. Inspect its Run before recovery.");
+                    snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before recovery.");
                 }
-                crate::run_record::activity::Activity::Running => {}
+                Activity::Running => {}
             }
         }
     }
@@ -78,7 +99,7 @@ pub(crate) async fn task_execution_and_flow(
             "Only Stop & restart can clear this blocker".to_string()
         } else {
             let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
-            format!("Complete the unblock Session, then run `lf task resume {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
+            format!("Complete the unblock Session, then run `lf task run {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
         };
         snapshot.reason.push_str(&format!(". {recovery}"));
     }
@@ -103,29 +124,33 @@ pub(crate) async fn task_execution_and_flow(
 }
 
 fn project_execution(
-    position: Option<&FlowInvocation>,
+    position: Option<&FlowSession>,
     evidence: Option<ProcessIdentityEvidence>,
 ) -> TaskExecutionSnapshot {
     let Some(position) = position else {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
-            reason: "No active Task Flow; independent Runs may still be active".to_string(),
+            reason: "No active Task Flow; independent Sessions may still be active".to_string(),
             step: None,
-            run_id: None,
+            captured: None,
         };
     };
     let step = position.current();
-    let run_id = position.session_run_id().cloned().or_else(|| {
-        position
-            .failure
-            .as_ref()
-            .and_then(|failure| failure.run_id.clone())
-    });
+    let captured = position
+        .current_attempt
+        .as_ref()
+        .map(|attempt| attempt.captured)
+        .or_else(|| {
+            position
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.captured)
+        });
     let (state, reason) = if let Some(failure) = &position.failure {
         (
             TaskExecutionState::Blocked,
-            match &failure.run_id {
-                Some(run) => format!("{} (Run {run})", failure.reason),
+            match &failure.captured {
+                Some(event) => format!("{} (Session event {event})", failure.reason),
                 None => failure.reason.clone(),
             },
         )
@@ -136,7 +161,7 @@ fn project_execution(
         )
     } else {
         match evidence {
-            Some(ProcessIdentityEvidence::Live) if run_id.is_some() => (
+            Some(ProcessIdentityEvidence::Live) if captured.is_some() => (
                 TaskExecutionState::Running,
                 format!("Task worker is running {}", step.step),
             ),
@@ -147,7 +172,7 @@ fn project_execution(
             Some(ProcessIdentityEvidence::Unknown) => (
                 TaskExecutionState::Unknown,
                 format!(
-                    "Worker liveness is unknown at {}; inspect its Run before recovery",
+                    "Worker liveness is unknown at {}; inspect its Session before recovery",
                     step.step
                 ),
             ),
@@ -171,7 +196,7 @@ fn project_execution(
         state,
         reason,
         step: Some(step),
-        run_id,
+        captured,
     }
 }
 
@@ -179,8 +204,7 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionSnapshot, TaskExecutionState};
     use crate::durable::{
-        test_flow_invocation, FlowAttempt, FlowInvocation, RunId, TaskId, TaskWorkerClaim,
-        TaskWorkerOwner,
+        test_flow_invocation, FlowAttempt, FlowSession, TaskId, TaskWorkerClaim, TaskWorkerOwner,
     };
     use crate::id::{ExecId, TraceId};
     use crate::journal::ProcessIdentityEvidence;
@@ -188,7 +212,7 @@ mod tests {
 
     #[test]
     fn worker_liveness_is_separate_from_durable_ready_work() {
-        let mut position = FlowInvocation {
+        let mut position = FlowSession {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             cursor: crate::engine::ExecutionCursor {
                 index: 0,
@@ -231,7 +255,8 @@ mod tests {
             claimed_at: OffsetDateTime::now_utc(),
         });
         position.current_attempt = Some(FlowAttempt {
-            run_id: RunId::new(),
+            captured: 1,
+            run_id: crate::session_record::new_artifact_key(),
             published: true,
             outcome: None,
         });
@@ -271,7 +296,7 @@ mod tests {
         assert_eq!(snapshot.state, TaskExecutionState::Stalled);
         assert!(snapshot
             .reason
-            .contains(snapshot.run_id.as_ref().unwrap().as_str()));
+            .contains(&snapshot.captured.unwrap().to_string()));
         assert_eq!(serde_json::to_value(snapshot).unwrap(), value);
     }
 }

@@ -34,6 +34,44 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
+Choose **Show Files** in a Task or Session toolbar to read `scratch/` and changed files
+beside the retained terminal. **Parent** compares the worktree with the Task PR's
+recorded base; **HEAD** compares with its current commit. The displayed SHA pins
+the file list and selected diff. A recorded PR links above the file navigator.
+Use ↑/↓ in the navigator to select files; hover a row for its full path.
+**Show Files** / **Hide Files** remembers the browser visibility across relaunches.
+
+**File** retains editable UTF-8 drafts and selection in this window; **Diff**
+shows the draft comparison read-only. Task headers show the recorded checkout;
+terminal and files follow that Task without a separate worktree selector.
+Switching files, hiding Files and returning to the Task keeps the draft.
+
+Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
+app menu for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+including atomic replacements. Disjoint local edits survive; disk wins overlaps
+without a conflict dialog. Incoming updates reset Undo to the surviving local
+edits, so Undo cannot restore text the LLM replaced. IME composition completes
+before incoming changes apply. Missing or invalid files retain dirty drafts and
+cannot be saved. Unsaved drafts do not survive closing the window.
+
+**Open saved versions** opens recovery folders in the checkout's Git metadata,
+including files later renamed or deleted. Every completed Save retains its draft,
+receipt and displaced inode; no version is created for each keystroke. Ordinary
+reads and saves do not scan old recovery history. Inspect late writes explicitly
+with `lf task file ISSUE PATH --recoveries --json`. Retention has no automatic
+cleanup or size cap; each settled save can retain up to two file-sized versions.
+Removing the worktree removes its recovery. Each window holds separate drafts
+and receives the other's writes through the same disk-wins policy.
+
+Save preserves file mode and exact UTF-8 bytes, including BOM and line endings.
+Revision checks refuse already-observed changes before the editor reconciles
+and retries. Arbitrary writers can still race publication; this is not exclusion
+of concurrent writes, extended-attribute preservation or power-loss durability.
+Symlink paths cannot be saved. A symlink introduced during exchange is retained
+without changing its destination.
+Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
+long lines retain the native editor's known responsiveness limitation.
+
 Select a repository in the outline, then choose a Task or Session. Use the
 outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
 shows repo → Wave → Task → Session and promotes descendants of singleton Waves
@@ -79,8 +117,7 @@ rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Home and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
-the focused worktree (a mono chip whose menu chooses, splits and hides
-worktrees and opens a terminal there), **Complete** for the focused pane's
+the Task's read-only worktree location, **Complete** for the focused pane's
 conversation when its shared actions allow it, and the Activity and Monitor
 glyphs.
 
@@ -92,15 +129,49 @@ dim slightly; nothing draws a focus border.
 
 **Monitor** opens beside retained Sessions and shells in the same multiplexer.
 Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
-selected Task's active Runs and updates automatically. **Refresh** requests an
+selected Task's active Sessions and updates automatically. **Refresh** requests an
 observation from the same reader. Recovery and read failures retain the last
 observation with a visible reason; **Retry** restarts a failed reader. Incomplete
 ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
 the window's shared reader and terminals. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
-Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
-history. Projects are internal chapter records and add no navigation tier. Task
+Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
+selected repository. Empty search shows recent destinations first; arrows select,
+Return opens and Escape returns focus to the previous terminal. Flow entries
+inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+The sidebar search remains a filter. Each repository retains up to 20 recent
+destinations for the window. Visited historical Tasks remain in recents after
+leaving their pages; opening one reads its exact identity again. This does not
+search all historical Tasks. Failed reads preserve the workspace and offer Retry.
+If a highlighted row disappears, Return opens the first remaining visible result;
+with no results it does nothing.
+
+With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
+the Session name. Both open the same picker: review the named Task, then choose
+**Bind permanently**. Opening the picker leaves the conversation and terminal intact.
+
+```sh
+open 'loopflow://task/LOO-303'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+```
+
+Task links and palette Task entries open details, including Tasks outside the
+current chapter. They never start work or enter a Task's sole Session. Ambiguous
+links offer repository-qualified choices; unavailable reads keep the current
+workspace and offer Retry. Only one workspace window receives a link.
+
+Wave details show the objective, current chapter plan/KRs, the current Project's
+Flow template, all Tasks and chapter history. Templates fold composed Flows;
+click a group or its disclosure control to expand it. Repeated uses disclose
+independently, and both return edges remain visible at folded boundaries. Tab to
+a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
+this includes nested and empty groups and XOR paths. Inspecting a return names
+its target step even while the containing Flow is folded.
+Task previews use the same template view until an invocation exists, including
+Tasks with independent conversations. Captured invocations keep their expanded
+graph. Changing a template resets its disclosure; it does not change a capture.
+Projects are internal chapter records and add no navigation tier. Task
 details include the directive, recorded condition, current KRs, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared PM API. Failed saves retain your
@@ -148,9 +219,9 @@ an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
 Selecting a Session in another checkout restores that worktree's conversation,
-companion terminals, split layout, and focus. The toolbar's worktree menu splits
-entire workspaces; pane strips and keybinds split within one workspace. Hiding a
-worktree retains its processes. Closing a shell ends that shell. Changing a shell's
+companion terminals, split layout, and focus. Outside Task context, the toolbar's
+worktree menu splits entire workspaces; pane strips and keybinds split within one
+workspace. Hiding a worktree retains its processes. Closing a shell ends that shell. Changing a shell's
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
@@ -170,8 +241,8 @@ only after a successful Session read. Compact retains an empty Wave
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
-Current Wave navigation reads `lf ls --all --current --json`. The CLI excludes
-abandoned and retired registrations; unfiltered `lf ls` retains historical
+Current Wave navigation reads `lf wave list --all --current --json`. The CLI excludes
+abandoned and retired registrations; unfiltered `lf wave list` retains historical
 registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
@@ -196,7 +267,7 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf status <wave> --json`.
+from `lf wave status <wave> --json`.
 
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
@@ -217,10 +288,10 @@ codebase tree, and registry health.
   to their Wave. The internal Project retains chapter planning and history;
   it has no separate operator.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
+  Lifecycle mutations remain `lf task run/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
+  `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.
@@ -254,11 +325,9 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app bundles the current source `lf` with release Home selection and
-validation-only migration authority. Its operator views therefore read the
-real Home without allowing an unpromoted build to advance the shared database
-frontier. Ordinary source-built `lf` commands keep their isolated `.lf-dev`
-Home.
+The dev app uses the installed CLI and main `~/.lf` Home. Its bundled source
+CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
+experiments remain disposable and never become the app's default.
 
 | Command | What it does |
 | --- | --- |
@@ -322,9 +391,11 @@ xcodebuild -quiet \
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
-Task Monitor's shared reader is `RegistryQuery.watchActiveRuns()`, backed by
-`lf runs --active --watch --json`. Its typed Work references and verified live processes
-are separate from Session rows and historical Run outcomes. Confirm emptiness
+Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
+`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+Verified Exec/process and native-client receipts establish activity independently
+of command outcomes. Input replacement keeps the same row; unresolved engine
+ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness
 only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
 and incomplete evidence visible. Podium starts one reader on first demand and
 retains it across pane and repository navigation until window teardown. Wake
@@ -333,3 +404,15 @@ and clears its evidence before starting the new one. Pipes drain off the main
 actor, frames are limited to 16 MiB, and pending delivery retains only the latest
 snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
 closes stdin, then terminates and reaps only the owned reader if necessary.
+
+## Headless checks
+
+```bash
+scripts/test_desktop.sh --filter DesktopHeadlessTests
+uv run python scripts/test.py --swift
+```
+
+Gate and CI build the app and inspect production views and controls without
+launching a window. Display/terminal integration is opt-in with
+`LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
+See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.

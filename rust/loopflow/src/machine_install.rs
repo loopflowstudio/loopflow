@@ -1,8 +1,7 @@
-//! Fixed machine authority for installed artifact/store selection.
+//! Machine authority for published artifact installation.
 //!
-//! This state lives outside every Loopflow Home. A development Home cannot
-//! select the reliable store by changing `LF_HOME`, and a published Home cannot
-//! hide an interrupted cross-store switch by selecting another database.
+//! Release receipts live outside the data directory. Ordinary commands share
+//! the main Home; explicit experiments never change installed artifact selection.
 
 use std::collections::HashSet;
 #[cfg(unix)]
@@ -755,6 +754,54 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Run ordinary commands through the installed CLI before opening any Home state.
+pub fn dispatch_default_cli() -> Result<()> {
+    if crate::store::custom_home_selected() {
+        let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
+        let database = crate::store::database_path_from_env()?;
+        let database = crate::store::canonicalize_with_missing_tail(&database)?;
+        std::env::set_var("LF_HOME", home);
+        std::env::set_var("LF_DB_PATH", database);
+        return Ok(());
+    }
+    let current = fs::canonicalize(std::env::current_exe()?)?;
+    let destination = if let Some(cli) = installed_cli(&root()?)? {
+        cli.verify()?;
+        cli.path
+    } else {
+        let installed = account_home()?.join(".local/bin/lf");
+        match fs::canonicalize(&installed) {
+            Ok(path) => path,
+            Err(error) if error.kind() == ErrorKind::NotFound && crate::build_info::provenance().is_release() => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(anyhow!(
+                "no installed lf; install a published release or select an explicit disposable LF_HOME for this build"
+            )),
+            Err(error) => return Err(error.into()),
+        }
+    };
+    if current == destination {
+        return Ok(());
+    }
+    let main_home = account_home()?.join(".lf");
+    let mut command = Command::new(&destination);
+    command
+        .args(std::env::args_os().skip(1))
+        .env("LF_HOME", &main_home)
+        .env("LF_DB_PATH", main_home.join("loopflow.db"))
+        .env("LF_BIN", &destination)
+        .env_remove(crate::store::CONTROL_HOME_ENV)
+        .env_remove(crate::store::CONTROL_DB_PATH_ENV)
+        .env_remove(crate::store::CONTROL_BIN_ENV);
+    #[cfg(unix)]
+    {
+        Err(command.exec()).context("run installed lf")
+    }
+    #[cfg(not(unix))]
+    {
+        std::process::exit(command.status()?.code().unwrap_or(1));
+    }
+}
+
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     let root = root()?;
     let gate = entry_gate_path(&root, role)?;
@@ -838,28 +885,6 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
 }
 
-/// Find a retained development Home without changing its data or machine selection.
-pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelection> {
-    for entry in fs::read_dir(root.join("receipts"))? {
-        let path = entry?.path();
-        if path.extension().is_none_or(|extension| extension != "json") {
-            continue;
-        }
-        let receipt: SwitchReceipt = serde_json::from_slice(&fs::read(&path)?)?;
-        if receipt.target.installation_id == id
-            && receipt.phase == SwitchPhase::Settled
-            && receipt.target.source == InstallSource::Development
-        {
-            receipt.validate()?;
-            if !receipt.target.store.is_file() {
-                return Err(anyhow!("retained Home {} is missing its store", id));
-            }
-            return Ok(receipt.target);
-        }
-    }
-    Err(anyhow!("no retained development installation named {id}"))
-}
-
 pub fn read_state(root: &Path) -> Result<MachineInstallState> {
     let switch_path = root.join(SWITCH_FILE);
     if path_exists(&switch_path)? {
@@ -874,6 +899,25 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
         return Ok(MachineInstallState::Settled(Box::new(active)));
     }
     Ok(MachineInstallState::Legacy)
+}
+
+/// Ordinary launches use published artifacts even if an old development
+/// installation is still selected. Its store never participates in routing.
+pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
+    let active = match read_state(root)? {
+        MachineInstallState::Legacy => return Ok(None),
+        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
+    };
+    let artifacts = match active.selection.source {
+        InstallSource::Published => active.selection.artifact_set,
+        InstallSource::Development => active.published_fallback,
+    };
+    artifacts
+        .artifact(&ArtifactRole::Cli)
+        .cloned()
+        .map(Some)
+        .context("installed CLI is missing")
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1205,7 +1249,7 @@ fn file_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
+pub(crate) fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
     path.parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
@@ -1564,6 +1608,31 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        assert!(super::installed_cli(&root).unwrap().is_none());
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
+        for selected in [published.clone(), development.clone()] {
+            let active = active(selected, published.artifact_set.clone());
+            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+            assert_eq!(
+                super::installed_cli(&root).unwrap().as_ref(),
+                Some(expected)
+            );
+        }
+        let next = selection(directory.path(), "next", InstallSource::Published);
+        let receipt = switch(development, next, published.artifact_set.clone());
+        write_switch(&root, &receipt).unwrap();
+        assert_eq!(
+            super::installed_cli(&root).unwrap().as_ref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
     fn copied_active_artifact_keeps_its_install_selection() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
@@ -1854,6 +1923,7 @@ mod tests {
 
     #[test]
     fn settlement_commits_target_then_archives_immutable_receipt() {
+        let _lock = crate::journal::test_env_lock();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
@@ -1883,34 +1953,6 @@ mod tests {
         assert!(root.join("receipts/switch-test.json").is_file());
 
         settle_switch(&root, &receipt, &active_state).unwrap();
-        // A later installation must not make the previous Home unreachable.
-        let later = selection(directory.path(), "later", InstallSource::Development);
-        let later_active = active(later.clone(), active_state.published_fallback.clone());
-        let mut next = switch(
-            development.clone(),
-            later.clone(),
-            active_state.published_fallback.clone(),
-        );
-        next.id = "switch-later".to_string();
-        write_switch(&root, &next).unwrap();
-        next.phase = SwitchPhase::Settled;
-        next.recovery_owner = RecoveryOwner::Candidate;
-        next.target_store_advance_started = true;
-        next.target_store_advanced = true;
-        next.active_selection_committed = true;
-        write_switch(&root, &next).unwrap();
-        settle_switch(&root, &next, &later_active).unwrap();
-        let restored = retained_development_home(&root, &development.installation_id).unwrap();
-        assert_eq!(restored, development);
-        assert_eq!(
-            fs::read(&restored.store).unwrap(),
-            b"retained chapter and Task history"
-        );
-        assert!(
-            matches!(read_state(&root).unwrap(), MachineInstallState::Settled(found) if found.selection == later)
-        );
-        assert!(retained_development_home(&root, "missing").is_err());
-        assert!(retained_development_home(&root, &published.installation_id).is_err());
     }
 
     #[test]

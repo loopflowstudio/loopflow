@@ -1,5 +1,6 @@
 //! Task planning operations against stateful, isolated Linear responses.
 
+use std::cell::RefCell;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,10 +13,7 @@ use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
 use crate::child::ChildRef;
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
-use crate::planning::{LinearProjectId, ProjectPlan};
-use crate::pm::PmSnapshot;
 use crate::store::{open_ephemeral_store, StorageConfig};
-use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
     PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -54,6 +52,8 @@ impl PlanningEnvironment {
 #[derive(Default)]
 struct PlanningState {
     issues: Vec<serde_json::Value>,
+    extra_projects: Vec<serde_json::Value>,
+    project_name: Option<String>,
     fail_confirmation: bool,
     fail_snapshot: bool,
     fail_completion: bool,
@@ -70,6 +70,28 @@ struct PlanningState {
     current_project_id: Option<String>,
     completion_state: Option<String>,
     comments: Vec<serde_json::Value>,
+    attachments: Vec<String>,
+    move_on_attachment_read: bool,
+}
+
+fn mark_issue_updated(issue: &mut serde_json::Value) {
+    issue["updatedAt"] = json!(time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap());
+}
+
+fn planning_project(id: &str, current: &str) -> serde_json::Value {
+    let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
+    let name = match id {
+        "project-1" => "Chapter",
+        "prior-project" => "Previous chapter",
+        _ => "Next chapter",
+    };
+    json!({"id":id, "name":name, "description":"", "content":"flow: feature",
+        "status":{"type":if completed { "completed" } else { "started" }},
+        "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
+        "archivedAt":null,
+        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}})
 }
 
 async fn planning_graphql(
@@ -80,132 +102,171 @@ async fn planning_graphql(
     let vars = &request["variables"];
     let page =
         |nodes| json!({"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}});
+    let mut state = state.lock().await;
     let project_id = state
-        .lock()
-        .await
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let project = json!({"id":project_id, "name":"Chapter", "description":"", "content":"flow: feature", "status":{"type":"started"},
-        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
-    let data =
-        if query.contains("query ListTeams") {
-            json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
+    let mut project = planning_project(&project_id, &project_id);
+    if let Some(name) = &state.project_name {
+        project["name"] = json!(name);
+    }
+    let data = if query.contains("query ListTeams") {
+        json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-        } else if query.contains("query ListInitiativeProjects") {
-            let mut state = state.lock().await;
-            if !state.issues.is_empty() && state.fail_snapshot {
-                state.fail_snapshot = false;
-                return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
-            }
-            json!({"initiative":{"projects":page(vec![project])}})
-        } else if query.contains("query ListProjectIssues") {
-            let mut state = state.lock().await;
-            if !state.issues.is_empty() && state.fail_confirmation {
-                state.fail_confirmation = false;
-                return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
-            }
-            let issues = if state.trashed && state.omit_trashed_issues {
-                vec![]
-            } else {
-                state.issues.clone()
-            };
-            json!({"project":{"issues":page(issues)}})
-        } else if query.contains("query IssueOwnership") {
-            let state = state.lock().await;
-            if state.trashed {
-                return axum::Json(
-                    json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
-                );
-            }
-            let mut issue = state
-                .issues
-                .iter()
-                .find(|issue| issue["id"] == vars["id"] || issue["identifier"] == vars["id"])
-                .unwrap()
-                .clone();
-            issue["project"] = project;
-            json!({"issue":issue})
-        } else if query.contains("query IssueDeletion") {
-            let state = state.lock().await;
-            if state.trashed && state.unreadable_trash {
-                json!({"issue":null})
-            } else {
-                json!({"issue":{"trashed":state.trashed}})
-            }
-        } else if query.contains("mutation DeleteIssue") {
-            let mut state = state.lock().await;
-            if state.refuse_deletion || state.trashed {
-                return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
-            }
-            state.trashed = true;
-            state.deletion_writes += 1;
-            state.fail_snapshot = state.fail_deleted_snapshot;
-            if state.lose_deletion {
-                state.lose_deletion = false;
-                return axum::Json(json!({"errors":[{"message":"lost deletion response"}]}));
-            }
-            json!({"issueDelete":{"success":true}})
-        } else if query.contains("query IssueTeam") {
-            json!({"issue":{"team":{"id":"team-1"}}})
-        } else if query.contains("query CompletedWorkflowStates") {
-            json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
-        } else if query.contains("mutation SetIssueState") {
-            let mut state = state.lock().await;
-            if state.fail_completion {
-                state.fail_completion = false;
-                return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
-            }
-            state.completion_writes += 1;
-            let outcome = state
-                .completion_state
-                .take()
-                .unwrap_or_else(|| "completed".into());
-            state.issues[0]["state"] = json!({"type":outcome});
-            if state.lose_completion {
-                state.lose_completion = false;
-                return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
-            }
-            json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
-        } else if query.contains("query IssueComments") {
-            json!({"issue":{"comments":page(state.lock().await.comments.clone())}})
-        } else if query.contains("mutation CreateComment") {
-            let mut state = state.lock().await;
-            let id = format!("comment-{}", state.comments.len() + 1);
-            state
-                .comments
-                .push(json!({"id":id,"body":vars["body"],"user":null}));
-            if state.lose_comment {
-                state.lose_comment = false;
-                return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
-            }
-            json!({"commentCreate":{"comment":{"id":id}}})
-        } else if query.contains("mutation UpdateIssue") {
-            let mut state = state.lock().await;
-            let issue = state
-                .issues
-                .iter_mut()
-                .find(|issue| issue["id"] == vars["id"])
-                .unwrap();
-            for key in ["title", "description"] {
-                if let Some(value) = vars["input"].get(key) {
-                    issue[key] = value.clone();
-                }
-            }
-            json!({"issueUpdate":{"success":true}})
-        } else if query.contains("query UnstartedWorkflowStates") {
-            json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
-        } else if query.contains("mutation CreateIssue") {
-            state.lock().await.issues.push(
-                json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
-            "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,
-            "sortOrder":0.0, "assignee":null, "state":{"type":"unstarted"},
-            "team":{"id":"team-1"}, "project":{"id":"project-1","name":"Chapter"}}),
-            );
-            return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
+    } else if query.contains("query ListInitiatives") {
+        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
+    } else if query.contains("mutation RenameProject") {
+        if let Some(project) = state
+            .extra_projects
+            .iter_mut()
+            .find(|project| project["id"] == vars["id"])
+        {
+            project["name"] = vars["name"].clone();
         } else {
-            panic!("unexpected creation fixture query: {query}");
+            state.project_name = Some(vars["name"].as_str().unwrap().into());
+        }
+        json!({"projectUpdate":{"success":true}})
+    } else if query.contains("query ListInitiativeProjects") {
+        if !state.issues.is_empty() && state.fail_snapshot {
+            state.fail_snapshot = false;
+            return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
+        }
+        let mut projects = if project_id == "prior-project" {
+            vec![project, planning_project("project-1", &project_id)]
+        } else {
+            vec![project]
         };
+        projects.extend(state.extra_projects.clone());
+        json!({"initiative":{"projects":page(projects)}})
+    } else if query.contains("query ListProjectIssues") {
+        if state
+            .extra_projects
+            .iter()
+            .any(|project| project["id"] == vars["projectId"])
+        {
+            return axum::Json(
+                json!({"errors":[{"message":"foreign Project issues are unavailable"}]}),
+            );
+        }
+        if !state.issues.is_empty() && state.fail_confirmation {
+            state.fail_confirmation = false;
+            return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
+        }
+        let issues = if state.trashed && state.omit_trashed_issues {
+            vec![]
+        } else {
+            state.issues.clone()
+        };
+        let issues = issues
+            .into_iter()
+            .filter(|issue| issue["project"]["id"] == vars["projectId"])
+            .collect::<Vec<_>>();
+        json!({"project":{"issues":page(issues)}})
+    } else if query.contains("query ProjectOwnership") {
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
+        json!({"project": owned})
+    } else if query.contains("query IssueOwnership") {
+        if state.trashed {
+            return axum::Json(
+                json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
+            );
+        }
+        let mut issue = state
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == vars["id"] || issue["identifier"] == vars["id"])
+            .unwrap()
+            .clone();
+        issue["project"] = project;
+        json!({"issue":issue})
+    } else if query.contains("query IssueDeletion") {
+        if state.trashed && state.unreadable_trash {
+            json!({"issue":null})
+        } else {
+            json!({"issue":{"trashed":state.trashed}})
+        }
+    } else if query.contains("mutation DeleteIssue") {
+        if state.refuse_deletion || state.trashed {
+            return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
+        }
+        state.trashed = true;
+        state.deletion_writes += 1;
+        state.fail_snapshot = state.fail_deleted_snapshot;
+        if state.lose_deletion {
+            state.lose_deletion = false;
+            return axum::Json(json!({"errors":[{"message":"lost deletion response"}]}));
+        }
+        json!({"issueDelete":{"success":true}})
+    } else if query.contains("query IssueTeam") {
+        json!({"issue":{"team":{"id":"team-1"}}})
+    } else if query.contains("query CanceledWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"canceled"}]}})
+    } else if query.contains("query CompletedWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
+    } else if query.contains("mutation SetIssueState") {
+        if state.fail_completion {
+            state.fail_completion = false;
+            return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
+        }
+        state.completion_writes += 1;
+        let outcome = state
+            .completion_state
+            .take()
+            .unwrap_or_else(|| vars["stateId"].as_str().unwrap().to_string());
+        state.issues[0]["state"] = json!({"type":outcome});
+        mark_issue_updated(&mut state.issues[0]);
+        if state.lose_completion {
+            state.lose_completion = false;
+            return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
+        }
+        json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
+    } else if query.contains("query IssueAttachments") {
+        if state.move_on_attachment_read {
+            state.move_on_attachment_read = false;
+            state.current_project_id = Some("project-1".into());
+            state.issues[0]["project"]["id"] = json!("project-1");
+            mark_issue_updated(&mut state.issues[0]);
+        }
+        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
+    } else if query.contains("query IssueComments") {
+        json!({"issue":{"comments":page(state.comments.clone())}})
+    } else if query.contains("mutation CreateComment") {
+        let id = format!("comment-{}", state.comments.len() + 1);
+        state
+            .comments
+            .push(json!({"id":id,"body":vars["body"],"user":null}));
+        if state.lose_comment {
+            state.lose_comment = false;
+            return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
+        }
+        json!({"commentCreate":{"comment":{"id":id}}})
+    } else if query.contains("mutation UpdateIssue") {
+        let issue = state
+            .issues
+            .iter_mut()
+            .find(|issue| issue["id"] == vars["id"])
+            .unwrap();
+        for key in ["title", "description"] {
+            if let Some(value) = vars["input"].get(key) {
+                issue[key] = value.clone();
+            }
+        }
+        mark_issue_updated(issue);
+        json!({"issueUpdate":{"success":true}})
+    } else if query.contains("query UnstartedWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
+    } else if query.contains("mutation CreateIssue") {
+        state
+            .issues
+            .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
+            "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,
+            "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
+            "team":{"id":"team-1"}, "project":{"id":"project-1","name":"Chapter"}}));
+        return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
+    } else {
+        panic!("unexpected creation fixture query: {query}");
+    };
     axum::Json(json!({"data":data}))
 }
 
@@ -291,6 +352,7 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
             // Lookup is valid for terminal planning items; launch owns eligibility.
             state.lock().await.issues[0]["state"]["type"] = json!("completed");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
             let resolved =
                 crate::ops::task_pm::resolve_task_async(&repo, "FIX-1", PmRefresh::Force)
                     .await
@@ -380,8 +442,9 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
                 1
             );
         }
-        let (first, task) = create().unwrap();
-        assert!(task.is_none());
+        let crate::ops::task::TaskCreateResult::Created(first) = create().unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         let edit = || {
             crate::ops::task::task_edit(
                 &repo,
@@ -403,8 +466,9 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
             assert!(error.contains("Retry the same Task command"), "{error}");
         }
         edit().unwrap();
-        let (retry, task) = create().unwrap();
-        assert!(task.is_none());
+        let crate::ops::task::TaskCreateResult::Created(retry) = create().unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         assert_eq!(first.id, retry.id);
         assert_eq!(first.name, "Future work");
         assert_eq!(retry.name, "Edited future work");
@@ -416,7 +480,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
             .unwrap();
         assert!(retry.description.ends_with(marker));
         let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![retry]);
+        assert_eq!(snapshot.items, vec![*retry]);
     });
     assert_eq!(
         runtime.block_on(async { state.lock().await.issues.len() }),
@@ -523,6 +587,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     runtime.block_on(async {
         let mut state = state.lock().await;
         state.issues[0]["state"] = json!({"type":"completed"});
+        mark_issue_updated(&mut state.issues[0]);
         state.lose_deletion = lost;
         state.unreadable_trash = lost;
         state.fail_deleted_snapshot = fail_snapshot;
@@ -599,7 +664,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             .block_on(fixture.store.pm_snapshot(wave.id()))
             .unwrap()
             .unwrap();
-        let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+        let snapshot = row.snapshot;
         assert_eq!(snapshot.items.is_empty(), fail_snapshot);
         if fail_local {
             connection
@@ -692,10 +757,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
         .block_on(fixture.store.pm_snapshot(wave.id()))
         .unwrap()
         .unwrap();
-    assert!(serde_json::from_str::<PmSnapshot>(&row.payload)
-        .unwrap()
-        .items
-        .is_empty());
+    assert!(row.snapshot.items.is_empty());
     runtime.block_on(async {
         let state = state.lock().await;
         assert_eq!(state.deletion_writes, 1);
@@ -779,14 +841,16 @@ fi
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let (item, _) = crate::ops::task::task_create(
+        let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
             None,
         )
-        .unwrap();
+        .unwrap() else {
+            panic!("creation without --run must return the issue");
+        };
         let task = registered.then(|| {
             for args in [
                 vec!["add", "."],
@@ -808,25 +872,9 @@ fi
                     .success());
             }
             let timestamp = time::OffsetDateTime::now_utc();
-            let project = Project {
-                id: ProjectId::new(),
-                plan: ProjectPlan {
-                    flow: "feature".into(),
-                    status: crate::pm::ProjectStatus::Started,
-                    id: LinearProjectId::new("project-1").unwrap(),
-                    slug: "chapter".into(),
-                    name: "Chapter".into(),
-                    prompt_context: String::new(),
-                    pm_snapshot_synced_at: 1,
-                },
-                wave_id: wave.id().clone(),
-                iteration: 0,
-                abandon_intent: None,
-                created_at: timestamp,
-                updated_at: timestamp,
-            };
-            runtime
-                .block_on(fixture.store.create_project(&project))
+            let project = runtime
+                .block_on(fixture.store.get_project_by_project("project-1"))
+                .unwrap()
                 .unwrap();
             let task = Task {
                 id: TaskId::new(),
@@ -902,8 +950,7 @@ fi
             .as_ref()
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
         let complete = |summary: &str| match merge {
-            None => crate::ops::task::task_complete(&repo, selector, summary.into()),
-            Some(PrMergeMode::User) => crate::ops::task::task_status(Some(selector)).map(Some),
+            None | Some(PrMergeMode::User) => crate::ops::task::task_complete(&repo, selector, summary.into()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = task.as_ref().unwrap();
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
@@ -930,6 +977,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 let error = complete("Cannot change the outcome").unwrap_err();
                 assert!(
@@ -989,6 +1037,7 @@ fi
                 runtime.block_on(async {
                     let mut provider = state.lock().await;
                     provider.issues[0]["state"] = json!({"type":"unstarted"});
+                    mark_issue_updated(&mut provider.issues[0]);
                     provider.completion_state = Some(terminal.into());
                 });
                 assert!(matches!(
@@ -1004,6 +1053,7 @@ fi
             }
             runtime.block_on(async {
                 state.lock().await.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut state.lock().await.issues[0]);
             });
         }
         runtime.block_on(async {
@@ -1065,6 +1115,7 @@ fi
                 provider.fail_snapshot = true;
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
+                mark_issue_updated(&mut provider.issues[0]);
             });
             let retry = complete("Delivered the requested outcome")
                 .unwrap()
@@ -1097,6 +1148,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                     fixture.store.update_task_pm_writeback(
                         &task.id,
                         &PmWritebackState::Pending {
@@ -1150,6 +1202,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 assert!(complete("Cannot change the outcome")
                     .unwrap_err()
@@ -1184,5 +1237,552 @@ impl Drop for PlanningEnvironment {
                 None => std::env::remove_var(name),
             }
         }
+    }
+}
+
+#[test]
+fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
+    let _lock = crate::journal::test_env_lock();
+    for (selector, delete) in [
+        (Some("FIX-1"), false),
+        (Some("cancel-me"), false),
+        (None, false),
+        (Some("FIX-1"), true),
+    ] {
+        let _restore = PlanningEnvironment::isolate();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(Fixture::new());
+        std::env::set_var("LF_HOME", fixture.directory.path());
+        std::env::set_var("LF_DB_PATH", &fixture.database);
+        let (repo, wave) = runtime.block_on(fixture.planning_repo());
+        runtime.block_on(fixture.seed(now() + 86_400));
+        let remote = fixture.directory.path().join("loopflowstudio/fixture.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        let git = |cwd: &Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        git(&remote, &["init", "--bare", "-q"]);
+        git(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        git(&repo, &["config", "user.name", "Fixture"]);
+        git(&repo, &["config", "user.email", "fixture@example.com"]);
+        git(
+            &repo,
+            &["remote", "set-url", "origin", remote.to_str().unwrap()],
+        );
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "baseline"]);
+        git(&repo, &["push", "-u", "origin", "main"]);
+        let checkout = fixture.directory.path().join("task");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "cancel-me",
+                checkout.to_str().unwrap(),
+            ],
+        );
+        git(&checkout, &["push", "-u", "origin", "cancel-me"]);
+        let bin = fixture.directory.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let gh = bin.join("gh");
+        // Git is real; only GitHub is simulated. State survives separate calls.
+        std::fs::write(&gh, r#"#!/bin/sh
+root=$(git rev-parse --git-common-dir)
+case "$2" in
+  list) if [ -f "$root/pr-closed" ]; then echo '[{"number":42,"state":"CLOSED","headRepository":{"nameWithOwner":"loopflowstudio/fixture"}}]'; else echo '[{"number":42,"state":"OPEN","headRepository":{"nameWithOwner":"loopflowstudio/fixture"}}]'; fi ;;
+  close) if [ -f "$root/fail-close" ]; then echo 'GitHub unavailable' >&2; exit 1; fi; touch "$root/pr-closed" ;;
+  *) echo 'Unexpected GitHub operation' >&2; exit 1 ;;
+esac
+"#).unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+        let (url, server) = runtime.block_on(serve(state.clone()));
+        PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+            let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
+                &repo,
+                Some("product"),
+                Some("Cancel me".into()),
+                Some("Keep history".into()),
+                None,
+            )
+            .unwrap() else {
+                panic!("planning issue")
+            };
+            let timestamp = time::OffsetDateTime::now_utc();
+            let project = runtime
+                .block_on(fixture.store.list_projects(Some(wave.id())))
+                .unwrap()
+                .into_iter()
+                .find(|project| project.plan.id.as_str() == "project-1")
+                .unwrap();
+            let task = Task {
+                id: TaskId::new(),
+                plan: crate::planning::TaskPlan {
+                    id: crate::planning::LinearIssueId::new(&item.id).unwrap(),
+                    identifier: item.identifier.clone(),
+                    title: item.name,
+                    description: item.description,
+                    pm_snapshot_synced_at: 1,
+                },
+                pm_writeback: PmWritebackState::Current,
+                wave_id: wave.id().clone(),
+                project_id: project.id,
+                worktree: checkout.clone(),
+                workspace_slug: "cancel-me".into(),
+                abandon_intent: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+                observation: Observation::NotRequired,
+                agent: None,
+            };
+            let pr = TaskPr {
+                id: TaskPrId::new(),
+                task_id: task.id.clone(),
+                sequence: 1,
+                slug: "cancel-me".into(),
+                branch: "cancel-me".into(),
+                base_commit: git(&repo, &["rev-parse", "HEAD"]).trim().into(),
+                parent_pr_id: None,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+            };
+            runtime
+                .block_on(fixture.store.create_task(&task, &pr))
+                .unwrap();
+            runtime
+                .block_on(fixture.store.start_task_flow(
+                    &task.id,
+                    crate::durable::FlowSession {
+                        task_id: Some(task.id.clone()),
+                        wave_id: Some(task.wave_id.clone()),
+                        cwd: task.worktree.clone(),
+                        message: None,
+                        model: None,
+                        finished: false,
+                        invocation: crate::durable::test_flow_invocation(
+                            "review",
+                            0,
+                            "review",
+                            Some("review"),
+                            true,
+                        ),
+                        current_attempt: None,
+                        pending_session_id: None,
+                        ready_summary: None,
+                        cursor: Default::default(),
+                        version: 0,
+                        worker_generation: 0,
+                        claim: None,
+                        failure: None,
+                        updated_at: timestamp,
+                    },
+                ))
+                .unwrap();
+            assert_eq!(
+                crate::ops::task::task_repository(&checkout, None).unwrap(),
+                checkout.canonicalize().unwrap()
+            );
+            let caller = match selector {
+                None => &checkout,
+                Some("FIX-1") => fixture.directory.path(),
+                Some(_) => &repo,
+            };
+            // A provider refusal cannot be mistaken for local cancellation.
+            runtime.block_on(async {
+                state.lock().await.fail_completion = true;
+            });
+            assert!(crate::ops::task::task_abandon(caller, selector, false).is_err());
+            assert_eq!(
+                runtime
+                    .block_on(
+                        fixture
+                            .store
+                            .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                    )
+                    .unwrap(),
+                WorkStatus::Ready
+            );
+            assert!(checkout.exists());
+            if selector == Some("cancel-me") {
+                let progress = LifecycleMessages::default();
+                crate::ops::abandon_branch(
+                    &repo,
+                    &crate::ops::AbandonOptions {
+                        branch: Some("cancel-me".into()),
+                        force: true,
+                    },
+                    &progress,
+                )
+                .unwrap();
+                assert!(progress
+                    .0
+                    .borrow()
+                    .iter()
+                    .any(|message| message.contains("Task FIX-1")
+                        && message.contains("remain unchanged")));
+                assert_eq!(
+                    runtime
+                        .block_on(
+                            fixture
+                                .store
+                                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        )
+                        .unwrap(),
+                    WorkStatus::Ready
+                );
+                assert_eq!(
+                    runtime
+                        .block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+                    json!("unstarted")
+                );
+                assert!(!checkout.exists());
+                // A reopened PR on an already-abandoned record must be excluded
+                // by preview as well as apply, even after its checkout is gone.
+                std::fs::remove_file(repo.join(".git/pr-closed")).unwrap();
+                runtime.block_on(async {
+                    let mut state = state.lock().await;
+                    state.current_project_id = Some("prior-project".into());
+                    state.issues[0]["project"]["id"] = json!("prior-project");
+                    mark_issue_updated(&mut state.issues[0]);
+                });
+                for apply in [false, true] {
+                    let entries = crate::ops::task::task_sweep(&repo, apply).unwrap();
+                    assert_eq!(entries.len(), 1);
+                    assert!(entries[0].outcome.contains("open PR"), "{:?}", entries);
+                    assert_eq!(
+                        runtime.block_on(async {
+                            state.lock().await.issues[0]["state"]["type"].clone()
+                        }),
+                        json!("unstarted")
+                    );
+                    assert!(!repo.join(".git/pr-closed").exists());
+                }
+                std::fs::write(repo.join(".git/pr-closed"), "").unwrap();
+                runtime.block_on(async {
+                    let mut state = state.lock().await;
+                    state.current_project_id = None;
+                    state.issues[0]["project"]["id"] = json!("project-1");
+                    mark_issue_updated(&mut state.issues[0]);
+                });
+            } else {
+                // A later GitHub failure preserves enough evidence for a retry.
+                std::fs::write(repo.join(".git/fail-close"), "").unwrap();
+                assert!(crate::ops::task::task_abandon(caller, selector, false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("GitHub unavailable"));
+                assert_eq!(
+                    runtime
+                        .block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+                    json!("canceled")
+                );
+                assert!(checkout.exists());
+                std::fs::remove_file(repo.join(".git/fail-close")).unwrap();
+            }
+            assert_eq!(
+                if delete {
+                    crate::ops::task::task_delete(caller, "FIX-1").unwrap()
+                } else {
+                    crate::ops::task::task_abandon(caller, selector, false).unwrap()
+                },
+                "FIX-1"
+            );
+            assert!(!checkout.exists());
+            assert!(git(
+                &repo,
+                &["ls-remote", "--heads", "origin", "refs/heads/cancel-me"]
+            )
+            .is_empty());
+            assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
+            assert!(repo.join(".git/pr-closed").exists());
+            assert!(runtime
+                .block_on(fixture.store.task_flow(&task.id))
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                runtime
+                    .block_on(
+                        fixture
+                            .store
+                            .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                    )
+                    .unwrap(),
+                WorkStatus::Abandoned
+            );
+            assert_eq!(
+                runtime.block_on(fixture.store.task_prs(&task.id)).unwrap()[0].phase(),
+                PrPhase::Abandoned
+            );
+            assert_eq!(
+                runtime.block_on(async { state.lock().await.trashed }),
+                delete
+            );
+            // Both retry paths survive deletion of the checkout and refs.
+            if delete {
+                crate::ops::task::task_delete(caller, "FIX-1").unwrap();
+            } else {
+                crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
+            }
+        });
+        server.abort();
+        std::env::set_var("PATH", path);
+    }
+}
+
+#[test]
+fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    std::env::set_var("LF_DB_PATH", &fixture.database);
+    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let foreign = json!({
+        "id":"foreign-project", "name":"Other Repository — Technical Architecture",
+        "description":"", "content":"", "status":{"type":"started"},
+        "initiatives":{"nodes":[{"id":"initiative-1"},{"id":"other-initiative"}]},
+        "teams":{"nodes":[{"id":"other-team"}]}
+    });
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
+        extra_projects: vec![foreign.clone()],
+        ..PlanningState::default()
+    }));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        // Creation refreshes planning and must still find the repository chapter.
+        crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Eligible work".into()),
+            Some("Cancel only repository work".into()),
+            None,
+        )
+        .unwrap();
+        for plan in [true, false] {
+            let result = super::pm_sync(
+                &repo,
+                &super::PmSyncOptions {
+                    wave: Some("product".into()),
+                    plan,
+                },
+                &NullProgress,
+            )
+            .unwrap();
+            assert_eq!(
+                result
+                    .diagnostics
+                    .iter()
+                    .filter(|message| message.contains("foreign-project"))
+                    .count(),
+                1
+            );
+            assert!(!result
+                .actions
+                .iter()
+                .any(|action| action.contains("Technical Architecture")));
+        }
+        runtime.block_on(async {
+            let provider = state.lock().await;
+            assert_eq!(provider.extra_projects, vec![foreign.clone()]);
+            assert_eq!(provider.project_name.as_deref(), Some("Product — Chapter"));
+            let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+            let snapshot = row.snapshot;
+            assert_eq!(snapshot.projects.len(), 1);
+            assert_eq!(snapshot.projects[0].id, "project-1");
+        });
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.current_project_id = Some("prior-project".into());
+            provider.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut provider.issues[0]);
+            // Duplicate foreign membership still yields one preview entry.
+            provider.project_name = None;
+            provider.extra_projects.push(foreign.clone());
+        });
+        let preview = crate::ops::task::task_sweep(&repo, false).unwrap();
+        assert_eq!(preview.len(), 2);
+        assert_eq!(preview[0].issue, None);
+        assert_eq!(preview[0].project, foreign["name"].as_str().unwrap());
+        assert!(preview[0].outcome.contains("foreign-project"));
+        assert_eq!(
+            serde_json::to_value(&preview).unwrap()[0]["issue"],
+            json!(null)
+        );
+        assert_eq!(preview[1].issue.as_deref(), Some("FIX-1"));
+        assert!(preview[1].outcome.starts_with("would cancel"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[1].outcome, "canceled");
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("canceled")
+        );
+        let repeated = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(repeated[0].issue, None);
+        // Missing or shared ownership must not silently disappear from reads.
+        for teams in [json!([]), json!([{"id":"team-1"}, {"id":"other-team"}])] {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                let mut ambiguous = foreign.clone();
+                ambiguous["initiatives"]["nodes"] = json!([{"id":"initiative-1"}]);
+                ambiguous["teams"]["nodes"] = teams;
+                provider.extra_projects = vec![ambiguous];
+            });
+            let error = crate::ops::task::task_sweep(&repo, false)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expected exactly one repository Team"),
+                "{error}"
+            );
+        }
+    });
+    server.abort();
+}
+
+#[test]
+fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    std::env::set_var("LF_DB_PATH", &fixture.database);
+    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Planning work".into()),
+            Some("Retain evidence".into()),
+            None,
+        )
+        .unwrap();
+        assert!(crate::ops::task::task_sweep(&repo, true)
+            .unwrap()
+            .is_empty());
+        runtime.block_on(async {
+            let mut state = state.lock().await;
+            state.current_project_id = Some("prior-project".into());
+            state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
+        });
+        let bin = fixture.directory.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let gh = bin.join("gh");
+        std::fs::write(&gh, "#!/bin/sh\necho '{\"state\":\"OPEN\"}'\n").unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        runtime.block_on(async {
+            state.lock().await.attachments =
+                vec!["https://github.com/loopflowstudio/fixture/pull/99".into()];
+        });
+        let excluded = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert!(excluded[0].outcome.contains("untracked and OPEN"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        runtime.block_on(async {
+            state.lock().await.attachments.clear();
+        });
+        std::env::set_var("PATH", path);
+        let preview = crate::ops::task::task_sweep(&repo, false).unwrap();
+        assert_eq!(preview.len(), 1);
+        assert!(preview[0].outcome.starts_with("would cancel"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        for terminal in ["completed", "canceled", "duplicate"] {
+            runtime.block_on(async {
+                state.lock().await.issues[0]["state"]["type"] = json!(terminal);
+                mark_issue_updated(&mut state.lock().await.issues[0]);
+            });
+            assert!(crate::ops::task::task_sweep(&repo, true)
+                .unwrap()
+                .is_empty());
+        }
+        runtime.block_on(async {
+            state.lock().await.issues[0]["state"]["type"] = json!("unstarted");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
+        });
+        // Membership changes after candidate enumeration still prevent writes.
+        runtime.block_on(async {
+            state.lock().await.move_on_attachment_read = true;
+        });
+        let moved = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert!(moved[0].outcome.contains("current chapter"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        runtime.block_on(async {
+            let mut state = state.lock().await;
+            state.current_project_id = Some("prior-project".into());
+            state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
+        });
+        let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert_eq!(applied[0].outcome, "canceled");
+        assert!(!runtime.block_on(async { state.lock().await.trashed }));
+        assert!(crate::ops::task::task_sweep(&repo, true)
+            .unwrap()
+            .is_empty());
+    });
+    server.abort();
+}
+
+#[derive(Default)]
+struct LifecycleMessages(RefCell<Vec<String>>);
+
+impl crate::ops::Progress for LifecycleMessages {
+    fn status(&self, message: &str) {
+        self.0.borrow_mut().push(message.to_string());
+    }
+    fn error(&self, message: &str) {
+        self.status(message);
+    }
+    fn confirm(&self, _: &str) -> bool {
+        true
     }
 }

@@ -3,7 +3,9 @@
   "window_days": 14,
   "minimum_p95_samples": 20,
   "resource_envelope": {
-    "minimum_free_disk_bytes": 68719476736,
+    "minimum_free_disk_bytes": 34359738368,
+    "cleanup_target_free_disk_bytes": 68719476736,
+    "build_cache_retention_hours": 24,
     "worktree_build_cleanup_bytes": 25769803776,
     "maximum_run_record_bytes": 17179869184,
     "maximum_uv_cache_bytes": 17179869184,
@@ -19,24 +21,6 @@
     "sample_interval_seconds": 5.0
   },
   "metrics": {
-    "agent_cost_usd": {
-      "unit": "usd",
-      "p50": 1.5,
-      "p95": 8.0,
-      "maximum": null
-    },
-    "agent_output_tokens": {
-      "unit": "tokens",
-      "p50": 5000.0,
-      "p95": 20000.0,
-      "maximum": null
-    },
-    "agent_total_input_tokens": {
-      "unit": "tokens",
-      "p50": 1000000.0,
-      "p95": 5000000.0,
-      "maximum": null
-    },
     "avoidable_repairs": {
       "unit": "count",
       "p50": null,
@@ -127,18 +111,6 @@
       "p95": 5.0,
       "maximum": null
     },
-    "preland_phase.swift-build": {
-      "unit": "seconds",
-      "p50": null,
-      "p95": 60.0,
-      "maximum": null
-    },
-    "preland_phase.swift-surface": {
-      "unit": "seconds",
-      "p50": null,
-      "p95": 60.0,
-      "maximum": null
-    },
     "preland_phase.ui-host": {
       "unit": "seconds",
       "p50": null,
@@ -163,10 +135,52 @@
       "p95": 5.0,
       "maximum": null
     },
+    "publication_to_merge_seconds": {
+      "unit": "seconds",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
+    "recorded_attempt_to_merge_seconds": {
+      "unit": "seconds",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
+    "run_cost_usd": {
+      "unit": "usd",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
+    "run_elapsed_seconds": {
+      "unit": "seconds",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
+    "run_output_tokens": {
+      "unit": "tokens",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
+    "run_total_input_tokens": {
+      "unit": "tokens",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
     "task_first_progress_seconds": {
       "unit": "seconds",
       "p50": 10.0,
       "p95": 30.0,
+      "maximum": null
+    },
+    "task_pr_to_merge_seconds": {
+      "unit": "seconds",
+      "p50": null,
+      "p95": null,
       "maximum": null
     }
   }

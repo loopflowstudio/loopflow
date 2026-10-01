@@ -157,7 +157,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "native"] {
                     return "Session native completed"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -185,7 +185,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "ask"] {
                     return "Ask session completed: Ready for review"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -223,7 +223,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "review"] {
                     return "Review feedback returned"
                 }
-                #expect(args == ["session", "list", "--json", "--limit", "0"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -290,7 +290,7 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-      "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
+      "title_source": "generated", "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "terminal_ids": [],
       "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """

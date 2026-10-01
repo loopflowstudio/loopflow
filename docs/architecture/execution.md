@@ -4,13 +4,11 @@
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf session connect SESSION --restart
 ```
 
-These examples specify the accepted execution cutover. Public connect, conversation
-history and the remaining Run removal are still under implementation. Native
-transport proofs use actual Codex with synthetic responses; they do not establish
-configured provider or Desktop acceptance.
+These commands use the current parser. This guide specifies the accepted
+lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
+which owners and proofs remain unfinished.
 
 The command has an Exec. The agent has an AgentSession. A captured Flow has a
 FlowSession. Their completion and authority are different facts.
@@ -45,7 +43,7 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Flow captures its expanded graph, all routing alternatives and every Skill
+A Flow captures its compiled graph, all routing alternatives and every Skill
 before execution. A direct conversation captures its selected Skill or inline
 prompt. Reconnect retains that conversation; a new Flow invocation captures new
 source. Current credentials and checkout contents remain live inputs to execution,
@@ -102,16 +100,13 @@ Session state. The continuing engine retains its provider generation while the
 new driver receives a new driver generation. Engine ownership and driver ownership
 must not be collapsed into one counter.
 
-Explicit restart stops only the exact conversation owner, preserves its recorded
-native identity and history, and excludes late writes from the replaced provider.
-Graceful stop precedes force termination of an exclusively owned process. A shared
-engine and sibling conversations survive a thread-specific restart. Mere process
-silence, tmux visibility, causal ancestry or a stored active label grants no
-termination authority.
-
-The relay currently has an actual-engine fixture consumer; normal launch/public
-connect integration remains required. Stdio harness ownership is still present
-until that conversion. No general daemon or Wave listener is introduced.
+`session connect --replace` stops the exact owned clients and reconnects to the
+live engine, preserving the active turn and sibling conversations. Flow retry
+can resume the recorded native conversation after confirmed engine exit;
+the replacement provider generation excludes late writes from the old provider.
+There is no separate Session engine-restart operation. Mere process silence,
+tmux visibility, causal ancestry or a stored active label grants no termination
+authority, and recovery never authorizes killing a shared engine for one thread.
 
 ## Outcomes, retries and usage
 
@@ -123,14 +118,26 @@ continuation appends a new result to the same conversation.
 A Flow step consumes one exact successful AgentSession completion under its
 boundary/version/claim fence. Later conversation continuation does not rewrite
 that consumed result. A mechanical step records its own start/result in Flow
-history without inventing an AgentSession or child Exec. Recovery cannot infer
-exactly-once external effects from cursor movement.
+history under its own child `lf` Exec, without inventing an AgentSession. The
+driver retains navigation authority and consumes the saved result. Recovery
+waits for a surviving step before replacing the driver claim; a missing result
+after process death still requires inspection before retry. Cursor movement
+cannot prove exactly-once external effects.
+
+A successful `blocked` decision opens a keyed Ask after its turn ends. Recovery
+reuses the same question and answer. Consuming the answer retains the cursor and
+pass, then captures a new input in the same conversation. A later blocked turn
+can ask another question; answering never supplies an Advance or Iterate verdict.
 
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate
 outcomes and measurements. Missing counters and unknown finality stay missing.
-Under the supervisor's prospective-attribution assumption, binding affects later
-work and preserves earlier usage ownership. Active-turn allocation uses recorded
+The shared typed history reader selects captured events and unlinked native turns
+before decoding payloads. Native receipts without a start stay discoverable with
+unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
+separate from provider completion and Exec exit.
+Binding affects later work and preserves earlier usage ownership. The history
+reader owns this single attribution choice. Active-turn allocation uses recorded
 start/assignment evidence; uncertainty never becomes an invented token split.
 
 ## Read indexed history
@@ -140,16 +147,30 @@ payloads. Exact detail can load the selected captured input, transcript or final
 answer. A provider-neutral exact final-answer receipt and recovered streamed
 prose remain distinguishable; incomplete extraction is labeled.
 
+Session inventory reads the selected rows, Work labels and indexed Flow metadata;
+it does not decode captures or Session history. Readiness text remains the exact
+recorded Session field. Local active-client receipts may establish Active; without
+that observation, explicit readiness or closure, the displayed state is Unknown.
+It does not mean failed or unavailable for connection. Connect and completion
+validate the exact capture and native history before acting. A recorded Flow with
+no selected occurrence keeps its membership with an unknown position; missing
+historical membership never becomes Independent. Unknown or corrupt detail remains
+available for exact inspection instead of preventing unrelated rows from listing.
+
+Session lists support contains-search and title/ID ordering; stable ID pages serve
+Desktop's complete-inventory reconciliation. Names, readiness text and iteration
+tuples vary in size, and listing checks exact client receipts. The query therefore
+has no constant-byte or constant-time guarantee. Measurement status belongs in
+the [cutover status](../architecture-reference.md#cutover-status).
+
 Typed Task/Wave links survive landing and provider/driver replacement. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries
 or make it impossible to resume. Desktop and CLI consume the same fields.
 
-Historical Run IDs, captures, sidecars, command journal rows and repeated outcomes
-are one-time import inputs. Preserve unknown membership and original attribution;
-do not infer an actual process from a provider-launch record alone. Ordinary reads
-neither import nor fall back to those files. After verified conversion, the separate
-Run product owner and its competing readers are removed.
+Current-state conversion and its preservation boundary belong in
+[Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
+owners, with no legacy import or file fallback.
 
 [Planning](planning.md) owns captured Flow progression and planning ancestry.
 [Data and persistence](data.md) distinguishes record ownership from payload storage.

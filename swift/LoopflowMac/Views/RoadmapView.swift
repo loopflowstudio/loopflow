@@ -148,7 +148,7 @@ struct RoadmapView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
+                prURL: selection.task.activePr?.publication?.github?.url,
                 terminalStore: terminalStore,
                 initialSection: .changes
             )
@@ -491,7 +491,7 @@ struct RoadmapView: View {
                     case .run:
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     case .resume:
-                        try LocalWaveAgentLauncher.resumeTask(repoPath: repo, issue: issue)
+                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     }
                 }.value
                 await refresh()
@@ -594,7 +594,6 @@ private struct RoadmapWaveCard: View {
         .accessibilityIdentifier("podium-wave-\(roadmap.wave.id)")
     }
 }
-
 
 struct RoadmapTaskRow: View {
     let task: RoadmapTask

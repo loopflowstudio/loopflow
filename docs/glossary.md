@@ -14,16 +14,22 @@ first, then the engineering words it borrows.
 | **Human step** | A step that waits for a person. In a flow file it is marked `human: true`. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
-| **Chapter** | One planning period for a Wave. Each chapter has its own plan. |
-| **Project** | The plan for a Wave's current chapter: the results to reach and the tasks to get there. |
+| **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
+| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and default Flow. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
-| **Session** | One open conversation with the AI, shown as a terminal inside the app. |
-| **Run** | A record of one time the AI coding tool was started: what it was told and what happened. |
-| **Home** | One computer running Loopflow, with its own records. |
+| **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
+| **Exec** | One actual lf process, its causal parent and its observed command outcome. |
+| **FlowSession** | One captured resumable Flow, its cursor and exact boundary completion history. |
+| **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
+| **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
 | **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |
+
+Historical `Run` names remain on transitional CLI/wire surfaces; see
+[cutover status](architecture-reference.md#cutover-status). They are not a fourth
+execution owner in the accepted model.
 
 ## Borrowed from software engineering
 
@@ -39,7 +45,7 @@ first, then the engineering words it borrows.
 | **Worktree** | A second copy of your project on disk, on its own branch. Loopflow gives each task one, so tasks never overwrite each other. |
 | **Pull request**, **PR** | A proposal to add a branch's changes to main, where they can be reviewed first. |
 | **Merge**, **land** | Adding a branch's changes to main. |
-| **Rebase** | Replaying your changes on top of the newest main, so the two fit together. |
+| **Sync** | Merging updates from main or a stack parent into your branch while keeping its commit history. |
 | **CI** | Continuous integration: automatic checks that run on every pull request. |
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |

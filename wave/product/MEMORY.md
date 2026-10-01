@@ -75,7 +75,7 @@ KR or external-product progress is earned by source checks alone.
 Curated from the retired [name-attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)
 and [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md).
 These preserve detailed dated evidence; curation changes no Task ownership or
-acceptance state. STYLE.md and operating guidance already own Jack's naming rule.
+acceptance state. AGENTS.md and operating guidance already own Jack's naming rule.
 
 - Personal `user.name`, the current participant and each request's original
   author are different facts. Repository config cannot name every caller.

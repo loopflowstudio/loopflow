@@ -9,6 +9,7 @@ use std::process::Command;
 use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
@@ -406,9 +407,11 @@ fn seed_previous_release_task_pr(home: &Path) {
         )
         .expect("read previous release frontier");
     assert_eq!(frontier, "0.12.8.001_release");
+    migrations::apply_sqlite(&connection)
+        .expect("apply published migrations to historical fixture");
     drop(connection);
 
-    let store = SqliteStore::new(&database).expect("migrate previous release store");
+    let store = SqliteStore::new(&database).expect("open migrated previous release store");
     let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
     let pr = store
         .active_task_pr(&task_id)

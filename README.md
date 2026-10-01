@@ -206,9 +206,8 @@ each `.md` URL, use the curated
 lf install                                   # install the latest published Loopflow from anywhere
 lf install schedule                          # update Loopflow at login and weekly (macOS)
 lf sync                                      # refresh main and integrate it into this worktree
-uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
-lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # run a disposable experiment
 ```
 
 `TESTING.md` covers the test suites; `AGENTS.md` is the governing style guide;

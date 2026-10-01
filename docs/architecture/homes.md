@@ -97,36 +97,29 @@ Relocation fences the locator, moves authored files, commits the new locator tra
 placement joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
-## Promote a new artifact
+## One main Home
 
 ```bash
-lf install promote --from-build <path> --preview
-lf install promote --from-build <path>
+lf install                            # update the installed release and main Home
+uv run python scripts/install.py local # build an experimental CLI
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
 
-Promotion changes the executable selected by future top-level processes:
+All ordinary commands use the installed CLI and `~/.lf`. Source CLI commands
+forward there before opening a store. Task workers, Flow steps, sessions and
+agent tools inherit the same Home; no source-specific or installed-development
+Home exists.
 
-1. Verify and stage immutable artifacts.
-2. Copy the selected planning store.
-3. Apply the candidate schema to that isolated copy and prove it can be read.
-4. Acquire the machine promotion lock.
-5. Atomically select the new artifact.
-6. Replace the app surface owned by promotion.
-7. Persist a switch receipt for recovery or rollback.
+`LF_HOME` explicitly selects an empty, disposable experiment. Its schema is
+initialized once and must match on subsequent opens. A schema mismatch requires
+a new experiment. Loopflow neither copies main data into it nor upgrades,
+repairs, restores or promotes its contents.
 
-The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock` and is held only for the
-switch transaction. Ordinary harnesses do not check or hold it. Promotion does
-not discover, drain, stop, or settle conversations.
-
-An already-running old process continues with the executable and store path it
-selected. On the first published-to-development promotion, it may keep writing
-successfully to the prior production store; those writes are then invisible to
-commands reading the newly selected clone. A later development promotion may
-reuse and migrate the selected development store in place, in which case an
-old writer may instead fail against the changed schema. Promotion does not discover arbitrary shells or providers. Retry the
-operation with a current process after checking which store received the old
-write. The isolated clone proves candidate readability, not old-writer
-continuity across the selection switch.
+Published installation verifies immutable artifacts, validates the candidate on
+a temporary database snapshot, and advances only the main database under the
+machine promotion lock. The snapshot is validation input, never a second live
+Home. Published switch receipts support interrupted release installation;
+they do not choose ordinary command data directories.
 
 Artifact switching lives in
 [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) and the
@@ -142,8 +135,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Direct child handles are local capability; inferred process ownership is not.
 - Promotion owns artifact selection and app replacement, not conversation
   lifecycle.
-- A schema clone protects preview and recovery; it can also leave old writers
-  authoring the prior, now-unselected store.
+- Published preview uses a temporary snapshot; all ordinary writers share the main Home.
 
 ## Next
 

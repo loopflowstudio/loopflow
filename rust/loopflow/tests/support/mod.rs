@@ -199,8 +199,9 @@ impl EnvGuard {
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
-        if home.is_some() {
+        if let Some(home) = home {
             // Keep HOME-based config discovery intact while isolating its store.
+            env::set_var("LF_HOME", home.join(".lf"));
             env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
         } else {
             env::set_var("LF_HOME", lf_home.path());

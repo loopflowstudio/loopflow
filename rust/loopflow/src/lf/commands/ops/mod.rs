@@ -1066,7 +1066,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             days,
             json,
         } => {
-            let root = crate::ops::receipt_root(&crate::store::authority_home_dir());
+            let root = crate::ops::receipt_root(&crate::store::lf_home_dir());
             let receipts = crate::ops::list_cron_receipts(&root, wave, flow.as_deref(), *days)?;
             if *json {
                 println!("{}", serde_json::to_string(&receipts)?);
@@ -1195,8 +1195,8 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         Ok(CronAuthority {
             host: CronHost {
                 home_id: local.id.clone(),
-                lf_home: crate::store::authority_home_dir(),
-                db_path: crate::store::observability_database_path()?,
+                lf_home: crate::store::lf_home_dir(),
+                db_path: crate::store::database_path_from_env()?,
                 path_env,
             },
             local_home: local.id,
@@ -1917,7 +1917,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
         }
     }
 
-    // A development binary owns an isolated `.lf-dev` registry, but pruning is
+    // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
     // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();

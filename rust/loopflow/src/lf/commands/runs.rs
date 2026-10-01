@@ -19,9 +19,8 @@ const MAX_RUNS: usize = 50;
 pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let (home, store, task) = runtime.block_on(async {
-        let home = crate::store::observability_home_dir();
-        let config =
-            crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
+        let home = crate::store::lf_home_dir();
+        let config = crate::store::StorageConfig::sqlite(crate::store::database_path_from_env()?);
         let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
         let task = match task {
             Some(task) => Some(crate::durable::WorkRef::Task(
@@ -61,7 +60,7 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
 /// before decoding; exact Task and caller-input drills remain complete.
 pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let database = crate::store::observability_database_path()?;
+    let database = crate::store::database_path_from_env()?;
     if !database.exists() {
         return Ok((Vec::new(), false));
     }
@@ -79,14 +78,8 @@ pub(crate) fn collect_runs_started_since(
     filter: WorkFilter,
     since: i64,
 ) -> Result<Vec<SessionHistory>> {
-    let path = crate::store::observability_database_path()?;
-    collect_runs_at(
-        &crate::store::observability_home_dir(),
-        &path,
-        filter,
-        None,
-        since,
-    )
+    let path = crate::store::database_path_from_env()?;
+    collect_runs_at(&crate::store::lf_home_dir(), &path, filter, None, since)
 }
 
 /// Select conversations in SQL before reading their subordinate history.
@@ -120,7 +113,7 @@ pub fn list(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
-    let home = crate::store::observability_home_dir();
+    let home = crate::store::lf_home_dir();
     let filter = WorkFilter {
         wave,
         project,
@@ -129,7 +122,7 @@ pub fn list(
     // A Task's history and a capture's callers list whole; other drills are recent.
     let runs = match (parent, task) {
         (Some(parent), _) => {
-            let database = crate::store::observability_database_path()?;
+            let database = crate::store::database_path_from_env()?;
             let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
             let parent = store.resolve_history_input(parent)?;
             collect_runs_at(&home, &database, filter, Some(&parent), 0)?
@@ -225,8 +218,8 @@ pub fn observe_provider_session() -> Result<()> {
 }
 
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
-    let home = crate::store::observability_home_dir();
-    let database = crate::store::observability_database_path()?;
+    let home = crate::store::lf_home_dir();
+    let database = crate::store::database_path_from_env()?;
     let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
     let snapshot = store
         .input_history(selector)

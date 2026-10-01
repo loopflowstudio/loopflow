@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::durable::{render_steers, Steer, TaskId, WorkRef};
-use crate::engine::process::{
-    current_home_execution_context, pin_control_binary, start_lf_session_with_env,
-};
+use crate::engine::process::{execution_context, pin_control_binary, start_lf_session_with_env};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -294,7 +292,7 @@ pub(crate) struct TaskWorkerExec {
 
 pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
     let mut environment = request.environment;
-    let execution = current_home_execution_context()
+    let execution = execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)
         .to_string_lossy()
@@ -314,13 +312,13 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),
         ),
-        (crate::store::CONTROL_BIN_ENV.to_string(), control_bin),
+        ("LF_BIN".to_string(), control_bin),
         (
-            crate::store::CONTROL_DB_PATH_ENV.to_string(),
+            "LF_DB_PATH".to_string(),
             execution.db_path.to_string_lossy().to_string(),
         ),
         (
-            crate::store::CONTROL_HOME_ENV.to_string(),
+            "LF_HOME".to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
         (

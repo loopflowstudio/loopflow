@@ -13,6 +13,17 @@ use loopflow::engine::worktrees::{
 };
 use loopflow_test_support::TestRepo;
 
+fn lf_command(home: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .env_clear()
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", std::env::var_os("PATH").unwrap());
+    command
+}
+
 fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
@@ -384,7 +395,8 @@ fn wt_switch_prefers_exact_branch_match_over_sibling_name() {
     add_worktree(repo.path(), &sibling_path, other_branch);
 
     let directive_path = repo.path().join("directive.txt");
-    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let status = lf_command(home.path())
         .args(["wt", "switch", exact_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
@@ -416,7 +428,8 @@ fn wt_switch_finds_exact_branch_match() {
     add_worktree(repo.path(), &feature_path, "jack/feature");
 
     let directive_path = repo.path().join("directive.txt");
-    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let status = lf_command(home.path())
         .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
@@ -454,7 +467,8 @@ fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
         .expect("git branch");
     assert!(status.success(), "git branch should succeed");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let output = lf_command(home.path())
         .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .output()
@@ -637,7 +651,8 @@ fn repo_state(path: &std::path::Path) -> Vec<String> {
 fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
     let mut args = vec!["wt", "list"];
     args.extend_from_slice(extra);
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    lf_command(home.path())
         .args(&args)
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", repo.path().join("directive.txt"))

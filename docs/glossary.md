@@ -22,7 +22,7 @@ first, then the engineering words it borrows.
 | **Exec** | One actual lf process, its causal parent and its observed command outcome. |
 | **FlowSession** | One captured resumable Flow, its cursor and exact boundary completion history. |
 | **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
-| **Data directory** | Local Loopflow state selected by `LF_HOME`; a branch data copy preserves recorded Home identities without creating another execution destination. |
+| **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
 | **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |

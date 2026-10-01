@@ -2,7 +2,6 @@
 """Install published Loopflow releases or build this worktree locally.
 
     install.py local            # build this worktree into local-bin/
-    install.py local --use      # promote it into the installed development Home
     install.py local --skip swift
     install.py local -n         # dry run
 
@@ -427,16 +426,6 @@ def refresh(
 @app.command()
 def local(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
-    use_install: Annotated[
-        bool, typer.Option("--use", help="Promote this local build after staging")
-    ] = False,
-    fresh: Annotated[
-        bool, typer.Option("--fresh", help="Fork a fresh disposable development Home")
-    ] = False,
-    install_dir: Annotated[
-        Path | None,
-        typer.Option("--install-dir", help="Install lf here instead of the resolved local bin dir"),
-    ] = None,
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
@@ -446,13 +435,9 @@ def local(
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
-    if fresh and not use_install:
-        raise typer.BadParameter("--fresh requires --use")
     builds_app = platform.system() == "Darwin"
     if not builds_app:
         skip_set.add("swift")
-    if use_install and builds_app and "swift" in skip_set:
-        raise typer.BadParameter("--use cannot skip the swift artifact set")
 
     spec = default_bundle_spec()
     version = read_release_version(ROOT)
@@ -467,8 +452,6 @@ def local(
         else:
             typer.echo(f"Would stage lf into {LOCAL_BIN}")
         typer.echo("Would keep the validation-only build under local-bin/")
-        if use_install:
-            typer.echo("Would promote it into a disposable installed development Home")
         return
 
     total_start = time.monotonic()
@@ -482,50 +465,13 @@ def local(
             typer.echo(f"Built {spec.app_path}")
         else:
             typer.echo(f"Built lf into {LOCAL_BIN}")
-        if use_install:
-            _promote_local_build(
-                spec,
-                install_dir.expanduser() if install_dir else _resolve_install_dir(),
-                fresh,
-            )
-            typer.echo("\nInstalled the local build against a disposable development Home.")
-        else:
-            typer.echo(f"\nBuilt into {LOCAL_BIN}. Development builds cannot become production.")
+        typer.echo(f"\nBuilt into {LOCAL_BIN}. Set LF_HOME explicitly to run an experiment.")
     except StageError as exc:
         typer.echo(f"install failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     elapsed = time.monotonic() - total_start
     typer.echo(f"\nTotal time: {elapsed:.1f}s")
-
-
-def _promote_local_build(spec: BundleSpec, install_dir: Path, fresh: bool) -> None:
-    candidate = LOCAL_BIN / "lf"
-    command = [
-        str(candidate),
-        "install",
-        "promote",
-        "--from-build",
-        str(candidate),
-        "--cli-target",
-        str(install_dir / "lf"),
-        "--sync-skills",
-    ]
-    if fresh:
-        command.append("--fresh")
-    if platform.system() == "Darwin":
-        applications = Path(os.environ.get("LF_APPLICATIONS_DIR", "/Applications"))
-        command.extend(
-            [
-                "--app-source",
-                str(spec.app_path),
-                "--app-target",
-                str(applications / f"{APP_NAME}.app"),
-                "--legacy-app-target",
-                str(applications / "Concerto.app"),
-            ]
-        )
-    _run_or_raise(command, "local promotion")
 
 
 if __name__ == "__main__":

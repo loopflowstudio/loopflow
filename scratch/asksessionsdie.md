@@ -2,7 +2,8 @@
 
 Accepted direction — Jack Heart, 2026-10-01. Implementation complete locally;
 realigned 2026-10-01 after compression and upstream integration. Full Rust and
-Desktop acceptance remains with gate. No publication or landing was requested.
+Desktop acceptance remains with gate. Checkpoint publication was requested after
+realignment; landing remains outside this operation.
 
 ## Intended outcome and accepted boundary
 
@@ -111,3 +112,9 @@ Gate determines reuse against its exact content and command plan; integration do
 not itself require this reconciliation to repeat those checks.
 
 Check: 2026-10-01 — realign: `uv run python scripts/check_architecture.py` and `git diff --check` passed for documentation repairs; full materialized Rust/Desktop acceptance deferred to gate.
+
+Publication review: the diff against `origin/main` preserves the accepted failure,
+conversation migration and Task review boundaries. Fixed TESTING.md's stale
+AskHome fixture reference. This is a checkpoint PR with scratch retained; prior
+focused checks are recorded above, and full post-integration acceptance remains
+with gate. No live-provider or native UI proof is claimed.

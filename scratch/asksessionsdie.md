@@ -1,8 +1,9 @@
 # Remove Ask
 
 Accepted direction — Jack Heart, 2026-10-01. Implementation complete locally;
-realigned 2026-10-01 after compression and Session attention integration. Full Rust and
-Desktop acceptance remains with gate. Checkpoint publication was requested after
+realigned 2026-10-01 after compression and Session attention integration. Gate
+completed 2026-10-01 with test repairs after the full Rust and headless Desktop
+run. Checkpoint publication was requested after
 realignment; landing remains outside this operation.
 
 ## Intended outcome and accepted boundary
@@ -90,17 +91,16 @@ non-primary conversation under ordinary lifecycle rules. Task/Wave conversations
 and Flow reviews remain open, and passive inspection grants no settlement authority.
 The sync removed obsolete Ask enum branches; this reconciliation also removes
 stale Ask retention claims in the Desktop README and driver-exit comments.
-No runtime repair was needed. Full attention and retirement acceptance remains
-part of gate's materialized Rust and Desktop suites.
+No runtime repair was needed. Gate exercised attention and retirement in the
+materialized Rust and headless Desktop suites.
 
 No exact Wave placement was supplied. Product memory is updated as the existing
 owner of the shared Session contract; this does not assign the work to that Wave.
 
-## Remaining acceptance
+## Gate acceptance
 
-Gate owns the full materialized Rust suite and complete Desktop suite. Earlier
-focused evidence covers failure/retry, reconciliation, conversation launch/reopen,
-migration preservation, DTOs and prompt goldens. Acceptance is deliberately split:
+Gate ran the full materialized Rust suite and complete headless Desktop suite.
+Acceptance is deliberately split:
 
 - Public CLI provider simulations cover a Task-associated provider failure and
   a taskless blocked decision, nonzero return, retained history, explicit retry
@@ -121,24 +121,20 @@ advancement, retained historical conversations, and surviving Task review feedba
 No live provider or display is required. Broader configured-provider and native UI
 judgment are not established by these simulations.
 
-Remaining gate commands:
+Gate review found five stale test expectations: the headless prompt still expected
+Ask instructions, the driver-exit fixture inserted the deleted Ask kind, and three
+Session CLI tests expected Ask-era waiting/retention. The fixture now proves a Task
+conversation survives driver exit. CLI checks preserve request/name/history proof
+while asserting unknown prelaunch state and closed orphan history after confirmed
+exit. No production repair was required. A follow-up corrected the history flag
+from `--completed` to the existing `--history` before the final CLI suite passed.
 
-```sh
-uv run python scripts/materialize_rust_tests.py -- cargo test -p loopflow
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo build -p loopflow --bin lf
-scripts/test_desktop.sh
-```
+The full Rust run had 2,057 passes and five failures; all five are resolved by the
+focused reruns. The 75 prompt tests and driver-exit proof passed, then all seven
+Session CLI tests passed after the history-flag repair. The original runner receipt
+remains failed; no identical-tree all-suite pass or cache reuse is claimed.
+Desktop built and its 313 tests passed; website had 78 passes and three skips.
+Optional native display diagnostics remain unexecuted. No live-provider proof is
+claimed. Publication and landing remain outside gate.
 
-Existing focused evidence: compression passed the conversation suite (22 tests),
-the Task-associated `failure_without_ask` lifecycle case, the CLI build, formatting
-and clippy before integration. After Session attention integration, sync passed
-`cargo test -p loopflow --test session_lifecycle_tests inventory_scopes_before_paging_and_keeps_worktree_repository_identity`
-(1 test). Earlier documentation checks passed `scripts/check_architecture.py`.
-These results do not establish full post-integration acceptance; gate determines
-reuse against its exact content and command plan. No live-provider or native UI
-proof is claimed. Checkpoint publication retains scratch; landing remains outside
-this reconciliation.
-
-Check: 2026-10-01 — realign: `uv run python scripts/check_architecture.py` and `git diff --check` passed for prose/comment repairs; full materialized Rust/Desktop acceptance deferred to gate.
+Check: 2026-10-01 — `uv run python scripts/test.py --reuse-passing`: architecture/build/Desktop (313)/website (78) passed, materialized Rust 2,057 passed and five stale tests failed; repaired tests passed via `uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --no-fail-fast --build-jobs 4 --test-threads 4 -E 'test(engine::prompt::tests::) | test(session_exit_retires_orphans_but_preserves_primary_and_review_obligations) | binary(session_cli_tests)'` (76 prompt/store passes, CLI flag error subsequently repaired) and the same wrapper with `cargo nextest run -p loopflow --test session_cli_tests --no-fail-fast --build-jobs 4 --test-threads 4` (7/7); final `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, and `git diff --check` passed; disposable-Home `lf monitor list --json`/`lf usage --json` passed, `lf doctor --json` returned valid diagnostics with exit 1 for absent host-scheduled receipts in the empty Home (no schema failure); optional display diagnostics deferred to demo/review.

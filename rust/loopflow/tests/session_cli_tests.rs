@@ -184,7 +184,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     assert!(opened.get("run_id").is_none());
-    assert_eq!(opened["state"], "waiting");
+    assert_eq!(opened["state"], "unknown");
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
@@ -392,7 +392,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert!(completed_at.is_none());
+            assert!(completed_at.is_some(), "the exited orphan is retired");
             assert!(ready_summary.is_none());
         }
     }
@@ -464,7 +464,7 @@ fn prepare_conversation(
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(home, &["session", "list", "--all", "--json"]);
+    let output = run(home, &["session", "list", "--all", "--history", "--json"]);
     assert!(output.status.success(), "{output:?}");
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     sessions
@@ -636,13 +636,22 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // The boundary's Run never appears as a second, interactive Session.
-    let all: Vec<serde_json::Value> =
-        serde_json::from_slice(&run(home.path(), &["session", "list", "--all", "--json"]).stdout)
-            .unwrap();
+    let all: Vec<serde_json::Value> = serde_json::from_slice(
+        &run(
+            home.path(),
+            &["session", "list", "--all", "--history", "--json"],
+        )
+        .stdout,
+    )
+    .unwrap();
     assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(readback["state"], "closed", "the exited orphan is retired");
 
     let completed = run(home.path(), &["session", "complete", &replacement]);
-    assert!(completed.status.success(), "{completed:?}");
+    assert!(
+        String::from_utf8_lossy(&completed.stderr).contains("already complete"),
+        "{completed:?}"
+    );
     let again = run(home.path(), &["session", "complete", id]);
     assert!(
         String::from_utf8_lossy(&again.stderr).contains("already complete"),

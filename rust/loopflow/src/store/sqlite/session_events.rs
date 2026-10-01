@@ -826,10 +826,29 @@ mod tests {
     fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::work::task::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
+                rusqlite::params![project.as_str(), wave],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at) VALUES(?1,?2,'issue-proof','PROOF-1',1)",
+                rusqlite::params![task.as_str(), project.as_str()],
+            ).unwrap();
+        }
         for (id, kind, primary, retired) in [
             ("orphan", "conversation", None, true),
             ("primary", "conversation", Some("repository"), false),
-            ("ask", "ask", None, false),
+            ("task", "conversation", None, false),
             ("review", "flow_review", None, false),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
@@ -846,6 +865,13 @@ mod tests {
                     rusqlite::params![id, kind, primary],
                 )
                 .unwrap();
+                if id == "task" {
+                    conn.execute(
+                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+                        rusqlite::params![id, task.as_str(), wave],
+                    )
+                    .unwrap();
+                }
             }
             let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
             store

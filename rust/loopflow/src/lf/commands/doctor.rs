@@ -227,17 +227,13 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                let validation = match crate::machine_install::selection_for_current_executable() {
-                    Ok(Some(selection))
-                        if selection.source
-                            == crate::machine_install::InstallSource::Development =>
-                    {
-                        crate::store::migrations::validate_installed_development_sqlite(
-                            &connection,
-                            crate::build_info::migration_draft_manifest(),
-                        )
-                    }
-                    _ => crate::store::migrations::validate_sqlite(&connection),
+                let validation = if crate::store::custom_home_selected() {
+                    crate::store::migrations::validate_installed_development_sqlite(
+                        &connection,
+                        crate::build_info::migration_draft_manifest(),
+                    )
+                } else {
+                    crate::store::migrations::validate_sqlite(&connection)
                 };
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
@@ -293,7 +289,6 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
         )],
         Ok(crate::machine_install::MachineInstallState::Settled(active)) => {
             let selected = crate::machine_install::selection_for_current_executable();
-            let source_artifact = matches!(&selected, Ok(None));
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
@@ -315,10 +310,10 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                     "install-store",
                     format!("running store matches {}", database_path.display()),
                 )
-            } else if source_artifact {
+            } else if crate::store::custom_home_selected() {
                 Check::ok(
                     "install-store",
-                    "source artifact keeps its own isolated store",
+                    "explicit disposable Home; no upgrade or recovery contract",
                 )
             } else {
                 Check::fail(

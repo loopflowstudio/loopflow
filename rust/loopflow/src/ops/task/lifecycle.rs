@@ -219,15 +219,6 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
             current_branch(repo)?.ok_or_else(|| task_error("no Task selector or current branch"))?
         }
     };
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        crate::ops::task_destination::check_task(&destination, &selector).map_err(task_error)?;
-        let mut args = vec!["task".into(), "abandon".into(), selector];
-        if force {
-            args.push("--force".into());
-        }
-        return crate::ops::task_destination::json(&destination, repo, args, None)
-            .map_err(task_error);
-    }
     let repo = task_repository(repo, Some(&selector))?;
     block_on_task(abandon(&repo, &selector, force)).map_err(|error| {
         task_error(format!(
@@ -437,14 +428,6 @@ pub struct SweepEntry {
 }
 
 pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        let mut args = vec!["task".into(), "sweep".into()];
-        if apply {
-            args.push("--apply".into());
-        }
-        return crate::ops::task_destination::json(&destination, repo, args, None)
-            .map_err(task_error);
-    }
     block_on_task(async {
         let store = task_store().await?;
         let sweep = crate::ops::pm::chapter_sweep_candidates(repo).await?;
@@ -500,7 +483,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
 
 /// Address the existing PR/sync operation through its owning Task.
 pub fn task_operation(
-    repo: &Path,
+    _repo: &Path,
     issue: &str,
     operation: &str,
     args: &[String],
@@ -508,15 +491,6 @@ pub fn task_operation(
 ) -> OpsResult<()> {
     if !matches!(operation, "pr" | "sync") {
         return Err(task_error("expected a PR or sync operation"));
-    }
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        crate::ops::task_destination::check_task(&destination, issue).map_err(task_error)?;
-        let mut forwarded = vec!["task".into(), operation.into(), issue.into()];
-        forwarded.extend_from_slice(args);
-        let output = crate::ops::task_destination::execute(&destination, repo, &forwarded, None)
-            .map_err(task_error)?;
-        print!("{}", String::from_utf8_lossy(&output));
-        return Ok(());
     }
     let task = block_on_task(async {
         task_store()

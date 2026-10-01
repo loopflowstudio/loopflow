@@ -75,7 +75,6 @@ async fn drive_task(
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {
-    crate::ops::task_destination::require_worker_destination()?;
     let store = std::sync::Arc::new(
         crate::store::open_existing_store()
             .await

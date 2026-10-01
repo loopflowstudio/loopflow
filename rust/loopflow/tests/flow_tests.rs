@@ -1,5 +1,3 @@
-#[path = "support/installation.rs"]
-mod installation;
 mod support;
 
 use std::fs;
@@ -2560,57 +2558,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     let status = String::from_utf8(status.stdout).unwrap();
     assert_eq!(status.lines().next(), Some("INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn flow_step_executable_falls_back_without_losing_its_store() {
-    assert!(Path::new("/.dockerenv").is_file());
-    assert!(!loopflow::machine_install::root().unwrap().exists());
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    write_flow(repo.path(), "fallback-proof", "- cmd: sync --plan\n");
-    let execute = |driver: &Path, path: &str, expected: &Path| {
-        let mut command = Command::new(driver);
-        for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("LF_") {
-                command.env_remove(key);
-            }
-        }
-        let output = command
-            .args(["flow", "fallback-proof", "-b"])
-            .current_dir(repo.path())
-            .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
-            .env("PATH", path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let executable: String = db.query_row(
-            "SELECT json_extract(e.command,'$[0]') FROM flow_events f JOIN execs e ON e.id=f.exec_id WHERE f.kind='operation_started' ORDER BY f.seq DESC LIMIT 1",
-            [], |row| row.get(0)).unwrap();
-        assert_eq!(Path::new(&executable), expected);
-    };
-    let candidate = Path::new(env!("CARGO_BIN_EXE_lf"));
-    execute(candidate, "/usr/bin:/bin", candidate);
-    let installed = installation::Installation::new(home.path());
-    let alias = home.path().join("driver");
-    fs::copy(&installed.cli, &alias).unwrap();
-    execute(&alias, "/usr/bin:/bin", &installed.cli);
-    let bin = home.path().join("path-bin");
-    fs::create_dir(&bin).unwrap();
-    let path_lf = bin.join("lf");
-    fs::copy(&installed.cli, &path_lf).unwrap();
-    execute(
-        &alias,
-        &format!("{}:/usr/bin:/bin", bin.display()),
-        &path_lf,
-    );
 }
 
 #[test]

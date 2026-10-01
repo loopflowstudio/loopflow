@@ -6,14 +6,8 @@ import tarfile
 from pathlib import Path
 
 PROOFS = {
-    "flow_step_executable_falls_back_without_losing_its_store": "flow_tests",
+    "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_home_tests",
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
-    "task_resume_revokes_auto_merge_before_returning_to_human_review": "pr_tests",
-    "direct_open_preserves_another_installations_development_store": "task_initialization_tests",
-    "incompatible_branch_data_recommends_only_a_verified_retained_pair": (
-        "task_initialization_tests"
-    ),
-    "task_review_completion_consumes_only_installed_readiness": "task_initialization_tests",
     "task_operation_starts_with_durable_history_after_claim_only_failure": "flow_tests",
     "task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart": "flow_tests",
 }

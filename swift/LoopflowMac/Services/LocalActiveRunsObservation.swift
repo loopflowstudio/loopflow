@@ -62,7 +62,7 @@ final class LocalActiveSessionsObservation: @unchecked Sendable {
         self.continuation = continuation
         self.configurationChanged = configurationChanged
         let environment = process.environment ?? ProcessInfo.processInfo.environment
-        if let selected = environment["LF_CONTROL_HOME"] ?? environment["LF_HOME"], !selected.isEmpty {
+        if let selected = environment["LF_HOME"], !selected.isEmpty {
             home = URL(fileURLWithPath: selected).resolvingSymlinksInPath().standardizedFileURL.path
         }
     }

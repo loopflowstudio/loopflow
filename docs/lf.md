@@ -13,6 +13,18 @@ Flows combine agent work, deterministic operations, and review points.
 `feature` and `ship` include delivery; `code` leaves local changes.
 Use `lf help feature` to inspect a flow before running it.
 
+## Use one Home
+
+Ordinary commands, Task workers and agent tools use the installed `lf` and
+`~/.lf`. Source builds forward there too. For an explicit disposable experiment:
+
+```bash
+LF_HOME="$(mktemp -d)" target/debug/lf wave list --json
+```
+
+Children stay in that Home. Experiments start empty; Loopflow does not upgrade,
+repair or preserve them. Use a fresh directory when its schema changes.
+
 ## Start and continue Tasks
 
 ```bash

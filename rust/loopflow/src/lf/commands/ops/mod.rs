@@ -1917,7 +1917,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
         }
     }
 
-    // A development binary owns an isolated `.lf-dev` registry, but pruning is
+    // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
     // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();

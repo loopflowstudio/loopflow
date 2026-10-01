@@ -10,7 +10,6 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
-mod branch_data;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
@@ -26,9 +25,6 @@ pub mod rows;
 mod sessions;
 pub mod sqlite;
 mod token_crypto;
-
-pub use branch_data::isolate_branch_data;
-pub(crate) use branch_data::observation_database_path;
 
 /// One wave's locally readable PM projection. Linear owns the payload; sync
 /// replaces this row atomically so readers never observe a partial refresh.
@@ -105,48 +101,21 @@ pub(crate) fn production_database_path() -> PathBuf {
     machine_home_dir().join(".lf/loopflow.db")
 }
 
-/// Resolve the live Home evidence store for read-only operator surfaces.
-///
-/// Development builds normally isolate writes under `.lf-dev/worktrees`.
-/// Observability is different: it must describe the Home that launched the
-/// process (after source CLI startup redirects installed Homes), and opening it
-/// through `open_execs_read_only` cannot migrate
-/// or otherwise mutate its schema. Explicit control authority wins, followed
-/// by an ordinary override, then the installed Home.
+/// An explicit experimental Home is inherited unchanged by child commands.
 pub(crate) fn authority_home_dir() -> PathBuf {
-    std::env::var_os(CONTROL_HOME_ENV)
-        .or_else(|| std::env::var_os("LF_HOME"))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(default_lf_home_dir)
+    lf_home_dir()
 }
 
 pub(crate) fn observability_home_dir() -> PathBuf {
-    authority_home_dir()
+    lf_home_dir()
 }
 
 pub(crate) fn observability_database_path() -> Result<PathBuf, std::io::Error> {
-    let home = observability_home_dir();
-    let candidate = std::env::var_os(CONTROL_DB_PATH_ENV)
-        .or_else(|| std::env::var_os("LF_DB_PATH"))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join("loopflow.db"));
-    if candidate.is_absolute() {
-        return Ok(candidate);
-    }
-    if candidate.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "observability database path must not escape its Home",
-        ));
-    }
-    Ok(home.join(candidate))
+    database_path_from_env()
+}
+
+pub(crate) fn observation_database_path() -> Result<PathBuf, std::io::Error> {
+    database_path_from_env()
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -154,38 +123,18 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
 }
 
 fn default_lf_home_dir() -> PathBuf {
-    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(parent) = selection.store.parent() {
-            return parent.to_path_buf();
-        }
-    }
-    default_lf_home_dir_for(
-        &machine_home_dir(),
-        crate::build_info::provenance(),
-        &crate::build_info::source_identity(),
-    )
-}
-
-fn default_lf_home_dir_for(
-    home: &Path,
-    provenance: crate::build_info::BuildProvenance,
-    source_identity: &str,
-) -> PathBuf {
-    if provenance.is_release() {
-        home.join(".lf")
-    } else {
-        home.join(".lf-dev/worktrees").join(source_identity)
-    }
+    machine_home_dir().join(".lf")
 }
 
 pub(crate) fn lf_home_dir() -> PathBuf {
-    select_store_env_value(
-        crate::build_info::provenance(),
-        std::env::var_os(CONTROL_HOME_ENV),
-        std::env::var_os("LF_HOME"),
-    )
-    .map(PathBuf::from)
-    .unwrap_or_else(default_lf_home_dir)
+    std::env::var_os("LF_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_lf_home_dir)
+}
+
+pub(crate) fn custom_home_selected() -> bool {
+    !same_database_file(&lf_home_dir(), &default_lf_home_dir()).unwrap_or(false)
 }
 
 pub fn default_db_path() -> PathBuf {
@@ -193,59 +142,21 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
-    if let Some(selection) = crate::machine_install::selection_for_current_executable()
-        .map_err(|error| std::io::Error::other(error.to_string()))?
-    {
-        guard_development_database(
-            &selection.store,
-            crate::build_info::provenance(),
-            &machine_home_dir(),
-        )?;
-        return Ok(selection.store);
-    }
     resolve_database_path(
-        select_store_env_value(
-            crate::build_info::provenance(),
-            std::env::var_os(CONTROL_DB_PATH_ENV),
-            std::env::var_os("LF_DB_PATH"),
-        ),
+        custom_home_selected()
+            .then(|| std::env::var_os("LF_DB_PATH"))
+            .flatten()
+            .filter(|value| !value.is_empty()),
         lf_home_dir(),
     )
 }
 
-/// Resolve the current Home lf's home directory, ignoring `LF_CONTROL_HOME`.
-///
-/// A relaunch must target the current Home, not the historical control home a
-/// legacy body carries in `LF_CONTROL_HOME`. Only `LF_HOME` (or the built-in
-/// default) is honored here — the control-plane selection is deliberately not.
 pub(crate) fn current_home_lf_home_dir() -> PathBuf {
-    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(parent) = selection.store.parent() {
-            return parent.to_path_buf();
-        }
-    }
-    std::env::var_os("LF_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(default_lf_home_dir)
+    lf_home_dir()
 }
 
-/// Resolve the current Home lf's database path, ignoring `LF_CONTROL_DB_PATH`.
-///
-/// The companion to [`current_home_lf_home_dir`]: a relaunch resolves the
-/// current store, never the launching body's pinned control database.
 pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Some(selection) = crate::machine_install::selection_for_current_executable()
-        .map_err(|error| std::io::Error::other(error.to_string()))?
-    {
-        guard_development_database(
-            &selection.store,
-            crate::build_info::provenance(),
-            &machine_home_dir(),
-        )?;
-        return Ok(selection.store);
-    }
-    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+    database_path_from_env()
 }
 
 fn resolve_database_path(
@@ -273,18 +184,6 @@ fn resolve_database_path(
     };
     guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
     Ok(path)
-}
-
-fn select_store_env_value(
-    provenance: crate::build_info::BuildProvenance,
-    control: Option<OsString>,
-    ordinary: Option<OsString>,
-) -> Option<OsString> {
-    if provenance.is_release() {
-        control.or(ordinary)
-    } else {
-        ordinary
-    }
 }
 
 fn guard_development_database(
@@ -1263,9 +1162,9 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::{
-        default_lf_home_dir_for, guard_development_database, may_apply_migrations,
-        read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
-        ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+        guard_development_database, may_apply_migrations, read_nonterminal_task_worktrees,
+        CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId, RoutingState,
+        StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
@@ -1284,23 +1183,6 @@ mod tests {
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
-
-    #[test]
-    fn build_provenance_selects_separate_default_store_universes() {
-        let home = PathBuf::from("/home/operator");
-        assert_eq!(
-            default_lf_home_dir_for(&home, BuildProvenance::Release, "branch-a"),
-            home.join(".lf")
-        );
-        assert_eq!(
-            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-a"),
-            home.join(".lf-dev/worktrees/branch-a")
-        );
-        assert_ne!(
-            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-a"),
-            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-b")
-        );
-    }
 
     #[test]
     fn reads_nonterminal_task_ownership_without_opening_the_store_for_writes() {
@@ -1330,20 +1212,6 @@ mod tests {
                 PathBuf::from("/repo.running"),
                 PathBuf::from("/repo.waiting")
             ]
-        );
-    }
-
-    #[test]
-    fn release_prefers_control_store_while_development_ignores_it() {
-        let control = Some("/control".into());
-        let ordinary = Some("/ordinary".into());
-        assert_eq!(
-            select_store_env_value(BuildProvenance::Release, control.clone(), ordinary.clone()),
-            control
-        );
-        assert_eq!(
-            select_store_env_value(BuildProvenance::Development, control, ordinary.clone()),
-            ordinary
         );
     }
 

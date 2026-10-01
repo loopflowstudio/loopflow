@@ -329,13 +329,13 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),
         ),
-        (crate::store::CONTROL_BIN_ENV.to_string(), control_bin),
+        ("LF_BIN".to_string(), control_bin),
         (
-            crate::store::CONTROL_DB_PATH_ENV.to_string(),
+            "LF_DB_PATH".to_string(),
             execution.db_path.to_string_lossy().to_string(),
         ),
         (
-            crate::store::CONTROL_HOME_ENV.to_string(),
+            "LF_HOME".to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
     ]);

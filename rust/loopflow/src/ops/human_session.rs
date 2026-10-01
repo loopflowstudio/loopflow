@@ -1526,19 +1526,6 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     #[cfg(test)]
     action_test::after_lookup("complete", session_id).await;
     let session = session_surface(store, &target).await?;
-    if matches!(&target, SessionTarget::Flow { .. }) {
-        if let Some(destination) = super::task_destination::destination()? {
-            // The full boundary id includes Task, invocation, node and iteration.
-            // The installed operation reads its own readiness/feedback; none is copied.
-            super::task_destination::execute(
-                &destination,
-                &std::env::current_dir()?,
-                &["session".into(), "complete".into(), session.id.clone()],
-                None,
-            )?;
-            return Ok(session);
-        }
-    }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
         SessionTarget::Row { session }

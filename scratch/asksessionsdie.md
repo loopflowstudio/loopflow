@@ -135,3 +135,12 @@ focused checks are recorded above, and full post-integration acceptance remains
 with gate. No live-provider or native UI proof is claimed.
 
 Check: 2026-10-01 — follow-up compress: `cargo test -p loopflow --lib ops::human_session` passed (22 tests); `cargo build -p loopflow --bin lf`, `cargo fmt --all -- --check` and `git diff --check` passed; full Rust/Desktop acceptance remains with gate.
+
+Sync resolution: preserved Ask deletion while retaining main's session attention
+projection and `--needs-me` documentation. Removed newly merged Ask enum references
+from attention projection and its unit coverage; retained current review and ready
+conversation obligations. Review found no remaining Ask runtime references in the
+reconciled source. The owned continuation completed the merge; its dirty-state
+postcondition required a separate local commit for the semantic reconciliation.
+
+Check: 2026-10-01 — sync-conflicts: `cargo test -p loopflow --test session_lifecycle_tests inventory_scopes_before_paging_and_keeps_worktree_repository_identity` passed (1 test); full Rust/Desktop acceptance remains with gate.

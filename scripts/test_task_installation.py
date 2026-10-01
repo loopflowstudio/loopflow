@@ -6,6 +6,7 @@ import tarfile
 from pathlib import Path
 
 PROOFS = {
+    "flow_start_preserves_the_selected_review_from_another_checkout": "flow_tests",
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_home_tests",
     "task_adopts_linear_checkout_and_preserves_saved_progress": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",

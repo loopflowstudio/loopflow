@@ -627,7 +627,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .reason
         .contains(&missing_path.display().to_string()));
     assert!(snapshot.actions.reason.contains(&branch));
-    assert!(snapshot.actions.reason.contains("lf task run INF-123"));
+    assert!(snapshot
+        .actions
+        .reason
+        .contains("lf --task INF-123 flow start"));
     assert!(snapshot
         .actions
         .reason

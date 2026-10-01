@@ -1,8 +1,8 @@
 use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{
-    compile_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
-    ExecutionCursor, Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
+    compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
+    Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
@@ -64,18 +64,6 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
             Some(reason) => println!("{}  (unavailable: {reason})", entry.name),
             None => println!("{}", entry.name),
         }
-    }
-    Ok(())
-}
-
-pub fn validate(name: &str, repo: &Path) -> Result<()> {
-    let flow = crate::engine::flow::load_authored_flow(name, repo)?;
-    let mut human = human_occurrence_ids(&flow, repo)?;
-    human.sort();
-    if human.is_empty() {
-        println!("{}: valid (no review steps)", flow.name);
-    } else {
-        println!("{}: valid (review steps: {})", flow.name, human.join(", "));
     }
     Ok(())
 }

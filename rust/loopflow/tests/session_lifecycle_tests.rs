@@ -273,7 +273,14 @@ impl Fixture {
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
 const PATIENCE: Duration = Duration::from_secs(180);
 
-const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
+const LAUNCH: [&str; 6] = [
+    "--mode",
+    "tui",
+    "--model",
+    "opencode",
+    ":",
+    "Review the parser",
+];
 
 #[test]
 fn conversation_keeps_its_name_and_identity_until_completed() {
@@ -347,9 +354,9 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert_eq!(retained[0]["title"], "Parser review");
 
     // Open resumes the same conversation with its captured input.
-    let described = fixture.json(&["session", "open", &id, "--json"]);
+    let described = fixture.json(&["session", "connect", &id, "--json"]);
     assert_eq!(described["id"], id.as_str());
-    let (resumed, resumed_run) = fixture.attach(&["session", "open", &id]);
+    let (resumed, resumed_run) = fixture.attach(&["session", "connect", &id]);
     assert_eq!(resumed_run, first_run);
     assert_eq!(fixture.sessions()[0]["state"], "active");
     fixture.release(resumed);
@@ -372,7 +379,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     let remaining = fixture.sessions();
     assert_eq!(remaining.len(), 1, "{remaining:?}");
     assert_eq!(remaining[0]["id"], second_id.as_str());
-    let reopened = fixture.run(&["session", "open", &id, "--json"]);
+    let reopened = fixture.run(&["session", "connect", &id, "--json"]);
     assert!(!reopened.status.success(), "{reopened:?}");
     assert!(
         String::from_utf8_lossy(&reopened.stderr).contains("already complete"),
@@ -551,10 +558,8 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
             rusqlite::params![session,kind,payload.to_string()]).unwrap();
     }
     let captures = fixture.count("agent_sessions");
-    for command in [
-        vec!["runs", "--json"],
-        vec!["usage", "--days", "0", "--json"],
-    ] {
+    {
+        let command = vec!["usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -618,7 +623,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["runs", "--task", issue, "--json"])
+            .json(&["usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -713,7 +718,8 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let later = launch(&[
         "--task",
         "INF-123",
-        "--tui",
+        "--mode",
+        "tui",
         "--model",
         "opencode",
         ":",
@@ -855,12 +861,13 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
-        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
+        "argv": [env!("CARGO_BIN_EXE_lf"), "--mode", "tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
-        "--as",
-        "task:INF-123",
-        "--tui",
+        "--task",
+        "INF-123",
+        "--mode",
+        "tui",
         "--model",
         "opencode",
         ":",
@@ -909,7 +916,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: sync --plan\n",
+        "- cmd: task sync --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -963,20 +970,14 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "--json"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "--json"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture
         .command(&[
-            "--as",
-            "task:INF-124",
-            "--tui",
-            "--model",
-            "opencode",
-            ":",
-            "Start Y",
+            "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
         ])
         .env("LF_BIN", bin.join("lf"))
         .output()
@@ -1019,10 +1020,11 @@ fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-const BOUND_LAUNCH: [&str; 7] = [
+const BOUND_LAUNCH: [&str; 8] = [
     "--task",
     "INF-123",
-    "--tui",
+    "--mode",
+    "tui",
     "--model",
     "opencode",
     ":",
@@ -1137,7 +1139,7 @@ fn ask_returns_feedback_once_and_rejects_a_stale_answer() {
     // A consumed launch without provider history is replaced on the next open.
     // Replacement captures another input in the same conversation.
     std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
-    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    let (opened, second_run) = fixture.attach(&["session", "connect", &id]);
     assert_ne!(second_run, first_run);
     assert_eq!(
         feedback(),
@@ -1237,7 +1239,14 @@ fn failed_exec_observation_cannot_admit_a_provider() {
         .unwrap();
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
     ] {
         let output = fixture.run(args);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -1258,7 +1267,14 @@ fn malformed_caller_cannot_use_library_agent_admission() {
     let fixture = Fixture::new(false);
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
     ] {
         let output = fixture
             .command(args)
@@ -1294,13 +1310,21 @@ fn unavailable_store_starts_no_provider_or_ask() {
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
         &[
             "--model",
             "opencode",
             "flow",
             "work-then-decide",
-            "-b",
+            "--mode",
+            "batch",
             "--no-loopflow",
         ],
         &["ask", "Which release target?"],
@@ -1329,12 +1353,13 @@ fn unavailable_store_starts_no_provider_or_ask() {
     );
 }
 
-const REVIEW_FLOW: [&str; 6] = [
+const REVIEW_FLOW: [&str; 7] = [
     "--model",
     "opencode",
     "flow",
     "review-first",
-    "-b",
+    "--mode",
+    "batch",
     "--no-loopflow",
 ];
 
@@ -1449,7 +1474,7 @@ fn review_feedback_survives_replacement_and_resumes_the_flow() {
     // A consumed launch without provider history is replaced on the next open.
     // Title and feedback belong to the Session, so both survive.
     std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
-    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    let (opened, second_run) = fixture.attach(&["session", "connect", &id]);
     assert_ne!(second_run, first_run);
     assert_eq!(
         fixture.feedback(&id),
@@ -1536,7 +1561,8 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let output = fixture.run(&[
         "--wave",
         "task-pr-tests",
-        "-b",
+        "--mode",
+        "batch",
         "--model",
         "opencode",
         ":",
@@ -1547,8 +1573,8 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
-    for command in ["runs", "usage"] {
-        let rows = fixture.json(&[command, "--wave", "task-pr-tests", "--json"]);
+    {
+        let rows = fixture.json(&["usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
@@ -1718,7 +1744,8 @@ raise SystemExit(1 if failed else 0)
         "claude",
         "flow",
         "work-then-review",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     let stderr = String::from_utf8_lossy(&blocked.stderr);
@@ -1794,8 +1821,10 @@ raise SystemExit(1 if failed else 0)
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }
     let review = runs[2].0.clone();
-    let listed: Vec<Value> =
-        serde_json::from_value(fixture.json(&["runs", "--task", "INF-123", "--json"])).unwrap();
+    let listed: Vec<Value> = serde_json::from_value(
+        fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
+    )
+    .unwrap();
     let mut listed: Vec<&str> = listed
         .iter()
         .map(|run| run["artifact_key"].as_str().unwrap())
@@ -1867,7 +1896,8 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "opencode",
             "flow",
             "work-then-decide",
-            "-b",
+            "--mode",
+            "batch",
             "--no-loopflow",
         ]);
         assert_eq!(
@@ -1906,7 +1936,8 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
         "opencode",
         "flow",
         "choose",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1940,7 +1971,8 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1989,7 +2021,8 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(!output.status.success(), "{output:?}");
@@ -2031,7 +2064,8 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -2072,7 +2106,14 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         .unwrap();
     assert_eq!(retried["usage"]["input_tokens"], 40);
     assert_eq!(retried["usage"]["output_tokens"], 10);
-    let answer = fixture.run(&["runs", &fixture.launches()[1], "--final"]);
+    let answer = fixture.run(&[
+        "monitor",
+        "show",
+        retried["session_id"].as_str().unwrap(),
+        "--input",
+        &launches[1],
+        "--final",
+    ]);
     assert_eq!(
         serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
         "advance"

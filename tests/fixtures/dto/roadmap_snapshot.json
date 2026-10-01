@@ -744,7 +744,7 @@
       },
       "tasks": {
         "state": "unavailable",
-        "reason": "no local PM snapshot for wave/context; run `lf wave sync`"
+        "reason": "no local PM snapshot for wave/context; run `lf repo refresh`"
       },
       "unavailable_tasks": [],
       "projects": {

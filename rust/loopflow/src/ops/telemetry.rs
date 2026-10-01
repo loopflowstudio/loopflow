@@ -1,5 +1,5 @@
 //! Local ops telemetry — the single owned source of truth for the path and
-//! writer that records operational metrics (`lf sync`, `lf wt create`, …).
+//! writer that records operational metrics (`lf sync`, `lf task wt create`, …).
 //!
 //! Telemetry lives under the git-ignored `.lf/tmp/metrics/ops.jsonl` tree so
 //! read-only operations never dirty a tracked worktree. The previous design

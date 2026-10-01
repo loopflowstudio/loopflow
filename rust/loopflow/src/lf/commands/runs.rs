@@ -1,15 +1,10 @@
-//! `lf runs` — read retained AgentSession input and provider history.
+//! Read retained Session inputs and observe provider conversations.
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::{io::Read, path::PathBuf};
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
-use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
 pub use crate::session_record::{SessionHistory, SessionUsage};
 
@@ -74,26 +69,17 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, b
     )?)
 }
 
-pub(crate) fn collect_runs_started_since(
-    filter: WorkFilter,
-    since: i64,
-) -> Result<Vec<SessionHistory>> {
-    let path = crate::store::database_path_from_env()?;
-    collect_runs_at(&crate::store::lf_home_dir(), &path, filter, None, since)
-}
-
 /// Select conversations in SQL before reading their subordinate history.
-fn collect_runs_at(
-    _lf_home: &Path,
-    database: &Path,
+pub(crate) fn collect_history(
     filter: WorkFilter,
     parent: Option<&str>,
     since: i64,
 ) -> Result<Vec<SessionHistory>> {
+    let database = crate::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(database)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
     Ok(store.conversation_history(
         filter.wave,
         filter.project,
@@ -104,97 +90,7 @@ fn collect_runs_at(
     )?)
 }
 
-/// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
-/// launches, optionally drilled to one attributed Work subject.
-pub fn list(
-    json: bool,
-    wave: Option<&str>,
-    project: Option<&str>,
-    task: Option<&str>,
-    parent: Option<&str>,
-) -> Result<()> {
-    let home = crate::store::lf_home_dir();
-    let filter = WorkFilter {
-        wave,
-        project,
-        task,
-    };
-    // A Task's history and a capture's callers list whole; other drills are recent.
-    let runs = match (parent, task) {
-        (Some(parent), _) => {
-            let database = crate::store::database_path_from_env()?;
-            let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
-            let parent = store.resolve_history_input(parent)?;
-            collect_runs_at(&home, &database, filter, Some(&parent), 0)?
-        }
-        (None, Some(_)) => collect_runs_started_since(filter, 0)?,
-        (None, None) => collect_runs(filter)?.0,
-    };
-
-    if json {
-        println!("{}", serde_json::to_string(&runs)?);
-        return Ok(());
-    }
-
-    if runs.is_empty() {
-        match (parent, wave, project, task) {
-            (Some(parent), _, _, _) => println!("No caller-input history recorded for {parent}."),
-            (None, _, _, Some(task)) => {
-                println!("No Session history recorded for {task}.")
-            }
-            (None, _, Some(project), None) => {
-                println!("No Session history recorded for project/{project} in the last {WINDOW_DAYS} days.")
-            }
-            (None, Some(wave), None, None) => {
-                println!(
-                    "No Session history recorded for wave/{wave} in the last {WINDOW_DAYS} days."
-                )
-            }
-            (None, None, None, None) => {
-                println!("No Session history recorded in the last {WINDOW_DAYS} days.")
-            }
-        }
-        return Ok(());
-    }
-
-    let colors = Colors::default();
-    println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  INPUT{reset}",
-        bold = colors.bold,
-        reset = colors.reset,
-        time = "TIME",
-        repo = "REPO",
-        wave = "WAVE",
-        label = "HISTORY",
-        tokens = "TOKENS",
-        cost = "COST",
-        agent = "AGENT",
-        status = "STATUS",
-    );
-    for run in &runs {
-        println!(
-            "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  {id}",
-            time = format_time(run.observed_at),
-            repo = truncate(&display_repo(run.repo.as_deref()), 14),
-            wave = truncate(run.wave_name.as_deref().unwrap_or("-"), 10),
-            label = truncate(run.label(), 22),
-            tokens = run
-                .total_tokens()
-                .map(format_tokens)
-                .unwrap_or_else(|| "-".to_string()),
-            cost = run
-                .usage
-                .cost_usd
-                .map(format_cost)
-                .unwrap_or_else(|| "-".to_string()),
-            agent = truncate(&format_agent(Some(&run.harness), run.model.as_deref()), 18),
-            status = run.status(),
-            id = short_id(run.selector()),
-        );
-    }
-    Ok(())
-}
-
+/// Record a provider callback against its owning Session capture.
 pub fn observe_provider_session() -> Result<()> {
     let run_dir = std::env::var_os(crate::session_record::RUN_DIR_ENV)
         .map(PathBuf::from)
@@ -304,24 +200,6 @@ fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
         (None, Some(model)) => model.to_string(),
         (None, None) => "-".to_string(),
     }
-}
-
-fn display_repo(repo: Option<&str>) -> String {
-    repo.and_then(|value| std::path::Path::new(value).file_name())
-        .and_then(|value| value.to_str())
-        .or(repo)
-        .unwrap_or("-")
-        .to_string()
-}
-
-fn format_time(unix: i64) -> String {
-    chrono::DateTime::from_timestamp(unix, 0)
-        .map(|utc| {
-            utc.with_timezone(&chrono::Local)
-                .format("%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|| unix.to_string())
 }
 
 pub(crate) fn format_tokens(value: i64) -> String {

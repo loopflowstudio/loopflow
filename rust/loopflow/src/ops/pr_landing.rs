@@ -591,7 +591,7 @@ fn exec_ci_fix(
         .unwrap_or_default();
     let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf task sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -709,8 +709,9 @@ fn exec_ci_fix(
         .map(|answer| answer.text)
         .unwrap_or_else(|| {
             format!(
-                "No repair conclusion recorded; inspect lf runs {} --events",
-                capture.artifact_key()
+                "No repair conclusion recorded for input {}; retained artifacts: {}",
+                capture.artifact_key(),
+                capture.artifact_dir().display()
             )
         });
     let result = result.map_err(|error| {
@@ -730,14 +731,14 @@ fn exec_ci_fix(
 
 fn repair_arm_command(landing: &PrLanding) -> String {
     if landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask) {
-        "lf pr arm -c".to_string()
+        "lf arm -c".to_string()
     } else if let Some(slug) = &landing.next_slug {
         format!(
-            "lf pr arm --next {}",
+            "lf arm --next {}",
             crate::engine::process::shell_escape(slug)
         )
     } else {
-        "lf pr arm".to_string()
+        "lf arm".to_string()
     }
 }
 
@@ -1081,7 +1082,7 @@ async fn reconcile_claimed(
             block_landing(
                 store,
                 landing,
-                "pull request has no auto-merge request; run lf pr arm to resume landing".into(),
+                "pull request has no auto-merge request; run lf arm to resume landing".into(),
             )
             .await
         }
@@ -1650,15 +1651,15 @@ mod tests {
     async fn repair_retains_completion_and_rotation_intent() {
         let (_directory, _store, mut landing) = fixture().await;
         landing.after_merge = Some(crate::work::task::AfterMerge::CompleteTask);
-        assert_eq!(super::repair_arm_command(&landing), "lf pr arm -c");
+        assert_eq!(super::repair_arm_command(&landing), "lf arm -c");
         landing.after_merge = Some(crate::work::task::AfterMerge::ContinueTask);
         landing.next_slug = Some("follow-up".into());
         assert_eq!(
             super::repair_arm_command(&landing),
-            "lf pr arm --next 'follow-up'"
+            "lf arm --next 'follow-up'"
         );
         landing.next_slug = None;
-        assert_eq!(super::repair_arm_command(&landing), "lf pr arm");
+        assert_eq!(super::repair_arm_command(&landing), "lf arm");
     }
 
     #[tokio::test]

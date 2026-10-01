@@ -11,7 +11,7 @@ the readable label and the `--depends-on` handle. 128 bits is materially
 collision-resistant — two branches would need on the order of 2**64 same-name
 drafts before a birthday collision, so distinct files are a guarantee, not a
 hope. A draft has no ordinal: the release cut
-(`lf release run`) is the single boundary that orders the accumulated drafts and
+(`lf repo release run`) is the single boundary that orders the accumulated drafts and
 publishes one canonical `<major>.<minor>.<patch>.001_release` batch.
 
 Because two branches authoring the same readable name mint different ids, they

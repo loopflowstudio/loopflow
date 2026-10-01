@@ -1,4 +1,4 @@
-// RegistryQuery decodes the `lf wave list/status/roadmap/runs --json` wire snapshots. The
+// RegistryQuery decodes the `lf wave list/status/roadmap/usage --json` wire snapshots. The
 // runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
@@ -400,7 +400,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["task", "changes", "INF-123", "--base", "parent", "--json"]:
+            case ["task", "diff", "INF-123", "--files", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
@@ -454,7 +454,7 @@ struct RegistryQueryTests {
             switch args {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "open", session.id, "--json"]:
+            case ["session", "connect", session.id, "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
@@ -585,7 +585,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
-            if args == ["wave", "sync", "infrastructure"] { return "" }
+            if args == ["repo", "refresh", "infrastructure"] { return "" }
             #expect(args == ["wave", "status", "infrastructure", "--json"])
             return json
         }

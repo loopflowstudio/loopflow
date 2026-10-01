@@ -190,7 +190,7 @@ struct ActiveSessionsObservationTests {
             let firstID = "run_00000000000000000000000000000001"
             let secondID = "run_00000000000000000000000000000002"
             try await publishClient(client, id: firstID, home: home)
-            let process = fixtureProcess(["runs", "--active", "--watch", "--json"], home: home)
+            let process = fixtureProcess(["monitor", "active", "--watch", "--json"], home: home)
             let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
             observation = reader
             var iterator = reader.snapshots.makeAsyncIterator()

@@ -36,7 +36,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["wave", "sync"]`).
+    /// Subcommand path for the completeness guard (e.g. `["repo", "refresh"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -65,12 +65,11 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["activity"],
-    &["ci"],
-    &["cron", "list"],
-    &["exec", "list"],
-    &["runs"],
-    &["usage"],
+    &["monitor", "activity"],
+    &["repo", "ci"],
+    &["wave", "cron", "list"],
+    &["monitor", "list"],
+    &["monitor", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -78,14 +77,13 @@ const FILTER_ONLY: &[&[&str]] = &[
 /// operations must name the installed Wave whose authority they validate.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
-    &["wave", "relocate"],
     &["discord", "serve"],
-    &["cron", "preflight"],
-    &["cron", "sync"],
-    &["cron", "run"],
-    &["cron", "history"],
-    &["cron", "trigger"],
-    &["cron", "remove"],
+    &["wave", "cron", "preflight"],
+    &["wave", "cron", "sync"],
+    &["wave", "cron", "run"],
+    &["wave", "cron", "history"],
+    &["wave", "cron", "trigger"],
+    &["wave", "cron", "remove"],
 ];
 
 const COMMANDS: &[Cmd] = &[
@@ -108,25 +106,26 @@ const COMMANDS: &[Cmd] = &[
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
-        id: "wave connect",
-        path: &["wave", "connect"],
-        base_args: &["wave", "connect"],
-        wave_form: WaveForm::Flag,
+        id: "repo connect",
+        path: &["repo", "connect"],
+        base_args: &["repo", "connect"],
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
-        id: "wave sync",
-        path: &["wave", "sync"],
-        base_args: &["wave", "sync"],
-        wave_form: WaveForm::Flag,
+        id: "repo refresh",
+        path: &["repo", "refresh"],
+        base_args: &["repo", "refresh"],
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: true,
     },
     Cmd {
         id: "cron add",
-        path: &["cron", "add"],
+        path: &["wave", "cron", "add"],
         base_args: &[
+            "wave",
             "cron",
             "add",
             "--flow",
@@ -230,10 +229,8 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation and explicit chat connection may register the selected Wave.
-    if env.id == "explicit-unknown"
-        && matches!(cmd.id, "chat post" | "wave connect" | "wave new-chapter")
-    {
+    // Connection may register the selected Wave.
+    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
         return Outcome::Resolved;
     }
 
@@ -580,10 +577,16 @@ fn registry_is_complete() {
     // 4. Every cron leaf must be classified exactly once. Required-wave cron
     //    commands do not appear in the optional-wave discovery above.
     let cron = root
+        .find_subcommand("wave")
+        .expect("wave command must exist")
         .find_subcommand("cron")
         .expect("cron command must exist");
     for subcommand in cron.get_subcommands() {
-        let path = vec!["cron".to_string(), subcommand.get_name().to_string()];
+        let path = vec![
+            "wave".to_string(),
+            "cron".to_string(),
+            subcommand.get_name().to_string(),
+        ];
         let classifications = usize::from(registry_paths.contains(&path))
             + usize::from(filter_paths.contains(&path))
             + usize::from(explicit_paths.contains(&path));
@@ -684,6 +687,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "wave",
             "cron",
             "add",
             "--flow",

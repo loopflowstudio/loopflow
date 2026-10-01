@@ -128,7 +128,7 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: false,
-        message: Some("lf pr open: prepare branch".to_string()),
+        message: Some("lf task pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
@@ -368,7 +368,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let branch = current_branch(repo)?;
     if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
+            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf --task <issue-id> flow start`"
                 .to_string(),
         ));
     }
@@ -2590,13 +2590,13 @@ Body:
 ## Usage
 
 ```bash
-lf wave connect
+lf repo connect
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf wave connect\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf repo connect\n```".to_string(),
             })
         );
     }
@@ -2660,13 +2660,14 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf pr open" after gating to open or update the PR."}"###;
+Use "lf task pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
-                    .to_string(),
+                body:
+                    "## Summary\n\nUse \"lf task pr open\" after gating to open or update the PR."
+                        .to_string(),
             })
         );
     }

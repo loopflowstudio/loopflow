@@ -119,9 +119,7 @@ pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmP
         .pm_snapshot(wave.id())
         .await
         .map_err(error)?
-        .ok_or_else(|| {
-            error("Project planning is unavailable; run `lf wave sync --wave <wave>`")
-        })?;
+        .ok_or_else(|| error("Project planning is unavailable; run `lf repo refresh <wave>`"))?;
     let snapshot = snapshot.snapshot;
     select_current(wave.slug(), &snapshot.projects)
 }

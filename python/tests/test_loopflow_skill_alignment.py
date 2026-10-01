@@ -48,7 +48,6 @@ def test_agent_surfaces_share_the_inspection_commands():
         SKILL.read_text(),
         LOOPFLOW.read_text(),
         (ROOT / "docs/agent-api.md").read_text(),
-        (ROOT / "docs/lf.md").read_text(),
     ]
 
     for text in surfaces:

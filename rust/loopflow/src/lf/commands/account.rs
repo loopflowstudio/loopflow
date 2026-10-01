@@ -1,7 +1,7 @@
+#[path = "account_status.rs"]
+mod account_status;
 #[path = "auth_input.rs"]
 mod auth_input;
-#[path = "auth_status.rs"]
-mod auth_status;
 
 use std::fs;
 use std::future::Future;
@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
-use crate::lf::AuthCommand;
+use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
     account_home_path, account_id_for_login, account_login, acquire_managed_login_lock,
@@ -60,24 +60,27 @@ struct AccountLifecycleUpdate<'a> {
     clear_paid_through: bool,
 }
 
-pub fn run(cmd: &AuthCommand) -> Result<()> {
+pub fn run(
+    cmd: Option<&AccountCommand>,
+    provider: Option<Provider>,
+    cached: bool,
+    details: bool,
+    json: bool,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(run_async(cmd))
+    match cmd {
+        Some(cmd) => rt.block_on(run_async(cmd)),
+        None => rt.block_on(account_status::run(provider, !cached, details, json)),
+    }
 }
 
-async fn run_async(cmd: &AuthCommand) -> Result<()> {
+async fn run_async(cmd: &AccountCommand) -> Result<()> {
     match cmd {
-        AuthCommand::Status {
-            provider,
-            cached,
-            details,
-            json,
-        } => auth_status::run(provider.as_deref(), !*cached, *details, *json).await,
-        AuthCommand::Disconnect { provider, email } => match email {
+        AccountCommand::Disconnect { provider, email } => match email {
             Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,
         },
-        AuthCommand::Connect {
+        AccountCommand::Connect {
             provider,
             email,
             chrome_profile,
@@ -96,7 +99,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
                 None => connect(provider, chrome_profile.as_deref()).await,
             }
         }
-        AuthCommand::RedeemReset {
+        AccountCommand::RedeemReset {
             provider,
             email,
             idempotency_key,
@@ -112,8 +115,13 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             )
             .await
         }
-        AuthCommand::Route { cmd } => super::profile::run_route_async(cmd).await,
-        AuthCommand::Set {
+        AccountCommand::Route {
+            cmd,
+            repo,
+            default,
+            json,
+        } => super::profile::run_route_async(cmd.as_ref(), repo.as_deref(), *default, *json).await,
+        AccountCommand::Set {
             provider,
             email,
             login_email,
@@ -134,7 +142,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
                 || *clear_paid_through;
             if !lifecycle && !clear_cooldown && chrome_profile.is_empty() && !clear_chrome_profiles
             {
-                return Err(anyhow!("auth set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
+                return Err(anyhow!("account set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
             }
             if lifecycle {
                 set_account_lifecycle(
@@ -211,7 +219,7 @@ async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Chrome profile discovery: {}. Run lf auth connect {provider} --chrome-profile <profile>",
+        "Chrome profile discovery: {}. Run lf account connect {provider} --chrome-profile <profile>",
         failures.join("; ")
     ))
 }
@@ -256,7 +264,7 @@ async fn browser_profiles(
         .map(|a| format!(" {}", account_login(a)))
         .unwrap_or_default();
     if !std::io::stdin().is_terminal() {
-        return Err(anyhow!("No saved Chrome profile. Run lf auth connect {provider}{login} --chrome-profile <profile>"));
+        return Err(anyhow!("No saved Chrome profile. Run lf account connect {provider}{login} --chrome-profile <profile>"));
     }
     let choices = crate::profile::local_chrome_profiles().map_err(anyhow::Error::msg)?;
     for (index, choice) in choices.iter().enumerate() {
@@ -430,7 +438,7 @@ async fn connect_account(
     };
     if account.login_email.is_none() {
         return Err(anyhow!(
-            "account '{}' needs an expected email first: lf auth set {} {} --login-email <email>",
+            "account '{}' needs an expected email first: lf account set {} {} --login-email <email>",
             account.account_id,
             provider,
             account.account_id
@@ -691,7 +699,7 @@ fn exhausted_access_profiles_error(
     failures: &[String],
 ) -> anyhow::Error {
     anyhow!(
-        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf auth connect {provider} {} --chrome-profile <profile>",
+        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf account connect {provider} {} --chrome-profile <profile>",
         account_login(account), failures.join("; "), account_login(account)
     )
 }
@@ -1035,7 +1043,7 @@ async fn set_account_lifecycle(
         && !update.clear_paid_through
     {
         return Err(anyhow!(
-            "lf auth set needs --login-email, --routing, --plan, or --paid-through"
+            "lf account set needs --login-email, --routing, --plan, or --paid-through"
         ));
     }
     let provider = parse_managed_provider(raw_provider)?;
@@ -1063,7 +1071,7 @@ async fn set_account_lifecycle(
             };
             if let Some(observed) = observed {
                 if !observed.eq_ignore_ascii_case(login_email.as_str()) {
-                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf auth connect {provider} {login_email}"));
+                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf account connect {provider} {login_email}"));
                 }
             }
         }
@@ -1200,7 +1208,7 @@ async fn configure(raw_provider: &str) -> Result<()> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             anyhow!(
-                "{env_name} is not set. Export it, then run `lf auth connect {} --api-key`.",
+                "{env_name} is not set. Export it, then run `lf account connect {} --api-key`.",
                 provider.as_str()
             )
         })?;
@@ -1766,7 +1774,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                 fs::write(&replace_path, &replace_bytes).unwrap();
             })
             .await;
-        super::auth_status::run(Some("claude"), true, false, false)
+        super::account_status::run(Some(Provider::Claude), true, false, false)
             .await
             .unwrap();
         server.await.unwrap();
@@ -2312,7 +2320,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
 
         assert_eq!(
             error.to_string(),
-            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf auth connect claude jackstah@gmail.com --chrome-profile <profile>"
+            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf account connect claude jackstah@gmail.com --chrome-profile <profile>"
         );
     }
 }

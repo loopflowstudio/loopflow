@@ -137,7 +137,7 @@ pub(crate) async fn prepare_exec(
 ) -> Result<()> {
     let flow = store.waiting_review(session_id).await?;
     command
-        .arg("--tui")
+        .args(["--mode", "tui"])
         .env(flow_run::FLOW_STEP_ENV, ActiveStep::of(&flow).env_value()?)
         .env(
             crate::provider_account::lease::ACCOUNT_SELECTION_ENV,

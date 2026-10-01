@@ -255,7 +255,7 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
-        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf wave sync") == true)
+        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
 
     }
 
@@ -418,7 +418,7 @@ struct DTOFixtureTests {
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
-            "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+            "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])
 
         let encoded = try JSONEncoder().encode(session)

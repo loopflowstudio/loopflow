@@ -13,11 +13,11 @@ lf ssh <home-id> --wave product wave/operate
 ## Local by default
 
 ```bash
-lf runs                  # runs recorded on this Home
-lf ps --json             # OS-live processes on this Home
-lf wave status product        # planning and runtime view resolved here
+lf monitor list                                # Execs recorded on this Home
+lf ps --json                           # OS-live processes on this Home
+lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf ssh build-home runs   # run the same reader on build-home
+lf ssh build-home mon list   # run the same reader on build-home
 lf ssh build-home --wave product wave/operate
 ```
 
@@ -32,7 +32,10 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ## Place Work
 
 `Placement` maps one `WorkRef` to one `HomeId`. It records where Work belongs,
-not whether a process exists. `lf wave place` changes placement. It does not launch a process.
+not whether a process exists. `lf wave place` sets the Home used by Wave schedules
+and inherited once by new Projects; new Tasks inherit their Project's Home. It
+does not move existing child work or launch a process. `lf wave status` reads
+planning, Task conditions, metrics and Session history without a resident.
 
 ## Process topology
 
@@ -62,14 +65,14 @@ no signal authority.
 ```bash
 lf ps --json
 lf top
-lf prune --dry-run
+lf mon prune --dry-run
 ```
 
 The outer command journal records command receipts. `lf ps` and `lf top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf prune` removes dead command receipts and may reap only registered orphan
+`lf mon prune` removes dead command receipts and may reap only registered orphan
 OpenCode process groups whose ownership is known. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
@@ -90,7 +93,7 @@ Wave identity is a UUID. The readable Wave locator is `(canonical repository, sl
 A bare slug may be ambiguous across repositories and is not mutation authority.
 
 ```bash
-lf wave relocate <wave-id> --repo <target> --name <slug>
+lf relocate <wave-id> --repo <target> --name <slug>
 ```
 
 Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Home

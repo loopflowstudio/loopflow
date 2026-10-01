@@ -104,7 +104,7 @@ def main() -> int:
         env["LF_HOME"] = str(demo_home)
 
         print("Isolated account-routing demo — fake metadata, no credentials")
-        _run(binary, env, "auth", "set", "linear", "--clear-chrome-profiles")
+        _run(binary, env, "account", "set", "linear", "--clear-chrome-profiles")
         database = demo_home / "loopflow.db"
         _seed_topology(database, demo_home)
 
@@ -119,7 +119,7 @@ def main() -> int:
             _run(
                 binary,
                 env,
-                "auth",
+                "account",
                 "set",
                 provider,
                 account,
@@ -129,7 +129,7 @@ def main() -> int:
         _run(
             binary,
             env,
-            "auth",
+            "account",
             "route",
             "set",
             "claude",
@@ -139,7 +139,7 @@ def main() -> int:
         _run(
             binary,
             env,
-            "auth",
+            "account",
             "route",
             "set",
             "codex",
@@ -148,12 +148,12 @@ def main() -> int:
             "personal@example.com",
         )
 
-        _print_step("Access profiles", _run(binary, env, "auth", "status", "--details"))
+        _print_step("Access profiles", _run(binary, env, "account", "--cached", "--details"))
         _print_step(
             "Provider routes",
-            _run(binary, env, "auth", "route", "show"),
+            _run(binary, env, "account", "route"),
         )
-        _print_step("Account lifecycle", _run(binary, env, "auth", "status"))
+        _print_step("Account lifecycle", _run(binary, env, "account", "--cached"))
 
         print("\nLook for:")
         print("  1. Claude and Codex have independent account orders.")

@@ -199,11 +199,11 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     for args in [
         vec!["list"],
         vec!["flow", "show", "code"],
-        vec!["flow", "validate", "code"],
-        vec!["auth", "status"],
-        vec!["auth", "status", "--details"],
-        vec!["auth", "route", "show"],
-        vec!["auth", "route", "show", "--repo", "example/project"],
+        vec!["help", "flow", "code"],
+        vec!["account", "--cached"],
+        vec!["account", "--cached", "--details"],
+        vec!["account", "route"],
+        vec!["account", "route", "--repo", "example/project"],
         vec!["wave", "list", "--json"],
         vec!["ps", "--json"],
     ] {
@@ -230,11 +230,13 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
+    let output = command(home.path(), cwd.path(), &["task", "sync", "--plan"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Run lf task sync from a Git repository")
+    );
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
@@ -251,7 +253,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["auth", "route", "set", "claude", "person@example.com"],
+        &["account", "route", "set", "claude", "person@example.com"],
     )
     .output()
     .unwrap();

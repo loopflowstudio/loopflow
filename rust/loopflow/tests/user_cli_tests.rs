@@ -4,7 +4,7 @@ use std::process::Command;
 fn user_name_command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
-        .args(["user", "name", "--json"])
+        .args(["home", "user", "--json"])
         .current_dir(home)
         .env("LF_HOME", home)
         .env("GIT_CONFIG_GLOBAL", home.join("gitconfig"))

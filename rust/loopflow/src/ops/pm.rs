@@ -1,7 +1,7 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
 //! Linear owns authored chapter content and Tasks; the durable chapter binding
-//! identifies the current Project. `lf wave sync` projects provider state into
+//! identifies the current Project. `lf repo refresh` projects provider state into
 //! SQLite; reads serve that snapshot and only reach Linear through a bounded
 //! staleness policy (see `load_show_snapshot`).
 
@@ -70,7 +70,7 @@ pub enum PmRefresh {
     Auto,
     /// Always refresh before reading (`--sync`).
     Force,
-    /// Never touch the network; serve the cache as-is (`--no-sync`).
+    /// Never touch the network; serve the cache as-is (the default for status reads).
     Never,
 }
 
@@ -284,7 +284,7 @@ fn require_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<S
     read_repository_team(repo, provider)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
-             Run `lf wave connect --wave <wave> --team-key <KEY>` before creating or mutating work."
+             Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -368,7 +368,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository PM identity from Git origin: {error}. \
-             Configure an origin before running `lf wave connect`."
+             Configure an origin before running `lf repo connect`."
         ))
     })
 }
@@ -407,7 +407,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf wave connect --wave {wave}` to connect its Linear Initiative.",
+             Run `lf repo connect {wave}` to connect its Linear Initiative.",
             provider.initiative_key()
         ))
     })?;
@@ -423,7 +423,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
-    // without this hook remote `lf wave sync` could never authenticate.
+    // without this hook remote `lf repo refresh` could never authenticate.
     if let Some(token) = forwarded_pm_token(provider) {
         return Ok(token);
     }
@@ -435,7 +435,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
 
 fn missing_linear_credential() -> OpsError {
     OpsError::Message(
-        "No Linear credential found. Run `doppler run -- lf auth connect linear`.".into(),
+        "No Linear credential found. Run `doppler run -- lf account connect linear`.".into(),
     )
 }
 
@@ -574,7 +574,7 @@ async fn resolve_pm_token_from_store(
                     return Ok(Some(access));
                 }
                 return Err(if reason.requires_reconnect() {
-                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf auth connect linear` to reconnect."))
+                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf account connect linear` to reconnect."))
                 } else {
                     credential_retry(&format!(
                         "Linear refresh failed: {reason}; prior credential preserved"
@@ -679,7 +679,7 @@ const PM_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 
 fn missing_snapshot_error(wave: &str) -> OpsError {
     OpsError::Message(format!(
-        "wave/{wave} has no local PM snapshot. Run `lf wave sync --wave {wave}`."
+        "wave/{wave} has no local PM snapshot. Run `lf repo refresh {wave}`."
     ))
 }
 
@@ -812,7 +812,7 @@ async fn load_show_snapshot(
                     )
                 };
                 Err(OpsError::Message(format!(
-                    "{reason}. Retry with `lf wave sync --wave {wave}` after addressing the reported cause."
+                    "{reason}. Retry with `lf repo refresh {wave}` after addressing the reported cause."
                 )))
             }
             None => Err(OpsError::Message(format!(
@@ -1003,7 +1003,7 @@ async fn pm_init_async(
             repo,
             &crate::ops::CommitOptions {
                 add: true,
-                message: Some(format!("lf wave connect: {wave} to {provider}")),
+                message: Some(format!("lf repo connect: {wave} to {provider}")),
                 ..crate::ops::CommitOptions::for_task("pm")
             },
             progress,
@@ -1955,7 +1955,7 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
     let team_id = read_repository_team(repo, provider)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
-             Run `lf wave connect --wave <wave> --team-key <KEY>` to establish the migration target."
+             Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -2351,7 +2351,7 @@ async fn pm_sync_async(
         require_repository_pm_ready(repo)?;
     }
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf wave connect --wave <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -2591,15 +2591,7 @@ async fn pm_sync_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub fn pm_rename(
-    repo: &Path,
-    options: &PmRenameOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmRenameResult> {
-    block_on_pm(pm_rename_async(repo, options, progress))
-}
-
-async fn pm_rename_async(
+pub(crate) async fn pm_rename(
     repo: &Path,
     options: &PmRenameOptions,
     progress: &impl Progress,
@@ -2817,7 +2809,7 @@ fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> 
         [] => Ok(None),
         [wave] => Ok(Some(wave.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf repo connect`",
             many.iter()
                 .map(|wave| wave.id.as_str())
                 .collect::<Vec<_>>()
@@ -2925,7 +2917,7 @@ fn validate_project_ownership(
     crate::pm::validate_project_ownership(wave, initiative_id, Some(team_id), project).map_err(
         |error| {
             OpsError::Message(format!(
-                "{error}. Repair the associations and run `lf wave sync --wave {wave}`."
+                "{error}. Repair the associations and run `lf repo refresh {wave}`."
             ))
         },
     )

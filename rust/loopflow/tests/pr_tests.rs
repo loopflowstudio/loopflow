@@ -67,6 +67,91 @@ exit 0
 }
 
 #[test]
+fn task_delivery_works_on_an_ordinary_branch_without_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join("pr-state");
+    let gh = draft_pr_script(&state);
+    let marker = home.path().join("present.log");
+    let open = counting_open_script(&marker);
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", &gh), ("open", &open), ("xdg-open", &open)],
+        home.path(),
+    );
+    let repo = TestRepo::new();
+    repo.create_branch("ordinary");
+    repo.create_file("feature.txt", "local work");
+    let before = repo.head_sha();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_DB_PATH", home.path().join("store.db"))
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    assert_eq!(
+        String::from_utf8(run(&["pr"])).unwrap().trim(),
+        "No open PR for the current branch."
+    );
+    run(&["task", "commit", "-m", "Record local work"]);
+    let committed = repo.head_sha();
+    assert_ne!(before, committed);
+    assert!(!state.exists(), "commit published a PR");
+    let remote = Command::new("git")
+        .args(["ls-remote", "origin", "refs/heads/ordinary"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(remote.status.success());
+    assert!(remote.stdout.is_empty(), "commit pushed the branch");
+    run(&["task", "sync", "--plan"]);
+    assert_eq!(repo.head_sha(), committed);
+    let worktrees: serde_json::Value =
+        serde_json::from_slice(&run(&["task", "wt", "list", "--json"])).unwrap();
+    assert_eq!(worktrees.as_array().unwrap().len(), 1);
+    for (verb, expected) in [("open", "draft"), ("publish", "open")] {
+        run(&[
+            "task",
+            "pr",
+            verb,
+            "--title",
+            "Ordinary branch",
+            "--body",
+            "No Task required.",
+        ]);
+        assert_eq!(fs::read_to_string(&state).unwrap(), expected);
+        let status = String::from_utf8(run(&["task", "pr"])).unwrap();
+        assert!(status.contains("#1") && status.contains("https://example.com/pr/1"));
+    }
+    let remote = Command::new("git")
+        .args(["ls-remote", "origin", "refs/heads/ordinary"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(remote.status.success());
+    assert!(String::from_utf8_lossy(&remote.stdout).starts_with(&repo.head_sha()));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let store = loopflow::store::open_ephemeral_store(&loopflow::store::StorageConfig::sqlite(
+            home.path().join("store.db"),
+        ))
+        .await
+        .unwrap();
+        assert!(store.list_tasks(None).await.unwrap().is_empty());
+    });
+}
+
+#[test]
 fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
     for headless in [false, true] {
         let home = tempfile::TempDir::new().unwrap();
@@ -101,15 +186,18 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 execute_flow_command(
                     repo.path(),
                     &FlowCommand {
-                        command: "pr".to_string(),
-                        args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                        command: "task".to_string(),
+                        args: std::iter::once("pr")
+                            .chain(args.iter().copied())
+                            .map(str::to_string)
+                            .collect(),
                     },
                     &NullProgress,
                 )
                 .unwrap();
             } else {
                 let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-                    .arg("pr")
+                    .args(["task", "pr"])
                     .args(args)
                     .current_dir(repo.path())
                     .output()
@@ -889,7 +977,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf wave sync")),
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf repo refresh")),
         "missing provider identity should be actionable: {result:?}"
     );
     assert!(!github_marker.exists(), "GitHub must not mutate");
@@ -1286,7 +1374,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .expect("store auto merge request");
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["task", "run", "INF-123", "--json"])
+        .args(["--task", "INF-123", "flow", "start", "--json"])
         .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(repo.path())
@@ -1643,7 +1731,7 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
         result,
         Err(OpsError::Message(message))
             if message.contains("canonical checkout")
-                && message.contains("lf task run")
+                && message.contains("lf --task <issue-id> flow start")
     ));
 }
 

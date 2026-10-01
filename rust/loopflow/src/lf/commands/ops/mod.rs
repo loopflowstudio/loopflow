@@ -38,7 +38,7 @@ use std::time::Instant;
 pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
-        None | Some(PrCommand::Status) => pr_status(),
+        None => pr_status(),
         Some(PrCommand::Reconcile) => {
             crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
             Ok(())
@@ -130,7 +130,7 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
         pr.branch,
         &pr.base_commit[..pr.base_commit.len().min(12)]
     );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
+    println!("Push your follow-up edits, then `lf task pr open` when ready.");
     Ok(())
 }
 
@@ -214,7 +214,7 @@ pub fn run_sync(
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
     run_sync_in(
         &repo_root,
         onto,
@@ -243,7 +243,7 @@ pub(crate) fn run_sync_in(
     }
     if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
+            "--adopt is only valid with `lf task sync --continue` or `lf task sync --abort`"
         ));
     }
     if continue_sync {
@@ -627,19 +627,12 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_commit(
-    message: Option<&str>,
-    push: bool,
-    no_add: bool,
-    agent_override: Option<&str>,
-) -> Result<()> {
+pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
             add: !no_add,
-            push,
-            create_draft_pr: true,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
@@ -684,16 +677,16 @@ pub fn connect_wave(
         crate::ops::pm::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
-        // Wave connection is a creation flow: an explicit --wave may name a
+        // Wave connection is a creation flow: its positional name may select a
         // wave not yet registered (it links a wave directory to
         // Linear, not a registry row). Normalize-only for explicit;
         // ambient still uses the shared validating resolver.
         let name = if let Some(raw) = explicit {
             crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
+                .ok_or_else(|| anyhow!("repo connect requires a non-empty wave name"))?
         } else {
             ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
+                .ok_or_else(|| anyhow!("cannot determine wave; run `lf repo connect <name>`"))?
         };
         vec![name]
     };
@@ -724,23 +717,6 @@ pub fn connect_wave(
             result.wave, result.initiative_id
         );
     }
-    Ok(())
-}
-
-pub fn rename_wave(repo_root: &std::path::Path, wave: &str, title: &str) -> Result<()> {
-    let progress = &CliProgress;
-    let result = crate::ops::pm::pm_rename(
-        repo_root,
-        &crate::ops::pm::PmRenameOptions {
-            wave: Some(wave.to_string()),
-            title: title.to_string(),
-        },
-        progress,
-    )?;
-    println!(
-        "{}: renamed Linear Initiative {} to `{}`",
-        result.wave, result.initiative, result.title
-    );
     Ok(())
 }
 
@@ -788,13 +764,32 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 }
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
-    let repo = crate::repo::working_directory()?;
     match cmd {
+        RepoCommand::Connect {
+            wave,
+            all,
+            team_key,
+            team_name,
+        } => {
+            let repo = crate::repo::working_directory()?;
+            connect_wave(
+                &repo,
+                wave.as_deref(),
+                *all,
+                team_key.as_deref(),
+                team_name.as_deref(),
+            )
+        }
+        RepoCommand::Refresh { wave, all } => {
+            let repo = crate::repo::working_directory()?;
+            sync_planning(&repo, wave.as_deref(), *all, false, false)
+        }
         RepoCommand::NewChapter {
             name,
             dry_run,
             json,
         } => {
+            let repo = crate::repo::working_directory()?;
             let rotation = crate::ops::chapter::new_chapter(&repo, name, *dry_run)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&rotation)?);
@@ -815,7 +810,16 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             }
             Ok(())
         }
+        RepoCommand::Release { cmd } => run_release(cmd),
+        RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
+        RepoCommand::Ci {
+            since,
+            wave,
+            repo,
+            json,
+        } => crate::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         RepoCommand::Reteam { apply } => {
+            let repo = crate::repo::working_directory()?;
             let result = crate::ops::pm::pm_reteam(
                 &repo,
                 &crate::ops::pm::PmReteamOptions { apply: *apply },
@@ -1253,7 +1257,7 @@ fn scheduled_release_prefers_its_operation_flow_over_the_builtin_skill() {
     std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
     std::fs::write(
         repo.path().join(".lf/flows/release-run.yaml"),
-        "- cmd: release run patch\n",
+        "- cmd: repo release run patch\n",
     )
     .unwrap();
     assert_eq!(
@@ -1512,7 +1516,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
+        WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
@@ -1589,6 +1593,10 @@ fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
 use crate::ops::telemetry::record_ops_metric;
 
 fn wt_switch(name: &str) -> Result<()> {
+    cd_directive(&resolve_worktree(name)?)
+}
+
+pub fn resolve_worktree(name: &str) -> Result<PathBuf> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let worktrees = list_worktrees(&main_repo)?;
@@ -1627,7 +1635,7 @@ fn wt_switch(name: &str) -> Result<()> {
         }
     };
 
-    cd_directive(&path)
+    Ok(path)
 }
 
 fn cd_directive(path: &Path) -> Result<()> {
@@ -1637,7 +1645,7 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
+fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let default_branch = get_default_branch(&main_repo)?;
@@ -1651,7 +1659,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     }
     let worktrees = list_worktrees(&main_repo)?;
 
-    if matches!(format, Some("json")) {
+    if json {
         let json = serde_json::to_string_pretty(&worktrees)?;
         println!("{}", json);
         return Ok(());
@@ -1925,7 +1933,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
 
     // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

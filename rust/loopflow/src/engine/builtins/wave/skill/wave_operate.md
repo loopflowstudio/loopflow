@@ -73,15 +73,15 @@ is an approval prerequisite. Each Task's selected Flow carries its work through
 landing; do not perform that Flow's steps or create another cursor here. Preserve selected Flows, review gates,
 worktrees, placement and execution history.
 
-- Start selected authorized work with `lf task run <issue-id>`; use the
+- Start selected authorized work with `lf --task <issue-id> flow start`; use the
   current Project's Flow unless an explicit choice is warranted. Existing
   execution is reconciled through Task operations, never a duplicate driver.
 - Inspect `lf task status` before recovery. Active work continues; unresolved
-  human Sessions remain waiting. Resume interrupted work through `lf task run`
+  human Sessions remain waiting. Resume interrupted work through `lf flow start`
   only when current evidence supports it. Unknown liveness is not idle.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
-- Update an authorized plan through `lf wave update-plan --wave <wave> --plan
+- Update an authorized plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `flow` and `krs`; for example

@@ -804,7 +804,8 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
         command.args([
             "--wave",
             &spec.wave,
-            "--batch",
+            "--mode",
+            "batch",
             spec.target_kind.as_str(),
             "--",
             &spec.flow,

@@ -15,7 +15,7 @@ enum RegistryQueryLocal {
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ActiveSessionsLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(
-                [configuration.helper, "runs", "--active", "--watch", "--json"]
+                [configuration.helper, "monitor", "active", "--watch", "--json"]
             )
             process.environment = configuration.environment
             return try LocalActiveSessionsObservation.start(

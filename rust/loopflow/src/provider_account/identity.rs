@@ -27,13 +27,13 @@ pub(crate) fn validate_identity(
     accounts: &[ProviderAccount],
 ) -> Result<(), String> {
     let recovery = format!(
-        "lf auth connect {} {}",
+        "lf account connect {} {}",
         account.provider,
         super::account_login(account)
     );
     let expected = account.login_email.as_ref().ok_or_else(|| {
         format!(
-            "account '{}' needs an expected email first: lf auth set {} {} --login-email <email>",
+            "account '{}' needs an expected email first: lf account set {} {} --login-email <email>",
             account.account_id, account.provider, account.account_id
         )
     })?;
@@ -67,7 +67,7 @@ pub(crate) fn validate_identity(
         });
         if let Some(other_identity) = other_identity {
             if identity.same_login(&other_identity) {
-                return Err(format!("account '{}' and account '{}' share login {}; disconnect the duplicate with lf auth disconnect {} {}, then {recovery}",
+                return Err(format!("account '{}' and account '{}' share login {}; disconnect the duplicate with lf account disconnect {} {}, then {recovery}",
                     account.account_id, other.account_id, identity.email, other.provider, super::account_login(other)));
             }
         }
@@ -109,7 +109,7 @@ pub(crate) fn check_account_identity(
     accounts: &[ProviderAccount],
 ) -> Result<(), String> {
     let identity = cached_identity(account).ok_or_else(|| {
-        format!("account '{}' has no identity verified against its current {} credential; run lf auth status {}",
+        format!("account '{}' has no identity verified against its current {} credential; run lf account {}",
             account.account_id, account.provider, account.provider)
     })?;
     validate_identity(account, &identity, accounts)

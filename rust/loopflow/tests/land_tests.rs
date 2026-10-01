@@ -1734,6 +1734,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "task",
             "pr",
             "arm",
             "--strict",
@@ -1813,7 +1814,7 @@ fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
   while [ ! -f "$LF_TEST_REPAIR_LAUNCHES.release" ]; do sleep 0.05; done
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
+  "$LF_TEST_BIN" task sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
@@ -1844,7 +1845,7 @@ fi"#;
             fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
             fs::write(
                 worktree.join(".lf/flows/repair-proof.yaml"),
-                "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
         }
@@ -1893,7 +1894,7 @@ fi"#;
         };
         let handed_off = if flow {
             command()
-                .args(["flow", "repair-proof", "-b", "--no-loopflow"])
+                .args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"])
                 .output()
                 .unwrap()
         } else {

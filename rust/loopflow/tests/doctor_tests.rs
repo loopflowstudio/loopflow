@@ -234,7 +234,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         assert!(detail.contains(&format!("2026-08-{day:02}")), "{detail}");
     }
 
-    let telemetry = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
+    let telemetry = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
     assert!(
         telemetry.status.success(),
         "telemetry-daily failed: {}{}",

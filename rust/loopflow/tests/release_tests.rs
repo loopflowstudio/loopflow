@@ -1454,7 +1454,7 @@ fn active_candidate_preparation_blocks_concurrent_cleanup_until_exit() {
     let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
 
     let release = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["release", "run", "patch"])
+        .args(["repo", "release", "run", "patch"])
         .current_dir(repo.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -2019,7 +2019,7 @@ exit 1
         .join(format!("{repo_name}.publish-default-v0-9-1"));
 
     let release = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["release", "run", "patch"])
+        .args(["repo", "release", "run", "patch"])
         .current_dir(repo.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

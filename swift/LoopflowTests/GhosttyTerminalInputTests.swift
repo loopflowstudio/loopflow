@@ -403,7 +403,7 @@ struct GhosttyTerminalInputTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
-            "-i",
+            "--mode", "interactive",
             "-c",
             """
             _ghostty_deferred_init

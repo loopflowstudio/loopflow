@@ -7,11 +7,11 @@ Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
 ```bash
-lf task checkout INF-123
+lf checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
-lf pr land -c
+lf land -c
 ```
 
 ## Delivery flow
@@ -45,9 +45,9 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf task checkout` resolves one existing Linear Issue inside one Project and
+`lf checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
-execution. `lf task run` uses the same substrate and additionally advances the
+execution. `lf flow start` uses the same substrate and additionally advances the
 declared Task flow. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
@@ -58,7 +58,7 @@ they do not edit product files in substitute worktrees.
 A dependent change that must begin before its parent merges uses another Task:
 
 ```bash
-lf task run INF-124 --stack-on INF-123
+lf --task INF-124 flow start --stack-on INF-123
 ```
 
 The child records its fork point and targets the parent's active PR branch.
@@ -66,7 +66,7 @@ Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
 updates keep the child's entire `scratch/` tree, including deleted files; the
 parent's notes remain on the parent branch. Even a child with only this cleanup
 commit merges updates instead of resetting onto the parent's scratch.
-After the parent merges, `lf sync` merges current main using the recorded fork
+After the parent merges, `lf task sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
 The parent Task does not hold two simultaneously open PRs.
@@ -74,12 +74,12 @@ The parent Task does not hold two simultaneously open PRs.
 ## Commit and publish
 
 ```bash
-lf commit -m "checkpoint: parser proof"       # local checkpoint
-lf commit -m "parser: accept nested groups" -p # commit and push
-lf pr publish                                  # visible, still in flight
-lf pr arm                                      # request exact-head auto-merge and return
-lf pr land                                     # hand off delivery and return
-lf pr reconcile                                # check recorded landings once
+lf commit -m "parser: accept nested groups" # local checkpoint
+lf pr open                             # prepare a draft and open its page
+lf pr publish                          # ready for review
+lf arm                                 # request auto-merge and return
+lf land                                # hand off delivery and return
+lf pr reconcile                        # check recorded landings once
 ```
 
 `publish` creates or refreshes the current PR without integration. A completed
@@ -107,7 +107,7 @@ unpublished changes still generate fresh copy. Task merge-disposition text is
 updated after that selection. Preparing an unchanged published PR needs no agent
 just to rewrite its description.
 
-Repeating `arm` or `land` on a clean, already armed exact head resumes the
+Repeating `land` on a clean, already armed exact head resumes the
 existing request, including standalone PRs. It preserves the commit, merge
 queue position, and CI. Explicit standalone title/body edits update only those
 fields; omitted copy is preserved. Dirty source or a new local commit still
@@ -115,7 +115,7 @@ prepares and publishes a replacement head. Task requests must also match the
 requested completion/continuation disposition.
 
 `lf pr open` is the presenting verb; it opens the review surface after
-publishing. Headless Task flows use publish, arm, or land.
+publishing. Headless Task flows use publish or land.
 
 ## Serialize the exact Git races
 
@@ -152,7 +152,7 @@ not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
 
 A supervisor-started merge can be handed to an agent in the same checkout.
-`lf sync --continue --adopt` claims a raw merge after resolution. For a stopped
+`lf task sync --continue --adopt` claims a raw merge after resolution. For a stopped
 Loopflow sync, ordinary `--continue` retains the saved branch and pinned target.
 Launching the agent neither adopts the operation nor publishes the result.
 
@@ -231,9 +231,9 @@ partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
 A blocked landing stays observable: later checks still settle its merge, and
-checks that stop failing clear the block. Rerun `lf pr arm` or `lf pr land`
+checks that stop failing clear the block. Rerun `lf arm` or `lf land`
 after resolving a blocker to resume under a fresh generation, including when
-the SHA has not changed. Use `lf runs <run> --final` to inspect a repair's
+the SHA has not changed. Use `lf mon show SESSION --final` to inspect a repair's
 conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.
@@ -244,8 +244,8 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge, bare `lf pr land` settles that PR and leaves the Task open.
-`lf pr land -c` completes the Task. `lf pr land --next <slug>` rotates the
+After verified merge, bare `lf land` settles that PR and leaves the Task open.
+`lf land -c` completes the Task. `lf land --next <slug>` rotates the
 serial chain to a new branch from fetched main.
 
 ## Failure and recovery

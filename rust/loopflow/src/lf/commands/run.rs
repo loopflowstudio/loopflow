@@ -1537,8 +1537,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
-        let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
 
         let mut implicit_launch = built.agent_config.clone();
         implicit_launch.env.insert(
@@ -1566,20 +1564,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(implicit_run_dir.join("manifest.json").is_file());
         assert!(implicit_run_dir.join("terminal.json").is_file());
         assert!(!implicit_run_dir.join("owner.json").exists());
-        let implicit_events =
-            std::fs::read_to_string(implicit_run_dir.join("events.jsonl")).unwrap();
-        assert_eq!(
-            implicit_events.matches("provider_attempt_started").count(),
-            2
-        );
-        let accounts: Vec<serde_json::Value> = implicit_events
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .filter(|event: &serde_json::Value| event["type"] == "provider_account_selected")
-            .collect();
-        assert_eq!(accounts.len(), 2);
-        assert!(accounts.iter().all(|event| event["account_id"].is_null()));
-        assert_ne!(accounts[0]["attempt_key"], accounts[1]["attempt_key"]);
+        // Completion does not wait for all telemetry. The provider evidence above
+        // proves retry identity; session_record tests own usage and account events.
         assert!(registry.is_file());
         let db = rusqlite::Connection::open(&registry).unwrap();
         let tasks: i64 = db

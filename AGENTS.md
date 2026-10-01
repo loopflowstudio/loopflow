@@ -28,7 +28,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 
 **Both:**
 - Mock side effects, but don't test mock wiring or reshape production code for tests
-- Design docs go under `scratch/`; `lf pr land` removes `scratch/*` contents
+- Design docs go under `scratch/`; `lf land` removes `scratch/*` contents
 - Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
 
 **Secrets:**
@@ -113,7 +113,7 @@ When editing `*_test.py` or `test_*.py` files:
 - Delete flaky tests rather than adding retries
 
 When writing CLI code with Typer:
-- Prefer lowercase short flags (`-p`, `-c`), support uppercase as aliases
+- Prefer lowercase short flags (`-p`, `-c`), do not add uppercase aliases
 - Pass args through to underlying tools rather than re-implementing
 - Default to sensible behavior (e.g., whole repo as context)
 
@@ -136,7 +136,7 @@ When editing `README.md` files:
 When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
 - `lf realign` updates the existing plan, code, and relevant memory; keep unresolved findings with the work
-- `lf pr land` removes `scratch/*` contents automatically
+- `lf land` removes `scratch/*` contents automatically
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
@@ -359,9 +359,16 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
 
 ## User-Facing Documentation
+
+Guides, examples, skills and agent instructions use the shortest uniquely
+resolving command, such as `lf land`, `lf wt create` or `lf pr publish`.
+Keep canonical owner paths in command references and help, where the tree is
+the point. Preserve established short names; do not expand `wt` to `worktree`.
+`documented_commands` checks example ambiguity against Clap; adding a competing
+command requires updating any shorthand that stops resolving uniquely.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

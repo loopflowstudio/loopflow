@@ -20,7 +20,7 @@ use serde_json::json;
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_adopts_linear_checkout_and_preserves_saved_progress() {
-    for (operation, remote_only) in [("checkout", false), ("run", false), ("checkout", true)] {
+    for (operation, remote_only) in [("checkout", false), ("start", false), ("checkout", true)] {
         let repo = TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
@@ -181,7 +181,12 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         };
         let run = |cwd: &Path, args: &[&str]| command(cwd, args).output().unwrap();
         let invoke = |op: &str| {
-            let output = run(repo.path(), &["task", op, "FIX-1", "--json"]);
+            let args = if op == "start" {
+                vec!["--task", "FIX-1", "flow", "start", "--json"]
+            } else {
+                vec!["task", op, "FIX-1", "--json"]
+            };
+            let output = run(repo.path(), &args);
             assert!(
                 output.status.success(),
                 "{op}: {}",
@@ -271,11 +276,11 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         // Catalog changes must not replace the saved graph or reset its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
-            "- cmd: sync --plan\n",
+            "- cmd: task sync --plan\n",
         )
         .unwrap();
         invoke("checkout");
-        invoke("run");
+        invoke("start");
         assert_eq!(
             runtime
                 .block_on(store.task_flow(&task.id))
@@ -357,7 +362,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
                         .unwrap();
                 }
-                let output = run(repo.path(), &["task", "run", "FIX-1", "--json"]);
+                let output = run(repo.path(), &["--task", "FIX-1", "flow", "start", "--json"]);
                 assert!(
                     !output.status.success(),
                     "{condition} allowed managed continuation"

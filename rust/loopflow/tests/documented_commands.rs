@@ -75,7 +75,7 @@ fn examples(text: &str) -> Vec<(usize, &str)> {
 #[test]
 fn documented_invocations_have_no_ambiguous_command_shorthand() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut files = vec![repo.join("README.md"), repo.join("STYLE.md")];
+    let mut files = vec![repo.join("README.md"), repo.join("AGENTS.md")];
     for directory in ["docs", "rust/loopflow/src/engine/builtins", "skills"] {
         markdown_files(&repo.join(directory), &mut files);
     }

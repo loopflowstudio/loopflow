@@ -134,7 +134,6 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
             &["task", "checkout", "INF-123", "--json"],
         )
         .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .output()
         .unwrap()
     };
@@ -353,7 +352,6 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let read = |args: &[&str]| {
             let output = Command::new(env!("CARGO_BIN_EXE_lf"))
                 .args(args)
-                .env("LF_DB_PATH", home.path().join("loopflow.db"))
                 .env_remove("LF_WAVE_ID")
                 .current_dir(repo.path())
                 .output()
@@ -502,7 +500,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let run_lf = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
             .env_remove("LF_WAVE_ID")
             .current_dir(repo.path())
             .output()

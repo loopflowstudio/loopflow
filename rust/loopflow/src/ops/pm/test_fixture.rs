@@ -18,7 +18,7 @@ pub(super) struct Fixture {
 impl Fixture {
     pub(super) async fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("registry.db");
+        let database = directory.path().join("loopflow.db");
         let store = Arc::new(
             open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
                 .await

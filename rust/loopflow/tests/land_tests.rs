@@ -1900,7 +1900,6 @@ fi"#;
                 .env_remove("LF_TRACE_ID")
                 .env_remove("LF_PROCESS_ID")
                 .env("LF_HOME", &lf_home)
-                .env("LF_DB_PATH", &database)
                 .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_TEST_SYNC_LOG", &sync_log)
                 .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)

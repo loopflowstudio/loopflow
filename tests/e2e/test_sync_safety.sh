@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-unset LOOPFLOW_DIRECTIVE_FILE LF_WORKTREE_WRITER_ID LF_GIT_OPERATION_ID
+unset LOOPFLOW_DIRECTIVE_FILE LF_GIT_OPERATION_ID
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LF_BIN="$ROOT_DIR/target/debug/lf"
 TMP_ROOT=$(mktemp -d)
 export LF_HOME="$TMP_ROOT/lf-home"
-export LF_DB_PATH="$LF_HOME/loopflow.db"
-unset LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_RUN_CONTEXT LF_TASK_ORIGIN LF_RUN_ID LF_RUN_DIR LF_WORK_ADVANCE_CLAIM LF_ACCOUNT_LEASE LF_HUMAN_SESSION
+unset LF_RUN_ID LF_RUN_DIR LF_WORK_ADVANCE_CLAIM LF_ACCOUNT_LEASE LF_HUMAN_SESSION
 
 cleanup() {
   find "$TMP_ROOT" -name sentinel.pid -type f -print0 2>/dev/null |
@@ -28,7 +27,7 @@ if [ "${1:-}" = "--version" ]; then
   echo "opencode sentinel"
   exit 0
 fi
-printf '%s %s %s\n' "${SENTINEL_MODE:-unknown}" "${LF_WORKTREE_WRITER_ID:-missing}" "${LF_GIT_OPERATION_ID:-missing}" >>"$SENTINEL_LOG"
+printf '%s %s\n' "${SENTINEL_MODE:-unknown}" "${LF_GIT_OPERATION_ID:-missing}" >>"$SENTINEL_LOG"
 case "${SENTINEL_MODE:-noop}" in
   resolve|adopt)
     printf 'resolved by owned recovery\n' >conflict.txt
@@ -237,7 +236,7 @@ export SENTINEL_MODE=nested_sync SENTINEL_LOG="$TMP_ROOT/nested.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" : run-nested-sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^nested_sync missing missing$' "$SENTINEL_LOG"
+grep -Eq '^nested_sync missing$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 
 # A live provider does not reserve the worktree. A separate sync can take the
@@ -307,7 +306,7 @@ export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/authorized.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^resolve missing gitop_[^ ]+$' "$SENTINEL_LOG"
+grep -Eq '^resolve gitop_[^ ]+$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test ! -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
 

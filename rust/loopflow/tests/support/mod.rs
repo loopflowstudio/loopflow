@@ -63,7 +63,6 @@ fn env_lock() -> &'static Mutex<()> {
 struct HomeOverride {
     _ambient: ambient::EnvGuard,
     previous_lf_home: Option<OsString>,
-    previous_db_path: Option<OsString>,
     _temp: TempDir,
 }
 
@@ -72,14 +71,11 @@ impl HomeOverride {
         let ambient = ambient::EnvGuard::new();
         let temp = TempDir::new().expect("temp home dir");
         let previous_lf_home = env::var_os("LF_HOME");
-        let previous_db_path = env::var_os("LF_DB_PATH");
         env::remove_var("LF_HOME");
-        env::remove_var("LF_DB_PATH");
         env::set_var("LF_HOME", temp.path());
         Self {
             _ambient: ambient,
             previous_lf_home,
-            previous_db_path,
             _temp: temp,
         }
     }
@@ -90,10 +86,6 @@ impl Drop for HomeOverride {
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
-        }
-        match &self.previous_db_path {
-            Some(prev) => env::set_var("LF_DB_PATH", prev),
-            None => env::remove_var("LF_DB_PATH"),
         }
     }
 }
@@ -150,7 +142,6 @@ pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
-    previous_db_path: Option<OsString>,
     _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
@@ -194,15 +185,12 @@ impl EnvGuard {
             env::set_var("HOME", home);
         }
         let previous_lf_home = env::var_os("LF_HOME");
-        let previous_db_path = env::var_os("LF_DB_PATH");
         let ambient = ambient::EnvGuard::new();
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
-        env::remove_var("LF_DB_PATH");
         if let Some(home) = home {
             // Keep HOME-based config discovery intact while isolating its store.
             env::set_var("LF_HOME", home.join(".lf"));
-            env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
@@ -211,7 +199,6 @@ impl EnvGuard {
             previous_path,
             previous_home,
             previous_lf_home,
-            previous_db_path,
             _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
@@ -241,10 +228,6 @@ impl Drop for EnvGuard {
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
-        }
-        match &self.previous_db_path {
-            Some(prev) => env::set_var("LF_DB_PATH", prev),
-            None => env::remove_var("LF_DB_PATH"),
         }
     }
 }

@@ -17,7 +17,6 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home.join(".lf"))
-        .env("LF_DB_PATH", home.join(".lf/loopflow.db"))
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("NO_COLOR", "1")
         .current_dir(cwd)
@@ -129,9 +128,6 @@ fn explicit_home_ignores_retired_control_home_pins() {
         vec!["ps", "--json"],
     ] {
         let output = command(home.path(), home.path(), &args)
-            .env_remove("LF_DB_PATH")
-            .env("LF_CONTROL_HOME", source.path())
-            .env("LF_CONTROL_DB_PATH", &source_db)
             .env("LF_RUN_DIR", source.path().join("runs/parent"))
             .env("LF_RUN_ID", "run_parent")
             .output()
@@ -172,9 +168,7 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
             cwd,
             &["install", "promote", "--cli-target", "/unused/lf"],
         );
-        cmd.env("LF_TASK_ORIGIN", "1")
-            .env("LF_WORK_ADVANCE_CLAIM", "obsolete")
-            .env("LF_INSTALL_PROMOTE_HOP", "6");
+        cmd.env("LF_WORK_ADVANCE_CLAIM", "obsolete");
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
         }

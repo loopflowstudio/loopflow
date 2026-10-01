@@ -1,7 +1,6 @@
 //! Daemonless local persistence shared by `lf`, Waves, Projects, and Tasks.
 
-use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::id::WaveId;
@@ -113,10 +112,6 @@ impl StorageConfig {
     }
 }
 
-pub const CONTROL_BIN_ENV: &str = "LF_CONTROL_BIN";
-pub const CONTROL_HOME_ENV: &str = "LF_CONTROL_HOME";
-pub const CONTROL_DB_PATH_ENV: &str = "LF_CONTROL_DB_PATH";
-
 fn machine_home_dir() -> PathBuf {
     crate::machine_install::account_home()
         .expect("resolve OS account home directory for the production store guard")
@@ -149,39 +144,9 @@ pub fn default_db_path() -> PathBuf {
     lf_home_dir().join("loopflow.db")
 }
 
+/// The selected Home's database. A Home has exactly one, at a fixed name.
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
-    resolve_database_path(
-        custom_home_selected()
-            .then(|| std::env::var_os("LF_DB_PATH"))
-            .flatten()
-            .filter(|value| !value.is_empty()),
-        lf_home_dir(),
-    )
-}
-
-fn resolve_database_path(
-    candidate_env: Option<OsString>,
-    home_dir: PathBuf,
-) -> Result<PathBuf, std::io::Error> {
-    let candidate = candidate_env
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir.join("loopflow.db"));
-    let path = if candidate.is_absolute() {
-        candidate
-    } else {
-        if candidate.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        }) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "LF_DB_PATH must not escape LF_HOME",
-            ));
-        }
-        home_dir.join(candidate)
-    };
+    let path = default_db_path();
     guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
     Ok(path)
 }

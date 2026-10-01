@@ -75,7 +75,6 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             .current_dir(repo.path())
             .args(["task", "status", selector, "--json"])
             .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", &database)
             .output()
             .unwrap();
         assert!(

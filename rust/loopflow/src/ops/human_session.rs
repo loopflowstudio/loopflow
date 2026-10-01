@@ -22,7 +22,7 @@ pub(crate) mod primary;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
-const REVIEW_CAPTURE_ENV: &str = "LF_REVIEW_RUN_RESERVATION";
+pub(crate) const REVIEW_CAPTURE_ENV: &str = "LF_REVIEW_RUN_RESERVATION";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ReviewCaptureReservation {
@@ -2163,7 +2163,6 @@ pub(crate) fn human_open_argv(
         "/usr/bin/env".to_string(),
         format!("LF_BIN={}", context.lf_bin.display()),
         format!("LF_HOME={}", context.lf_home.display()),
-        format!("LF_DB_PATH={}", context.db_path.display()),
         context.lf_bin.display().to_string(),
     ];
     if let Some(home_id) = remote_home {
@@ -2678,7 +2677,7 @@ mod tests {
             FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
             let ambient = crate::test_ambient::EnvGuard::new();
             let home = tempfile::tempdir().unwrap();
-            let previous = ["LF_HOME", "LF_BIN", "LF_DB_PATH"]
+            let previous = ["LF_HOME", "LF_BIN"]
                 .into_iter()
                 .map(|name| {
                     let value = std::env::var_os(name);
@@ -2687,7 +2686,6 @@ mod tests {
                 })
                 .collect();
             std::env::set_var("LF_HOME", home.path());
-            std::env::set_var("LF_DB_PATH", home.path().join("registry.db"));
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
             let manifest = SessionCaptureManifest {
                 schema_version: 1,
@@ -2726,7 +2724,7 @@ mod tests {
 
         pub(super) async fn store(&self) -> SharedStore {
             std::sync::Arc::new(
-                open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("registry.db")))
+                open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("loopflow.db")))
                     .await
                     .unwrap(),
             )
@@ -3664,7 +3662,7 @@ mod tests {
     fn initial_session_publication_requires_history_and_an_owned_client() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let capture = crate::session_record::CaptureHandle::begin_at(
             home.path(),

@@ -2745,9 +2745,7 @@ fn row_database(dir: &Path) -> StoreResult<PathBuf> {
 fn database_in(home: &Path) -> StoreResult<PathBuf> {
     #[cfg(test)]
     {
-        Ok(std::env::var_os("LF_DB_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("loopflow.db")))
+        Ok(home.join("loopflow.db"))
     }
     #[cfg(not(test))]
     {
@@ -3158,7 +3156,7 @@ mod tests {
     fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
         let (dir, mut manifest) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
@@ -3217,7 +3215,7 @@ mod tests {
     fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let original = crate::work::task::TaskPrId::new();
         let mut step = super::SessionFlowStep {
@@ -3444,7 +3442,7 @@ mod tests {
     fn prepared_session_run_is_resolvable_and_consumed_once() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let caller = crate::session_record::new_artifact_key();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(caller.clone()))
@@ -3589,7 +3587,7 @@ mod tests {
     fn record_keeps_direct_usage_and_one_immutable_terminal_without_an_owner_claim() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
@@ -3660,7 +3658,7 @@ mod tests {
     fn final_answer_reader_returns_the_conclusion_without_commentary() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         capture.record_conversation(ConversationEvent::ItemCompleted {
@@ -3764,7 +3762,7 @@ mod tests {
     fn provider_account_observation_precedes_session_and_preserves_attempts() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();

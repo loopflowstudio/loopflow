@@ -73,7 +73,7 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--mode tui` / `--mode ide` | `session.launch: tui` |
-| Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+| Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
 ## Context budgets
 

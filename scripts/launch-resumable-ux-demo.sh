@@ -14,15 +14,10 @@ mkdir -p "$demo_home"
 run_lf() {
   env \
     -u LF_BIN \
-    -u LF_DB_PATH \
-    -u LF_CONTROL_BIN \
-    -u LF_CONTROL_HOME \
-    -u LF_CONTROL_DB_PATH \
     -u LF_ACCOUNT_LEASE \
     -u LF_ACCOUNT_SELECTION \
     -u LF_RUN_ID \
     -u LF_RUN_DIR \
-    -u LF_PARENT_RUN_ID \
     -u LF_PROVIDER_ACCOUNT_ID \
     RUST_LOG=warn \
     LF_HOME="$demo_home" \

@@ -1422,29 +1422,11 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let previous = std::env::var_os("LF_HOME");
-        let previous_db_path = std::env::var_os("LF_DB_PATH");
-        let previous_control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV);
-        let previous_control_db_path = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV);
         std::env::set_var("LF_HOME", home.path());
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
         let result = import_account("codex", "engineering@example.com").await;
         match previous {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
-        }
-        match previous_db_path {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
-        match previous_control_home {
-            Some(value) => std::env::set_var(crate::store::CONTROL_HOME_ENV, value),
-            None => std::env::remove_var(crate::store::CONTROL_HOME_ENV),
-        }
-        match previous_control_db_path {
-            Some(value) => std::env::set_var(crate::store::CONTROL_DB_PATH_ENV, value),
-            None => std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV),
         }
 
         let error = result.expect_err("Codex imports must require a stored login");
@@ -1524,18 +1506,12 @@ mod account_first_tests {
     use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
     use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
-    use crate::store::{
-        CredentialState, ProviderAccount, RoutingState, StorageConfig, CONTROL_DB_PATH_ENV,
-        CONTROL_HOME_ENV,
-    };
+    use crate::store::{CredentialState, ProviderAccount, RoutingState, StorageConfig};
     use tempfile::tempdir;
 
     const CONNECT_ENV: &[&str] = &[
         "HOME",
         "LF_HOME",
-        "LF_DB_PATH",
-        CONTROL_HOME_ENV,
-        CONTROL_DB_PATH_ENV,
         "PATH",
         ACCOUNT_LEASE_ENV,
         "LF_TEST_CODEX_AUTH_JSON",
@@ -1638,9 +1614,6 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
         std::env::set_var("HOME", temp);
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(CONTROL_HOME_ENV);
-        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_TEST_CODEX_AUTH_JSON", auth_json);
         std::env::set_var("LF_TEST_CODEX_EMAIL", reported_login);
@@ -1689,22 +1662,9 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
 
     async fn verify_replaced_claude_credential(accepted: bool) {
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
-            ACCOUNT_LEASE_ENV,
-        ]);
+        let _restore = EnvRestore::capture(&["LF_HOME", ACCOUNT_LEASE_ENV]);
         std::env::set_var("LF_HOME", temp.path());
-        for name in [
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
-            ACCOUNT_LEASE_ENV,
-        ] {
-            std::env::remove_var(name);
-        }
+        std::env::remove_var(ACCOUNT_LEASE_ENV);
         let home = temp.path().join("claude");
         fs::create_dir(&home).unwrap();
         let path = home.join(".credentials.json");

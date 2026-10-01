@@ -873,7 +873,6 @@ pub struct ServiceSpec {
     pub repo: PathBuf,
     pub lf_path: PathBuf,
     pub lf_home: PathBuf,
-    pub db_path: PathBuf,
     pub path_env: String,
 }
 
@@ -912,8 +911,6 @@ fn render_service(spec: &ServiceSpec) -> String {
         <string>{path_env}</string>
         <key>LF_HOME</key>
         <string>{lf_home}</string>
-        <key>LF_DB_PATH</key>
-        <string>{db_path}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -934,7 +931,6 @@ fn render_service(spec: &ServiceSpec) -> String {
         lf_path = escape(&spec.lf_path.to_string_lossy()),
         path_env = escape(&spec.path_env),
         lf_home = escape(&spec.lf_home.to_string_lossy()),
-        db_path = escape(&spec.db_path.to_string_lossy()),
         repo = escape(&spec.repo.to_string_lossy()),
         log = escape(&log.to_string_lossy()),
     )
@@ -1231,7 +1227,6 @@ mod tests {
             repo: directory.path().join("repo & co"),
             lf_path: PathBuf::from("/usr/local/bin/lf"),
             lf_home: PathBuf::from("/home/.lf"),
-            db_path: PathBuf::from("/home/.lf/loopflow.db"),
             path_env: "/usr/bin".into(),
         };
         let path = install_service(&agents, &spec, &FakeLaunchctl).unwrap();

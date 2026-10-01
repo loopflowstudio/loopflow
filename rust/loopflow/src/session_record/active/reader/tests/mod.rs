@@ -35,8 +35,6 @@ impl Drop for Client {
 }
 
 async fn store(home: &Path) -> SharedStore {
-    // This fixture also exercises an explicit database outside the observed Home.
-    std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
     Arc::new(
         open_store(&StorageConfig::sqlite(home.join("loopflow.db")))
             .await
@@ -99,7 +97,7 @@ async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[S
 async fn native_feed_discovers_old_resumes_replacement_and_removal() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let old = prepare(home.path());
@@ -176,10 +174,10 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
 async fn missing_roots_and_replaced_home_never_become_false_empty() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let parent = tempfile::tempdir().unwrap();
     let home = parent.path().join("new-home");
-    let store = store(parent.path()).await;
+    let store = store(&home).await;
     let mut reader = ActiveSessionReader::start(&home, true, CancellationToken::new()).unwrap();
     visible(&mut reader, &store, &[]).await;
     let id = prepare(&home);
@@ -195,14 +193,14 @@ async fn missing_roots_and_replaced_home_never_become_false_empty() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // Fixture storage is private and outside the observed Home.
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let parent = tempfile::tempdir().unwrap();
     let home = parent.path().join("observed-home");
-    let store = store(parent.path()).await;
+    let store = store(&home).await;
     let base = prepare(&home);
     let input = crate::session_record::new_artifact_key();
     let dir = crate::session_record::record_dir(&home, &input).unwrap();
@@ -258,7 +256,7 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
 async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let id = prepare(home.path());
@@ -299,7 +297,7 @@ async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() 
 async fn discovery_cost_matrix() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let live_id = prepare(home.path());

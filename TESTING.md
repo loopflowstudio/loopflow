@@ -515,8 +515,8 @@ uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
 `LF_BIN` to the compiled test CLI. Clear inherited `LF_*` execution authority.
 Without an explicit experiment a source CLI forwards to the installed CLI and
-main Home. Children use the same Home and executable; PATH and retired
-`LF_CONTROL_*` pins cannot choose a second store.
+main Home. Children use the same Home and executable; PATH cannot choose a
+second store. A Home's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-decide after work and review so navigation
@@ -909,9 +909,8 @@ usage and account-event assertions in the recorder tests, rather than racing
 its queue in subprocess-launch tests. Reproduce suspected races with a temporary
 recorder delay beyond that drain window; remove the delay before publication.
 
-Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
-`LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables
-are removed before provider launch.
+Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME`.
+Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 
 When changing Home selection, run the affected fixtures with `LF_HOME` unset in
 the test runner; the materialization wrapper's shared test Home can mask missing

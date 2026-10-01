@@ -37,7 +37,6 @@ fn command(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     cmd.current_dir(home)
         .args(args)
         .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("RUST_LOG", "off")
         .output()
@@ -53,7 +52,7 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         .status()
         .unwrap()
         .success());
-    let store = open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("db")))
+    let store = open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
     let flow = store

@@ -246,7 +246,7 @@ mod tests {
     async fn native_client_survives_input_replacement_without_retired_payload() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::store::open_store(&crate::store::StorageConfig::sqlite(
@@ -327,7 +327,7 @@ mod tests {
     async fn old_waiting_sessions_are_task_exact_in_one_checkout_and_dead_clients_disappear() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         use crate::durable::WorkRef;
         use crate::session_record::{
             read_manifest, write_provider_client, CaptureHandle, SessionCaptureSpec,

@@ -493,10 +493,8 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 def _authority_home() -> Path:
-    for name in ("LF_CONTROL_HOME", "LF_HOME"):
-        value = os.environ.get(name)
-        if value:
-            return Path(value).expanduser()
+    if value := os.environ.get("LF_HOME"):
+        return Path(value).expanduser()
     return Path.home() / ".lf"
 
 

@@ -12,13 +12,9 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("LF_HOME", home)
-        .env("LF_CONTROL_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"))
-        .env("LF_CONTROL_DB_PATH", home.join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env_remove("LF_RUN_ID")
         .env_remove("LF_RUN_DIR")
-        .env_remove("LF_RUN_CONTEXT")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_FLOW_STEP")
@@ -109,17 +105,12 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .env("PATH", &path)
             .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
             .env("RUST_LOG", "off");
         for name in [
             "LF_BIN",
             "CARGO_BIN_EXE_lf",
-            "LF_CONTROL_BIN",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
             "LF_RUN_ID",
             "LF_RUN_DIR",
-            "LF_RUN_CONTEXT",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
@@ -153,7 +144,6 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     let reopened = command(argv[0].as_str().unwrap())
         .args(argv[1..].iter().map(|arg| arg.as_str().unwrap()))
         .env("LF_HOME", other_home.path())
-        .env("LF_DB_PATH", other_home.path().join("loopflow.db"))
         .arg("--json")
         .output()
         .unwrap();

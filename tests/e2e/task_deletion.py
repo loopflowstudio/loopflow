@@ -223,7 +223,6 @@ def main() -> None:
     }
     env.update(
         LF_HOME=str(root),
-        LF_DB_PATH=str(dbpath),
         LF_PROVIDER_TOKEN_KEY_PATH=str(root / "provider.key"),
         SSL_CERT_FILE=str(cert),
         SSL_CERT_DIR=str(root / "empty-certs"),

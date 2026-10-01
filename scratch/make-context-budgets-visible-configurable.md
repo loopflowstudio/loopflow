@@ -54,14 +54,24 @@ measurement and feedback, not successful semantic curation.
 
 ## Remaining acceptance
 
-- Gate: remaining affected suites and automated acceptance, reusing applicable passes.
-- Demo/review: run realign on copies of LOO-303 scratch and infrastructure memory,
-  compare retained live decisions and confirm usage below limits. Implementation
-  does not modify another active Task's checkout or claim this live proof.
+- Gate complete: affected suites and focused repairs pass; no check deferred.
+- Jack Heart's supervising session reviewed the built query, configuration and
+  writer feedback and directed shipment in Linear comment
+  `f5cd6421-355b-46a5-9b0d-f91ebc7ab0a5`. The supervisor owns real curation of
+  infrastructure memory after landing. Live curation is not a gate prerequisite;
+  this branch does not claim semantic preservation proof for infrastructure
+  memory or LOO-303 scratch.
+
+Gate review found the new CLI family missing from the architecture ownership
+map and Wave-resolution test registry. Added its existing config, assembler and
+local-source owners; no new store. The registry now classifies the authored-file
+preview separately from registered-Wave operations. A CLI regression proves
+unregistered Wave preview, per-field provenance, source and total overages, and
+fresh measurements after edits.
 
 LOO-303 query could not read the stored Task checkout: `git diff --name-only -z
 746418d8d934d9c9c6f8830f3e95cdd06d8d1df2..HEAD` failed with `No such file or
 directory (os error 2)`. Demo needs an available copy of that evidence; no other
 Task checkout was repaired or modified.
 
-Checks: compression `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --lib budget` (8), `cargo test -p loopflow --lib live_steers_inject_new_comments_and_defer_when_not_steerable` (1), `cargo fmt`, `git diff --check`, and `target/debug/lf context --skill compress --json` — passed; earlier checkout-memory and prompt-golden checks remain applicable, Clippy passed before compression; remaining suites belong to gate and live curation to demo/review.
+Checks: `uv run python scripts/test.py --base de074a2 --reuse-passing` — Rust 2,028 passed / 1 registry failure / 17 skipped, website 78 passed / 3 skipped, architecture missing CLI entry; repaired failures pass with `uv run python scripts/check_architecture.py` and `cargo nextest run -p loopflow --test global_commands --test wave_resolution_matrix -E 'test(context_budget_preview_reads_authored_wave_without_registration) | test(registry_is_complete)'` (2 passed); final `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, and `git diff --check` pass; portable architecture regenerated without a diff; no CI deferral, semantic curation remains supervisor-owned after landing.

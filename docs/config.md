@@ -136,11 +136,12 @@ scratch        3,050 ██
 clipboard      1,234 █
 ```
 
+The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
 The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
+| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |

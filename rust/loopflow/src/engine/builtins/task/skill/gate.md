@@ -15,7 +15,7 @@ Before starting, orient yourself in this branch:
 - Read wave/PM context only when the seed names the exact wave, task, project,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
@@ -110,6 +110,6 @@ leave them alone. Report check results and unresolved blockers briefly.
 
 Did you discover a quality check this repo always needs? A formatter, a type
 check, a build step that should run every time? Encode it so the next gate is
-faster. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all
+faster. Most discoveries belong in repo docs (AGENTS.md, TESTING.md) where all
 skills can see them. Copy this skill to `.lf/skills/gate.md` when the repo needs
 gate to work differently.

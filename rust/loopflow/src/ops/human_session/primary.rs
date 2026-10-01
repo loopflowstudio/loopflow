@@ -28,6 +28,18 @@ pub(crate) async fn ensure_wave(
     start(store, session).await
 }
 
+/// Find or admit the repository's own conversation. It needs no Wave, Task
+/// or planning provider.
+pub(crate) async fn ensure_repository(store: &SharedStore, repo: &Path) -> Result<SessionRecord> {
+    let repo = crate::repository::CanonicalRepo::discover(repo)?;
+    let scope = PrimaryScope::Repository(repo.clone());
+    let _lock = lock_scope(&scope).await?;
+    let session = store
+        .ensure_primary_session(&scope, None, repository_session(&repo))
+        .await?;
+    start(store, session).await
+}
+
 /// Give the scope a fresh conversation. The predecessor's provider stops
 /// first; if it cannot be stopped, the predecessor stays primary.
 pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionRecord> {
@@ -46,17 +58,46 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
         stop_client(&previous)
             .with_context(|| format!("stop primary Session {id}; it remains primary"))?;
     }
-    let PrimaryScope::Wave(wave) = &scope;
-    let binding =
-        crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}")).await?;
+    let successor = match &scope {
+        PrimaryScope::Repository(repo) => repository_session(repo),
+        PrimaryScope::Wave(wave) => wave_session(
+            &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}"))
+                .await?,
+        ),
+    };
     let session = store
-        .ensure_primary_session(&scope, Some(id), wave_session(&binding))
+        .ensure_primary_session(&scope, Some(id), successor)
         .await?;
     start(store, session).await
 }
 
 fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
-    let agent = crate::ops::task::resolve_task_agent(&binding.cwd, binding.agent.as_deref(), None);
+    AgentSession {
+        wave_id: Some(binding.wave_id.clone()),
+        work_source: Some(WorkSource::Declared),
+        ..conversation(
+            &binding.cwd,
+            binding.agent.as_deref(),
+            "wave/session",
+            binding.wave_name.clone(),
+        )
+    }
+}
+
+fn repository_session(repo: &crate::repository::CanonicalRepo) -> AgentSession {
+    let title = repo
+        .as_path()
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| repo.to_string());
+    AgentSession {
+        repo: Some(repo.to_string()),
+        ..conversation(repo.as_path(), None, "repo/session", title)
+    }
+}
+
+fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> AgentSession {
+    let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
     let (provider, model) = crate::engine::config::parse_agent(&agent);
     AgentSession {
         captured: None,
@@ -64,21 +105,21 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
         artifact_key: crate::session_record::new_artifact_key(),
         caller_artifact_key: None,
         input_published: false,
-        cwd: binding.cwd.clone(),
-        skill: Some("wave/session".into()),
+        cwd: cwd.to_path_buf(),
+        skill: Some(skill.into()),
         provider: Some(provider),
         model,
         node: None,
         iterations: None,
         task_id: None,
-        wave_id: Some(binding.wave_id.clone()),
+        wave_id: None,
         flow_session_id: None,
-        work_source: Some(WorkSource::Declared),
+        work_source: None,
         bound_at: None,
         kind: SessionKind::Conversation,
         interactive: true,
         repo: None,
-        title: binding.wave_name.clone(),
+        title,
         title_source: TitleSource::Generated,
         request: None,
         ready_summary: None,
@@ -134,6 +175,7 @@ fn stop_client(session: &AgentSession) -> Result<()> {
 /// Admission and replacement of one scope are serial across processes.
 async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
     let key = match scope {
+        PrimaryScope::Repository(repo) => format!("primary:repository:{repo}"),
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
     };
     match tokio::task::spawn_blocking(move || lock_session_exec(&key)).await {
@@ -144,7 +186,7 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_wave, replace};
+    use super::{ensure_repository, ensure_wave, replace};
     use crate::ops::human_session::tests::{AskHome, ASK_LAUNCHERS, FAILED_ASK_LAUNCHERS};
     use crate::ops::human_session::{action_test::NativeClients, ask_background_name};
     use crate::session::SessionKind;
@@ -253,6 +295,38 @@ mod tests {
                     .await
                     .unwrap()
                     .id,
+                successor.id
+            );
+        });
+    }
+
+    #[test]
+    fn a_repository_without_waves_has_its_own_conversation() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let repo = loopflow_test_support::TestRepo::new();
+
+            let first = ensure_repository(&store, repo.path()).await.unwrap();
+            let second = ensure_repository(&store, repo.path()).await.unwrap();
+
+            assert_eq!(first.id, second.id);
+            let session = store.session(&first.id).await.unwrap().unwrap();
+            assert_eq!(session.skill.as_deref(), Some("repo/session"));
+            assert_eq!((session.wave_id, session.task_id), (None, None));
+
+            // A Wave's conversation in the same repository is a separate scope.
+            wave(&store, &repo).await;
+            let wave = ensure_wave(&store, repo.path(), "infrastructure")
+                .await
+                .unwrap();
+            assert_ne!(wave.id, first.id);
+
+            let successor = replace(&store, &first.id).await.unwrap();
+            assert_ne!(successor.id, first.id);
+            assert_eq!(
+                ensure_repository(&store, repo.path()).await.unwrap().id,
                 successor.id
             );
         });

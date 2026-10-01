@@ -269,11 +269,11 @@ Connect to the live conversation, or resume its saved history
 
 ## lf session ensure
 
-Find or start a Wave's one ongoing conversation
+Find or start the one ongoing conversation of this repository or a Wave
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | wave |
+| `--wave / -w` | The Wave's conversation instead of the repository's |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

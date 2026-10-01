@@ -112,6 +112,7 @@ pub enum TitleSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PrimaryScope {
+    Repository(crate::repository::CanonicalRepo),
     Wave(WaveId),
 }
 

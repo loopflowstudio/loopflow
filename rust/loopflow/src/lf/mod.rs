@@ -535,10 +535,11 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Find or start a Wave's one ongoing conversation
+    /// Find or start the one ongoing conversation of this repository or a Wave
     Ensure {
+        /// The Wave's conversation instead of the repository's
         #[arg(short = 'w', long)]
-        wave: String,
+        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },

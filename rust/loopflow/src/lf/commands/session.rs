@@ -109,8 +109,14 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
         SessionCommand::Ensure { wave, json } => {
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
-            let session =
-                crate::ops::human_session::primary::ensure_wave(&store, &repo, wave).await?;
+            let session = match wave {
+                Some(wave) => {
+                    crate::ops::human_session::primary::ensure_wave(&store, &repo, wave).await?
+                }
+                None => {
+                    crate::ops::human_session::primary::ensure_repository(&store, &repo).await?
+                }
+            };
             report_primary(&session, *json)
         }
         SessionCommand::Replace { id, json } => {
@@ -275,7 +281,7 @@ fn report_primary(
         println!(
             "Session {} is {}'s conversation. Open it with `lf session connect {}`.",
             session.id,
-            session.work_path.as_deref().unwrap_or("this scope"),
+            session.work_path.as_deref().unwrap_or("this repository"),
             session.id
         );
     }

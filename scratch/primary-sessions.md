@@ -1,134 +1,101 @@
 # Primary Sessions (LOO-364)
 
-Status: draft, restated 2026-10-01 from Unit 2 of
-`loopflow.growth-thoughts/scratch/growth-thoughts.md`. That plan was written
+Status: draft, revised 2026-10-01. Restated from Unit 2 of
+`loopflow.growth-thoughts/scratch/growth-thoughts.md`, which was written
 against Runs and a `PrimarySession { scope, run_id, replacement_run_id }`
 pointer record. Jack Heart moved the unit out of LOO-353 on 2026-10-01; Desktop
-presentation stays there. LOO-332's cron floor landed as #1382.
+presentation stays there.
 
 ## Outcome
 
-Jack talks to one ongoing conversation per repository and per Wave, and one per
-launched Task. He does not track Sessions, remind agents to continue, or chase
-whether Tasks landed: the conversations find themselves, pick up operational
-input automatically, and call the same reconciliation the minute schedule runs.
+Jack talks to one ongoing conversation per repository and per Wave. The
+conversations find themselves and reconcile on entry with the same check the
+schedule runs. They are conversations with Jack, not owners of repair.
 
-## The model, on Exec / AgentSession / FlowSession
+## Decisions (Jack Heart, 2026-10-01)
 
-| Unit 2 said | Landed owner |
-| --- | --- |
-| Primary Run + pointer record | An `AgentSession` whose `primary_scope` names what it is primary *for*. No sidecar table. |
-| `run_id` / `replacement_run_id` | The Session id. Replacement is one transaction: complete the predecessor, admit the successor. No intermediate pointer. |
-| Prepared Run, owner token | The Session's prepared captured input (`input_published`), launched by the existing durable-terminal path with a `Primary` token. |
-| Run records as history/provider authority | `session_events`; provider identity and usage stay on the AgentSession. |
-| Task Flow cursor (`FlowPosition`) | The Task's managed `FlowSession`. It is the only cursor. |
-| Worker Runs, checkpoint, stop | `Exec` rows and the FlowSession claim. |
-| Flow/independent Session membership | LOO-358's checkout association; no primary-specific membership. |
+- **No TaskSession owns CI repair, and nothing wakes a conversation.** "i think
+  theres probably no need to have the task session do it then, you can just
+  start a simple ci-fix skill or whatever." The clock starts one plain `ci-fix`
+  run as the Task. This replaces his earlier same-day TaskSession-as-owner
+  call. The TaskSession, Flow switching through it, outbox delivery into a live
+  conversation and scheduled wakes are removed from this Task.
+- **The clock is replaceable.** LOO-332's minute cron (#1382) is the clock now;
+  the LOO-365 watcher replaces it later. The repair entry point is independent
+  of its caller.
 
-**A primary Session is an ordinary interactive `conversation` AgentSession.**
-Primary is a nullable attribute of the row (`primary_scope`), with the scope's
-identity in the columns the row already has (`wave_id`, `repo`, `task_id`). The
-current primary of a scope is its one uncompleted row; a partial unique index
-states that. Completed predecessors remain ordinary history. Membership,
+## The model
+
+A primary Session is an ordinary interactive `conversation` AgentSession.
+Primary is a nullable attribute of the row (`primary_scope`); the scope's
+identity is in columns the row already has (`repo`, `wave_id`). The current
+primary of a scope is its one uncompleted row, stated by a partial unique index
+per scope. Completed predecessors remain ordinary history. Membership,
 attribution, title, rename, connect and complete are the existing Session
-operations and grant no Flow or process authority.
+operations and grant no Flow, review or process authority.
 
+- **Repository Session** — `primary_scope='repository'`, keyed by the canonical
+  repository (linked worktrees collapse to the main checkout). Works with zero
+  Waves, zero Tasks and unavailable planning. Skill `repo/session`.
 - **Wave Session** — `primary_scope='wave'`, `wave_id`. Launched with the Wave
-  selector, so goal and memory arrive through the Session's ordinary Wave
-  context (Jack, 2026-09-30); there is no separate memory channel.
-- **Repository Session** — `primary_scope='repository'`, `repo`. Works with zero
-  Waves, zero Tasks and unavailable PM.
-- **TaskSession** — `primary_scope='task'`, `task_id`, in the Task's checkout.
-  Ensured by Task launch, never by filing or viewing. It is a member of the
-  Task through the checkout association like any other Session there.
+  selector, so goal and memory arrive as ordinary Wave context (Jack,
+  2026-09-30). Skill `wave/session`.
 
-### TaskSession and the Flow
+`lf session ensure [-w WAVE]` finds or admits the scope's primary and starts its
+durable terminal once; a failed start keeps the Session for the next ensure.
+`lf session replace ID` stops the predecessor's provider, then completes it and
+admits the successor in one transaction; a repeat returns the same successor.
 
-The TaskSession operates the existing Flow runtime through `lf task` commands.
-It holds no claim and no cursor. A switch is data on the managed FlowSession:
+## CI repair claim: already present, unchanged
 
-- **Switch now** — record the captured successor, stop the exact driver Exec,
-  confirm it stopped, checkpoint locally, then atomically mark the FlowSession
-  `Replaced` and install the successor. Extends `task restart`.
-- **Finish, then switch** — record the captured successor and the exact loop
-  occurrence (innermost repeat interval containing the cursor, by structural
-  occurrence within the current activation). Claim, reclaim and review
-  preparation observe the pending switch in the same store transaction and
-  consume it instead of launching the decider. Crossing intervals, no active
-  loop, and an already-claimed decider are reported, never guessed.
+The direct repair #1382 shipped already has the claimed entry point Jack asked
+for, so this Task adds none.
 
-The pending switch lives beside the cursor, not in it, so a worker settling an
-older in-memory position cannot erase it. Target definition and account
-selection are captured at acceptance.
+- **One claim per PR, head and failure.** `ci_incidents.identity` is
+  `github:ci:<repo>:<pr>:<head>:<digest of failing check names and URLs>`.
+  `admit_ci_fix` takes the cross-process checkout admission lock, reads the
+  reservation, and returns without launching when its Exec is live or
+  unresolved. `reserve_repair` writes the claim in one immediate transaction,
+  fenced on the landing generation. A second clock seeing the same failure
+  finds the reservation.
+- **Durable attempt record.** `repair_exec_id`, `repair_session_id`,
+  `repair_retries`, `repair_finished_at`, `repair_error`, `repair_conclusion`.
+- **Retry once, then surface.** A repair that died or errored without a
+  conclusion is retried while `repair_retries < automation.retries` (default
+  1), reusing the reserved Session; after that the landing blocks with "repair
+  startup exhausted automatic retries". A concluded repair (`published` or
+  `blocked`) is never rerun on unchanged evidence: the landing blocks with
+  "waiting for changed evidence".
+- **Caller-independent.** The claim lives in `pr_landing`, reached by
+  `lf pr reconcile` / `lf task reconcile`; the cron only calls them.
+- Coverage: `lf_pr_land_returns_before_later_checks_repair_and_observe_merge`
+  exercises an overlapping second check during a live repair and a failed
+  start retried on the reserved Session.
 
-### Input delivery and wakes
+Observed, not changed: the identity includes failing check URLs, so a provider
+rerun of the same head that fails again is new evidence and may get its own
+repair. That matches "unchanged failure" literally; tighten to head-only only
+if reruns are seen producing repeat repairs.
 
-The observation outbox survives without a consumer since #1360. The primary
-Session of the recipient scope becomes its consumer:
+## Remaining
 
-- Claim pending observations for the scope under the Session's driver fence,
-  deliver them as one structured turn, and record the receiving Session event.
-  `delivered_at` means "entered a turn", never "recovered".
-- Delivery serializes with Jack's typing through the Session's one driver
-  (the Codex live-connection path already crosses that fence). No terminal
-  keystroke injection, no second Harness on the same history, no resident.
-- Wake producer: the minute schedule. When a scope has pending observations
-  and its primary Session is idle, the scheduled check admits one delivery
-  turn. The TaskSession is the fast path for its own Task; the Wave Session
-  handles broader recovery. Both, and the cron, call `lf task reconcile`.
-
-Native turn delivery into a live interactive client is unproved for Claude and
-OpenCode. That spike gates the delivery slice, not the slices before it.
-
-## Delivery
-
-One Task, coherent slices. Each stands on its own.
-
-1. **Wave primary Session runtime** — this slice, below.
-2. Repository primary Session: `ensure --repo`, `repo/session` skill.
-3. TaskSession: ensured by `task run`, `task/session` skill, in the Task
-   checkout.
-4. Flow switching on the FlowSession (both timings), via `task restart`.
-5. Outbox delivery and scheduled wakes, after the native turn-delivery spike.
-   Repository-scope attention requests extend the outbox recipient here.
-6. Scope checkout for design writing (`ensure_agent_worktree` with a local
+1. Scope checkout for design writing (`ensure_agent_worktree` with a local
    base) so primary conversations stop sharing the main checkout.
+2. `primary_scope` on the Session DTO, with its first Desktop consumer
+   (LOO-353).
 
-### Slice 1 — Wave primary Session (built)
-
-- Migration draft `primary_session_scope`: `agent_sessions.primary_scope` and a
-  partial unique index on the current Wave primary.
-- Store: one `ensure_primary_session(scope, replacing, session)` transaction.
-  It returns the scope's current primary, or admits the given Session; when the
-  current primary is the one being replaced it completes it and admits the
-  successor together. Concurrent callers converge on one row.
-- `lf session ensure --wave NAME [--json]` — find or admit the Wave's primary,
-  publish its prepared input, and start its durable terminal once. Repeats
-  return the same Session and never start a second launcher. A failed start
-  keeps the Session; the next ensure retries it. The command is read-only for
-  every other Session.
-- `lf session replace ID [--json]` — stop the predecessor's provider client,
-  then complete it and admit a fresh primary in one transaction. A repeat with
-  the same ID returns the successor already admitted. If the provider cannot be
-  stopped, nothing changes.
-- `lf session connect ID` opens a primary whose first launch has no provider
-  history yet through the prepared-input path instead of refusing.
-- Builtin `wave/session` skill: reconcile first (`lf task reconcile`, then
-  status), act within existing Task controls, leave interactive work ready,
-  capture ideas in scratch before creating Tasks. It never becomes a second
-  driver of a Task's Flow.
-
-Not in this slice: automatic wakes, Ctrl-C interception, Desktop discovery
-calling ensure (LOO-353), a dedicated checkout (slice 6), and exposing
-`primary_scope` on the Session DTO (added with its first Desktop consumer).
+Not in this Task: a per-Task conversation with Jack (the original LOO-353
+meaning of TaskSession) has no accepted design here; Desktop discovery calling
+ensure is LOO-353.
 
 ### Delete — do not maintain
 
-Nothing is removed in slice 1. The delivery slice deletes the consumerless
-`pending_observations` / `mark_observation_delivered` callers' absence by
-giving them their one caller; it does not restore the listener.
+Nothing. The consumerless `pending_observations` /
+`mark_observation_delivered` stay as #1360 left them; this Task no longer gives
+them a consumer.
 
 ## Checks
 
-`cargo test -p loopflow --lib primary::tests` — 4 passed (2026-10-01). Gate owns
-affected suites; a real provider launch belongs to demo.
+`cargo test -p loopflow --lib primary::tests` — 5 passed (2026-10-01); clippy
+and fmt clean. Gate owns affected suites; a real provider launch belongs to
+demo.

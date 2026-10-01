@@ -16,14 +16,20 @@
   next `ensure` admits a fresh conversation.
 - **`primary_scope` is not on the Session DTO yet.** It joins the wire shape and
   fixtures with its first Desktop consumer (LOO-353).
-- **Native turn delivery into a live interactive client is unproved** for Claude
-  and OpenCode. It gates the outbox delivery slice only.
-- Candidate instrument for the Wave: count of minute-schedule checks that found
-  pending observations with no primary Session to receive them. It would show
-  whether wakes are reaching a conversation; cheapest producer is the existing
-  `lf task automation --json` reading. Proposal only.
+- **`lf session ensure` without `-w` means the repository** (assumed
+  2026-10-01). The plan said `ensure --repo`; the flagless form is the smaller
+  surface and the repository is the default scope everywhere else.
+- **The repository Session is keyed by the canonical local checkout path**, the
+  same value `agent_sessions.repo` already holds. A relocated checkout starts a
+  new conversation.
+- **CI repair identity includes failing check URLs.** A provider rerun of the
+  same head is new evidence and can get its own repair. Left as shipped.
+- Candidate instrument for the Wave: count of CI incidents per PR head with more
+  than one `repair_session_id` across identities. It would show whether the
+  URL-keyed identity lets reruns start repeat repairs; cheapest producer is a
+  query over `ci_incidents` in `lf repo ci --json`. Proposal only.
 
-Check (2026-10-01): `cargo test -p loopflow --lib primary::tests` 4 passed;
+Check (2026-10-01): `cargo test -p loopflow --lib primary::tests` 5 passed;
 `cargo clippy -p loopflow --all-targets -- -D warnings` and `cargo fmt` clean.
 Deferred to gate: affected suites, the regenerated `docs/lf-reference.md`
 (entries were written by hand in the generator's format). Deferred to demo: a

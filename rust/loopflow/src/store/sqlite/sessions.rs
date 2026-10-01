@@ -676,7 +676,8 @@ impl SqliteStore {
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
         let (kind, column, id) = match scope {
-            PrimaryScope::Wave(wave) => ("wave", "wave_id", wave.as_str()),
+            PrimaryScope::Repository(repo) => ("repository", "repo", repo.to_string()),
+            PrimaryScope::Wave(wave) => ("wave", "wave_id", wave.to_string()),
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -713,18 +714,24 @@ impl SqliteStore {
     /// The scope a Session is or was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let row: Option<(Option<String>, Option<String>)> = conn
+        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
-                "SELECT primary_scope,wave_id FROM agent_sessions WHERE id=?1",
+                "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
         match row {
-            Some((Some(kind), Some(wave))) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
+            Some((Some(kind), Some(wave), _)) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
                 crate::id::WaveId::parse(&wave).map_err(invalid)?,
             ))),
-            Some((Some(kind), _)) => Err(invalid(format!(
+            Some((Some(kind), _, Some(repo))) if kind == "repository" => {
+                Ok(Some(PrimaryScope::Repository(
+                    crate::repository::CanonicalRepo::discover(std::path::Path::new(&repo))
+                        .map_err(invalid)?,
+                )))
+            }
+            Some((Some(kind), _, _)) => Err(invalid(format!(
                 "Session {id} has unsupported primary scope {kind:?}"
             ))),
             _ => Ok(None),

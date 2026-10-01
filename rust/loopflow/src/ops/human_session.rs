@@ -2244,7 +2244,7 @@ fn ask_message(request: &str) -> String {
     )
 }
 
-const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the ongoing primary conversation for the selected Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
     let step = position.current();

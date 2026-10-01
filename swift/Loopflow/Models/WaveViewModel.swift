@@ -17,7 +17,12 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var repo: String { api.repo }
 
-    public var displayName: String { name }
+    public var displayName: String {
+        guard !name.contains(where: \.isUppercase) else { return name }
+        return name.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
+    }
 
     /// The stable id of this Wave's parent, when one exists. Drives future
     /// ancestry indentation in the navigation list.

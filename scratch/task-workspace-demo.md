@@ -86,6 +86,16 @@ from the disposable source copy and a fresh migrated copy of Jack's Home. Ordina
 `loopflow-dev.py run` rebuilds the authoring CLI, so reusing this demo database
 requires the matching materialized helper recorded in `demo-copy.json`.
 
+### Wave names — October 1 follow-up
+
+Jack Heart requested readable `wave.displayName` labels, with `a-b` displayed as
+“A B” and the same treatment for snake case. `WaveViewModel.displayName` now
+preserves any name containing an uppercase letter exactly, per Jack's follow-up.
+For other names it replaces underscores and hyphens with spaces and capitalizes
+the words. Registry names and identity are unchanged. Existing Wave, sidebar-row and portfolio
+expectations use the display labels. The running demo has not been relaunched
+for this follow-up.
+
 ## Visual review — September 30, 18:32
 
 Jack supplied a screenshot of LOO-330 and said “extremely ugly.” When the agent

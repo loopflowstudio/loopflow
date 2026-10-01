@@ -12,9 +12,9 @@ use super::SqliteStore;
 
 // Wave owns bound repository identity. The nullable scalar on an unbound Flow
 // records its launch repository; cwd never becomes read-time identity.
-const INVENTORY_FROM: &str = "FROM flow_sessions f INDEXED BY flow_metadata
+pub(super) const INVENTORY_FROM: &str = "FROM flow_sessions f INDEXED BY flow_metadata
     LEFT JOIN tasks t ON t.id=f.task_id LEFT JOIN waves w ON w.id=f.wave_id";
-const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),
+pub(super) const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),
     COALESCE(t.current_invocation_id=f.id,0),f.ended_at";
 
 fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String, Vec<Value>) {
@@ -26,7 +26,6 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
     };
     for (column, value) in [
         ("COALESCE(w.repo,f.unbound_repo)", filter.repo.as_deref()),
-        ("f.task_id", filter.task_id.as_ref().map(|id| id.as_str())),
         ("f.wave_id", filter.wave_id.as_ref().map(|id| id.as_str())),
     ] {
         if let Some(value) = value {
@@ -35,6 +34,13 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
                 bind(Value::Text(value.into()))
             ));
         }
+    }
+    if let Some(task) = &filter.task_id {
+        let task = bind(Value::Text(task.to_string()));
+        sql.push_str(&format!(
+            " AND f.id IN ({})",
+            super::task_work::flow_ids(&task)
+        ));
     }
     if filter.taskless {
         sql.push_str(" AND f.task_id IS NULL");
@@ -69,7 +75,9 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
     (sql, values)
 }
 
-fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInventoryEntry>> {
+pub(super) fn read_entry(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoreResult<FlowInventoryEntry>> {
     Ok((|| {
         Ok(FlowInventoryEntry {
             summary: read_flow_summary(row, 0)?.ok_or(StoreError::NotFound)?,

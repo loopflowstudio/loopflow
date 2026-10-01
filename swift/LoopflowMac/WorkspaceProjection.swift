@@ -44,7 +44,9 @@ struct WorkspaceProjection {
         var matched = Set<String>()
         func attached(to work: WorkReference?) -> [SessionRecord] {
             guard let work else { return [] }
-            let records = sessions.filter { $0.work == work }
+            let records = sessions.filter {
+                $0.work == work || (work.kind == .task && $0.taskIds.contains(work.id))
+            }
             matched.formUnion(records.map(\.id))
             return records
         }

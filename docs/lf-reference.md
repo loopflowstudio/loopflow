@@ -404,6 +404,11 @@ the command path.
 
 Use `lf roadmap --json` to inspect Tasks across current Wave plans and
 `lf task status ISSUE` for one retained Task, including past planning ownership.
+Its `work` lists every Session, Flow and Exec associated with the checkout plus
+explicit binds, including headless and completed history. The managed Flow is
+marked; the execution field describes that worker's cursor. Session inventory's
+`task_ids` carries the same Rust association for Desktop navigation without
+changing historical usage attribution.
 
 ### Create and advance a Task
 

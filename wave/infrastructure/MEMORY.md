@@ -9,6 +9,22 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+
+Jack Heart selected the Task's checkout as its general work set: every
+AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
+SQLite reader supplies Task status and Desktop membership; the app does not
+reconstruct ownership from paths. Membership is additive, includes descendants
+at component boundaries and closed history, and survives a missing checkout.
+It changes neither recorded usage attribution nor process/Flow authority.
+
+The managed Flow remains one marked member for worker progression, claims,
+Task review settlement and worker delivery authority. Independent unfinished
+Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
+during completion, recovery and cleanup. General membership cannot settle or
+signal them. Current mechanics live in the architecture reference; this branch
+entry is not evidence of shipment or configured Desktop acceptance.
+
 ## Session launch continuity (branch evidence, 2026-09-28)
 
 Jack assigned `jack-heart/session-launch-hardening` an independent main-based

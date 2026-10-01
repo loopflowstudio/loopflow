@@ -335,3 +335,18 @@ fn flow_templates_round_trip_distinct_compositions_and_required_children() {
     .unwrap();
     assert!(catalog[0].template.is_some() && catalog[1].template.is_none());
 }
+
+#[test]
+fn task_work_preserves_all_owners_and_managed_marker() {
+    let input = include_str!("../../../tests/fixtures/dto/task_work.json");
+    let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
+    assert_eq!(work.sessions.len(), 2);
+    assert!(!work.sessions[0].managed);
+    assert!(work.sessions[1].managed);
+    assert!(work.flows[0].managed);
+    assert!(!work.execs.is_empty());
+    assert_eq!(
+        serde_json::to_value(work).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}

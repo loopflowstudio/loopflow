@@ -114,7 +114,7 @@ func renameFixtureRecord(
      "detail":"codex","cwd":"/src/loopflow","state":"closed","wave_id":null,"work_path":null,
      "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "closed")),
      "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
-     "terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
+     "task_ids": [], "terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
     """.utf8))
 }
 

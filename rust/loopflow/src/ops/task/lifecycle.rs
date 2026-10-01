@@ -18,6 +18,15 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
+    let blockers = associated_work_blockers(store, task)?;
+    if !blockers.is_empty() {
+        eprintln!(
+            "Task {} is complete; retained checkout: {}",
+            task.plan.identifier,
+            blockers.join("; ")
+        );
+        return Ok(());
+    }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
         if execution_unsettled(store, &position)? {
             eprintln!(
@@ -134,6 +143,10 @@ fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<boo
 }
 
 async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
+    let blockers = associated_work_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
         if execution_unsettled(store, &position)? {
             return Err(task_error(format!("{} has live or unresolved execution; interrupt it and wait for exit before abandoning", task.plan.identifier)));
@@ -569,4 +582,83 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
     crate::repo::discover_repo_root(directory)
         .map_err(task_error)?
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
+}
+
+/// Completion cannot implicitly settle another Flow's work.
+pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let mut blockers = execution_blockers(store, &work)?;
+    for flow in work.flows.iter().filter(|flow| !flow.managed) {
+        if flow.summary.state == crate::session::FlowSummaryState::Current {
+            blockers.push(format!(
+                "Flow {} is unfinished; inspect `lf flow show {} --sessions`",
+                flow.summary.id, flow.summary.id
+            ));
+        }
+    }
+    Ok(blockers)
+}
+
+/// Restoring a checkout preserves idle Flows; only unresolved execution waits.
+pub(super) fn associated_execution_blockers(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Vec<String>> {
+    execution_blockers(
+        store,
+        &store.sqlite.task_work(&task.id).map_err(task_error)?,
+    )
+}
+
+fn execution_blockers(
+    store: &SharedStore,
+    work: &crate::task_work::TaskWork,
+) -> OpsResult<Vec<String>> {
+    let mut blockers = Vec::new();
+    let mut managed_execs = Vec::new();
+    for flow in work.flows.iter().filter(|flow| flow.managed) {
+        managed_execs.extend(
+            store
+                .sqlite
+                .flow_exec_ids(&flow.summary.id)
+                .map_err(task_error)?,
+        );
+        if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
+            if let Some(claim) = position.claim {
+                managed_execs.push(claim.owner.exec_id);
+            }
+        }
+    }
+    for session in work.sessions.iter().filter(|session| !session.managed) {
+        if session.completed_at.is_none()
+            && session.kind != crate::session::SessionKind::Conversation
+        {
+            blockers.push(format!("Session {} awaits completion", session.id));
+        }
+        if store
+            .sqlite
+            .session_has_pending_turn(&session.id)
+            .map_err(task_error)?
+        {
+            blockers.push(format!(
+                "Session {} has an unresolved provider turn",
+                session.id
+            ));
+        }
+    }
+    let caller = crate::journal::current_exec_id();
+    for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
+        if caller.as_ref() == Some(&exec.id) || managed_execs.contains(&exec.id) {
+            continue;
+        }
+        if crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+        {
+            blockers.push(format!(
+                "Exec {} has live or unresolved execution; inspect `lf exec show {}`",
+                exec.id, exec.id
+            ));
+        }
+    }
+    Ok(blockers)
 }

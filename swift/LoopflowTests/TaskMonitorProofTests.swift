@@ -258,11 +258,11 @@ struct TaskMonitorProofTests {
         [{"id":"monitor-review","run_id":"monitor-review", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Review Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["/bin/cat"]},
          {"id":"monitor-other","run_id":"monitor-other", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_now00000000000000000000000000000"},
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
         var run = try #require((active["sessions"] as? [[String: Any]])?.first)

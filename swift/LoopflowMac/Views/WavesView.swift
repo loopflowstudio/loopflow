@@ -13,6 +13,7 @@ enum RepoFilter: Hashable {
 struct WavesView: View {
     let portfolioService: PortfolioService
     @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
+    @State private var taskWorkspaceModel: PodiumModel?
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
@@ -118,6 +119,21 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
+        .sheet(isPresented: Binding(get: { taskWorkspaceModel != nil }, set: { if !$0 { taskWorkspaceModel = nil } })) {
+            if let model = taskWorkspaceModel, let repo = model.repoPath {
+                VStack {
+                    HStack { Spacer(); Button("Done") { taskWorkspaceModel = nil } }.padding()
+                    SessionsView(model: model, repoPath: repo, workspaces: sessionWorkspaces)
+                }
+                .frame(minWidth: 1100, minHeight: 700)
+                .task {
+                    while !Task.isCancelled {
+                        await model.refresh()
+                        try? await Task.sleep(for: .seconds(15))
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -281,7 +297,12 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                onClose: { selectedWaveId = nil }
+                onClose: { selectedWaveId = nil },
+                onOpenTask: { id in
+                    let model = PodiumModel(query: RegistryQueryLocal.shared, repoPath: waveRepoPath(for: wave))
+                    model.select(.task(id: id))
+                    taskWorkspaceModel = model
+                }
             )
             .id(waveSelectionId(wave))
             .environment(sessionWorkspaces)

@@ -2904,7 +2904,7 @@ async fn checked_projects_with_store(
     Ok(projects)
 }
 
-fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+pub(super) fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
     !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 

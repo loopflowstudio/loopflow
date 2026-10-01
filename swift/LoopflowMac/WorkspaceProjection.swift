@@ -19,10 +19,7 @@ struct WorkspaceTask: Identifiable {
 
     /// The started working set. A Task with open Sessions stays reachable even
     /// when its start predates recorded evidence.
-    var inWorkingSet: Bool {
-        !sessions.isEmpty || (started && !task.task.completed
-            && task.runtime?.status != .done && task.runtime?.status != .abandoned)
-    }
+    var inWorkingSet: Bool { !sessions.isEmpty || (started && !task.task.completed) }
 }
 
 enum WorkspacePresentation: String, CaseIterable {
@@ -44,12 +41,11 @@ struct WorkspaceProjection {
     let unmatchedSessions: [SessionRecord]
 
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
-        let sessions = sessions.filter { $0.state != .closed }
         var matched = Set<String>()
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
         func attached(to taskId: String?) -> [SessionRecord] {
             guard let taskId else { return [] }
-            let records = sessions.filter { $0.taskIds.contains(taskId) }
+            let records = sessions.filter { $0.primaryScope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -60,7 +56,7 @@ struct WorkspaceProjection {
                 roadmap: wave,
                 sessions: {
                     let records = sessions.filter {
-                        !$0.taskIds.contains(where: visibleTaskIds.contains)
+                        !($0.workspace?.taskId.map(visibleTaskIds.contains) ?? false) && !$0.taskIds.contains(where: visibleTaskIds.contains)
                             && ($0.work == .wave(id: wave.wave.id)
                                 || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
                     }
@@ -124,7 +120,10 @@ struct WorkspaceProjection {
                 return task.id.work
             }
         }
-        return unmatchedSessions.first { $0.id == sessionId }?.work
+        guard let session = unmatchedSessions.first(where: { $0.id == sessionId }) else { return nil }
+        if session.primaryScope == "repository" { return nil }
+        if session.primaryScope == "wave" { return session.waveId.map { .wave(id: $0) } }
+        return session.workspace?.taskId.map { .task(id: $0) } ?? session.work
     }
 }
 
@@ -142,8 +141,11 @@ struct WorkspaceBreadcrumb {
     }
 
     var taskWork: WorkReference? {
+        guard session?.primaryScope == nil else { return nil }
+        if let task { return task.id.work }
+        if let id = session?.workspace?.taskId { return .task(id: id) }
         if let work = session?.work, work.kind == .task { return work }
-        return task?.id.work
+        return nil
     }
 }
 
@@ -203,9 +205,8 @@ struct WorkspaceOutlineRow: Identifiable {
 extension WorkspaceProjection {
     func outline(
         presentation: WorkspacePresentation, collapsed: Set<WorkspaceNodeKey>,
-        search: String, planningReadable: Bool, needsMe: Bool = false
+        search: String, planningReadable: Bool
     ) -> [WorkspaceOutlineRow] {
-        if needsMe { return attentionRows(search: search) }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         func matches(_ text: String) -> Bool {
             query.isEmpty || text.localizedCaseInsensitiveContains(query)
@@ -228,11 +229,8 @@ extension WorkspaceProjection {
                 ancestors: ancestors
             ))
         }
-        for session in unmatchedSessions where session.primaryScope == "repository" {
-            appendSession(session, depth: 0, ancestors: [])
-        }
         for wave in waves {
-            let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.name)
+            let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.displayName)
             let complete: Bool
             if case .available(_, false) = wave.roadmap.tasks {
                 complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
@@ -243,7 +241,8 @@ extension WorkspaceProjection {
             let omitWave = flat || (presentation == .compact && waves.count == 1 && complete
                 && waveHasChildren && expanded(wave.id))
             let waveStart = rows.count
-            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren) }
+            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren,
+                                      sessions: wave.tasks.flatMap(\.sessions)) }
             if flat || expanded(wave.id) {
                 let waveDepth = omitWave ? 0 : 1
                 for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
@@ -260,14 +259,9 @@ extension WorkspaceProjection {
                                           include: matches(task.task.task.identifier))
                         }
                     } else {
+                        // Open Sessions ride the Task row as a count and names.
                         appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
-                                   hasChildren: !task.sessions.isEmpty, sessions: task.sessions)
-                        if expanded(task.id) {
-                            for session in task.sessions {
-                                appendSession(session, depth: waveDepth + 1, ancestors: ancestors + [taskSubject],
-                                              include: matches(task.task.task.identifier))
-                            }
-                        }
+                                   hasChildren: false, sessions: task.sessions)
                     }
                 }
             }
@@ -275,18 +269,17 @@ extension WorkspaceProjection {
         }
         // Known Work stays visible when its planning row is unavailable.
         // Only genuinely unbound Sessions belong in the orphan section.
-        for session in unmatchedSessions where session.primaryScope != "repository"
-            && (session.work != nil || session.waveId != nil || !session.taskIds.isEmpty) {
+        for session in unmatchedSessions where session.work != nil || session.waveId != nil || session.primaryScope != nil || session.workspace?.taskId != nil || !session.taskIds.isEmpty {
             let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
             let wave = waves.first { $0.roadmap.wave.id == waveId }
             var ancestors: [WorkspaceOutlineSubject] = []
             if let waveId {
                 ancestors.append(WorkspaceOutlineSubject(
                     key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: .wave(id: waveId)),
-                    title: wave?.roadmap.wave.name ?? "Wave \(waveId)"
+                    title: wave?.roadmap.wave.displayName ?? "Wave \(waveId)"
                 ))
             }
-            if let work = session.work ?? session.taskIds.first.map({ WorkReference.task(id: $0) }), work.kind != .wave {
+            if session.primaryScope == nil, let work = session.work, work.kind != .wave {
                 ancestors.append(WorkspaceOutlineSubject(
                     key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: work),
                     title: "\(work.kind == .task ? "Task" : "Project") \(work.id)"
@@ -317,36 +310,17 @@ extension WorkspaceProjection {
         return rows
     }
 
-    /// Attention destinations are never hidden behind a collapsed ancestor.
-    func attentionRows(search: String) -> [WorkspaceOutlineRow] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let records = waves.flatMap { $0.sessions + $0.tasks.flatMap(\.sessions) } + unmatchedSessions
-        var seen = Set<String>()
-        return records.compactMap { session in
-            guard session.state != .closed, session.attention != nil,
-                  seen.insert(session.id).inserted else { return nil }
-            let crumb = breadcrumb(selection: nil, sessionId: session.id)
-            let context = [crumb?.wave?.roadmap.wave.name, crumb?.task?.task.task.name,
-                           session.workPath].compactMap { $0 }.joined(separator: " / ")
-            guard query.isEmpty || [session.title, session.detail, context,
-                                    crumb?.task?.task.task.identifier ?? ""]
-                .contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
-            return WorkspaceOutlineRow(content: .session(session),
-                detail: context.isEmpty ? session.attention?.label : context,
-                depth: 0, ancestors: [])
-        }
-    }
-
-    /// Sessions with no Work in this repository: the sidebar's bottom section,
-    /// filtered like the outline. Their Task is never guessed from a checkout.
+    /// Diagnostic inventory: no Task association, regardless of attention state.
     func orphanSessions(search: String) -> [SessionRecord] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return unmatchedSessions.filter { session in
-            guard session.work == nil, session.waveId == nil, session.taskIds.isEmpty, session.primaryScope == nil else { return false }
+        let records = waves.flatMap { $0.sessions } + unmatchedSessions
+        return records.filter { session in
+            guard session.workspace?.taskId == nil, session.taskIds.isEmpty else { return false }
             return query.isEmpty || [session.title, session.detail, session.workPath ?? ""]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
+
 }
 
 /// One exact Session's assignment confirmation, retained through a failed commit.
@@ -422,13 +396,12 @@ final class WorkspaceNavigation {
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
     var showsHeadlessSessions = false
-    var showsNeedsMe = false
     /// Flow drafts by planning Task id; they survive Task and Session navigation.
     var flowDrafts: [String: TaskFlowDraft] = [:]
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
-    var preparedTaskWorktrees: [String: String] = [:]
+    var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose recent Runs are disclosed; the Runs are read only then.
@@ -438,7 +411,6 @@ final class WorkspaceNavigation {
     var repositoryCollapsed = false
     /// The orphan Session section's disclosure. `nil` follows the default:
     /// collapsed beside planned Work, open when orphans are all there is.
-    var orphansDisclosed: Bool?
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?

@@ -52,7 +52,7 @@ struct WorkspaceNavigationProofTests {
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let host = NSHostingView(rootView: view.id("/src/loopflow"))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 600),
@@ -173,7 +173,7 @@ struct WorkspaceNavigationProofTests {
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "task-0-7"))
-        let registry = SessionsWorkspaceRegistry()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let host = NSHostingView(rootView: view.id("/src/loopflow"))
         let captureDirectory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"].map(URL.init(fileURLWithPath:))
@@ -202,18 +202,11 @@ struct WorkspaceNavigationProofTests {
             // Counts only where Sessions exist.
             _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-0")
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-7") }
-            // Orphans: one collapsed section, never a tree row, never an ancestry sentence.
-            _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open")
-            #expect(throws: (any Error).self) { try outline.find(text: "Repository or unavailable ancestry") }
+            // Diagnostic Sessions do not consume main navigation space.
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
-            try capture(window, "density-orphans-collapsed-\(suffix)")
-            try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-toggle").button().tap()
-            try await settle(window)
-            _ = try view.inspect().find(WorkspaceNavigator.self).actualView().inspect()
-                .find(viewWithAccessibilityIdentifier: "session-row-demo")
-            try capture(window, "density-orphans-open-\(suffix)")
-            model.navigation.orphansDisclosed = nil
-            try await settle(window)
+            _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
+            try capture(window, "density-debug-orphans-\(suffix)")
         }
         // Zero orphans hides the section.
         await source.replace(try encode(attached))
@@ -249,8 +242,8 @@ struct WorkspaceNavigationProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<3 {
             workspace.multiplexer.newShell()
@@ -590,12 +583,12 @@ struct WorkspaceNavigationProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let paths = [repo, "/src/loopflow.task"]
-        let registry = SessionsWorkspaceRegistry()
-        let outer = registry.layout(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let outer = registry.layout(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         var records: [[String: Any]] = []
         for (index, path) in paths.enumerated() {
-            let workspace = registry.workspace(for: path)
+            let workspace = registry.workspace(for: fixtureWorkspace(path))
             for _ in 0..<2 {
                 workspace.multiplexer.newShell()
                 let pane = workspace.multiplexer.focusedPaneId
@@ -617,7 +610,7 @@ struct WorkspaceNavigationProofTests {
         }
         defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
         let surfaces = try terminals.map { try #require($0.surface) }
-        let layouts = paths.map { registry.workspace(for: $0).multiplexer.layout }
+        let layouts = paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout }
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
@@ -642,19 +635,19 @@ struct WorkspaceNavigationProofTests {
         for index in [1, 0] {
             try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
             try await settle(window)
-            #expect(outer.focusedPath == paths[index])
+            #expect(outer.focusedPath == fixtureWorkspace(paths[index]))
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
             #expect(terminals[(1 - index) * 2].window == nil)
-            #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+            #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
         }
 
         let firstSlot = outer.focusedSlotId
         try view.inspect().find(viewWithAccessibilityLabel: "Split worktrees right").button().tap()
-        outer.select(paths[1])
+        outer.select(fixtureWorkspace(paths[1]))
         try await settle(window)
         #expect(terminals.allSatisfy { $0.window === window })
-        #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
         try await settle(window)
         #expect(outer.layout.slots.count == 2)
@@ -665,9 +658,9 @@ struct WorkspaceNavigationProofTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
         try await settle(window)
         #expect(window.firstResponder === terminals[0])
-        #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
 
-        let store = registry.workspace(for: repo).sessionStore(repoPath: repo, query: query)
+        let store = registry.workspace(for: fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
         #expect(store.sessions.allSatisfy { $0.state == .live })
         for (index, surface) in surfaces.enumerated() {
             #expect(terminals[index].surface == surface)
@@ -687,8 +680,8 @@ struct WorkspaceNavigationProofTests {
     func shellSessionCompletion(rejected: Bool) async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/tmp")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId
         let terminal = registry.surfaces.view(for: .shell(pane))
@@ -766,8 +759,8 @@ struct WorkspaceNavigationProofTests {
     func rejectedFlowCompletionRetainsTerminal() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/tmp")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
         workspace.multiplexer.load(sessionId: "review-decision")
         let terminal = registry.surfaces.view(for: .session("review-decision"))
         terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
@@ -944,8 +937,8 @@ struct WorkspaceNavigationProofTests {
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/src/loopflow")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "navigation-split")
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
@@ -1078,7 +1071,7 @@ struct WorkspaceNavigationProofTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
         try await settle(window)
         #expect(terminals[0].surface == sessionSurface)
-        let otherWorkspace = registry.workspace(for: "/src/context")
+        let otherWorkspace = registry.workspace(for: fixtureWorkspace("/src/context"))
         if switchBeforeCompletion {
             model.setRepoPath("/src/context")
             await model.refreshSessions()

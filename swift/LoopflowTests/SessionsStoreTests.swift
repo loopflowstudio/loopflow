@@ -110,7 +110,6 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.state == .live)
 
         store.noteSurfaceClosed(.shell("native"))
-        store.noteSurfaceClosed(.taskTerminal("native"))
         #expect(item(store, "native")?.state == .live)
 
         store.noteSurfaceClosed(.session("native"))

@@ -17,7 +17,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var repo: String { api.repo }
 
-    public var displayName: String { name }
+    public var displayName: String { api.displayName }
 
     /// The stable id of this Wave's parent, when one exists. Drives future
     /// ancestry indentation in the navigation list.

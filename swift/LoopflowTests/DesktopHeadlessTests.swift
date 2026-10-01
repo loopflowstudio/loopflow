@@ -73,7 +73,7 @@ struct DesktopHeadlessTests {
         #expect(model.selection == .wave(id: wave.id))
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
-        #expect(title == wave.name)
+        #expect(title == "Product")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-loading")
         }

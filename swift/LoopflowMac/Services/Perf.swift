@@ -19,6 +19,7 @@ enum Perf {
     static let hierarchyInteraction: StaticString = "hierarchy_interaction"
     /// Wave/Task selection → detail committed; Session selection → pane accepts input.
     static let taskWorkspaceReady: StaticString = "task_workspace_ready"
+    static let retainedWorkspaceAction: StaticString = "retained_workspace_action"
     /// One `lf` subprocess read; the message names the verb.
     static let lf: StaticString = "lf"
     /// One Markdown parse into blocks; the message carries the source length.

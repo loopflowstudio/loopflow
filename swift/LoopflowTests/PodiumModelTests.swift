@@ -324,7 +324,7 @@ struct PodiumModelTests {
         model.setRepoPath(repo.path)
 
         #expect(model.visibleWaves.map(\.displayName) == [
-            "infrastructure", "intelligence", "product",
+            "Infrastructure", "Intelligence", "Product",
         ])
     }
 
@@ -381,7 +381,7 @@ struct PodiumModelTests {
         #expect(model.visibleRepos[0].path.normalizedFilePath == origin.path.normalizedFilePath)
         #expect(model.visibleRepos[0].displayName == "repo")
         #expect(model.repoIdentity(model.visibleRepos[0].path) == model.repoIdentity(worktree.path))
-        #expect(model.visibleWaves.map(\.displayName) == ["product"])
+        #expect(model.visibleWaves.map(\.displayName) == ["Product"])
         #expect(model.visibleWaves.map(\.isRegistered) == [true])
 
         let restored = PodiumModel(query: fixture.query, repoPath: worktree.path)

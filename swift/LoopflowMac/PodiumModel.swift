@@ -99,7 +99,7 @@ final class PodiumModel {
                 }
             }
             taskLinkReading = .available(result)
-            if matches.count == 1, !unavailable, let match = matches.first {
+            if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 openTaskDestination(wave: match.0, task: match.1)
             }
         } catch {
@@ -176,19 +176,12 @@ final class PodiumModel {
             .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
     }
 
-    /// Visibility never changes the inventory used by panes and selection.
+    /// Task membership is independent of provider mode or attention state.
     var visibleWorkspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
-            $0.state != .closed && (navigation.showsNeedsMe
-                ? $0.attention != nil
-                : navigation.showsHeadlessSessions || $0.interactive || $0.attention != nil)
+            $0.state != .closed && (!$0.taskIds.isEmpty || $0.workspace?.taskId != nil
+                || $0.primaryScope != nil || navigation.showsHeadlessSessions || $0.interactive)
         })
-    }
-    /// Count the same searched destinations the attention view will display.
-    /// A failed read has no trustworthy count, even when last-good rows remain.
-    var needsMeCount: Int? {
-        guard sessions.value != nil, sessions.errorMessage == nil else { return nil }
-        return workspace.attentionRows(search: navigation.search).count
     }
 
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {

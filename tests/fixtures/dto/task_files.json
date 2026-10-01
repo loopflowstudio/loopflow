@@ -43,7 +43,8 @@
         "changed": true,
         "message": "Recovered file changed. Inspect before continuing."
       }
-    ]
+    ],
+    "read_only_reason": null
   },
   "save": {
     "file": {
@@ -60,9 +61,28 @@
           "changed": true,
           "message": "Recovered file changed. Inspect before continuing."
         }
-      ]
+      ],
+      "read_only_reason": null
     },
     "published": true,
     "message": "Saved. Previous file retained."
+  },
+  "directory": {
+    "path": "",
+    "entries": [
+      {
+        "path": "scratch",
+        "kind": "directory"
+      },
+      {
+        "path": "unchanged.txt",
+        "kind": "file"
+      },
+      {
+        "path": "link",
+        "kind": "symlink"
+      }
+    ],
+    "next_cursor": null
   }
 }

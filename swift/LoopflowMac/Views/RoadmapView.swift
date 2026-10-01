@@ -72,13 +72,11 @@ struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @StateObject private var terminalStore = TaskTerminalStore()
     @State private var model: PodiumModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
-    @State private var workspaceSelection: RoadmapTaskSelection?
 
     init(
         repoPath: String?,
@@ -142,16 +140,6 @@ struct RoadmapView: View {
                 if Task.isCancelled { return }
                 await refresh()
             }
-        }
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                prURL: selection.task.activePr?.publication?.github?.url,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
         }
     }
 

@@ -1072,6 +1072,31 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             }
             Ok(())
         }
+        TaskCommand::Files {
+            issue,
+            directory,
+            cursor,
+            show_ignored,
+            json,
+        } => {
+            let snapshot = loopflow::ops::task::task_files(
+                issue,
+                directory,
+                cursor.as_deref(),
+                *show_ignored,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else {
+                for entry in snapshot.entries {
+                    println!("{}", entry.path);
+                }
+                if let Some(cursor) = snapshot.next_cursor {
+                    eprintln!("Next page: --cursor {cursor}");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::File {
             issue,
             path,
@@ -1670,7 +1695,10 @@ fn execute_command(
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
             cmd:
-                cmd @ (TaskCommand::Diff { .. } | TaskCommand::File { .. } | TaskCommand::Save { .. }),
+                cmd @ (TaskCommand::Diff { .. }
+                | TaskCommand::File { .. }
+                | TaskCommand::Files { .. }
+                | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd, cli),
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;

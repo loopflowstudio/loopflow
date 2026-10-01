@@ -97,7 +97,7 @@ counts. A failed inventory read shows an unavailable count and expandable detail
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
 its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
-Ask boundaries, Task conversations and repository/Wave primaries remain reachable.
+Task conversations and repository/Wave primaries remain reachable.
 Stopping a response alone never closes the conversation or completes a review.
 
 Right-click a row to inspect its subject or ancestors, start a scoped conversation,

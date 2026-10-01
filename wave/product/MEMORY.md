@@ -25,6 +25,15 @@ store recovery coverage; full Rust and Desktop acceptance remains with gate.
 A successful provider turn is not reclassified from prose alone. This records
 Product’s shared Session contract, not a Task or Wave placement decision.
 
+Reconciliation with the October 1 Session attention change preserves `--needs-me`
+for current reviews, ready conversations and recorded interactive replies.
+Converted Ask history follows ordinary conversation rules; its former kind alone
+creates no attention obligation. Conversion itself never completes a Session.
+Later confirmed owning-driver exits can retire unassigned, non-primary
+conversations; Task/Wave conversations and Flow reviews remain open. Missing
+process evidence grants neither retirement nor Flow settlement. This is source
+inspection, not full Desktop acceptance.
+
 ## CI watcher decisions (2026-10-01)
 
 Jack Heart's decisions on [LOO-365](https://linear.app/loopflow/issue/LOO-365),

@@ -1,7 +1,7 @@
 # Remove Ask
 
 Accepted direction — Jack Heart, 2026-10-01. Implementation complete locally;
-realigned 2026-10-01 after compression and upstream integration. Full Rust and
+realigned 2026-10-01 after compression and Session attention integration. Full Rust and
 Desktop acceptance remains with gate. Checkpoint publication was requested after
 realignment; landing remains outside this operation.
 
@@ -82,6 +82,17 @@ carried Ask caller-release requirements; their Session/review guidance now recor
 Jack’s dated boundary while preserving historical observations and outstanding
 review proof. Release notes and historical design reviews remain historical.
 
+The merged Session attention change preserves `--needs-me` for current reviews,
+ready conversations and recorded interactive replies. Former Ask kind alone
+creates no attention obligation after conversion. Conversion still launches and
+completes nothing; a later confirmed owning-driver exit can retire an unassigned,
+non-primary conversation under ordinary lifecycle rules. Task/Wave conversations
+and Flow reviews remain open, and passive inspection grants no settlement authority.
+The sync removed obsolete Ask enum branches; this reconciliation also removes
+stale Ask retention claims in the Desktop README and driver-exit comments.
+No runtime repair was needed. Full attention and retirement acceptance remains
+part of gate's materialized Rust and Desktop suites.
+
 No exact Wave placement was supplied. Product memory is updated as the existing
 owner of the shared Session contract; this does not assign the work to that Wave.
 
@@ -120,27 +131,14 @@ cargo build -p loopflow --bin lf
 scripts/test_desktop.sh
 ```
 
-Compression recorded passes for `cargo test -p loopflow --lib ops::human_session`
-(21 tests), the Task-associated `failure_without_ask` lifecycle case,
-`cargo build -p loopflow --bin lf`, formatting and clippy before upstream integration.
-Gate determines reuse against its exact content and command plan; integration does
-not itself require this reconciliation to repeat those checks.
+Existing focused evidence: compression passed the conversation suite (22 tests),
+the Task-associated `failure_without_ask` lifecycle case, the CLI build, formatting
+and clippy before integration. After Session attention integration, sync passed
+`cargo test -p loopflow --test session_lifecycle_tests inventory_scopes_before_paging_and_keeps_worktree_repository_identity`
+(1 test). Earlier documentation checks passed `scripts/check_architecture.py`.
+These results do not establish full post-integration acceptance; gate determines
+reuse against its exact content and command plan. No live-provider or native UI
+proof is claimed. Checkpoint publication retains scratch; landing remains outside
+this reconciliation.
 
-Check: 2026-10-01 — realign: `uv run python scripts/check_architecture.py` and `git diff --check` passed for documentation repairs; full materialized Rust/Desktop acceptance deferred to gate.
-
-Publication review: the diff against `origin/main` preserves the accepted failure,
-conversation migration and Task review boundaries. Fixed TESTING.md's stale
-AskHome fixture reference. This is a checkpoint PR with scratch retained; prior
-focused checks are recorded above, and full post-integration acceptance remains
-with gate. No live-provider or native UI proof is claimed.
-
-Check: 2026-10-01 — follow-up compress: `cargo test -p loopflow --lib ops::human_session` passed (22 tests); `cargo build -p loopflow --bin lf`, `cargo fmt --all -- --check` and `git diff --check` passed; full Rust/Desktop acceptance remains with gate.
-
-Sync resolution: preserved Ask deletion while retaining main's session attention
-projection and `--needs-me` documentation. Removed newly merged Ask enum references
-from attention projection and its unit coverage; retained current review and ready
-conversation obligations. Review found no remaining Ask runtime references in the
-reconciled source. The owned continuation completed the merge; its dirty-state
-postcondition required a separate local commit for the semantic reconciliation.
-
-Check: 2026-10-01 — sync-conflicts: `cargo test -p loopflow --test session_lifecycle_tests inventory_scopes_before_paging_and_keeps_worktree_repository_identity` passed (1 test); full Rust/Desktop acceptance remains with gate.
+Check: 2026-10-01 — realign: `uv run python scripts/check_architecture.py` and `git diff --check` passed for prose/comment repairs; full materialized Rust/Desktop acceptance deferred to gate.

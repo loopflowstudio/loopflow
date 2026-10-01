@@ -28,7 +28,7 @@ the buttons to its left. Preserve the terminal presentation; the agent's broader
 terminal redesign proposal is superseded by this narrower direction. Jack also
 requested left-pane collapse and questioned the persistent Flow module at the top.
 
-Proposed implementation: retain the conversation list but replace the vertical
+Implemented candidate for review, 2026-10-01: retain the conversation list but replace the vertical
 Task details / New conversation / New shell / Files button stack. Use a compact
 + menu for conversation and shell creation, one Files toggle in the toolbar, and
 the Task title to open details and the directive. Keep pane-specific expansion
@@ -42,7 +42,7 @@ retain only a compact current-stage/status action near the Task title. Selecting
 an available interactive stage still opens its exact Session; completion and
 recovery controls remain available. Jack questioned the permanent top module but
 has not yet selected this exact replacement. The button arrangement and Flow
-placement remain proposals; left-pane collapse and preserving the terminal are
+placement are implemented for review, without acceptance; left-pane collapse and preserving the terminal are
 explicit direction from Jack.
 
 Next proof: show the actual LOO-330 workspace with one conversation, multiple

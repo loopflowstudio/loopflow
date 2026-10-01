@@ -29,6 +29,7 @@ final class SessionsWorkspace {
     }
     var fileWidth: CGFloat = 700
     var showsDetails = false
+    var showsMaterials = true
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
@@ -473,17 +474,25 @@ struct SessionsContentView: View {
                         WorkspaceBreadcrumbBar(
                             model: model,
                             crumb: model.breadcrumb,
-                            onOpenSession: openSession, onMonitor: showMonitor
+                            onOpenSession: openSession, onMonitor: showMonitor,
+                            onTaskDetails: { workspace.showsDetails = true }
                         ) {
                             if taskPath != nil {
-                                Button(showsFiles ? "Hide Files" : "Show Files") { workspace.showsFiles.toggle() }
-                                    .buttonStyle(.plain).fixedSize()
+                                taskStage
+                                WorkspaceGlyphButton("sidebar.left",
+                                    label: workspace.showsMaterials ? "Hide Sessions" : "Show Sessions",
+                                    identifier: "workspace-toggle-materials") { workspace.showsMaterials.toggle() }
+                                workspaceCreation
+                                WorkspaceGlyphButton("doc",
+                                    label: showsFiles ? "Hide Files" : "Show Files",
+                                    identifier: "workspace-toggle-files") { workspace.showsFiles.toggle() }
                             }
                             if terminalsVisible {
                                 if navigation.selectedSessionId != nil { worktreeChip }
                                 else if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
+                                        .frame(maxWidth: 180).layoutPriority(-3)
                                         .foregroundStyle(palette.textSecondary).help(taskPath)
                                         .accessibilityLabel("Task worktree")
                                         .accessibilityIdentifier("task-worktree-location")
@@ -495,15 +504,11 @@ struct SessionsContentView: View {
                                 if navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil { completionControls }
                             }
                         }
-                        if multiplexer.zoomedPaneId == nil, let task = fileTask, let found = model.task(id: task.task.id) {
-                            TaskFlowView(model: model, task: found.task, wave: found.wave.wave, onOpenSession: openSession)
-                                .padding(.horizontal, Spacing.md)
-                        }
                         ZStack {
                             Group {
                                 if let taskPath {
                                     HStack(spacing: 0) {
-                                        if multiplexer.zoomedPaneId == nil { taskMaterials }
+                                        if workspace.showsMaterials && multiplexer.zoomedPaneId == nil { taskMaterials }
                                         WorktreeTerminalsView(workspace: workspace,
                                             path: taskPath, isFocused: terminalsVisible, sessions: store)
                                             .id(taskIdentity)
@@ -656,69 +661,113 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    @ViewBuilder
+    private var taskStage: some View {
+        if let task = fileTask, case .pinned(let pinned) = task.task.flow.record,
+           let current = pinned.current, let node = pinned.graph.node(current) {
+            Button {
+                if let session = participationSession(node: String(current), pinned: pinned,
+                                                      sessions: store.sessions.map(\.record)) {
+                    openSession(session)
+                } else { workspace.showsDetails = true }
+            } label: {
+                Label(node.label, systemImage: node.human ? "bubble.left" : "arrow.triangle.branch")
+                    .font(Typography.meta).lineLimit(1)
+            }
+            .buttonStyle(.plain).help(pinned.reason)
+            .accessibilityIdentifier("workspace-current-stage")
+        }
+    }
+
+    private var workspaceCreation: some View {
+        Menu {
+            Button("New conversation", systemImage: "bubble.left") { prepareTaskWorkspace(conversation: true) }
+            Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
+                .disabled(taskIdentity?.homeId != homeId)
+        } label: { Image(systemName: "plus") }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help("New conversation or shell")
+        .accessibilityLabel("New conversation or shell")
+        .accessibilityIdentifier("workspace-create")
+    }
+
     private var taskMaterials: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Conversations").font(Typography.textStrong)
-            ForEach(store.sessions.filter { $0.record.workspace?.identity == taskIdentity }) { item in
-                HStack {
-                    Button { openSession(item.record) } label: {
-                        VStack(alignment: .leading) {
-                            Text(item.record.title).lineLimit(2)
-                            Text(item.error == nil ? item.record.participationLabel : "Needs recovery").font(Typography.meta)
-                                .foregroundStyle(palette.textSecondary)
-                            if let reason = item.record.workspace?.unavailable {
-                                Text(reason).font(Typography.meta).foregroundStyle(Color.statusWarning)
-                            }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Sessions").font(Typography.meta.weight(.semibold))
+                .foregroundStyle(palette.textSecondary)
+                .padding(.horizontal, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(store.sessions.filter { $0.record.workspace?.identity == taskIdentity }) { item in
+                        HStack(alignment: .top, spacing: 6) {
+                            Button { openSession(item.record) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.record.title).font(Typography.body(13)).lineLimit(2)
+                                    Text(item.error == nil ? item.record.participationLabel : "Needs recovery")
+                                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
+                                    if let reason = item.record.workspace?.unavailable {
+                                        Text(reason).font(Typography.meta).foregroundStyle(Color.statusWarning)
+                                    }
+                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                            Menu {
+                                if let pane = multiplexer.pane(forSessionId: item.id) {
+                                    Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
+                                        workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
+                                    }
+                                    Button("Focus") { workspace.toggleFocus(pane.id) }
+                                } else { Button("Expand") { openSession(item.record) } }
+                                if let caller = item.record.callerSessionId {
+                                    Button("Open caller") {
+                                        if let session = store.sessions.first(where: { $0.record.id == caller }) {
+                                            openSession(session.record)
+                                        } else if let taskId = item.record.workspace?.taskId { showMonitor(taskId) }
+                                    }
+                                    .disabled(!store.sessions.contains(where: { $0.record.id == caller }) && item.record.workspace?.taskId == nil)
+                                }
+                            } label: { Image(systemName: "ellipsis") }
+                            .menuStyle(.borderlessButton).fixedSize().help("Conversation actions")
+                            .accessibilityLabel("Actions for \(item.record.title)")
                         }
-                    }.buttonStyle(.plain)
-                    if let caller = item.record.callerSessionId {
-                        Button("Caller · \(String(caller.prefix(12)))") {
-                            if let session = store.sessions.first(where: { $0.record.id == caller }) {
-                                openSession(session.record)
-                            } else if let taskId = item.record.workspace?.taskId {
-                                showMonitor(taskId)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .help("Waiting conversation: \(caller). Open its conversation or Task activity.")
-                        .disabled(!store.sessions.contains(where: { $0.record.id == caller }) && item.record.workspace?.taskId == nil)
+                        .padding(8)
+                        .background(navigation.selectedSessionId == item.id ? palette.surfaceMuted : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 6))
+                        .accessibilityIdentifier("workspace-material-\(item.id)")
                     }
-                    Spacer()
-                    if let pane = multiplexer.pane(forSessionId: item.id) {
-                        Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
-                            workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
-                        }.buttonStyle(.plain)
-                        Button("Focus") { workspace.toggleFocus(pane.id) }.buttonStyle(.plain)
-                    } else {
-                        Button("Expand") { openSession(item.record) }.buttonStyle(.plain)
+                    ForEach(multiplexer.layout.allPanes.filter { $0.content == .shell }) { pane in
+                        HStack {
+                            Button {
+                                workspace.setCollapsed(paneId: pane.id, collapsed: false)
+                                multiplexer.setFocusedPane(pane.id)
+                            } label: {
+                                Label("Shell", systemImage: "terminal")
+                                    .font(Typography.body(13)).frame(maxWidth: .infinity, alignment: .leading)
+                            }.buttonStyle(.plain)
+                            Menu {
+                                Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
+                                    workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
+                                }
+                                Button("Focus") { workspace.toggleFocus(pane.id) }
+                                Button("Terminate", role: .destructive) {
+                                    store.surfaces.release(.shell(pane.id)); multiplexer.close(pane.id)
+                                }
+                            } label: { Image(systemName: "ellipsis") }
+                            .menuStyle(.borderlessButton).fixedSize().help("Shell actions")
+                            .accessibilityLabel("Shell actions")
+                        }.padding(8)
                     }
-                }.accessibilityIdentifier("workspace-material-\(item.id)")
+                }
             }
-            ForEach(multiplexer.layout.allPanes.filter { $0.content == .shell }) { pane in
-                HStack {
-                    Button("Shell") { workspace.setCollapsed(paneId: pane.id, collapsed: false); multiplexer.setFocusedPane(pane.id) }
-                    Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
-                        workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
-                    }
-                    Button("Terminate") { store.surfaces.release(.shell(pane.id)); multiplexer.close(pane.id) }
-                }.buttonStyle(.plain)
-            }
-            Divider()
             if fileTask?.task.reference.workspace?.localExists == false,
                navigation.preparedTaskWorktrees[fileTask?.task.id ?? ""] == nil {
                 Text("Recorded checkout is missing").font(Typography.meta)
                 Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
             }
-            Button("Task details") { workspace.showsDetails = true }
-            Button("New conversation") { prepareTaskWorkspace(conversation: true) }
-            Button("New shell") { multiplexer.newShell() }
-                .disabled(taskIdentity?.homeId != homeId)
-            Button(showsFiles ? "Hide files" : "Files") { workspace.showsFiles.toggle() }
-            if let task = fileTask {
-                Text(task.task.task.description).font(Typography.meta).lineLimit(8)
-            }
-            Spacer()
-        }.padding(Spacing.sm).frame(width: 240)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 14).frame(width: 224)
+        .background(palette.background)
+        .overlay(alignment: .trailing) { Rectangle().fill(palette.border).frame(width: 1) }
+        .accessibilityIdentifier("workspace-materials")
     }
 
     private func prepareTaskWorkspace(conversation: Bool) {

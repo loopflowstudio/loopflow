@@ -61,12 +61,30 @@ struct WorkspaceDestinationTests {
         #expect(destination.task(id: task.id)?.task.task.name == task.task.name)
         #expect(destination.visibleRoadmaps.isEmpty)
         #expect(destination.breadcrumb?.task?.task.id == task.id)
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: try #require(task.reference.workspace?.identity))
+        workspace.multiplexer.newShell(command: ["local-server"])
+        let layout = workspace.multiplexer.layout
+        let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
+                                       query: exactQuery).document("note.txt")
+        document.editor.string = "unsaved draft"
         let retained = SessionsContentView(
             model: destination, repoPath: wave.wave.repo,
-            workspaces: SessionsWorkspaceRegistry(), homeId: "local", query: exactQuery
+            workspaces: registry, homeId: "local", query: exactQuery
         )
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+        }
+        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
+        #expect(!workspace.showsMaterials)
+        #expect(throws: (any Error).self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
+        }
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(document.editor.string == "unsaved draft")
+        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
+        #expect(throws: Never.self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
         }
         #expect(throws: Never.self) {
             try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")

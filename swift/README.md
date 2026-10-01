@@ -85,7 +85,12 @@ Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
 long lines retain the native editor's known responsiveness limitation.
 
 Select a repository, then a Task. Its workspace retains conversations, shells,
-file drafts and layout across visits. **Collapse** hides a pane while its process
+file drafts and layout across visits. Use **+** in the toolbar for a conversation
+or shell, and the document icon for Files. The sidebar icon hides or restores the
+Sessions pane without changing its terminals or drafts. Click the Task title for
+details and the full Flow; the toolbar's current stage opens its available review.
+
+Each Session or shell's **…** menu holds its pane actions. **Collapse** hides a pane while its process
 continues; **Expand** returns to it. **Focus** gives one conversation the content
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.

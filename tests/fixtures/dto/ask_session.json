@@ -45,5 +45,8 @@
     "unavailable": null
   },
   "caller_session_id": "session_00000000000000000000000000000002",
-  "interactive": true
+  "interactive": true,
+  "task_ids": [
+    "task_00000000000000000000000000000001"
+  ]
 }

@@ -7,13 +7,63 @@ Design: [growth-thoughts.md](growth-thoughts.md).
 Prior local proof: [kickoff-evidence.md](kickoff-evidence.md).
 Ask contract: [ask-evidence.md](ask-evidence.md).
 
-Status: the app/CLI protocol mismatch is repaired using a private copy of Jack's
-Home, as Jack explicitly accepted. Native planning and LOO-330's Task workspace
-now render. Visual review failed: Jack Heart called the result “extremely ugly,”
-then clarified that the terminal is fine and the problem is mostly the buttons
-to its left. No complete Unit 1 walkthrough or latency target has passed.
+Status, 2026-10-01: main is integrated through `5eaf887fe` in local merge
+`d6db71c9f`. A compact Sessions pane, retained pane visibility toggle, toolbar
+creation/Files controls and compact current-stage action are implemented for review.
+The terminal presentation is unchanged. The rebuilt app initially failed against
+the September demo copy: main now requires an exact development migration history,
+and that copy has no receipts for the seven current drafts. Jack Heart supplied
+screenshots of the same error in both the workspace and Open Task dialog. Retry
+cannot resolve it. The first reopening was premature; compilation did not prove
+runtime compatibility. No Unit 1 walkthrough or latency target has passed.
 
-## Visual review — 18:32
+## October 1 retry
+
+Jack requested integration with main and another demonstration. Loopflow selected
+`merge_target` for the protected published branch; the operation used `lf sync`
+and retained branch history. No push or PR mutation occurred.
+
+The candidate removes the left-side button stack and description, places creation
+in a + menu and Files in one toolbar control, and puts Task details behind the
+Task title. The Sessions pane can hide and restore through a retained workspace
+preference. The full Flow remains in Task details; its current stage is a compact
+toolbar action. These are implemented proposals for Jack's next visual review,
+not inferred acceptance of the exact arrangement.
+
+Local proof after reconciliation: 17 Rust DTO fixtures, 33 Session tests, 67 Swift
+workspace/navigation/file tests and 11 focused destination tests passed. The latter
+exercises hiding/restoring the pane with retained shell layout and editor draft.
+Cargo formatting/Clippy passed before the integration checkpoint. Both SwiftPM
+and Xcode fallback build-for-testing compiled the candidate. Logs:
+`.lf/tmp/sync-oct1/`. These checks do not prove a configured demonstration.
+
+The old automatic source-Home seed mechanism was removed upstream. The ordinary
+CLI intentionally validates an existing private Home without upgrading its draft
+schema. The retry uses a new SQLite backup of the main Home and the documented
+migration-test materialization path in a disposable source copy, without Git
+worktree creation or changing the assigned checkout's migration catalog. The
+copied database passed the production migration runner and persisted-JSON checks;
+Home identity, scoped LOO-330 roadmap, Session inventory and its 40-entry directory
+listing all exited 0. Copied Session driver ownership and provider endpoints were
+cleared before launching, preserving history without attaching to live processes. This is a test-materialized copied-data demo, not a published
+release or main-Home operation. Its exact paths are recorded in
+`.lf/tmp/sync-oct1/demo-copy.json`. The earlier September copy remains preserved.
+
+The first successful workspace capture exposed another counterexample: `roadmap
+--all` rejected two `ear` snapshots belonging to different repositories, hiding
+all planning. The reader now maintains ownership checks per canonical repository;
+a focused Rust test proves separate repositories remain readable and duplicate
+ownership inside one repository still fails. The full copied roadmap then exited
+0. No snapshot was deleted to suppress the error.
+
+The fresh main-Home copy contains no open Session for LOO-330. Its retained Task
+and checkout remain available for visual and Files review; the empty Sessions
+list is not proof of a grouping defect or a successful provider continuation.
+The previous September screenshot had a conversation that is absent from this
+fresh inventory. Use an available current conversation for the provider portion
+of the subsequent walkthrough rather than inventing one from historical evidence.
+
+## Visual review — September 30, 18:32
 
 Jack supplied a screenshot of LOO-330 and said “extremely ugly.” When the agent
 proposed broader layout changes, Jack clarified: “the terminal part is fine its

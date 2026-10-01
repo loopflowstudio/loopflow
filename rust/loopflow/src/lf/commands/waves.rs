@@ -904,7 +904,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
-    let mut ownership = PmPortfolioValidator::default();
+    let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
         let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
@@ -917,7 +917,7 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         };
         let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
-        ownership.validate(
+        ownership.entry(repo).or_default().validate(
             wave.slug(),
             &row.initiative,
             expected_team.as_deref(),
@@ -2198,6 +2198,50 @@ mod tests {
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn portfolio_ownership_is_scoped_to_repository() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let store = Arc::new(store);
+        let mut waves = Vec::new();
+        for (name, repository) in [("ear", "first"), ("ear", "second"), ("duplicate", "first")] {
+            let wave = Wave::new(
+                crate::id::WaveId::new(),
+                name.into(),
+                directory.path().join(repository).display().to_string(),
+            );
+            store.create_wave(&wave).await.unwrap();
+            store
+                .put_pm_snapshot(crate::store::PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 2,
+                    snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+                    "id":format!("{repository}-{name}"), "slug":name, "name":name,
+                    "summary":"", "metric_targets":[], "flow":"feature", "status":"started",
+                    "krs":[{"text":"Retained planning is readable", "holds":false}],
+                    "initiative_ids":["initiative"], "team_ids":["team"]
+                }], "items":[]}))
+                    .unwrap(),
+                })
+                .await
+                .unwrap();
+            waves.push(wave);
+        }
+        super::validate_pm_portfolio(&store, &waves[..2])
+            .await
+            .unwrap();
+        let error = super::validate_pm_portfolio(&store, &waves)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("bound by both"), "{error}");
+    }
 
     #[tokio::test]
     async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {

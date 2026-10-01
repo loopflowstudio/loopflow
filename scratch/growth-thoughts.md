@@ -91,6 +91,12 @@ counts. Remote Flow readings still carry recorded Home/Task identity with an exp
 unavailable checkout-resolution reason. Owning-Home remote association must be
 verified before claiming association complete across Homes. No shipping claim or
 performance result follows from local model/transport proof.
+The 2026-09-30 [configured demo attempt](task-workspace-demo.md) reached app launch
+but found an installation-boundary blocker: Loopflow Dev queries the older installed
+CLI, while its matching branch helper refuses the main Home's owned database.
+Resolve that supported execution path before claiming this demo; the documented
+development promotion uses a disposable Home and does not meet Jack's main-Home
+request. No workspace acceptance or latency target passed that attempt.
 Unit 2 is not launch-ready:
 native primary-turn delivery remains unproved, and Flow replacement needs the
 durable transition specified below. Upstream `3dc89bc9a` has already removed the

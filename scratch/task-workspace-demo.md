@@ -17,6 +17,57 @@ screenshots of the same error in both the workspace and Open Task dialog. Retry
 cannot resolve it. The first reopening was premature; compilation did not prove
 runtime compatibility. No Unit 1 walkthrough or latency target has passed.
 
+## October 1 Project repair and concept review
+
+Jack Heart requested repairing Growth and Product's current Projects, then making
+Projects independent of optional chapter coordination. Jack also accepted a Task
+admission/completion audit and requested the broader research in this conversation.
+The accepted direction is in [the design](growth-thoughts.md#optional-coordination-above-independent-operations--october-1-review);
+[source findings, primary research and twelve ranked proposals](independent-operations-research.md)
+separate accepted constraints from possible follow-ups.
+
+Live provider inspection found one unarchived Project per Wave, both Backlog.
+Authorized status changes returned success for Growth
+`f95ba11f-ab26-4780-9b6b-8fb99a691e48` and Product
+`5420affb-2d31-411a-b8d4-5516a7f49b8e`, both now In Progress. Existing plans and
+Product's two KRs were retained; the existing `feature` fallback was recorded
+explicitly because the source reader requires a nonempty Flow. No chapter was
+rotated, Task moved or history retired. These are current-data repairs; optional
+chapters remain implementation work.
+
+Configured Product refresh then failed on a retained historical Project owned by
+another Team. Legacy adoption preceded the normal Team filter. The local repair
+reuses that filter before adoption and candidate selection, preserving foreign
+Projects and their migration receipts. Two focused `legacy_adoption_` tests passed,
+including listed and archived foreign Projects and ambiguity handling. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, and whitespace checks passed.
+Review finding: filtering only the adoption loop would still let a foreign Started
+Project suppress legitimate current selection; filtering the candidate inventory
+as well fixes that dependency.
+
+The materialized demo CLI was rebuilt with this repair and installed into the
+signed Dev app. Explicit `repo refresh product` succeeded against the copied Home;
+subsequent `wave status product --json` returns Projects and Tasks with state `ok`,
+the same current Project with status `started`, Flow `feature`, and both KRs.
+Growth's configured reading likewise returns its same Started Project and Tasks.
+Evidence: `.lf/tmp/sync-oct1/{growth-status-repair,product-status-repair,
+growth-demo-verified,product-adoption-verified}.json`,
+`product-adoption-refresh.log`, `adoption-tests.log`, `adoption-clippy.log`.
+The live main database was not upgraded. The Dev app was reopened on the accepted
+copied Home; native capture `/tmp/loopflow-20261001-151634.png` showed loading.
+The next capture returned `No window to snapshot (8)`. Window closure versus app
+exit was not established. Native rendering remains unverified for this repair;
+the successful CLI readings are not substituted for that proof.
+
+Filed [LOO-366](https://linear.app/loopflow/issue/LOO-366) for Project availability
+and optional chapters, and [LOO-367](https://linear.app/loopflow/issue/LOO-367) for
+Task admission/completion. Neither was launched. The deeper research was completed
+locally instead of filing a duplicate research Task. Remaining long-tail features
+are proposals. Next implementation should prove repeated/concurrent Project
+activation and no-chapter use, then the planning-only and managed delivery Task
+paths. Full Unit 1 provider continuation and measured layout performance remain
+unproved; this repair does not close those acceptance gaps.
+
 ## October 1 retry
 
 Jack requested integration with main and another demonstration. Loopflow selected

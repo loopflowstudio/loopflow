@@ -20,6 +20,79 @@ provider and latency walkthrough remains open. [Demo evidence](task-workspace-de
 records Jack's screenshots, the repairs and the current next step. These results
 do not establish live-main-Home operation or acceptance of Unit 1.
 
+## Optional coordination above independent operations — October 1 review
+
+Jack Heart requested repair of the missing current Projects and a Task making a
+Wave's In Progress Project reliably available, analogous to its primary Session.
+Jack then clarified that Projects should not have to conform to chapters: chapters
+are optional coordination for Project resets during global realignment. This
+supersedes this design's earlier assumption that chapter participation is a
+prerequisite for ordinary Project use. It does not authorize automatic retirement,
+Task cancellation, or a new chapter during the immediate repair.
+
+Jack broadened the review to middle-layer concepts that assume a higher-level
+workflow. Desired direction: smaller independent operations, with optional
+coordination made readily available by Desktop. The following boundaries are
+review boundaries. Jack accepted Project independence and the Task admission/completion audit; the remaining boundaries are proposals:
+
+- Project owns its plan, Tasks and status; a chapter reset coordinates transitions
+  across selected Projects without governing ordinary Project identity or naming.
+- Task records intended work and completion; managed Flow selection and Git/PR
+  delivery add execution and delivery policy. Inspect which Task operations need
+  those policies rather than assuming every operation needs a current Project,
+  worktree, PR or managed Flow.
+- Session owns a conversation and its driver; a primary-scope binding and Flow/Ask
+  boundary add their own selection and completion contracts. A finished turn does
+  not intrinsically complete a Task or settle a review.
+- Checkout/document operations own files and revisions; Task association and PR
+  comparison are additional relationships. Unit 1 already removes some of this
+  accidental dependency; do not characterize repaired paths as still broken.
+- Skills and captured Flows remain executable independently of planning; Work
+  attribution, advancement and chapter defaults are composition above that.
+
+Source observations: `ops/task.rs::create` resolves a current Project before
+filing; `ops/chapter.rs::select_current` selects exactly one Started Project;
+`docs/architecture/planning.md` gives current Projects a shared chapter name.
+The architecture already specifies that a Skill run needs no Wave/Project/Task,
+that taskless and managed Flows share a driver, and that Flow completion does not
+complete Task Work. Extend those existing boundaries rather than inventing a
+second execution system.
+
+Proposed usage: opening a Wave finds or ensures its ordinary current Project;
+filing a Task and starting a conversation require no chapter setup. A separate
+realignment action previews and coordinates resets. If reset fails partway,
+completed transitions remain recorded, unaffected Projects remain usable, and
+retry resumes the coordination without duplicating Projects or losing Tasks.
+Desktop makes the composed path easy; CLI and agents invoke the same operations.
+This is proposed usage/skill direction, not implemented command syntax.
+
+Keep the lower operation complete: identity, transaction boundaries, revision
+checks, exact driver/claim authority and recovery belong with the data they protect.
+Optional coordination must not move those guarantees into the UI. The audit test
+is whether an operation still makes sense without its parent workflow, and whether
+that workflow can be changed without replacing the lower object's identity.
+
+Open review: which Task admission/completion constraints are intrinsic intent and
+which are managed-work policy; whether Wave Project availability is ensured on
+creation/discovery or only before filing; behavior when several Projects already
+qualify. Jack clarified that Task supplies purpose, history and continuity to
+associated Flows; there is no separate “Task workflow” execution concept.
+
+Growth and Product's existing Projects were changed from Backlog to In Progress
+on October 1, with their existing `feature` fallback recorded explicitly to satisfy
+the current reader. Product's two KRs were retained. No chapter rotated, no Task
+was moved and no history was retired. Source demo refresh then exposed a separate
+legacy-adoption bug involving a historical Project owned by another Team.
+
+Implementation briefs are filed as [LOO-366](https://linear.app/loopflow/issue/LOO-366)
+(Project availability and optional chapters) and
+[LOO-367](https://linear.app/loopflow/issue/LOO-367) (Task admission/completion).
+Neither was launched. Jack requested the broader research here; the resulting
+[evidence and twelve ranked candidates](independent-operations-research.md)
+replace the proposed research Task. Remaining candidates are proposals, not
+implementation authorization. [Demo evidence](task-workspace-demo.md) records
+configured repair results and remaining proof.
+
 ## Left-panel visual revision
 
 Demo feedback, 2026-09-30: Jack Heart rejected the appearance of the LOO-330

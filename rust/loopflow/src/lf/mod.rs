@@ -1011,7 +1011,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Arm and watch a PR through CI repair and authoritative merge.
+    /// Prepare a PR, request exact-head auto-merge, and return without watching.
     Land {
         #[arg(long)]
         strict: bool,
@@ -1221,7 +1221,7 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
-    /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
+    /// Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]

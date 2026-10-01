@@ -151,14 +151,13 @@ Run history remain readable; confirmed provider trash makes retries idempotent.
 
 ## Ship
 
-Four commitment levels, all headless — pick by how done the work is and who
+Three commitment levels, all headless — pick by how done the work is and who
 lands it:
 
 ```bash
 lf pr publish                          # make work visible mid-stream; the agent's default verb
 lf submit                              # done, a person clicks merge
 lf land                                 # request exact-head auto-merge and return
-lf land                                # watch, repair CI, and return only after merge
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for

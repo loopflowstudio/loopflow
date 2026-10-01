@@ -84,9 +84,13 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: Exec =
-        serde_json::from_slice(&invoke(&["exec", "show", &ids[1].as_str()[..20], "--json"]))
-            .unwrap();
+    let detail: Exec = serde_json::from_slice(&invoke(&[
+        "monitor",
+        "show",
+        &ids[1].as_str()[..20],
+        "--json",
+    ]))
+    .unwrap();
     assert_eq!(detail, second.entries[0]);
     let caller: ExecPage = serde_json::from_slice(&invoke(&[
         "monitor",

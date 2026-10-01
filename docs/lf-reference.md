@@ -725,7 +725,7 @@ Internal command; invoked by the owning operation.
 
 ## lf home doctor
 
-Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
+Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
 
 | Argument | What it does |
 |---|---|
@@ -1027,7 +1027,7 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 
 ## lf task pr land
 
-Arm and watch a PR through CI repair and authoritative merge
+Prepare a PR, request exact-head auto-merge, and return without watching
 
 | Argument | What it does |
 |---|---|

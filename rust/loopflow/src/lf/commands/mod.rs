@@ -5,7 +5,6 @@ pub mod ci;
 pub mod desktop;
 pub mod discord;
 pub mod doctor;
-pub mod exec;
 pub mod flow;
 pub mod flow_inventory;
 pub mod home;

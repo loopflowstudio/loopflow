@@ -27,15 +27,15 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             .clone(),
         };
         let work = WorkRef::Wave(wave_id.clone());
-        if !matches!(command, WaveCommand::Rename { .. }) {
-            require_work_repository(&store, &work, repo).await?;
-        }
         match command {
-            WaveCommand::Place { home_id, json, .. } => print(
-                &store.place_work(&work, home_id).await?,
-                *json,
-                &format!("Wave {name}: placed on {home_id}"),
-            ),
+            WaveCommand::Place { home_id, json, .. } => {
+                require_wave_repository(&store, &wave_id, repo).await?;
+                print(
+                    &store.place_work(&work, home_id).await?,
+                    *json,
+                    &format!("Wave {name}: placed on {home_id}"),
+                )
+            }
             WaveCommand::Rename {
                 repo: target,
                 name,
@@ -48,7 +48,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                         .get_wave(&wave_id)
                         .await?
                         .ok_or_else(|| anyhow!("Wave {wave_id} not found"))?;
-                    crate::ops::pm::pm_rename_async(
+                    crate::ops::pm::pm_rename(
                         repo,
                         &crate::ops::pm::PmRenameOptions {
                             wave: Some(selected.name().to_string()),
@@ -93,35 +93,20 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
         .context("open the shared Loopflow store")
 }
 
-async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> anyhow::Result<()> {
-    let wave_id = match work {
-        WorkRef::Wave(wave_id) => wave_id.clone(),
-        WorkRef::Project(project_id) => {
-            store
-                .get_project(project_id)
-                .await?
-                .ok_or_else(|| anyhow!("Project {project_id} is not registered"))?
-                .wave_id
-        }
-        WorkRef::Task(task_id) => {
-            store
-                .get_task(task_id)
-                .await?
-                .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?
-                .wave_id
-        }
-    };
+async fn require_wave_repository(
+    store: &Store,
+    wave_id: &WaveId,
+    repo: &Path,
+) -> anyhow::Result<()> {
     let wave = store
-        .get_wave(&wave_id)
+        .get_wave(wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
     let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
     let local = store.get_wave_at(&locator).await?;
-    if local.as_ref().map(crate::work::wave::Wave::id) != Some(&wave_id) {
+    if local.as_ref().map(crate::work::wave::Wave::id) != Some(wave_id) {
         return Err(anyhow!(
-            "{} {} belongs to repository {}, not invoking repository {}",
-            work.kind(),
-            work.id(),
+            "Wave {wave_id} belongs to repository {}, not invoking repository {}",
             wave.repo(),
             locator.repo()
         ));

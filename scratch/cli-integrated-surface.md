@@ -76,7 +76,7 @@ children; it creates no additional stored object. Automatic help is parser disco
 | lf home install promote | Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence | keep (internal) | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
 | lf home install rollback | Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier | keep (internal) | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
 | lf home sync-skills | Compile loopflow skills into your home vendor Skills directories | keep (internal) | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
-| lf home doctor | Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage | keep | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
+| lf home doctor | Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage | keep | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
 | lf home ssh | Run lf on a Home or SSH host carrying your local credentials | keep | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
 | lf home user | Print the configured participant display name | keep | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
 | lf home id | Print this machine's stable local Home identity | keep | rust/loopflow/src/bin/lf.rs::execute_command; rust/loopflow/src/machine_install.rs |
@@ -105,7 +105,7 @@ children; it creates no additional stored object. Automatic help is parser disco
 | lf task pr publish | Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr open | Push and create or update a draft PR, then open its GitHub page. Existing ready PRs stay ready; opening a draft does not publish it | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr submit | Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
-| lf task pr land | Arm and watch a PR through CI repair and authoritative merge | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
+| lf task pr land | Prepare a PR, request exact-head auto-merge, and return without watching | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr abandon | Abandon branch: close PR, remove worktree, delete branch | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task wt | Worktree operations | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task wt create | Create a low-level sibling worktree | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |

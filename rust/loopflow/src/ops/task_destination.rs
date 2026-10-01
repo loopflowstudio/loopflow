@@ -92,23 +92,16 @@ pub(super) fn exec_args(operation: &str, options: &TaskExecOptions) -> Vec<Strin
         },
         operation.into(),
     ];
-    if operation == "start" {
-        if let Some(flow) = &options.flow {
-            args.push(flow.clone());
+    if let Some(flow) = &options.flow {
+        if operation != "start" {
+            args.push("--flow".into());
         }
+        args.push(flow.clone());
     }
     for (flag, value) in [
         ("--wave", &options.wave),
         ("--model", &options.agent),
         ("--name", &options.name),
-        (
-            "--flow",
-            if operation == "start" {
-                &None
-            } else {
-                &options.flow
-            },
-        ),
         ("--stack-on", &options.stack_on),
         ("--directive", &options.directive),
         ("--reason", &options.reason),

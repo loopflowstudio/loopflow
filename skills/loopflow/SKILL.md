@@ -38,10 +38,10 @@ authority, and never impersonates the User in chat.
 ```bash
 lf commit -m "message"               # local checkpoint
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                         # done; the user clicks merge
+lf submit                            # done; the user clicks merge
 lf land                              # request auto-merge; return
-lf pr land -c                        # land and complete the owning Task
-lf task sync --plan                       # show strategy; bare `lf task sync` applies it
+lf land -c                           # request Task completion after merge
+lf task sync --plan                  # show strategy; bare `lf task sync` applies it
 lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 

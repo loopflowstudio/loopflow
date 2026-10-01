@@ -54,6 +54,13 @@ all registered aliases. Main's resident, daemon, chat, webhook, in-turn Flow
 navigation and Chapter-table APIs remain deleted. The CLI's persistent landing
 watch test and its exclusive repair fixtures are deleted with that behavior.
 
+Compression removes the unreferenced `lf/commands/exec.rs` parser/dispatcher,
+`Store::forget_wave` and its SQLite implementation and exclusive deletion checks,
+and the unused synchronous PM rename wrapper. Monitor remains the sole command
+inventory. Current-Wave filtering still proves that historical rows survive.
+Wave placement checks now accept a Wave identity directly; launch-mode and
+forwarded Flow argument selection each use one decision.
+
 Preserve saved Flow graph/cursor/review, Task identity and PR/checkout, provider
 selection restrictions, exact client signaling, real process ancestry, raw
 provider evidence, DTO missingness and installation authority. No old spelling
@@ -103,3 +110,12 @@ pushed, published, landed or marked complete; shipment belongs to the supervisor
 Gate/CI retain affected-suite and release validation; these focused proofs are
 not a hosted gate receipt. Final compiled counts: 126 commands below root,
 419 flags, 84 positionals, 16 hidden commands and zero registered aliases.
+
+Compression review found deleted `arm` and `runs` spellings in landing recovery,
+and duplicate finite/waiting Land guidance. Recovery now requests `lf land`
+with the original completion/rotation disposition and names retained input
+artifacts when no conclusion exists. The Exec paging proof now inspects through
+Monitor instead of its deleted predecessor. Guides describe the finite handoff and
+use the selected mode/diff options. No command-catalog shape changed.
+
+Compression checks: `cargo test -p loopflow` (focused landing, launch, Wave preservation/placement, PR refusal, Exec paging, documentation and prompt-golden filters) — 37 passed; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` — passed; wider suites remain with gate/CI.

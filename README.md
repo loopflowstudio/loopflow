@@ -102,8 +102,7 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # watch, repair CI, merge, then complete the Task
+lf land -c                                           # request auto-merge and Task completion after merge
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts

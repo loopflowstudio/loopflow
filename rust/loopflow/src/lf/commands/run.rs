@@ -567,11 +567,11 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    cli.mode == Some(crate::lf::LaunchMode::Tui)
-        || cli.mode == Some(crate::lf::LaunchMode::Ide)
-        || cli.mode == Some(crate::lf::LaunchMode::Interactive)
-        || (cli.mode != Some(crate::lf::LaunchMode::Batch)
-            && (attached_tty || (skill.is_none() && message.is_none())))
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Batch) => false,
+        Some(_) => true,
+        None => attached_tty || (skill.is_none() && message.is_none()),
+    }
 }
 
 fn should_exec_via_skill(skill_name: &str) -> bool {

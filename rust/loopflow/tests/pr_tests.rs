@@ -1717,7 +1717,7 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
         result,
         Err(OpsError::Message(message))
             if message.contains("canonical checkout")
-                && message.contains("lf task run")
+                && message.contains("lf --task <issue-id> flow start")
     ));
 }
 

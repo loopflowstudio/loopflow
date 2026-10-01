@@ -63,10 +63,10 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
+| Interactive TUI | direct TTY or `--mode interactive` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
-| Include raw diff | `--diff` | `diff: true` |
+| Include raw diff | `--diff patch` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
@@ -96,7 +96,7 @@ The token breakdown shows what's included:
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff** | Branch diff when requested | `--diff` |
+| **diff** | Branch diff when requested | `--diff patch` |
 | **diff_files** | Files changed on this branch when requested | `diff_files: true` |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
@@ -346,7 +346,7 @@ frontmatter never changes scheduling.
 
 | | |
 |---|---|
-| **CLI** | `-i` (interactive), `-b` (batch/headless) |
+| **CLI** | `--mode interactive` (interactive), `--mode batch` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
 Flows declare a required User gate on the exact skill occurrence with a stable

@@ -5092,7 +5092,7 @@
     "short_aliases": []
   },
   {
-    "about": "Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses \u2014 leaving every target unchanged \u2014 on incompatible schema or persisted executable evidence",
+    "about": "Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence",
     "aliases": [],
     "hidden": true,
     "kind": "command",
@@ -5474,7 +5474,7 @@
     "short_aliases": []
   },
   {
-    "about": "Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage",
+    "about": "Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -7743,7 +7743,7 @@
     "short_aliases": []
   },
   {
-    "about": "Arm and watch a PR through CI repair and authoritative merge",
+    "about": "Prepare a PR, request exact-head auto-merge, and return without watching",
     "aliases": [],
     "hidden": false,
     "kind": "command",

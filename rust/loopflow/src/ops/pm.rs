@@ -2473,15 +2473,7 @@ async fn pm_sync_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub fn pm_rename(
-    repo: &Path,
-    options: &PmRenameOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmRenameResult> {
-    block_on_pm(pm_rename_async(repo, options, progress))
-}
-
-pub(crate) async fn pm_rename_async(
+pub(crate) async fn pm_rename(
     repo: &Path,
     options: &PmRenameOptions,
     progress: &impl Progress,

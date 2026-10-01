@@ -986,16 +986,7 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
                 println!("degraded: {degraded}");
             }
             for pr in &state.prs {
-                println!(
-                    "PR #{} {}: {}{}",
-                    pr.number,
-                    pr.task.as_deref().unwrap_or("(no Task)"),
-                    pr.state,
-                    pr.detail
-                        .as_deref()
-                        .map(|detail| format!(" — {detail}"))
-                        .unwrap_or_default()
-                );
+                println!("{pr}");
             }
             for repair in &state.repairs {
                 println!(

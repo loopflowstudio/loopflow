@@ -1396,14 +1396,8 @@ pub(crate) fn reconcile_armed_pr(
     pr: &PrInfo,
 ) -> OpsResult<PrLanding> {
     let landing = record_armed_pr(repo, options, pr)?;
-    tokio::runtime::Runtime::new()?.block_on(async {
-        reconcile_pr_landing(
-            landing_store().await?,
-            landing,
-            Arc::new(GithubLandingDriver { repairs: true }),
-        )
-        .await
-    })
+    tokio::runtime::Runtime::new()?
+        .block_on(async { repair_landing(landing_store().await?, landing).await })
 }
 
 /// One landing check that may start a ci-fix: the entry point `lf ci watch`

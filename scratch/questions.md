@@ -8,8 +8,8 @@ reversible choice; none has Jack Heart's confirmation.
    failing PR that has no Task and no landing. A standalone PR someone delivered
    with `lf land` has a landing and no Task; it is still repaired, because that
    is today's behavior and the landing is an explicit request to deliver it.
-   Reading the decision strictly would stop repairing those. One line in
-   `ci_watch::respond` decides this.
+   Reading the decision strictly would stop repairing those. The
+   `match landing` in `ci_watch::Watcher::pass` decides this.
 
 2. **A failing Task PR nobody armed is reported, not repaired.** The repair
    contract (`ci-fix`, `admit_ci_fix`, the incident's reservation) is defined

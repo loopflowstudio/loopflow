@@ -19,7 +19,6 @@ use time::OffsetDateTime;
 
 use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::SharedStore;
-use crate::work::task::CiCheck;
 
 use super::cron::Launchctl;
 use super::error::{OpsError, OpsResult};
@@ -239,7 +238,8 @@ enum Gate {
     Passing,
     Pending,
     Failing {
-        checks: Vec<CiCheck>,
+        /// The failing checks' names, sorted and distinct.
+        names: Vec<String>,
         /// When the last failing check completed at the provider.
         completed_at: Option<OffsetDateTime>,
     },
@@ -311,21 +311,18 @@ fn read_gate(
     }
     let reading = MergeGateReading::from_checks(required_checks, full);
     if reading.failing {
-        let completed_at = reading
+        let names: BTreeSet<String> = reading
             .failing_leaves
-            .iter()
-            .filter_map(|check| completed.get(&check.name).copied())
-            .max();
+            .into_iter()
+            .map(|check| check.name)
+            .collect();
         Gate::Failing {
-            checks: reading
-                .failing_leaves
-                .into_iter()
-                .map(|check| CiCheck {
-                    name: check.name,
-                    url: check.url,
-                })
-                .collect(),
-            completed_at,
+            completed_at: names
+                .iter()
+                .filter_map(|name| completed.get(name))
+                .max()
+                .copied(),
+            names: names.into_iter().collect(),
         }
     } else if reading.pending {
         Gate::Pending
@@ -334,27 +331,13 @@ fn read_gate(
     }
 }
 
-/// What a reading asks of the watcher. A recorded landing is the request to
+/// Why a failing PR is left alone. A recorded landing is the request to
 /// deliver a PR, so only a landing is repaired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Response {
-    /// Run the landing check, which may start a ci-fix.
-    CheckLanding,
-    /// Run the landing check every `LANDING_CHECK`.
-    CheckLandingOccasionally,
-    Report(&'static str),
-    Nothing,
-}
-
-fn respond(gate: &Gate, has_task: bool, has_landing: bool) -> Response {
-    match (gate, has_landing, has_task) {
-        (Gate::Failing { .. }, true, _) => Response::CheckLanding,
-        (_, true, _) => Response::CheckLandingOccasionally,
-        (Gate::Failing { .. }, false, true) => {
-            Response::Report("not armed; `lf arm` or `lf land` hands it to repair")
-        }
-        (Gate::Failing { .. }, false, false) => Response::Report("no Task; reported, not repaired"),
-        _ => Response::Nothing,
+fn unrepaired(has_task: bool) -> &'static str {
+    if has_task {
+        "not armed; `lf arm` or `lf land` hands it to repair"
+    } else {
+        "no Task; reported, not repaired"
     }
 }
 
@@ -419,6 +402,17 @@ pub struct WatchedPr {
     pub head_sha: String,
     pub state: String,
     pub detail: Option<String>,
+}
+
+impl std::fmt::Display for WatchedPr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let task = self.task.as_deref().unwrap_or("(no Task)");
+        write!(f, "PR #{} {task}: {}", self.number, self.state)?;
+        match &self.detail {
+            Some(detail) => write!(f, " — {detail}"),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -500,21 +494,14 @@ struct Watcher {
     required: HashMap<String, (Instant, BTreeSet<String>)>,
     /// Failures whose repair already finished; unchanged evidence is not rechecked.
     surfaced: HashSet<(u32, String, Vec<String>)>,
-    /// When each quiet landing was last checked, and what that check said.
+    /// When each landing was last checked, and what that check said.
     landing_checked: HashMap<u32, (Instant, Option<String>)>,
     state: CiWatchState,
 }
 
 impl Watcher {
-    fn new(root: &Path) -> OpsResult<Self> {
-        let (owner, name) = crate::engine::worktrees::github_repo_nwo(root)
-            .ok_or_else(|| error("the origin remote is not a GitHub repository"))?;
-        let nwo = format!("{owner}/{name}");
-        let repo_id = crate::repository::RepoId::discover(root)
-            .map_err(error)?
-            .as_str()
-            .to_string();
-        Ok(Self {
+    fn new(nwo: String, repo_id: String) -> Self {
+        Self {
             state: CiWatchState {
                 pid: std::process::id(),
                 repo: nwo.clone(),
@@ -532,7 +519,7 @@ impl Watcher {
             required: HashMap::new(),
             surfaced: HashSet::new(),
             landing_checked: HashMap::new(),
-        })
+        }
     }
 
     fn open_pulls(&mut self, fetch: Fetch<'_>) -> OpsResult<Vec<RestPull>> {
@@ -639,20 +626,15 @@ impl Watcher {
                     ("unknown".to_string(), Some(cause.to_string()))
                 }
                 Ok(gate) => {
-                    let detail = match (respond(&gate, task.is_some(), landing.is_some()), landing)
-                    {
-                        (Response::CheckLanding, Some(landing)) => {
-                            let task = task.as_deref();
-                            let (ok, detail) =
-                                self.check_landing(store, landing, &pull, &gate, task).await;
-                            clean &= ok;
-                            detail
-                        }
-                        (Response::CheckLandingOccasionally, Some(landing)) => {
-                            let due = self
-                                .landing_checked
-                                .get(&pull.number)
-                                .is_none_or(|(at, _)| at.elapsed() >= LANDING_CHECK);
+                    let failing = matches!(gate, Gate::Failing { .. });
+                    let detail = match landing {
+                        Some(landing) => {
+                            // A failure is checked at once; a quiet landing occasionally.
+                            let due = failing
+                                || self
+                                    .landing_checked
+                                    .get(&pull.number)
+                                    .is_none_or(|(at, _)| at.elapsed() >= LANDING_CHECK);
                             if due {
                                 let task = task.as_deref();
                                 let (ok, detail) =
@@ -665,8 +647,8 @@ impl Watcher {
                                 .get(&pull.number)
                                 .and_then(|(_, detail)| detail.clone())
                         }
-                        (Response::Report(detail), _) => Some(detail.to_string()),
-                        _ => None,
+                        None if failing => Some(unrepaired(task.is_some()).to_string()),
+                        None => None,
                     };
                     (gate.label().to_string(), detail)
                 }
@@ -684,16 +666,7 @@ impl Watcher {
             if before.map(|old| (&old.state, &old.detail)) != Some((&pr.state, &pr.detail))
                 && (pr.detail.is_some() || before.is_some())
             {
-                println!(
-                    "PR #{} {}: {}{}",
-                    pr.number,
-                    pr.task.as_deref().unwrap_or("(no Task)"),
-                    pr.state,
-                    pr.detail
-                        .as_deref()
-                        .map(|detail| format!(" — {detail}"))
-                        .unwrap_or_default()
-                );
+                println!("{pr}");
             }
         }
         let open: HashSet<u32> = watched.iter().map(|pr| pr.number).collect();
@@ -717,19 +690,14 @@ impl Watcher {
     ) -> (bool, Option<String>) {
         let failure = match gate {
             Gate::Failing {
-                checks,
+                names,
                 completed_at,
-            } => {
-                let mut names: Vec<String> = checks.iter().map(|c| c.name.clone()).collect();
-                names.sort();
-                names.dedup();
-                Some((names, *completed_at))
-            }
+            } => Some((names, *completed_at)),
             _ => None,
         };
         let key = failure
             .as_ref()
-            .map(|(names, _)| (pull.number, pull.head.sha.clone(), names.clone()));
+            .map(|(names, _)| (pull.number, pull.head.sha.clone(), (*names).clone()));
         if key.as_ref().is_some_and(|key| self.surfaced.contains(key)) {
             return (
                 true,
@@ -743,12 +711,12 @@ impl Watcher {
             return (true, Some("ci-fix running".to_string()));
         }
         let result = super::pr_landing::repair_landing(store.clone(), landing.clone()).await;
-        if let Some((_, Some(completed_at))) = &failure {
+        if let Some((_, Some(completed_at))) = failure {
             if let Err(cause) = store.sqlite.record_ci_provider_completion(
                 &landing.repo,
                 landing.pr_number,
                 &pull.head.sha,
-                *completed_at,
+                completed_at,
             ) {
                 eprintln!(
                     "PR #{}: provider completion not recorded: {cause}",
@@ -853,7 +821,10 @@ pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
                 return Ok(());
             }
         };
-        let mut watcher = Watcher::new(&root)?;
+        let (owner, name) = crate::engine::worktrees::github_repo_nwo(&root)
+            .ok_or_else(|| error("the origin remote is not a GitHub repository"))?;
+        let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
+        let mut watcher = Watcher::new(format!("{owner}/{name}"), repo_id.as_str().to_string());
         let store = super::pr_landing::landing_store().await?;
         println!("watching CI for {}", watcher.nwo);
         let fetch = |path: &str, etag: Option<&str>| gh_rest(&root, path, etag);
@@ -1116,14 +1087,14 @@ mod tests {
             &required(),
         );
         let Gate::Failing {
-            checks,
+            names,
             completed_at,
         } = gate
         else {
             panic!("expected a failing gate, got {gate:?}");
         };
         assert_eq!(
-            checks.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            names,
             ["rust-test"],
             "the aggregate gives way to the leaf that broke"
         );
@@ -1176,32 +1147,6 @@ mod tests {
             read_gate(vec![], vec![status], &required()),
             Gate::Failing { .. }
         ));
-    }
-
-    #[test]
-    fn only_a_recorded_landing_is_repaired() {
-        let failing = Gate::Failing {
-            checks: vec![],
-            completed_at: None,
-        };
-        assert_eq!(respond(&failing, true, true), Response::CheckLanding);
-        assert_eq!(respond(&failing, false, true), Response::CheckLanding);
-        assert!(matches!(
-            respond(&failing, true, false),
-            Response::Report(_)
-        ));
-        assert_eq!(
-            respond(&failing, false, false),
-            Response::Report("no Task; reported, not repaired")
-        );
-        for quiet in [Gate::Pending, Gate::Passing, Gate::Unreported] {
-            assert_eq!(
-                respond(&quiet, true, true),
-                Response::CheckLandingOccasionally,
-                "a conflicting head or a CI timeout fails no check"
-            );
-            assert_eq!(respond(&quiet, true, false), Response::Nothing);
-        }
     }
 
     #[test]
@@ -1323,28 +1268,6 @@ mod tests {
         Ok(ok(body, "\"v1\""))
     }
 
-    fn watcher() -> Watcher {
-        Watcher {
-            nwo: "loopflowstudio/loopflow".into(),
-            repo_id: "loopflowstudio/loopflow".into(),
-            cache: RestCache::default(),
-            required: HashMap::new(),
-            surfaced: HashSet::new(),
-            landing_checked: HashMap::new(),
-            state: CiWatchState {
-                pid: 1,
-                repo: "loopflowstudio/loopflow".into(),
-                started_at: 0,
-                last_poll_at: None,
-                next_poll_at: None,
-                rate_remaining: None,
-                degraded: None,
-                prs: Vec::new(),
-                repairs: Vec::new(),
-            },
-        }
-    }
-
     #[tokio::test]
     async fn a_failing_pr_with_no_task_is_reported_and_never_repaired() {
         let directory = tempfile::tempdir().unwrap();
@@ -1355,7 +1278,8 @@ mod tests {
             .await
             .unwrap(),
         );
-        let mut watcher = watcher();
+        let repo = "loopflowstudio/loopflow".to_string();
+        let mut watcher = Watcher::new(repo.clone(), repo);
         assert!(watcher.pass(&store, &github).await.unwrap());
         assert_eq!(
             watcher.state.prs,

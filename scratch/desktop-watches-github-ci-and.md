@@ -80,4 +80,4 @@ command that owns its landing and cannot assume a watcher.
 
 ## Checks
 
-2026-10-01: `cargo fmt`, `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo test -p loopflow --lib -- ops::ci_watch ops::pr_landing ops::cron lf::tests`, `--test land_tests lf_pr_land_returns_before`, `--test release_tests release_run_repairs_failed_checks`, `--test documented_commands`, `--test golden_prompt`, `--test scheduled_task_tests`, and `swift test --filter CIWatchersTests` pass; full suites belong to gate/CI.
+2026-10-01: `cargo fmt`, `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo test -p loopflow --lib -- ops::ci_watch ops::pr_landing` pass after the compress pass (25 tests); earlier on this branch `ops::cron lf::tests`, `--test land_tests lf_pr_land_returns_before`, `--test release_tests release_run_repairs_failed_checks`, `--test documented_commands`, `--test golden_prompt`, `--test scheduled_task_tests` and `swift test --filter CIWatchersTests` passed; full suites belong to gate/CI.

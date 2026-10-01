@@ -96,7 +96,8 @@ struct Step {
 #[derive(Debug)]
 struct Turn {
     peak_input: Option<i64>,
-    seconds: i64,
+    started_at: i64,
+    completed_at: i64,
 }
 
 #[derive(Default)]
@@ -181,10 +182,16 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
 }
 
 fn step(session: &SessionHistory, event_times: &[i64]) -> Step {
-    let spans: Vec<(i64, i64)> = session
+    let turns: Vec<Turn> = session
         .providers
         .iter()
-        .filter_map(|turn| Some((turn.started_at?, turn.completed_at?)))
+        .filter_map(|turn| {
+            Some(Turn {
+                peak_input: turn.usage.peak_input_tokens,
+                started_at: turn.started_at?,
+                completed_at: turn.completed_at?,
+            })
+        })
         .collect();
     Step {
         at: session.observed_at,
@@ -196,30 +203,21 @@ fn step(session: &SessionHistory, event_times: &[i64]) -> Step {
             .total_input_tokens
             .or(session.usage.input_tokens)
             .zip(session.usage.output_tokens),
-        turns: session
-            .providers
-            .iter()
-            .filter_map(|turn| {
-                Some(Turn {
-                    peak_input: turn.usage.peak_input_tokens,
-                    seconds: turn.completed_at? - turn.started_at?,
-                })
-            })
-            .collect(),
-        silences: silences(event_times, &spans),
+        silences: silences(event_times, &turns),
+        turns,
     }
 }
 
 /// Gaps over the threshold between consecutive events inside a turn that
 /// completed. Waiting between turns is a person's time, not the provider's.
-fn silences(event_times: &[i64], turns: &[(i64, i64)]) -> Vec<i64> {
+fn silences(event_times: &[i64], turns: &[Turn]) -> Vec<i64> {
     event_times
         .windows(2)
         .filter(|pair| pair[1] - pair[0] > SILENCE_SECONDS)
         .filter(|pair| {
             turns
                 .iter()
-                .any(|(start, end)| *start <= pair[0] && pair[1] <= *end)
+                .any(|turn| turn.started_at <= pair[0] && pair[1] <= turn.completed_at)
         })
         .map(|pair| pair[1] - pair[0])
         .collect()
@@ -289,37 +287,33 @@ fn grouped<'a>(steps: &[&'a Step], key: impl Fn(&'a Step) -> Option<&'a str>) ->
     groups
 }
 
-fn band(peak_input: Option<i64>) -> (usize, &'static str) {
-    match peak_input {
-        None => (BANDS.len(), "unknown"),
-        Some(peak) => BANDS
+/// Index into `BANDS`; turns without a peak sort after every band.
+fn band(peak_input: Option<i64>) -> usize {
+    peak_input.map_or(BANDS.len(), |peak| {
+        BANDS
             .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, (_, floor))| peak >= *floor)
-            .map(|(index, (label, _))| (index, *label))
-            .expect("the first band starts at zero"),
-    }
+            .rposition(|(_, floor)| peak >= *floor)
+            .unwrap_or(0)
+    })
 }
 
 fn turn_bands(steps: &[&Step]) -> Vec<TurnBand> {
-    let mut seconds = BTreeMap::<(&str, usize, &'static str), Vec<i64>>::new();
+    let mut seconds = BTreeMap::<(&str, usize), Vec<i64>>::new();
     for step in steps {
         for turn in &step.turns {
-            let (order, label) = band(turn.peak_input);
             seconds
-                .entry((&step.harness, order, label))
+                .entry((&step.harness, band(turn.peak_input)))
                 .or_default()
-                .push(turn.seconds);
+                .push(turn.completed_at - turn.started_at);
         }
     }
     seconds
         .into_iter()
-        .map(|((harness, _, band), mut seconds)| {
+        .map(|((harness, band), mut seconds)| {
             seconds.sort_unstable();
             TurnBand {
                 harness: harness.to_string(),
-                band,
+                band: BANDS.get(band).map_or("unknown", |(label, _)| label),
                 turns: seconds.len(),
                 median_minutes: percentile(&seconds, 0.5) / 60.0,
                 p90_minutes: percentile(&seconds, 0.9) / 60.0,
@@ -571,19 +565,23 @@ mod tests {
         step.turns = vec![
             Turn {
                 peak_input: Some(99_999),
-                seconds: 60,
+                started_at: 0,
+                completed_at: 60,
             },
             Turn {
                 peak_input: Some(210_000),
-                seconds: 600,
+                started_at: 0,
+                completed_at: 600,
             },
             Turn {
                 peak_input: Some(250_000),
-                seconds: 2_880,
+                started_at: 0,
+                completed_at: 2_880,
             },
             Turn {
                 peak_input: None,
-                seconds: 30,
+                started_at: 0,
+                completed_at: 30,
             },
         ];
         let report = build_report(&[step], FIRST_WEEK_START + DAY);
@@ -599,7 +597,14 @@ mod tests {
     #[test]
     fn silence_counts_only_long_gaps_inside_a_completed_turn() {
         // 0→700 is inside the turn; 800→2000 spans its end; 2000→2100 is short.
-        let gaps = silences(&[0, 700, 800, 2_000, 2_100], &[(0, 900)]);
+        let gaps = silences(
+            &[0, 700, 800, 2_000, 2_100],
+            &[Turn {
+                peak_input: None,
+                started_at: 0,
+                completed_at: 900,
+            }],
+        );
         assert_eq!(gaps, [700]);
     }
 

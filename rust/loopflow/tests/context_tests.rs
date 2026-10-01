@@ -626,13 +626,14 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, content).unwrap();
     }
-    let components = gather_context(&GatherContextOpts {
+    let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         wave: Some("infrastructure/release".into()),
         docs: vec!["wave/infrastructure/release/GOAL.md".into()],
         ..Default::default()
     })
     .unwrap();
+    loopflow::engine::drop_duplicate_docs(&mut components, repo);
     let paths: Vec<_> = components
         .docs
         .iter()
@@ -667,7 +668,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         "Release decisions",
         "Release notes",
     ] {
-        assert_eq!(prompt.matches(content).count(), 1);
+        assert_eq!(prompt.matches(content).count(), 1, "{content}");
     }
     assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release goal").unwrap());
     assert!(prompt.find("Repository decisions").unwrap() < prompt.find("Parent goal").unwrap());

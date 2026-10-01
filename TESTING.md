@@ -560,6 +560,15 @@ cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
+For document gathering or deduplication changes, run the complete context suite
+alongside the delivery checks; a test-name filter alone misses ancestor coverage.
+Rendering gathered documents must include the production deduplication step.
+
+```bash
+cargo test -p loopflow --test context_tests
+cargo test -p loopflow --lib context_delivery
+```
+
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
 to cover interactive skill launches. Keep prose contracts in builtin tests;

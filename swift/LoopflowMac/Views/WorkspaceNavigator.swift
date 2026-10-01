@@ -404,7 +404,7 @@ struct WorkspaceNavigator: View {
 
     @ViewBuilder private var repositoryActions: some View {
         if let onConversation { Button("New repository conversation") { onConversation(nil) } }
-        if let onNewShell { Button("New terminal", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
+        if let onNewShell { Button("New shell", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
         if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
     }
 

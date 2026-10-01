@@ -231,7 +231,7 @@ and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
 Run. A prepared Run alone does not establish live provider activity.
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
-creating a Task or running an autonomous operating pass. **New terminal** opens
+creating a Task or running an autonomous operating pass. **New shell** opens
 an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 

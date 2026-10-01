@@ -93,6 +93,20 @@ replace the proposed research Task. Remaining candidates are proposals, not
 implementation authorization. [Demo evidence](task-workspace-demo.md) records
 configured repair results and remaining proof.
 
+## Session selection revision — October 1
+
+Jack Heart requested one existing Session open full-size without a sidebar. With
+multiple Sessions, use a collapsible sidebar; multi-selection creates splits.
+This supersedes the initial always-visible strip. Exact split maintenance is open.
+
+Proposed mechanics: retain surviving pane identities, order and relative ratios;
+adding splits the focused pane; removing lets its sibling expand. Selection never
+terminates or completes a Session. Incoming Sessions preserve layout and focus.
+Reuse the existing retained tree and visibility state. Keep a sidebar toggle.
+These mechanics are proposed, not approved or implemented. Clarify multi-select
+checkboxes versus modifier keys, shell participation, and whether reselect restores
+an earlier slot before changing the layout owner.
+
 ## Left-panel visual revision
 
 Demo feedback, 2026-09-30: Jack Heart rejected the appearance of the LOO-330

@@ -405,6 +405,7 @@ struct SessionsContentView: View {
     @State private var layoutRevision = 0
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
+    @State private var launchErrorTitle = "Could not start conversation"
     @State private var completing: String?
     @Environment(\.palette) private var palette
 
@@ -652,7 +653,7 @@ struct SessionsContentView: View {
                 WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask, onNewSession: newTaskSession)
             }.frame(minWidth: 680, minHeight: 560)
         }
-        .alert("Could not start conversation", isPresented: Binding(
+        .alert(launchErrorTitle, isPresented: Binding(
             get: { launchError != nil },
             set: { if !$0 { launchError = nil } }
         )) {
@@ -761,7 +762,13 @@ struct SessionsContentView: View {
             if fileTask?.task.reference.workspace?.localExists == false,
                navigation.preparedTaskWorktrees[fileTask?.task.id ?? ""] == nil {
                 Text("Recorded checkout is missing").font(Typography.meta)
-                Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
+                if let runtime = fileTask?.task.runtime, runtime.status != .ready {
+                    Text("This Task is \(runtime.status.label). Checkout restoration is unavailable.")
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
+                    Button("View Task details") { workspace.showsDetails = true }
+                } else {
+                    Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
+                }
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 14).frame(width: 224)
@@ -784,7 +791,10 @@ struct SessionsContentView: View {
                     navigation.preparedTaskWorktrees[task.task.id] = path
                     workspace.showsFiles = true
                 }
-            } catch { launchError = error.localizedDescription }
+            } catch {
+                launchErrorTitle = conversation ? "Could not start conversation" : "Could not prepare checkout"
+                launchError = error.localizedDescription
+            }
         }
     }
 
@@ -884,7 +894,10 @@ struct SessionsContentView: View {
     private func startConversation() {
         guard let conversationScope = model.conversationScope else { return }
         do { try launch(conversationScope, in: navigation) }
-        catch { launchError = error.localizedDescription }
+        catch {
+            launchErrorTitle = "Could not start conversation"
+            launchError = error.localizedDescription
+        }
     }
 
     /// `navigation` belongs to the repository that requested the launch; a
@@ -933,11 +946,11 @@ struct SessionsContentView: View {
             }
             Divider()
             if let path {
-                Button("New terminal in this worktree") {
+                Button("New shell in this worktree") {
                     worktreeLayout.focus(slot)
                     workspaces.workspace(for: path).multiplexer.newShell()
                 }
-                .accessibilityLabel("New terminal in worktree")
+                .accessibilityLabel("New shell in worktree")
             }
             Button("Split worktrees right") { worktreeLayout.split(slot, axis: .vertical) }
                 .accessibilityLabel("Split worktrees right")
@@ -1518,12 +1531,12 @@ private struct SessionPaneView: View {
         ContentUnavailableView {
             Label("No session open", systemImage: "terminal")
         } description: {
-            Text("Choose a session from the sidebar or start a terminal.")
+            Text("Choose a session from the sidebar or open a shell.")
         } actions: {
             Button {
                 store.newShell()
             } label: {
-                Label("New terminal", systemImage: "terminal")
+                Label("New shell", systemImage: "terminal")
             }
             .buttonStyle(.bordered)
             .tint(TerminalPalette.accent)

@@ -86,6 +86,35 @@ step: Jack hides/restores Sessions using the icon immediately left of +, then us
 + → New shell and Files to review the compact workspace controls. No new visual
 acceptance or performance result is inferred from this capture.
 
+### Further feedback — October 1, 15:30
+
+Jack Heart reported Infrastructure's missing-current-Project warning. A fresh
+provider read confirmed its single existing Project was Backlog. The same repair
+set it In Progress and recorded its existing `feature` fallback, preserving both
+KRs. Configured refresh succeeded; the bundled matching CLI subsequently returned
+Infrastructure Projects and Tasks `ok`. Receipts are in
+`.lf/tmp/sync-oct1/infrastructure-{provider,status-repair,repaired-reading}.json`.
+The refresh persisted Infrastructure's Wave identity in GOAL.md.
+
+Jack questioned “New terminal”; its action creates a shell. Labels and explanatory
+copy now consistently say “New shell.” Clicking Restore checkout on LOO-309 then
+produced a misleading conversation-start alert. The backend refuses preparation
+for abandoned/completed Tasks; the view now explains that existing limitation and
+offers Task details. Checkout failures have a checkout-specific alert title. No
+Task was revived. Historical checkout recovery remains a product question.
+
+Eleven WorkspaceDestinationTests passed; SwiftPM and Xcode fallback build-for-testing
+passed. A post-Xcode query through target/dev-app-control failed because the build
+replaced that helper with the authored 0.12.29 catalog. Repeating the read with the
+unchanged bundled materialized CLI succeeded; no database was modified to bypass
+that refusal. The UI-only correction was installed with the matching bundled CLI preserved.
+The existing window was not restarted; the correction appears on next launch.
+
+Jack then requested a single Session without sidebar, and a collapsible sidebar
+with multi-selection producing splits for multiple Sessions. Exact split changes
+remain open; the design records proposed stable-pane mechanics separately. This
+layout revision is not yet implemented or accepted in a live demo.
+
 ## October 1 retry
 
 Jack requested integration with main and another demonstration. Loopflow selected

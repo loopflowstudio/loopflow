@@ -265,7 +265,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
         });
     let ready_conversation = session.kind == crate::session::SessionKind::Conversation
         && session.ready_summary.is_some();
-    if session.kind == crate::session::SessionKind::Ask || current_review || ready_conversation {
+    if current_review || ready_conversation {
         Some(SessionAttention::Review)
     } else if session.interactive
         && session.latest_turn.as_deref() == Some("completed")
@@ -2270,11 +2270,7 @@ mod tests {
         );
         summary.task_terminal = true;
         assert_eq!(super::summary_surface(&summary).attention, None);
-        summary.kind = crate::session::SessionKind::Ask;
-        assert_eq!(
-            super::summary_surface(&summary).attention,
-            Some(super::SessionAttention::Review)
-        );
+        summary.task_terminal = false;
         summary.completed_at = Some(1);
         assert_eq!(super::summary_surface(&summary).attention, None);
     }

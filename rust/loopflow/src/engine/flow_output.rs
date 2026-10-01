@@ -13,7 +13,7 @@ pub enum FlowOutput {
 
 impl FlowOutput {
     pub fn instructions(&self) -> String {
-        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Flow decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That ends this turn; the answer starts another turn in this conversation for reassessment.", self.schema())
+        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Flow decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Flow at this position; explain the missing input in the reason.", self.schema())
     }
 
     pub fn decode_receipt(&self, payload: &Value) -> Result<SkillOutcome, String> {

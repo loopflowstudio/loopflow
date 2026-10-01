@@ -260,7 +260,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Give one Session a human-assigned name and return the authoritative
-    /// record. A Run ID reaches the Ask or Flow boundary that owns it.
+    /// record. A Run ID reaches the conversation or Flow boundary that owns it.
     public func renameSession(
         id: String,
         name: String,
@@ -280,7 +280,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete an interactive conversation, Flow review, or blocked Ask.
+    /// Complete an interactive conversation or Flow review.
     public func completeSession(
         id: String,
         cwd: String? = nil

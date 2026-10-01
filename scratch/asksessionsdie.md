@@ -1,6 +1,6 @@
 # Remove Ask
 
-Implementation plan draft — 2026-10-01. Product direction established by Jack Heart; kickoff resolves the mechanisms below. No implementation has started.
+Implementation — 2026-10-01. Product direction established by Jack Heart. All three internal slices are implemented; broader gate acceptance remains.
 
 ## What to build
 
@@ -26,15 +26,24 @@ A Task's headless agent cannot proceed, explains why in its ordinary output, and
 
 The same failure behavior applies to taskless work; absence of a Wave never causes creation of an operator or conversation. Its caller receives the failure.
 
-## Current system
+## Implementation findings
 
-- `lf/commands/ask.rs` creates a requested Session and waits for its completion through `ops/human_session.rs`.
-- `lf/commands/flow.rs` intercepts a Blocked decision, launches `flow_unblock`, waits, and consumes Ask feedback through `store/sqlite/flows.rs::answer_flow_blocker`.
-- `controller/task/mod.rs` opens Ask on decision failure and recovery. `ops/task.rs` can require completed Ask feedback before retrying.
-- `ops/task_execution.rs` exposes failures already, but its recovery guidance directs people to unblock Sessions.
-- `engine/builtins/wave/skill/wave_session.md` already reads Task status and evidence, but tells the operator to send human decisions to separate Sessions. `wave_operate.md` already inspects failed Task outcomes.
+- The driver and controllers no longer open Ask or consume its feedback. Blocked
+  verdicts persist through the ordinary failure path; explicit retry retains the
+  same Flow position and conversation.
+- Source review found an additional Ask exception in `store/sqlite/flows.rs`:
+  `project_output` hid blocked verdicts. Removing only the driver interception
+  caused repeated checkpointing instead of failure. The exception is removed,
+  with lifecycle and saved-verdict recovery coverage.
+- Scheduled Task reconciliation also cleared known failures. It now leaves
+  recorded failures stopped. Existing bounded launch recovery remains intact.
+- Former Ask rows convert to ordinary conversations in the `remove_ask` draft,
+  ordered after `primary_session_scope`. Their request, native history, feedback,
+  completion and attribution remain; the retired unblock skill is cleared.
+- Primary conversation launch keeps its existing terminal identity under the
+  renamed conversation helpers. Task reviews retain their completion contract.
 
-Paths above are relative to `rust/loopflow/src/`.
+Paths are relative to `rust/loopflow/src/`.
 
 ## Data structures and key functions
 
@@ -67,13 +76,16 @@ Deleting only the CLI would leave automatic Ask creation in controllers. Replaci
 
 No renamed Ask, replacement queue, automatic child chat, polling waiter, agent reporting command, or Wave escalation prerequisite. No automatic retry on unchanged evidence. A normal successful provider turn must not become failure merely because its prose mentions difficulty; retain the existing execution/Flow outcome contract. Reading logs grants no new process or delivery authority.
 
-## Internal slices
+## Remaining work
 
-An indivisible removal, implemented in internal slices and shipped as one PR.
+Gate owns the full materialized Rust suite, architecture check and complete
+Desktop suite. Implement has exercised failure/retry, Task reconciliation,
+conversation launch/reopen, migration preservation, DTOs and prompt goldens.
+The acceptance is split between public CLI provider simulations, public Task
+reconciliation against a recorded managed failure, and store recovery at a
+saved blocked verdict; no live provider or display is required.
 
-1. **This slice:** remove Ask interception, `answer_flow_blocker`, controller auto-launches, and Task recovery prerequisites together. Return Blocked through the existing transition; preserve Task identity, cursor, claims and retry semantics. Update recovery guidance in `ops/task_execution.rs`. Focused proof: `cargo test -p loopflow --test session_lifecycle_tests failure_without_ask` (new cases) exercises Task and taskless failure, recovery, and explicit retry with a simulated provider.
-2. Delete Ask CLI/runtime/UI representations and exclusive tests, with the migration and shared-launcher rename in the same cut. Reject both `lf ask` and `lf session ask`; do not leave aliases. Preserve ordinary conversation launch, primary uniqueness, and Task review behavior. Prove populated-store conversion and shared Session DTOs.
-3. Update `wave_session.md`, `wave_operate.md`, builtin headless/Loopflow guidance, `loop-decide`, and affected skills/docs/goldens. Operators inspect existing logs and bring unresolved judgment into Wave chat; authored Task reviews still use their own Sessions. Delete the `unblock` skill and obsolete references, including prompt instructions in `flow_output.rs`. Verify the full cut.
+Ship the removal as one PR. No publication or landing has been requested.
 
 ## Done when
 
@@ -100,4 +112,4 @@ On 2026-10-01, Jack clarified: “no, Task sessions stay”. Preserve Task sessi
 
 Jack values Task conversations as a private room that takes load off the Wave thread. Persistent versus one-off Task sessions remains open and is excluded from this removal. No new operator scheduler, notification channel, or delivery authority is included. Missing logs or failed status reads remain missing evidence, not proof that work succeeded or permission to retry.
 
-Check: 2026-10-01 — source inspection and `git diff --check` passed; implementation/runtime acceptance remains for implement and gate.
+Check: 2026-10-01 — filtered `cargo test -p loopflow` lifecycle, reconciliation, conversation, migration, membership, builtin and golden suites passed; `scripts/test_desktop.sh --filter 'DTOFixtureTests|SessionsStoreTests'` passed (31 tests); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; full materialized Rust/architecture/Desktop acceptance remains with gate.

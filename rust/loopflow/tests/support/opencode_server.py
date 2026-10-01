@@ -86,6 +86,10 @@ def _launch(session, request, prompt, output_format):
                 if "decision" in schema["properties"]:
                     decision = "iterate" if remaining else "advance"
                     info["structured_output"] = {"decision": decision, "summary": "Proof observed"}
+                    blocked = HOME / "blocked-once"
+                    if blocked.exists():
+                        blocked.unlink()
+                        info["structured_output"] = {"decision": "blocked", "reason": "Release target is missing"}
                     invalid = HOME / "invalid-output-once"
                     if invalid.exists() or (HOME / "invalid-output-always").exists():
                         invalid.unlink(missing_ok=True)

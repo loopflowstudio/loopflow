@@ -65,15 +65,6 @@ pub(crate) async fn task_execution_and_flow(
             }
         }
     }
-    if let (TaskExecutionState::Running, Some(position)) = (snapshot.state, position.as_ref()) {
-        if let Some(reason) = crate::ops::human_session::task_waiting_unblock(store, position)
-            .await
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-        {
-            snapshot.state = TaskExecutionState::Blocked;
-            snapshot.reason = reason;
-        }
-    }
     if snapshot.state == TaskExecutionState::Running {
         if let Some(attempt) = position
             .as_ref()
@@ -101,7 +92,7 @@ pub(crate) async fn task_execution_and_flow(
             "Only Stop & restart can clear this blocker".to_string()
         } else {
             let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
-            format!("Complete the unblock Session, then run `lf --task {} flow start`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
+            format!("Resolve the failure, then run `lf --task {} flow start --reason \"<what changed>\"`.", task.plan.identifier)
         };
         snapshot.reason.push_str(&format!(". {recovery}"));
     }

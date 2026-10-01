@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // Isolates the native Session and Ask environment.
+    #[allow(clippy::await_holding_lock)] // Isolates the native Session environment.
     async fn deleted_task_retains_context_and_run_attribution() {
         let _environment = crate::journal::test_env_lock();
         let (directory, store) = test_store().await;
@@ -771,17 +771,7 @@ mod tests {
                 &capture.artifact_dir(),
                 &history,
             );
-            let asked = tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                crate::ops::human_session::ask(&store, "Continue removed work", None),
-            )
-            .await;
             assert!(resumed.unwrap_err().to_string().contains("was deleted"));
-            assert!(asked
-                .expect("Ask must refuse before waiting")
-                .unwrap_err()
-                .to_string()
-                .contains("was deleted"));
             assert!(
                 crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()

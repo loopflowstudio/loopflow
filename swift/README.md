@@ -206,21 +206,17 @@ is rejected, its error stays visible in the toolbar through refresh and the term
 retry Complete after addressing the error. Undo does
 not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
-and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until you complete
-the conversation. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
+and reopen exactly as left. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
 Rejected completion preserves the terminal and keeps its error visible through refresh.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
 Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
-Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
-files before the caller resumes. The app lists, opens, and acts on the shared
+The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
-Every record carries a required `runId` for Run lookup, including unopened Ask
-and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
-Run. A prepared Run alone does not establish live provider activity.
+The Session ID targets conversation actions and history lookup. A prepared
+input alone does not establish live provider activity.
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New terminal** opens

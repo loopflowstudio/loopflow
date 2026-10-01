@@ -155,8 +155,6 @@ const SUMMARY_SELECT: &str = "SELECT s.id,c.receipt_key AS artifact_key,s.title,
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
 fn summary_query(page: &str, by_id: bool) -> String {
-    // Ask purpose is explicitly independent of its caller's Flow, including
-    // before its prepared input is launched. Other missing membership is unknown.
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     format!("WITH page AS MATERIALIZED ({page}),
         flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
@@ -164,7 +162,7 @@ fn summary_query(page: &str, by_id: bool) -> String {
         SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
         w.slug,t.issue_identifier,
         COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
-        (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
+        ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({}))
@@ -908,7 +906,7 @@ impl SqliteStore {
     }
 
     /// Completion closes the Session; its Runs and provider history remain.
-    /// An Ask or review closes only with the feedback its caller waits for.
+    /// A review closes only with the feedback its caller waits for.
     /// A Task review closes inside its invocation's transaction instead.
     pub fn complete_session(&self, id: &str, expected_capture: Option<i64>) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -977,7 +975,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
             "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_capture=?2
-             AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
+             AND completed_at IS NULL AND (EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
                  AND agent_sessions.input_published=1 AND f.pending_session_id=?1 AND f.state='current'
                  AND f.claim_json IS NULL))",
             params![id, expected_capture, summary.trim()],

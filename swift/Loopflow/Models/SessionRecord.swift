@@ -10,7 +10,6 @@ public enum SessionState: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionKind: String, Codable, Sendable, Hashable {
-    case ask
     case flow
     case conversation
 }

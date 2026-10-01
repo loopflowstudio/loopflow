@@ -20,8 +20,7 @@ lf session complete <session-id>
 Completion returns feedback to the next Flow step. A following loop-decide
 interprets it and chooses Advance or Iterate through an authored edge. If the
 User requests design revisions, clarify and save them before completing review.
-Readiness alone leaves the conversation waiting. For a blocked Ask, Complete
-returns the answer to its waiting caller. An unbound interactive conversation
+Readiness alone leaves the conversation waiting. An unbound interactive conversation
 does not become a Task by being closed.
 
 ## An existing Task needs to continue

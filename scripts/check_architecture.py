@@ -47,7 +47,7 @@ SCAN_ROOTS = (
     Path("README.md"),
     Path("PROMPTS.md"),
     Path("RELEASE_NOTES.md"),
-    Path("STYLE.md"),
+    Path("AGENTS.md"),
     Path("TESTING.md"),
     Path("VISUAL_DESIGN.md"),
     Path("deploy"),

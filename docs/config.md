@@ -122,6 +122,9 @@ the next memory- or scratch-writing step to curate it. `realign`, `compress`,
 `kickoff`, and `implement` preserve live decisions while consolidating notes and
 retiring historical or stacked-parent material, then re-query usage. The query
 still reports a total-input overage when an actual launch would reject it.
+Memory curation is gradual: retire the largest stale sections to git history
+until it fits just under the effective limits. Keep live decisions and evidence
+limits; memory already within budget needs no reduction merely for size.
 
 ## Context Assembly
 
@@ -136,11 +139,12 @@ scratch        3,050 ██
 clipboard      1,234 █
 ```
 
+The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
 The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
+| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |

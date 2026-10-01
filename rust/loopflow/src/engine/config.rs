@@ -3,7 +3,7 @@
 //! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
 //! Repo config overrides global. Additive keys (docs, context, exclude, summaries) combine.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(not(test))]
 use crate::engine::agent::check_cli_available;
+use crate::engine::context_budget::BudgetKey;
 use crate::engine::error::LoadError;
 
 /// Request participant carried across foreground launches, including SSH.
@@ -182,6 +183,10 @@ pub struct PmConfig {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub context_budgets: BTreeMap<BudgetKey, usize>,
+    #[serde(skip)]
+    pub context_budget_sources: BTreeMap<BudgetKey, String>,
     /// Agent in format harness:model (e.g., claude:opus, codex)
     #[serde(default)]
     pub agent: Option<String>,
@@ -268,6 +273,8 @@ fn default_summary_tokens() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            context_budgets: Default::default(),
+            context_budget_sources: Default::default(),
             agent: None,
             supported_harnesses: Vec::new(),
             yolo: false,
@@ -353,6 +360,9 @@ fn merge_config_values(
                     } else {
                         global_map.insert(key, value);
                     }
+                } else if key_str == "context_budgets" {
+                    let previous = global_map.remove(&key);
+                    global_map.insert(key, merge_config_values(previous, Some(value)));
                 } else {
                     // Repo overrides
                     global_map.insert(key, value);
@@ -381,11 +391,30 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
         return Ok(None);
     }
 
+    let mut sources = BTreeMap::new();
+    for (data, path) in [
+        (&global_data, Some(&global_path)),
+        (&repo_data, repo_path.as_ref()),
+    ] {
+        if let (Some(data), Some(path)) = (data, path) {
+            if let Some(budgets) = data.get("context_budgets") {
+                let budgets: BTreeMap<BudgetKey, usize> =
+                    serde_yaml_ng::from_value(budgets.clone()).map_err(|e| {
+                        LoadError::InvalidFlow(format!(
+                            "Invalid context_budgets in {}: {e}",
+                            path.display()
+                        ))
+                    })?;
+                sources.extend(budgets.keys().map(|key| (*key, path.display().to_string())));
+            }
+        }
+    }
     let merged = merge_config_values(global_data, repo_data);
 
-    let config: Config = serde_yaml_ng::from_value(merged)
+    let mut config: Config = serde_yaml_ng::from_value(merged)
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
+    config.context_budget_sources = sources;
     Ok(Some(config))
 }
 

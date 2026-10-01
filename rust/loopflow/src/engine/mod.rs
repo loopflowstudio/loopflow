@@ -3,7 +3,7 @@ pub mod builtins;
 pub mod clipboard;
 pub mod command;
 pub mod config;
-pub(crate) mod context_budget;
+pub mod context_budget;
 pub mod error;
 pub mod event;
 pub mod exec;

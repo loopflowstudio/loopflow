@@ -126,6 +126,7 @@ lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable work, delivery and steering history
 lf session list --json # conversations on this Home
+lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot

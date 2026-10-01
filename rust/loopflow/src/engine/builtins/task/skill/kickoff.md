@@ -40,6 +40,20 @@ Before starting, orient yourself in this branch:
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
+## Keep authored context within budget
+
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill kickoff`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Bring over-budget material under both token and byte limits as part of this step.
+Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
+stacked parent, and keep historical detail in git rather than ambient context.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.
+
 ## Workflow
 
 1. **Recover the intent.** Read the design or Task brief. What problem does it solve? Who benefits? Which decisions are accepted, and what remains open?

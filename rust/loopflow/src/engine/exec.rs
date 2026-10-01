@@ -46,6 +46,7 @@ pub struct ExecPromptInput {
 /// Canonical Exec preparation output.
 #[derive(Debug, Clone)]
 pub struct PreparedExecPrompt {
+    pub budget_report: crate::engine::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplicated_docs: Vec<Document>,
@@ -57,6 +58,25 @@ pub fn prepare_exec_prompt(
     config: &Config,
     input: ExecPromptInput,
 ) -> Result<PreparedExecPrompt, CoreError> {
+    let prepared = preview_exec_prompt(config, input)?;
+    crate::engine::context_budget::check_input(
+        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
+        &prepared.config.task_prompt,
+        &prepared.budget_report.budgets,
+    )?;
+    Ok(prepared)
+}
+
+/// Assemble a preview even when its total input would prevent launch.
+pub(crate) fn preview_exec_prompt(
+    config: &Config,
+    input: ExecPromptInput,
+) -> Result<PreparedExecPrompt, CoreError> {
+    let budgets = crate::engine::context_budget::ContextBudgets::resolve(
+        config,
+        &input.repo_root,
+        input.wave.as_deref(),
+    )?;
     let ExecPromptInput {
         repo_root,
         skill,
@@ -117,7 +137,16 @@ pub fn prepare_exec_prompt(
         });
     }
 
-    crate::engine::context_budget::bound_context(&mut components)?;
+    let original_system = format_claude_system_prompt(&components);
+    let original_task = format_claude_task_prompt(&components);
+    let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
+    budget_report.measure_input(
+        &original_system,
+        &original_task,
+        &format_claude_system_prompt(&components),
+        &format_claude_task_prompt(&components),
+    );
+    components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -155,12 +184,18 @@ pub fn prepare_exec_prompt(
         )]
         .into(),
     };
-    crate::engine::context_budget::check_input(
-        &crate::engine::agent::system_prompt_with_structured_replies(&launch),
+    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
+    budget_report.measure_input(
+        &original_system,
+        &original_task,
+        &effective_system,
         &launch.task_prompt,
-    )?;
+    );
+    // The source snapshot is stable; the total includes this notice and provider guidance.
+    // The notice labels its pre-feedback total; the report measures submitted bytes.
 
     Ok(PreparedExecPrompt {
+        budget_report,
         config: launch,
         components,
         deduplicated_docs,
@@ -257,9 +292,12 @@ Test skill body.
 
     #[test]
     fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
-        use crate::engine::context_budget::{
-            GOAL_TOKENS, INPUT_BYTES, INPUT_TOKENS, MEMORY_TOKENS, SCRATCH_TOKENS,
-        };
+        use crate::engine::context_budget::BudgetKey;
+        let goal_tokens = BudgetKey::GoalTokens.default_limit();
+        let input_bytes = BudgetKey::InputBytes.default_limit();
+        let input_tokens = BudgetKey::InputTokens.default_limit();
+        let memory_tokens = BudgetKey::MemoryTokens.default_limit();
+        let scratch_tokens = BudgetKey::ScratchTokens.default_limit();
         use crate::engine::prompt::count_tokens;
 
         let tmp = create_repo_fixture();
@@ -295,12 +333,12 @@ Test skill body.
         let config = &prepared.config;
         let bytes = config.system_prompt.len() + config.task_prompt.len();
         let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
-        assert!(bytes <= INPUT_BYTES, "{bytes}");
-        assert!(tokens <= INPUT_TOKENS, "{tokens}");
-        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
+        assert!(bytes <= input_bytes, "{bytes}");
+        assert!(tokens <= input_tokens, "{tokens}");
+        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= goal_tokens);
         assert!(
             count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
-                <= MEMORY_TOKENS
+                <= memory_tokens
         );
         assert!(
             prepared
@@ -310,7 +348,7 @@ Test skill body.
                 .filter(|doc| doc.source == DocumentSource::Scratch)
                 .map(|doc| count_tokens(&doc.content))
                 .sum::<usize>()
-                <= SCRATCH_TOKENS
+                <= scratch_tokens
         );
         assert!(config.task_prompt.contains("Task definition"));
         assert!(config
@@ -373,7 +411,9 @@ Test skill body.
         let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
         let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
             + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
-        let content = " x".repeat(crate::engine::context_budget::INPUT_TOKENS - overhead - 32);
+        let content = " x".repeat(
+            crate::engine::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
+        );
         prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
         let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
             panic!("structured reply guidance exceeded the launch budget without rejection");
@@ -818,5 +858,71 @@ Test skill body.
         .expect("bare OpenCode should defer to the user's default");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use std::fs;
+
+    use crate::engine::config::Config;
+    use crate::engine::context_budget::BudgetKey;
+    use crate::engine::exec::{prepare_exec_prompt, preview_exec_prompt, ExecPromptInput};
+    use crate::engine::prompt::count_tokens;
+
+    #[test]
+    fn every_context_writer_receives_limits_usage_and_cleanup_guidance() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        fs::write(
+            repo.path().join("scratch/plan.md"),
+            "Pending live decision. ".repeat(500),
+        )
+        .unwrap();
+        let config = Config {
+            context_budgets: [(BudgetKey::ScratchTokens, 400)].into(),
+            ..Default::default()
+        };
+        for skill in ["realign", "compress", "kickoff", "implement"] {
+            let prepared = prepare_exec_prompt(
+                &config,
+                ExecPromptInput {
+                    repo_root: repo.path().to_owned(),
+                    skill: Some(skill.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let prompt = &prepared.config.task_prompt;
+            assert!(prompt.contains("<lf:context-budget>"), "{skill}");
+            assert!(prompt.contains("scratch_tokens: 400 (provided config)"));
+            assert!(prompt.contains("Read the relevant omitted sections"));
+            assert!(prompt.contains("Re-run the query after writing"));
+            let total = prepared.budget_report.usage.last().unwrap();
+            assert_eq!(
+                total.submitted_tokens,
+                count_tokens(&prepared.config.system_prompt) + count_tokens(prompt)
+            );
+        }
+    }
+
+    #[test]
+    fn preview_reports_a_total_that_launch_would_reject() {
+        let repo = tempfile::tempdir().unwrap();
+        let config = Config {
+            context_budgets: [(BudgetKey::InputTokens, 100)].into(),
+            ..Default::default()
+        };
+        let input = ExecPromptInput {
+            repo_root: repo.path().to_owned(),
+            skill: Some("realign".into()),
+            ..Default::default()
+        };
+        let preview = preview_exec_prompt(&config, input.clone()).unwrap();
+        assert!(preview.budget_report.usage.last().unwrap().submitted_tokens > 100);
+        assert!(prepare_exec_prompt(&config, input)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds the input budget"));
     }
 }

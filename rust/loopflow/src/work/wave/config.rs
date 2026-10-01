@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use tracing::warn;
+
+use crate::engine::context_budget::BudgetKey;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {
@@ -56,6 +58,8 @@ pub enum WaveChatConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
+    #[serde(default)]
+    pub context_budgets: BTreeMap<BudgetKey, usize>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,

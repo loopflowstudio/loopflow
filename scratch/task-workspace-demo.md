@@ -63,6 +63,29 @@ The previous September screenshot had a conversation that is absent from this
 fresh inventory. Use an available current conversation for the provider portion
 of the subsequent walkthrough rather than inventing one from historical evidence.
 
+### Reopened candidate — October 1, 13:42
+
+Native capture `.lf/tmp/sync-oct1/reopened-workspace.png` shows LOO-330's retained
+workspace, compact toolbar, empty Sessions pane, unchanged terminal surface and
+restored repository planning navigation. The incompatible-database dialog and
+global duplicate-ownership error are absent. Product still reports no In Progress
+Project; this retained planning gap was not repaired or hidden by the demo.
+The exact Task remains accessible. Jack has not yet reviewed the revised controls.
+
+Final Cargo Clippy passed; `git diff --check` passed. Local implementation checkpoint:
+`9d5af02fc`. The focused ownership test passed with exit 0; its log also contains an
+earlier compilation failure because two sequential attempts overlapped their log
+file. The final pass is the `1 passed` result, not the earlier type mismatch.
+
+Next action: Jack reviews the revised workspace and uses the toolbar's Sessions
+visibility toggle, + menu and Files control. Continue the provider and retention
+walkthrough on a current placed Task with a live conversation. Full Ask retry,
+symlink/draft, cross-Task focus and 20-action latency/CPU proof remain unexecuted;
+this reopening is not Unit 1 acceptance. The app uses the test-materialized CLI
+from the disposable source copy and a fresh migrated copy of Jack's Home. Ordinary
+`loopflow-dev.py run` rebuilds the authoring CLI, so reusing this demo database
+requires the matching materialized helper recorded in `demo-copy.json`.
+
 ## Visual review — September 30, 18:32
 
 Jack supplied a screenshot of LOO-330 and said “extremely ugly.” When the agent

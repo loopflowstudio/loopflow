@@ -578,7 +578,10 @@ execution overrides; they are not exported by `sync-skills`.
 cargo test -p loopflow --lib engine::skills::tests
 ```
 
-Prompt parity and golden prompt tests live in Rust.
+After editing embedded skills, directions, surfaces, or prompt assembly, run
+the Rust golden prompt check even for Markdown-only changes. If the mismatch
+reflects the intended prompt change, regenerate the snapshots, review their
+diff, and rerun the check before gate.
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -607,9 +610,11 @@ test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task controller consumers: durable work reservation retains Started
 after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Experimental Homes record
-the exact draft checksums: use a fresh Home after changing the schema. Preserve
-populated historical fixtures for published migration coverage.
+changes; an ordinary draft build may omit the trigger. Experimental Homes hold
+this build's exact schema: use a fresh Home after changing it. Preserve
+populated historical fixtures for published migration coverage. A Task's draft is
+edited in place, so test the released frontier against the finished draft and
+write no test for a schema that existed only between two edits.
 
 For manual migration check in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization

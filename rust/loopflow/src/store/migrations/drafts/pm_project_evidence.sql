@@ -1,5 +1,3 @@
--- name: pm_project_evidence
--- id: 9f9a5c34c488ce217dbdf71f12bbd7c5
 -- depends_on: normalize_pm_planning
 
 -- These are planning evidence, independent of execution and acquisition age.

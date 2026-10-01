@@ -258,15 +258,8 @@ fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
     let mut code = String::from("static MIGRATION_DRAFT_MANIFEST: &[MigrationDraft] = &[\n");
     for draft in drafts {
         writeln!(code, "    MigrationDraft {{").expect("write draft manifest");
-        writeln!(code, "        id: {:?},", draft.id).expect("write draft manifest");
         writeln!(code, "        name: {:?},", draft.name).expect("write draft manifest");
-        code.push_str("        dependencies: &[");
-        for dependency in draft.dependencies {
-            write!(code, "{dependency:?},").expect("write draft manifest");
-        }
-        code.push_str("],\n");
         writeln!(code, "        sql: {:?},", draft.sql).expect("write draft manifest");
-        writeln!(code, "        checksum: {:?},", draft.checksum).expect("write draft manifest");
         code.push_str("    },\n");
     }
     code.push_str("];\n");

@@ -128,9 +128,7 @@ def test_new_durable_table_must_join_the_map(repo: Path) -> None:
     _write(
         repo,
         "rust/loopflow/src/store/migrations/drafts/add_mirror.sql",
-        """-- name: add_mirror
--- id: draft_add_mirror
--- depends_on: none
+        """-- depends_on: none
 CREATE TABLE mirrors (id TEXT);
 """,
     )
@@ -176,7 +174,6 @@ path = "src/bin/keeper.rs"
     )
 
     assert "process boundary missing from map: keeper" in _errors(repo)
-
 
 
 def test_new_provider_must_join_an_external_edge(repo: Path) -> None:

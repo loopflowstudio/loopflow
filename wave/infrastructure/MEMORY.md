@@ -9,6 +9,18 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
+
+Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
+`drafts/<name>.sql`, and edits it in place until landing; unreleased drafts on
+main are edited rather than undone by a later draft. Draft ids, `-- name:`/`-- id:`
+headers and the `development_migrations` receipt ledger are removed, so the
+applied-draft names, IDs and checksums in the LOO-321 diagnostics below no longer
+exist. Custom Homes keep exact-schema validation and stay disposable.
+`-- depends_on:` still orders drafts across Tasks at the release cut. Mechanics
+live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
+evidence only; not shipped.
+
 ## One main Home (LOO-342, branch evidence 2026-09-30)
 
 Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task

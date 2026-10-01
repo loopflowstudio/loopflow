@@ -56,25 +56,6 @@ fn registered_wave(repo: &Path, slug: &str) -> Wave {
     )
 }
 
-fn apply_status_truth(database: &Path) {
-    let connection = rusqlite::Connection::open(database).unwrap();
-    let has_retirement = connection
-        .prepare("PRAGMA table_info(waves)")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(1))
-        .unwrap()
-        .any(|column| column.is_ok_and(|column| column == "retired_at"));
-    if has_retirement {
-        return;
-    }
-    connection
-        .execute_batch(&loopflow_test_support::migration_sql_for_test(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            "status_truth",
-        ))
-        .unwrap();
-}
-
 fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
@@ -191,7 +172,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let alpha = registered_wave(&repo_a, "infrastructure");
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
@@ -612,7 +592,6 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let wave = registered_wave(&source, "feedback");
     store.create_wave(&wave).await.unwrap();
 
@@ -658,7 +637,6 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let identities = ["core", "ear", "theory"].map(|slug| {
         (
             registered_wave(&source, slug),
@@ -769,7 +747,6 @@ async fn relocation_refuses_meaningful_destination_history() {
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let established = registered_wave(&source, "core");
     store.create_wave(&established).await.unwrap();
 

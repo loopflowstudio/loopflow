@@ -9,7 +9,15 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Synced planning and runtime selection (LOO-334, 2026-09-29)
+## Synced planning integration (LOO-334, 2026-09-30)
+
+Main's landed current-state cutover supersedes the earlier intermediate-schema
+bridge below. Planning now migrates from released Session ownership; it does not
+restore the historical importer or old execution drafts. Managed validation uses
+the single FlowSession driver, after native recovery and completed-Task cleanup.
+Task adoption retains branch/worktree/PR identity without inferring Flow progress.
+
+## Earlier synced planning and runtime selection (LOO-334, 2026-09-29)
 
 Jack Heart approved one local planning interface, with repository-level Linear
 authority when connected and private local plans otherwise. Git shares Wave

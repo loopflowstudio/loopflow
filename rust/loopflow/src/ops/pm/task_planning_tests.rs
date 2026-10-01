@@ -78,6 +78,20 @@ fn mark_issue_updated(issue: &mut serde_json::Value) {
         .unwrap());
 }
 
+fn planning_project(id: &str, current: &str) -> serde_json::Value {
+    let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
+    let name = match id {
+        "project-1" => "Chapter",
+        "prior-project" => "Previous chapter",
+        _ => "Next chapter",
+    };
+    json!({"id":id, "name":name, "description":"", "content":"flow: feature",
+        "status":{"type":if completed { "completed" } else { "started" }},
+        "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
+        "archivedAt":null,
+        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}})
+}
+
 async fn planning_graphql(
     axum::extract::State(state): axum::extract::State<Arc<tokio::sync::Mutex<PlanningState>>>,
     axum::Json(request): axum::Json<serde_json::Value>,
@@ -92,13 +106,7 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let project_name = if project_id == "project-1" {
-        "Chapter"
-    } else {
-        "Next chapter"
-    };
-    let project = json!({"id":project_id, "name":project_name, "description":"", "content":"flow: feature", "status":{"type":"started"},
-        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
+    let project = planning_project(&project_id, &project_id);
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
@@ -109,12 +117,7 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
         let projects = if project_id == "prior-project" {
-            let mut previous = project.clone();
-            previous["status"] = json!({"type":"completed"});
-            let mut current = project.clone();
-            current["id"] = json!("project-1");
-            current["name"] = json!("Chapter");
-            vec![previous, current]
+            vec![project, planning_project("project-1", &project_id)]
         } else {
             vec![project]
         };
@@ -136,13 +139,7 @@ async fn planning_graphql(
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query ProjectOwnership") {
-        let mut owned = project.clone();
-        owned["id"] = vars["id"].clone();
-        if vars["id"] != project["id"] {
-            owned["name"] = json!("Chapter");
-            owned["status"] = json!({"type":"completed"});
-        }
-        owned["archivedAt"] = serde_json::Value::Null;
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
         let state = state.lock().await;
@@ -209,6 +206,7 @@ async fn planning_graphql(
             state.move_on_attachment_read = false;
             state.current_project_id = Some("project-1".into());
             state.issues[0]["project"]["id"] = json!("project-1");
+            mark_issue_updated(&mut state.issues[0]);
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueComments") {
@@ -1454,6 +1452,7 @@ esac
                     let mut state = state.lock().await;
                     state.current_project_id = Some("prior-project".into());
                     state.issues[0]["project"]["id"] = json!("prior-project");
+                    mark_issue_updated(&mut state.issues[0]);
                 });
                 for apply in [false, true] {
                     let entries = crate::ops::task::task_sweep(&repo, apply).unwrap();
@@ -1472,6 +1471,7 @@ esac
                     let mut state = state.lock().await;
                     state.current_project_id = None;
                     state.issues[0]["project"]["id"] = json!("project-1");
+                    mark_issue_updated(&mut state.issues[0]);
                 });
             } else {
                 // A later GitHub failure preserves enough evidence for a retry.
@@ -1566,6 +1566,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             let mut state = state.lock().await;
             state.current_project_id = Some("prior-project".into());
             state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
         });
         let bin = fixture.directory.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1601,6 +1602,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         for terminal in ["completed", "canceled", "duplicate"] {
             runtime.block_on(async {
                 state.lock().await.issues[0]["state"]["type"] = json!(terminal);
+                mark_issue_updated(&mut state.lock().await.issues[0]);
             });
             assert!(crate::ops::task::task_sweep(&repo, true)
                 .unwrap()
@@ -1608,6 +1610,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         }
         runtime.block_on(async {
             state.lock().await.issues[0]["state"]["type"] = json!("unstarted");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
         });
         // Membership changes after candidate enumeration still prevent writes.
         runtime.block_on(async {
@@ -1623,6 +1626,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             let mut state = state.lock().await;
             state.current_project_id = Some("prior-project".into());
             state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
         });
         let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(applied[0].outcome, "canceled");

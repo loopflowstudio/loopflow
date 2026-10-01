@@ -2,13 +2,44 @@
 
 Status: implementation follows Jack Heart's 2026-09-30 scope cut below. The
 2026-09-29 approval and older installation-continuation plans remain historical
-context; they do not reinstate multi-store succession. Main integration and the
-caller's subsequent delivery steps remain outstanding.
+context; they do not reinstate multi-store succession. Main is merged locally;
+the waiting sync caller owns final verification and publication.
 Review feedback: [repository connection and Task validity](repository-planning-connection-review.md).
 Open choices: [questions](questions.md).
 Research: [Apollo, Relay, Realm and PowerSync](planning-store-sync-research.md).
 Command walkthrough: [Dave takes an idea to running work](idea-to-task-command-story.md).
 Wave mapping and remaining migration details: [Wave existence and Linear migration](wave-existence-and-linear-migration.md).
+
+## Main integration — 2026-09-30
+
+Merge target `61d21f885` includes Jack Heart's later LOO-298 compression decision:
+retain current state and final Session owners; remove historical import and
+intermediate draft-schema compatibility. That decision supersedes the older
+migration-preservation sections below. The planning migration now starts at the
+released 0.12.29 schema, with three planning drafts. Released SQL remains unchanged.
+The old execution drafts, Session importer, branch-history bridge and their
+obsolete fixtures are removed. No installed Home is opened by the proof.
+
+Main's single FlowSession driver retains managed-planning validation after native
+recovery and completed-Task cleanup, before another boundary starts. Main's Task
+lifecycle and sync commands remain intact; adoption keeps this branch's existing
+worktree, PR and saved-progress behavior. CLI reference additions follow main's
+split between the tour and command reference. Broader gate and configured
+acceptance remain with their existing owners.
+
+Verification: materialized `cargo test -p loopflow --lib` filters for `automatic_refresh_reports_failure_with_retained_observation_age`, `migration_preserves_planning_identity_and_removes_snapshot_storage`, and `task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues` passed (3 tests); `cargo test --test task_adoption_tests --no-run` passed; logs `.lf/tmp/sync-main/`; gate/CI retain broader checks.
+
+The first sweep proof exposed conflicting simulated Project facts between list
+and detail. The shared fixture now gives each Project consistent names, statuses
+and revisions and advances issue revisions after mutations. Production rejection
+of conflicting evidence remains unchanged. Review also moved managed admission
+after completed-Task cleanup so successful completion can settle. The adoption
+fixture uses `sync --plan` and the final FlowSession shape. The public installation
+scenario was compiled, not rerun; no configured-provider acceptance follows.
+
+`lf sync --continue` created merge `e42db82ef`; its cleanliness check reported
+related deletions outside the original conflict paths. A local Loopflow cleanup
+commit includes those changes. No second sync or push is performed by this Run.
 
 ## Current implementation scope — 2026-09-30
 

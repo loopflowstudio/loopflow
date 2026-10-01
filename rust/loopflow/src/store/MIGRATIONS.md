@@ -56,16 +56,6 @@ SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
 
-Planning integration recognizes the exact development histories retained at
-`b1719ea6c` and `b21f657fc`. Their ordered IDs and SQL checksums live in
-`migrations/planning_integration/histories.json`. Both the draft and canonical
-upgrade paths validate those receipts and the corresponding schema before
-applying missing SQL. Dependency metadata orders new stores without changing
-already-applied SQL bodies. Temporary chapter inputs exist only inside the
-upgrade transaction; normalized planning remains the runtime owner. Keep this
-import path until those development stores have been converted. Schema equality
-alone never authorizes an unknown or reordered history.
-
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
 shape in a DTO stored by the database requires an ordinal-free repair draft and
 a typed upgrade test seeded with the previous shape. Before commit, the runner

@@ -237,7 +237,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .block_on(store.start_task_flow(
                     &task.id,
                     FlowSession {
-                        parent_id: None,
                         invocation: QueuedInvocation::load(&checkout, "adoption").unwrap(),
                         cursor: ExecutionCursor {
                             index: 1,
@@ -272,7 +271,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         // Catalog changes must not replace the saved graph or reset its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
-            "- op: rebase --plan\n",
+            "- op: sync --plan\n",
         )
         .unwrap();
         invoke("checkout");

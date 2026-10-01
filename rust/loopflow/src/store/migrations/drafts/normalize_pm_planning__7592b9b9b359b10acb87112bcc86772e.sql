@@ -1,6 +1,6 @@
 -- name: normalize_pm_planning
 -- id: 7592b9b9b359b10acb87112bcc86772e
--- depends_on: prepare_planning_integration
+-- depends_on: session_ownership
 
 -- Planning facts have repository/provider identity, independent of execution.
 CREATE TABLE pm_projects (

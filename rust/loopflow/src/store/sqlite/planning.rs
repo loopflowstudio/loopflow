@@ -492,7 +492,7 @@ mod tests {
         let wave = WaveId::new();
         let snapshot = json!({"projects":[{
             "id":"project", "slug":"chapter", "name":"Chapter", "summary":"Proof",
-            "metric_targets":[], "flows":{"recommended":null}, "krs":[],
+            "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
             "initiative_ids":["initiative"], "team_ids":["team"]
         }],"items":[{
             "id":"issue", "identifier":"FIX-1", "url":null, "name":"Retained title",
@@ -508,12 +508,6 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload) VALUES(?1,'linear','initiative',42,?2)",params![wave,snapshot.to_string()]).unwrap();
-            let mut predecessor = snapshot["projects"][0].clone();
-            predecessor["id"] = json!("retired-project");
-            let receipt =
-                json!({"phase":"complete", "created_at":32, "predecessors":[predecessor]});
-            conn.execute("INSERT INTO wave_chapters(wave_id,chapter_id,project_id,current,receipt) VALUES(?1,'chapter','project',1,?2)",
-                params![wave,receipt.to_string()]).unwrap();
         }
         let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
@@ -530,15 +524,6 @@ mod tests {
         assert_eq!(detail.item.name, "Retained title");
         assert_eq!(detail.item.description, "Retained notes");
         assert_eq!(detail.project.as_ref(), Some(&list.snapshot.projects[0]));
-        let mut delayed = list.clone();
-        let mut archived = delayed.snapshot.projects[0].clone();
-        archived.id = "retired-project".into();
-        delayed.snapshot.projects.push(archived);
-        store.put_pm_snapshot(delayed).await.unwrap();
-        assert_eq!(
-            store.pm_snapshot(&wave).await.unwrap().unwrap().snapshot,
-            list.snapshot
-        );
         assert_eq!(store.get_wave(&wave).await.unwrap().unwrap().id(), &wave);
         assert!(store.list_tasks(None).await.unwrap().is_empty());
         assert!(!Connection::open(database)

@@ -68,6 +68,24 @@ activation and no-chapter use, then the planning-only and managed delivery Task
 paths. Full Unit 1 provider continuation and measured layout performance remain
 unproved; this repair does not close those acceptance gaps.
 
+### Project repair reopening — October 1, 15:28
+
+Jack Heart clarified that the immediate goal is to resume the workspace demo;
+the broader architecture follow-ups can wait. The Dev app was opened on the same
+accepted copied Home. Three Dev processes remained running; application-name
+AppleScript routing returned no window, while targeting the newly opened process
+with the same native screenshot command succeeded. The earlier no-window response
+therefore does not establish an app crash.
+
+Native capture `.lf/tmp/sync-oct1/project-repair-workspace.png` shows LOO-330's
+workspace, compact controls, Sessions pane and populated Growth/Product navigation
+without the missing-current-Project warnings. This confirms the repair reaches the
+rendered app. The copied Home has no open Session for this Task, so the empty
+terminal is expected; provider continuation remains unproved. Next interactive
+step: Jack hides/restores Sessions using the icon immediately left of +, then uses
++ → New shell and Files to review the compact workspace controls. No new visual
+acceptance or performance result is inferred from this capture.
+
 ## October 1 retry
 
 Jack requested integration with main and another demonstration. Loopflow selected

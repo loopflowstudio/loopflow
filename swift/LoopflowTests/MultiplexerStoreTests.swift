@@ -4,6 +4,50 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Opening in the active pane preserves split geometry and other visible Sessions")
+    func activePaneSelectionPreservesSplits() throws {
+        let store = MultiplexerStore()
+        store.load(sessionId: "design")
+        let left = store.focusedPaneId
+        store.reveal(sessionId: "review")
+        let right = store.focusedPaneId
+        store.updateRatio(between: left, and: right, ratio: 0.35)
+        let arrangement = store.layout
+        store.load(sessionId: "ask")
+        #expect(store.layout == arrangement.replacingContent(of: right, with: .session(id: "ask")))
+        store.load(sessionId: "design")
+        #expect(store.focusedPaneId == left)
+        #expect(store.visibleLayout?.allPanes.count == 2)
+        store.setCollapsed(paneId: right, collapsed: true)
+        store.load(sessionId: "ask")
+        #expect(store.focusedPaneId == left)
+        #expect(store.focusedPane.content == .session(id: "ask"))
+        #expect(store.visibleLayout?.allPanes.count == 1)
+        #expect(store.layout.pane(for: right)?.content == .session(id: "design"))
+        store.reveal(sessionId: "design")
+        #expect(store.layout == arrangement.replacingContent(of: left, with: .session(id: "ask"))
+            .replacingContent(of: right, with: .session(id: "design")))
+        #expect(store.visibleLayout == store.layout)
+        store.setCollapsed(paneId: left, collapsed: true)
+        store.setCollapsed(paneId: right, collapsed: true)
+        store.load(sessionId: "ask")
+        #expect(store.visibleLayout?.allPanes.map(\.content) == [.session(id: "ask")])
+    }
+
+    @Test("Opening a Session preserves a running shell and restores a hidden final pane")
+    func selectingBesideShell() {
+        let store = MultiplexerStore()
+        store.newShell(command: ["server"])
+        let shell = store.focusedPaneId
+        store.load(sessionId: "design")
+        #expect(store.layout.pane(for: shell)?.content == .shell)
+        #expect(store.shellCommands[shell] == ["server"])
+        store.setCollapsed(paneId: shell, collapsed: true)
+        store.setCollapsed(paneId: store.focusedPaneId, collapsed: true)
+        store.load(sessionId: "design")
+        #expect(store.visibleLayout?.allPanes.map(\.content) == [.session(id: "design")])
+    }
+
     @Test("Focus restores the prior selection and collapsed arrangement")
     func focusCollapsedPaneAndRestore() {
         let store = MultiplexerStore()

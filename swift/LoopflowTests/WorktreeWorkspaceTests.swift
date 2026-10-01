@@ -12,6 +12,26 @@ func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
+    @Test("Single-Session entry hides the sidebar without reacting to later arrivals")
+    func initialSessionSidebar() {
+        let single = SessionsWorkspace()
+        single.initializeMaterials(sessionCount: 0)
+        single.initializeMaterials(sessionCount: 1)
+        #expect(!single.showsMaterials)
+        single.initializeMaterials(sessionCount: 3)
+        #expect(!single.showsMaterials)
+        single.showsMaterials = true
+        single.initializeMaterials(sessionCount: 1)
+        #expect(single.showsMaterials)
+
+        let multiple = SessionsWorkspace()
+        multiple.initializeMaterials(sessionCount: 2)
+        #expect(multiple.showsMaterials)
+        multiple.showsMaterials = false
+        multiple.initializeMaterials(sessionCount: 3)
+        #expect(!multiple.showsMaterials)
+    }
+
     @Test("Files follow focus while the workspace view is absent")
     func focusRetainsFilePreference() {
         let workspace = SessionsWorkspace()

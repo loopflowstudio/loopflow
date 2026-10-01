@@ -29,7 +29,16 @@ final class SessionsWorkspace {
     }
     var fileWidth: CGFloat = 700
     var showsDetails = false
-    var showsMaterials = true
+    private var materialsPreference: Bool?
+    var showsMaterials: Bool {
+        get { materialsPreference ?? true }
+        set { materialsPreference = newValue }
+    }
+
+    func initializeMaterials(sessionCount: Int) {
+        guard materialsPreference == nil, sessionCount > 0 else { return }
+        materialsPreference = sessionCount > 1
+    }
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
@@ -628,6 +637,9 @@ struct SessionsContentView: View {
             workspaces.removeSessions(previous.subtracting(ids))
             if model.sessions.errorMessage == nil {
                 workspaces.reconcileMembership(records)
+                if let work = model.selection, work.kind == .task {
+                    enterTask(work)
+                }
                 if let selected = navigation.selectedSessionId,
                    let record = records.first(where: { $0.id == selected }),
                    let identity = record.workspace?.identity,
@@ -701,7 +713,11 @@ struct SessionsContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(store.sessions.filter { $0.record.workspace?.identity == taskIdentity }) { item in
                         HStack(alignment: .top, spacing: 6) {
-                            Button { openSession(item.record) } label: {
+                            Button {
+                                if NSEvent.modifierFlags.contains(.command) { toggleSessionVisibility(item.record) }
+                                else if NSEvent.modifierFlags.contains(.option) { openSession(item.record, alongside: true) }
+                                else { openSession(item.record) }
+                            } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.record.title).font(Typography.body(13)).lineLimit(2)
                                     Text(item.error == nil ? item.record.participationLabel : "Needs recovery")
@@ -711,13 +727,16 @@ struct SessionsContentView: View {
                                     }
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                                .help("Click to open; ⌘-click to show or hide alongside")
                             Menu {
-                                if let pane = multiplexer.pane(forSessionId: item.id) {
-                                    Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
-                                        workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
+                                if let pane = sessionPane(item.record) {
+                                    if !multiplexer.collapsedPaneIds.contains(pane.id) {
+                                        Button("Hide pane") { workspace.setCollapsed(paneId: pane.id, collapsed: true) }
+                                        Button("Focus") { workspace.toggleFocus(pane.id) }
+                                    } else {
+                                        Button("Open alongside") { openSession(item.record, alongside: true) }
                                     }
-                                    Button("Focus") { workspace.toggleFocus(pane.id) }
-                                } else { Button("Expand") { openSession(item.record) } }
+                                } else { Button("Open alongside") { openSession(item.record, alongside: true) } }
                                 if let caller = item.record.callerSessionId {
                                     Button("Open caller") {
                                         if let session = store.sessions.first(where: { $0.record.id == caller }) {
@@ -731,8 +750,13 @@ struct SessionsContentView: View {
                             .accessibilityLabel("Actions for \(item.record.title)")
                         }
                         .padding(8)
-                        .background(navigation.selectedSessionId == item.id ? palette.surfaceMuted : Color.clear,
+                        .background(sessionIsVisible(item.record) ? palette.surfaceMuted : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(alignment: .leading) {
+                            if navigation.selectedSessionId == item.id {
+                                RoundedRectangle(cornerRadius: 2).fill(palette.accent).frame(width: 3).padding(.vertical, 6)
+                            }
+                        }
                         .accessibilityIdentifier("workspace-material-\(item.id)")
                     }
                     ForEach(multiplexer.layout.allPanes.filter { $0.content == .shell }) { pane in
@@ -831,6 +855,30 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord) {
+        openSession(record, alongside: false)
+    }
+
+    private func sessionPane(_ record: SessionRecord) -> PaneState? {
+        if case .shell(let id) = store.localTerminal(for: record) {
+            return multiplexer.layout.pane(for: id)
+        }
+        return multiplexer.pane(forSessionId: record.id)
+    }
+
+    private func sessionIsVisible(_ record: SessionRecord) -> Bool {
+        guard let pane = sessionPane(record) else { return false }
+        return !multiplexer.collapsedPaneIds.contains(pane.id)
+    }
+
+    private func toggleSessionVisibility(_ record: SessionRecord) {
+        if let pane = sessionPane(record), sessionIsVisible(record) {
+            workspace.setCollapsed(paneId: pane.id, collapsed: true)
+        } else {
+            openSession(record, alongside: true)
+        }
+    }
+
+    private func openSession(_ record: SessionRecord, alongside: Bool) {
         let subject = model.workspace.subject(for: record.id)
         model.select(subject)
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
@@ -841,11 +889,21 @@ struct SessionsContentView: View {
         if case .shell(let id) = store.localTerminal(for: record),
            let path = workspaces.path(containingShell: id) {
             worktreeLayout.select(path)
+            if alongside, let zoomed = multiplexer.zoomedPaneId { multiplexer.toggleZoom(zoomed) }
+            multiplexer.setCollapsed(paneId: id, collapsed: false)
             multiplexer.setFocusedPane(id)
             store.surfaces.focus(.shell(id))
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
-            multiplexer.reveal(sessionId: record.id)
+            if model.sessions.errorMessage == nil {
+                workspace.initializeMaterials(sessionCount: store.sessions.filter {
+                    $0.record.workspace?.identity == record.workspace?.identity
+                }.count)
+            }
+            if alongside {
+                if let zoomed = multiplexer.zoomedPaneId { multiplexer.toggleZoom(zoomed) }
+                multiplexer.reveal(sessionId: record.id)
+            } else { multiplexer.load(sessionId: record.id) }
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
@@ -860,14 +918,15 @@ struct SessionsContentView: View {
 
     private func enterTask(_ work: WorkReference) {
         guard let identity = taskIdentity else { return }
-        let panes = workspaces.workspace(for: identity).multiplexer
+        let taskWorkspace = workspaces.workspace(for: identity)
+        let panes = taskWorkspace.multiplexer
+        let sessions = store.sessions.map(\.record).filter { $0.workspace?.identity == identity }
+        if model.sessions.errorMessage == nil { taskWorkspace.initializeMaterials(sessionCount: sessions.count) }
         if let session = focusedPaneSessions.first {
             navigation.selectedSessionId = session.id
             return
         }
         guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        let sessions = model.visibleWorkspace.waves.lazy.flatMap(\.tasks)
-            .first { $0.id.work == work }?.sessions ?? []
         if let session = sessions.first(where: {
             if $0.kind == .flow, case .step(_, _, _, _, _, .current) = $0.flowMembership { return true }
             return false

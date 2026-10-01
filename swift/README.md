@@ -235,6 +235,14 @@ creating a Task or running an autonomous operating pass. **New shell** opens
 an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
+In a Task workspace, one existing Session starts with the Sessions sidebar hidden;
+multiple Sessions show a collapsible sidebar. Use the toolbar to toggle it. Clicking
+a Session focuses its visible pane or opens it in the active Session pane, preserving
+other splits. **⌘-click** toggles a pane without ending the Session; **Option-click**
+or **Open alongside** reveals its saved split or opens it to the right. Visible rows
+are highlighted, and the focused row has an accent marker. New arrivals preserve
+the current layout and sidebar preference. Running shells stay intact.
+
 Selecting a Session in another checkout restores that worktree's conversation,
 companion terminals, split layout, and focus. Outside Task context, the toolbar's
 worktree menu splits entire workspaces; pane strips and keybinds split within one

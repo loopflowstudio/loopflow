@@ -95,17 +95,44 @@ configured repair results and remaining proof.
 
 ## Session selection revision — October 1
 
-Jack Heart requested one existing Session open full-size without a sidebar. With
-multiple Sessions, use a collapsible sidebar; multi-selection creates splits.
-This supersedes the initial always-visible strip. Exact split maintenance is open.
+Jack Heart requested one existing Session open full-size without a sidebar; with
+multiple Sessions, a collapsible sidebar and multi-selection producing splits.
+Jack then suggested existing splits dictate selection, asked to follow IDE practice,
+and requested implementation after research. This supersedes selection rebuilding
+the full arrangement and the September always-visible strip.
 
-Proposed mechanics: retain surviving pane identities, order and relative ratios;
-adding splits the focused pane; removing lets its sibling expand. Selection never
-terminates or completes a Session. Incoming Sessions preserve layout and focus.
-Reuse the existing retained tree and visibility state. Keep a sidebar toggle.
-These mechanics are proposed, not approved or implemented. Clarify multi-select
-checkboxes versus modifier keys, shell participation, and whether reselect restores
-an earlier slot before changing the layout owner.
+Research: [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface#_side-by-side-editing)
+opens ordinary file selections in the active editor group and creates another group
+through Open to the Side, splitting, or edge drag. [IntelliJ](https://www.jetbrains.com/help/idea/using-code-editor.html#split_screen)
+also provides explicit directional split/open actions and navigation between groups.
+These sources support keeping layout geometry independent from ordinary content
+selection. They do not establish multi-select-as-layout as a universal IDE behavior.
+
+Demo implementation: the existing split tree owns placement. Click focuses a visible
+Session or opens it in the active Session pane; other splits keep their geometry.
+Opening a hidden Session into the active pane exchanges its content with that slot,
+keeping the displaced Session in the hidden slot. A new Session replacing an active
+Session retains the old native surface in the existing pool, without promising its
+old slot remains reserved. Shells/monitors remain beside the newly opened Session
+because their content cannot be discarded as an editor tab. No process is stopped.
+
+Command-click toggles a Session's pane visibility; Option-click or Open alongside
+reveals its retained slot or splits the active pane to the right. Hidden panes keep
+their position and ratios. The sidebar highlights visible Sessions, with a separate
+focused marker; it owns no parallel selected-ID set. Hide does not resolve a Session.
+This Command-click shortcut is a Loopflow adaptation for Jack's multi-select request.
+Existing pane Focus/Restore remains temporary and preserves the tree and file state.
+
+The first nonempty inventory sets sidebar visibility: one Session hides it; multiple
+show it. Manual toggles and later arrivals do not reset that choice. Initial empty
+inventory does not commit a default or launch provider clients. Auto-entry selects
+one current interactive Session, otherwise one available conversation. Later changes
+do not steal focus. The toolbar toggle is always available in a prepared Task.
+
+Proof: active-pane replacement preserving ratios, hidden-slot exchange and reveal,
+shell command retention, restoring a final hidden pane, and sidebar preference
+surviving arrivals. This is a bounded demo revision using existing owners; tabs,
+new drag/drop machinery and a full editor-group framework are outside this pass.
 
 ## Left-panel visual revision
 

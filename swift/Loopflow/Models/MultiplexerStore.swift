@@ -142,6 +142,19 @@ public final class MultiplexerStore {
 
     public func load(sessionId: String) {
         if let openPane = pane(forSessionId: sessionId) {
+            if collapsedPaneIds.contains(openPane.id), openPane.id != focusedPaneId,
+               case .session = focusedPane.content {
+                // Opening in the active slot must not resurrect a hidden split.
+                // Keep the displaced Session in the hidden slot for later reveal.
+                let previous = focusedPane.content
+                layout = layout.replacingContent(of: focusedPaneId, with: openPane.content)
+                    .replacingContent(of: openPane.id, with: previous)
+                collapsedPaneIds.remove(focusedPaneId)
+                closedState = nil
+                _notify()
+                return
+            }
+            setCollapsed(paneId: openPane.id, collapsed: false)
             setFocusedPane(openPane.id)
             return
         }
@@ -158,6 +171,7 @@ public final class MultiplexerStore {
             of: focusedPaneId,
             with: .session(id: sessionId)
         )
+        collapsedPaneIds.remove(focusedPaneId)
         closedState = nil
         _notify()
     }

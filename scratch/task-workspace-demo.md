@@ -115,6 +115,37 @@ with multi-selection producing splits for multiple Sessions. Exact split changes
 remain open; the design records proposed stable-pane mechanics separately. This
 layout revision is not yet implemented or accepted in a live demo.
 
+### IDE layout research and implementation — October 1
+
+Jack Heart asked for IDE-informed split behavior and requested a working demo after
+research. The [revised design](growth-thoughts.md#session-selection-revision--october-1)
+records primary VS Code and IntelliJ sources and distinguishes their editor-group
+pattern from Loopflow's Command-click visibility adaptation.
+
+Implemented: one existing Session defaults to a hidden Sessions sidebar; multiple
+Sessions default to a collapsible sidebar. Manual preference survives later arrivals.
+Click focuses a visible Session or opens it in the active Session pane; Command-click
+toggles visibility, and Option-click / Open alongside explicitly adds or reveals a
+split. Layout owns placement and ratios; sidebar highlights derive from visible
+panes and focus. Existing shells, native Session surfaces and hidden-pane geometry
+survive. No tab model, second selected-ID store or provider lifecycle was added.
+
+Review findings fixed: a hidden Session click must not unexpectedly expand its old
+split; exchange it into the active Session slot instead. When every pane is hidden,
+opening must unhide its destination. A Session hosted inside a shell must control
+that existing shell pane rather than create another terminal. First inventory with
+zero Sessions must not lock in the sidebar default. These are local behavior fixes,
+not configured provider continuation evidence.
+
+Verification: 44 focused Swift tests passed, and the SwiftPM/Ghostty and Xcode
+fallback build-for-testing paths passed. The signed UI was installed with the
+matching materialized CLI preserved and reopened on the same copied Home. Logs:
+`.lf/tmp/sync-oct1/ide-layout-{swift,xcode}.log`. Real Task LOO-330's copied inventory
+has no open Session, so an empty workspace alone cannot demonstrate the new one- or
+multiple-Session rules. The next review should open a real conversation, verify its
+full-size entry, then add another and exercise Command-click, active-slot replacement,
+ratio retention and sidebar toggle. Full Unit 1 acceptance and latency remain open.
+
 ## October 1 retry
 
 Jack requested integration with main and another demonstration. Loopflow selected

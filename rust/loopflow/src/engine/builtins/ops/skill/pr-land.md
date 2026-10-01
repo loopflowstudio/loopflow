@@ -18,8 +18,9 @@ lf land --next <slug>   # continue its serial PR chain
 
 The operation owns preparation, sync, publication, and exact-head auto-merge.
 It records the settlement intent and returns. Later `lf pr reconcile` invocations
-check recorded repository landings once, repair actionable CI, and settle verified
-merges. An unchanged incident receives one repair; unresolved evidence stays visible.
+check recorded repository landings once and settle verified merges. `lf ci watch`
+repairs actionable CI while it runs. An unchanged incident receives one repair;
+unresolved evidence stays visible.
 A successful handoff does not prove merge or Task completion. It consumes valid prepared copy or generates it
 through pr-message; use explicit title/body only for an intentional override.
 Check the resulting PR's scope, claims and evidence limits. Do not duplicate

@@ -5,6 +5,32 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## CI watcher decisions (2026-10-01)
+
+Jack Heart's decisions on [LOO-365](https://linear.app/loopflow/issue/LOO-365),
+in the order he revised them:
+
+- The watcher is an optional helper Desktop owns, or a command a person runs.
+  "not this always on 24 7 server that we expect to always be running."
+  Correctness never depends on it.
+- CI repair needs no owning conversation: the clock starts one ci-fix run,
+  deduplicated per PR and failing head. TaskSessions stay conversations with Jack.
+- It is repo-wide and does one job. "A PR with no Task is reported, not
+  repaired." Any future watcher is its own program, not a plug-in to this one.
+- One command, three ways to run it: a terminal, a launchd service, and Desktop
+  per open repository. A second copy never repeats a fix.
+- "i would prefer this watcher service to the one minute cron." The branch
+  retires the cron's repair path only; the cron still resumes Flows and settles
+  merges. Deleting the cron outright remains Jack's stated preference.
+
+`lf ci watch` implements this on the LOO-365 branch: REST polling with ETags
+detects, and the existing landing check confirms and admits the repair, so the
+landing lock, generation and incident reservation are the only claim. Not yet
+proven against a real failing landing. Open choices the branch made without
+Jack's confirmation: a standalone `lf land` PR with no Task is still repaired;
+a failing Task PR nobody armed is only reported; watcher state has no Desktop
+view yet (LOO-353).
+
 ## Skill reduction decisions (2026-09-28)
 
 Jack reported uncertainty among repair and implementation entry points and

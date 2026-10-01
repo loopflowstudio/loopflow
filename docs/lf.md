@@ -109,7 +109,8 @@ lf release check                   # inspect release eligibility
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
 own preparation and integration; publish does not sync. PR operations work
 on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges.
+`lf pr reconcile` checks it once and settles verified merges; `lf ci watch`
+starts a ci-fix when a recorded landing fails its required checks.
 
 ## Keep Tasks progressing in the background
 
@@ -124,8 +125,25 @@ lf cron sync --repo --disable       # remove the schedule
 ```
 
 Checks continue with Desktop closed while the placed Home's user is logged in.
-They resume captured Flows, respect reviews and holds, and reconcile authorized
-landings. CI repair runs in a separate Exec; the check returns after startup.
+They resume captured Flows, respect reviews and holds, record CI failures, and
+settle verified merges. They do not repair CI.
+
+## Repair failed CI
+
+```bash
+lf ci watch               # watch this repository's PR checks until you stop it
+lf ci watch --once        # check every open PR once and exit
+lf ci watch --install     # keep it running as a launchd service
+lf ci watch --uninstall
+lf ci watch --status      # live or not, last poll, what it started and why
+```
+
+The watcher polls GitHub about once a minute and starts one ci-fix when a PR
+with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
+failing PR nobody armed is reported, not repaired; so is a PR with no Task.
+Loopflow Desktop runs the same command for each open repository and stops it
+on quit. A second copy stands by behind a live one. Nothing depends on the
+watcher running: without it, failures are recorded and wait.
 An idle check launches no provider. Existing work and GitHub merge requests
 continue when the schedule is disabled or a Task is held.
 

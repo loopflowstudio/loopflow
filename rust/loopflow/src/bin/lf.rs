@@ -1590,6 +1590,24 @@ fn execute_command(
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
+            // The watcher admits repairs, which needs a recorded Exec.
+            loopflow::lf::RepoCommand::Ci {
+                cmd:
+                    Some(loopflow::lf::CiCommand::Watch {
+                        uninstall: false,
+                        status: false,
+                        ..
+                    }),
+                ..
+            } => {
+                // It runs from the main checkout so its long-lived Exec never
+                // counts as live work in a Task's worktree.
+                let root = loopflow::engine::worktrees::main_repo_root(
+                    &loopflow::lf::commands::util::find_repo_root()?,
+                )?;
+                let _cwd = CwdGuard::enter(&root)?;
+                with_runtime(&root, args, || loopflow::lf::commands::ops::run_repo(cmd))
+            }
             loopflow::lf::RepoCommand::Tokens { .. } | loopflow::lf::RepoCommand::Ci { .. } => {
                 loopflow::lf::commands::ops::run_repo(cmd)
             }

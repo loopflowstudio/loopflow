@@ -80,6 +80,7 @@ lf pr publish                          # ready for review
 lf arm                                 # request auto-merge and return
 lf land                                # hand off delivery and return
 lf pr reconcile                        # check recorded landings once
+lf ci watch                            # repair failed landings while it runs
 ```
 
 `publish` creates or refreshes the current PR without integration. A completed
@@ -93,7 +94,7 @@ GitHub squash-merges the final PR tree into one commit on main. `arm` and `land`
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks enrolled Tasks and recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Home. `submit` performs the
+finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a live
 Task worker or certify that a particular Flow ran.
@@ -126,6 +127,7 @@ directory:
 <absolute-git-dir>/loopflow/rebase-owner.json
 <absolute-git-dir>/lf-pr-mutation.lock
 <absolute-git-dir>/lf-pr-landing.lock
+<absolute-git-dir>/lf-ci-watch.lock
 ```
 
 The open file descriptor is authority. JSON is a readable receipt. Process
@@ -191,10 +193,50 @@ read required checks on H1 once
    |      |      |          |
  pending pass  merged      fail
    |      |      |          |
- return return settle   reserve detached repair under G; return
+ return return settle   record the incident; the CI watcher or a
+                        release reserves a detached repair under G
 ```
 
 The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
+Those checks record a failure and return. Only `lf ci watch` and a release's own
+landing start a repair, through this same check.
+
+### CI watcher
+
+```text
+lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
+      |                         pulls?state=open
+      |                         commits/{head}/check-runs, commits/{head}/status
+      |                         rules/branches/{base} (required checks, hourly)
+      v
+ required check failed on a PR with a recorded landing?
+      |  yes                                  | no landing, or no Task
+      v                                       v
+ the landing check above                   report only
+ (lock, generation, confirm, reserve)
+```
+
+`lf ci watch` is one repository-wide program with one job. It reads the gate
+with the same required-check projection as the landing check, then hands a
+failing landing to that check, which confirms the failure against GitHub, stays
+silent for a queued PR, and reserves the incident's one repair. The landing
+lock, landing generation and incident reservation are the claim, so a watcher,
+a scheduled check and a release cannot repeat a fix. The watcher fills the
+incident's `provider_completed_at` from the check's `completed_at`, which makes
+detection latency measurable in `lf ci`.
+
+It backs off to five minutes after a degraded pass and waits for the reset when
+fewer than 500 core requests remain. Every recorded landing is also checked
+every five minutes, so a conflicting or stale head and a CI timeout are repaired
+without any check failing.
+
+The command runs three ways: in a terminal, as a launchd service
+(`lf ci watch --install`), and from Loopflow Desktop, which starts it for each
+open repository and stops it on quit. `<git-dir>/lf-ci-watch.lock` admits one
+live watcher per repository; a second copy stands by and takes over when the
+first exits. `<git-dir>/loopflow/ci-watch.json` carries its last poll, the PRs
+it saw and the repairs it started, read by `lf ci watch --status`. Correctness
+never depends on it: with no watcher, failures are recorded and wait.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair

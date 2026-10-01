@@ -957,7 +957,7 @@ fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     Ok(())
 }
 
-fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -1114,7 +1114,7 @@ fn plist_string(content: &str, key: &str) -> Option<String> {
     Some(xml_unescape(value))
 }
 
-fn xml_escape(value: &str) -> String {
+pub(crate) fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1168,7 +1168,7 @@ fn run_launchctl_path(action: &str, path: &Path) -> OpsResult<()> {
     })
 }
 
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };

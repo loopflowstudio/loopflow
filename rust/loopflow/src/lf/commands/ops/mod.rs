@@ -812,7 +812,9 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
         }
         RepoCommand::Release { cmd } => run_release(cmd),
         RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
+        RepoCommand::Ci { cmd: Some(cmd), .. } => ci_watch_cmd(cmd),
         RepoCommand::Ci {
+            cmd: None,
             since,
             wave,
             repo,
@@ -897,6 +899,115 @@ fn print_pm_sync_result(result: &crate::ops::pm::PmSyncResult) {
     }
     for diagnostic in &result.diagnostics {
         println!("diagnostic: {diagnostic}");
+    }
+}
+
+fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
+    use crate::ops::ci_watch;
+    let crate::lf::CiCommand::Watch {
+        once,
+        install,
+        uninstall,
+        status,
+        json,
+        parent_pid,
+    } = *cmd;
+    let repo = find_repo_root()?;
+    match (install, uninstall, status) {
+        (false, false, false) => Ok(ci_watch::watch(
+            &repo,
+            ci_watch::WatchOptions { once, parent_pid },
+        )?),
+        (true, _, _) => {
+            require_release_cron_binary()?;
+            let authority = cron_authority("")?;
+            let path = ci_watch::install_service(
+                &crate::ops::default_launch_agents_dir()?,
+                &ci_watch::ServiceSpec {
+                    repo: authority.repo,
+                    lf_path: crate::ops::resolve_lf_path()?,
+                    lf_home: authority.host.lf_home,
+                    db_path: authority.host.db_path,
+                    path_env: authority.host.path_env,
+                },
+                &SystemLaunchctl,
+            )?;
+            println!("installed {}", path.display());
+            Ok(())
+        }
+        (_, true, _) => {
+            let removed = ci_watch::uninstall_service(
+                &crate::ops::default_launch_agents_dir()?,
+                &main_repo_root(&repo)?,
+                &SystemLaunchctl,
+            )?;
+            println!(
+                "{}",
+                if removed {
+                    "removed the CI watch service"
+                } else {
+                    "no CI watch service is installed"
+                }
+            );
+            Ok(())
+        }
+        (_, _, true) => {
+            let status = ci_watch::status(&repo)?;
+            if json {
+                println!("{}", serde_json::to_string(&status)?);
+                return Ok(());
+            }
+            println!(
+                "{}{}",
+                if status.running {
+                    "watching"
+                } else {
+                    "not running"
+                },
+                if status.installed {
+                    " · service installed"
+                } else {
+                    ""
+                }
+            );
+            let Some(state) = status.state else {
+                return Ok(());
+            };
+            if let Some(at) = state.last_poll_at {
+                println!(
+                    "last poll {}s ago · rate limit {}",
+                    chrono::Utc::now().timestamp() - at,
+                    state
+                        .rate_remaining
+                        .map_or("unknown".to_string(), |left| left.to_string())
+                );
+            }
+            if let Some(degraded) = &state.degraded {
+                println!("degraded: {degraded}");
+            }
+            for pr in &state.prs {
+                println!(
+                    "PR #{} {}: {}{}",
+                    pr.number,
+                    pr.task.as_deref().unwrap_or("(no Task)"),
+                    pr.state,
+                    pr.detail
+                        .as_deref()
+                        .map(|detail| format!(" — {detail}"))
+                        .unwrap_or_default()
+                );
+            }
+            for repair in &state.repairs {
+                println!(
+                    "started ci-fix for PR #{} {} {}s ago: {}",
+                    repair.pr_number,
+                    repair.task.as_deref().unwrap_or("(no Task)"),
+                    chrono::Utc::now().timestamp() - repair.at,
+                    repair.reason
+                );
+            }
+            Ok(())
+        }
     }
 }
 

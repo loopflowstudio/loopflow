@@ -26,7 +26,7 @@ lf pr publish --title "..."          # push and create/update PR
 lf submit                         # prepare for the user's merge click
 lf arm                            # prepare and request auto-merge; return
 lf land                           # record delivery and return
-lf pr reconcile                      # check delivery once; repair or settle merge
+lf pr reconcile                      # check delivery once; settle a verified merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is

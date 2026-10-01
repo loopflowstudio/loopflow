@@ -108,10 +108,17 @@ impl LandingObservation {
 pub(crate) trait LandingDriver: Send + Sync {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation>;
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()>;
+    /// Whether this check may start a ci-fix. A check that may not still records
+    /// the failure and leaves the repair to `lf ci watch`.
+    fn repairs(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
-struct GithubLandingDriver;
+struct GithubLandingDriver {
+    repairs: bool,
+}
 
 impl LandingDriver for GithubLandingDriver {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
@@ -127,6 +134,10 @@ impl LandingDriver for GithubLandingDriver {
 
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         admit_ci_fix(landing, incident)
+    }
+
+    fn repairs(&self) -> bool {
+        self.repairs
     }
 }
 
@@ -215,12 +226,8 @@ fn admit_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
                 format!("repair completed at {finished}; waiting for changed evidence")
             })));
         }
-        if let Some(exec) = &reservation.exec {
-            if crate::journal::exec_process_evidence(&store.sqlite, exec)
-                != crate::journal::ProcessIdentityEvidence::Dead
-            {
-                return Ok(());
-            }
+        if repair_live(&store, reservation.exec.as_ref()) {
+            return Ok(());
         }
         if let Some(session) = &reservation.session {
             if store
@@ -407,6 +414,16 @@ fn admit_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
     })
 }
 
+/// A reservation still held by the caller was never handed to a repair worker;
+/// a long-lived watcher must be able to retry its own unacknowledged launch.
+fn repair_live(store: &SharedStore, exec: Option<&crate::id::ExecId>) -> bool {
+    exec.is_some_and(|exec| {
+        Some(exec) != crate::journal::current_exec_id().as_ref()
+            && crate::journal::exec_process_evidence(&store.sqlite, exec)
+                != crate::journal::ProcessIdentityEvidence::Dead
+    })
+}
+
 fn repair_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
@@ -498,7 +515,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         Ok::<_, OpsError>((store, landing, incident, captured))
     })?;
     let result = (|| {
-        let observation = GithubLandingDriver.observe(&landing)?;
+        let observation = GithubLandingDriver { repairs: true }.observe(&landing)?;
         let matching = match observation {
             LandingObservation::Failing {
                 head_sha,
@@ -998,6 +1015,9 @@ async fn reconcile_claimed(
             .observe_ci_incident(&incident)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
+        if !driver.repairs() {
+            return Ok(());
+        }
         observed = run_driver_operation(ownership, "CI confirmation", {
             let driver = Arc::clone(&driver);
             let landing = landing.clone();
@@ -1380,10 +1400,32 @@ pub(crate) fn reconcile_armed_pr(
         reconcile_pr_landing(
             landing_store().await?,
             landing,
-            Arc::new(GithubLandingDriver),
+            Arc::new(GithubLandingDriver { repairs: true }),
         )
         .await
     })
+}
+
+/// One landing check that may start a ci-fix: the entry point `lf ci watch`
+/// shares with a release's own landing. The landing lock, generation claim and
+/// incident reservation keep a second caller from repeating the repair.
+pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> OpsResult<PrLanding> {
+    reconcile_pr_landing(
+        store,
+        landing,
+        Arc::new(GithubLandingDriver { repairs: true }),
+    )
+    .await
+}
+
+/// Whether a repair worker for this landing is running now.
+pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsResult<bool> {
+    Ok(store
+        .sqlite
+        .landing_repair_execs(&landing.id)
+        .map_err(repair_error)?
+        .iter()
+        .any(|exec| repair_live(store, Some(exec))))
 }
 
 pub fn reconcile_repository(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
@@ -1431,7 +1473,11 @@ pub(crate) async fn reconcile_repository_async(
         let id = landing.id.clone();
         match tokio::time::timeout_at(
             deadline,
-            reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver)),
+            reconcile_pr_landing(
+                store.clone(),
+                landing,
+                Arc::new(GithubLandingDriver { repairs: false }),
+            ),
         )
         .await
         {
@@ -1780,6 +1826,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
+        let incidents = store
+            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert!(incidents[0].incident.responded_at.is_some());
+    }
+
+    /// The scheduled repository check: it sees the failure, the watcher repairs it.
+    struct ObservingDriver(Arc<FakeDriver>);
+
+    impl LandingDriver for ObservingDriver {
+        fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
+            self.0.observe(landing)
+        }
+        fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+            self.0.repair(landing, incident)
+        }
+        fn repairs(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn an_observing_check_records_the_failure_and_leaves_the_repair() {
+        let (_directory, store, landing) = fixture().await;
+        let fake = driver(vec![failure("head"), failure("head"), failure("head")]);
+        let observing = Arc::new(ObservingDriver(fake.clone()));
+        let watching = reconcile_pr_landing(store.clone(), landing, observing)
+            .await
+            .unwrap();
+        assert_eq!(watching.state, PrLandingState::Watching);
+        assert_eq!(*fake.repairs.lock().unwrap(), 0);
+        let incidents = store
+            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert!(incidents[0].incident.responded_at.is_none());
+
+        // The watcher's check then repairs that same incident, once.
+        reconcile_pr_landing(store.clone(), watching, fake.clone())
+            .await
+            .unwrap();
+        assert_eq!(*fake.repairs.lock().unwrap(), 1);
         let incidents = store
             .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
             .await

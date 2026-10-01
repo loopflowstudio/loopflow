@@ -18,6 +18,10 @@ checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Home. Disabling stops scheduled
 admission; already-running work and requested GitHub merges continue.
 
+While a repository is open, the app runs `lf ci watch` for it and stops it on
+quit. The watcher starts a ci-fix when a recorded landing fails its required
+checks; `lf ci watch --status` shows its last poll and what it started.
+
 ```text
 ⌘D          split right
 ⌘⇧D         split down

@@ -127,6 +127,7 @@ Show direct provider-authored usage from recorded Session inputs
 |---|---|
 | `--json` | Emit Session usage evidence as JSON Default: false. |
 | `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
 | `--parent` | Inputs issued by this Session or retained capture |
 | `--wave` | Limit to Session inputs attributed to one Wave |
 | `--project` | Limit to Session inputs attributed to one Project |

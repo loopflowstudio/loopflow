@@ -75,6 +75,9 @@ pub enum MonitorCommand {
         /// Observation window, in days (zero means all time)
         #[arg(long, default_value_t = 30)]
         days: u32,
+        /// Report context cost and turn time by week since 2026-09-30
+        #[arg(long, conflicts_with_all = ["days", "parent"])]
+        weekly: bool,
         /// Inputs issued by this Session or retained capture
         #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
         parent: Option<String>,
@@ -149,11 +152,27 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
         MonitorCommand::Usage {
             json,
+            weekly: true,
+            wave,
+            project,
+            task,
+            ..
+        } => super::context_cost::run(
+            *json,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+        ),
+        MonitorCommand::Usage {
+            json,
             days,
             parent,
             wave,
             project,
             task,
+            weekly: false,
             context,
         } => super::usage::run(
             *context,

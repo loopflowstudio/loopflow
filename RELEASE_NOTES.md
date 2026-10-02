@@ -1,5 +1,7 @@
 # v0.12.31
 
+<!-- loopflow:release-notes=narrative;gate=safe -->
+
 v0.12.31 makes it easier to start a conversation, find unfinished work and reach the Session that needs attention. Bare `lf` follows your request in the current checkout, while explicit operators handle repository and Task progression. Doctor can inspect broken Homes without changing their schema, and release recovery now handles more failures between merge, packaging and publication.
 
 ## Start with the request, reach for operations when needed

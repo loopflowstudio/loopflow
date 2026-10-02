@@ -182,6 +182,7 @@ the Session name. Both open the same picker: review the named Task, then choose
 ```sh
 open 'loopflow://task/LOO-303'
 open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow&session=SESSION_ID'
 ```
 
 Task links and palette Task entries open retained workspaces, including Tasks
@@ -189,6 +190,9 @@ outside the current chapter, without starting a Task Flow. A repository-qualifie
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
+Add `session` to open an existing Task conversation in its terminal pane. A
+missing or unrelated Session leaves the current workspace intact and offers Retry.
+Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
 Flow template, current Tasks and chapter history. Completed Tasks start hidden.

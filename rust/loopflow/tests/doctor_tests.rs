@@ -242,3 +242,39 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         assert!(events_after_telemetry.contains(&original));
     }
 }
+
+#[test]
+fn doctor_accepts_machine_commands_without_a_repository() {
+    let home = TestRepo::new();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    insert_exec(
+        &store,
+        "machine-command",
+        OffsetDateTime::now_utc().unix_timestamp(),
+    );
+    let mut event = store.execs_since(0).unwrap().pop().unwrap();
+    event.id = loopflow::id::ExecId::new();
+    event.repo = None;
+    event.command = Some("lf help".to_string());
+    store.record_exec(&event).unwrap();
+
+    let output = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let identity = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"] == "identity")
+        .unwrap();
+    assert_eq!(identity["status"], "ok");
+    assert!(identity["detail"]
+        .as_str()
+        .unwrap()
+        .contains("1 Exec(s) without repository scope"));
+}

@@ -56,3 +56,40 @@ Investigate the missing scheduled receipts separately using the two exact cron-h
 Review finding: distinguish reaching candidate refusal from completing an upgrade, and preserve the unresolved candidate identity instead of claiming the precise inner failure was reproduced. These limits are now explicit above.
 
 Analysis check: `git diff --check` passed; prose-only investigation reused the recorded implementation checks without rerunning builds. Release/container replay remains outstanding.
+
+
+## Doctor architecture repair — 2026-10-02
+
+Jack Heart requested Doctor diagnosis against the current architecture and a landed PR.
+The installed 61d21f885 replay reproduces two missing cron receipts and one invalid
+repository value. Exec now includes machine commands with absent repository scope;
+that absence is valid. Relative recorded repository paths remain invalid.
+
+The two exact cron histories have no receipts in the past two days. Both launchd
+specs pin lf-d7bf7c66843517e437c870e2dea0beb52717f4633f73441eedba01ff5e7bc401.
+Their logs report inactive retained artifact refusal, then missing Daemon-role
+failures from old startup code. These are startup failures before receipt recording,
+not evidence of corrupt Exec history. New cron installation uses the stable machine
+entry gate; Doctor retains missing-receipt failure and names executable, log and
+reconciliation commands, including repository-only schedules. Freshness output is
+bounded and distinguishes merged source from published releases.
+
+Live scheduler recovery still requires the published repair, cron reconciliation,
+and a real scheduled receipt. Do not trigger release-run merely to make Doctor green.
+The earlier installation acceptance limits remain in force.
+
+
+Replay evidence: copying the full 0.12.29 database into a disposable Home is rejected
+at the 0.12.30 canonical frontier, as required by its isolation contract. Importing
+all 3,990 unchanged Exec rows into a fresh fixture and copying the installed cron
+specs reproduces only the two real missing receipts: identity passes with three
+absolute repositories and 71 repository-free Execs; attribution and lineage pass.
+This is history diagnosis evidence, not a published upgrade or live scheduler replay.
+
+Review finding resolved: repository Task schedules have no Wave; their diagnostic
+must use `cron sync --repo` and quote the empty Wave for history. Preserve missing
+receipts as failures rather than laundering startup failures into a healthy ledger.
+The entry-gate test uses disposable true/false executables and proves job-path
+continuity, not successful production publication or release execution.
+
+Checks: `cargo test -p loopflow --lib doctor::tests` (10), `cargo test -p loopflow --lib ops::cron::tests` (16), `cargo test -p loopflow --test doctor_tests` (3), installation regressions (2), local promotion (2), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, README/index sync (1), and `git diff --check` passed.

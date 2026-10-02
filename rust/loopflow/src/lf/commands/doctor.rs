@@ -125,7 +125,7 @@ pub fn run(json: bool) -> Result<()> {
     }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("run ledger audit failed"));
+        return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
 }
@@ -167,6 +167,8 @@ fn check_binary_freshness() -> Check {
         crate::build_info::BuildFreshness::Behind { revision, missing } => {
             let commits = missing
                 .iter()
+                .rev()
+                .take(3)
                 .map(|commit| {
                     format!(
                         "{} {}",
@@ -179,9 +181,8 @@ fn check_binary_freshness() -> Check {
             Check::warn(
                 FRESHNESS,
                 format!(
-                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}, so \
-                     these fixes are not running: {commits}. Rebuilding is an operator action; \
-                     this check installs nothing",
+                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}; \
+                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -417,15 +418,29 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             satisfied += 1;
             continue;
         }
+        let wave = if obligation.wave.is_empty() {
+            "''"
+        } else {
+            &obligation.wave
+        };
+        let sync = if obligation.target_kind == crate::ops::CronTargetKind::Repository {
+            "lf cron sync --repo".to_string()
+        } else {
+            format!("lf cron sync --wave {wave}")
+        };
         missing.push(format!(
-            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; inspect `lf cron history --wave {} --flow {} --days 2`",
+            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; \
+             inspect `lf cron history --wave {wave} --flow {} --days 2`; \
+             configured executable {}; inspect log {}; reconcile with `{sync}` from repository {}",
             obligation.wave,
             obligation.flow,
             obligation.home_id,
             format_interval(interval),
             obligation.schedule.expression(),
-            obligation.wave,
             obligation.flow,
+            obligation.lf_path.display(),
+            obligation.log_path.display(),
+            obligation.repo.display(),
         ));
     }
 
@@ -596,25 +611,29 @@ fn check_attribution(events: &[Exec]) -> Check {
     }
 }
 
-/// Repo identity is the absolute main-repo root, never a basename.
+/// Execs may be machine-scoped; recorded repositories must be absolute.
 fn check_identity(events: &[Exec]) -> Check {
-    let repos: HashSet<Option<&str>> = events.iter().map(|event| event.repo.as_deref()).collect();
+    let repos: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| event.repo.as_deref())
+        .collect();
+    let unscoped = events.iter().filter(|event| event.repo.is_none()).count();
     let invalid = repos
         .iter()
-        .filter(|repo| repo.is_none_or(|repo| !Path::new(repo).is_absolute()))
+        .filter(|repo| !Path::new(repo).is_absolute())
         .count();
     if invalid == 0 {
         return Check::ok(
             "identity",
-            format!("{} repo value(s), all absolute", repos.len()),
+            format!(
+                "{} repo value(s), all absolute; {unscoped} Exec(s) without repository scope",
+                repos.len()
+            ),
         );
     }
     Check::fail(
         "identity",
-        format!(
-            "{invalid}/{} repo value(s) are missing or not absolute",
-            repos.len()
-        ),
+        format!("{invalid}/{} repo value(s) are not absolute", repos.len()),
     )
 }
 
@@ -667,7 +686,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     if let Some(error) = &store.migration_error {
         println!("migration error: {error}");
     }
-    println!("ledger: {rows} run events\n");
+    println!("ledger: {rows} Execs\n");
     for check in checks {
         let (mark, color) = match check.status {
             Status::Ok => ("ok  ", colors.green),
@@ -772,6 +791,9 @@ mod tests {
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
             home_id: HomeId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
+            repo: PathBuf::from("/src/loopflow"),
+            lf_path: PathBuf::from("/usr/local/bin/lf"),
+            log_path: PathBuf::from("/src/loopflow/.lf/logs/cron.log"),
             receipts: Vec::new(),
         }
     }
@@ -855,6 +877,9 @@ mod tests {
             "0 0 9 * * *",
             "has no scheduled receipt",
             "lf cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "configured executable /usr/local/bin/lf",
+            "inspect log /src/loopflow/.lf/logs/cron.log",
+            "lf cron sync --wave infrastructure",
         ] {
             assert!(
                 check.detail.contains(expected),
@@ -862,6 +887,18 @@ mod tests {
                 check.detail
             );
         }
+    }
+
+    #[test]
+    fn repository_schedule_recovery_does_not_require_a_wave() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        cron.wave.clear();
+        cron.target_kind = CronTargetKind::Repository;
+        let check = check_continuity(&[], &[cron], now);
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.detail.contains("lf cron sync --repo"));
+        assert!(check.detail.contains("lf cron history --wave '' --flow"));
     }
 
     #[test]
@@ -939,6 +976,13 @@ mod tests {
         terminal.command = Some(r#"["lf","code"]"#.to_string());
         let rows = [named(row(DAY, "started"), r#"["lf","code"]"#), terminal];
         assert_eq!(status_of(&rows, "attribution"), Status::Ok);
+    }
+
+    #[test]
+    fn machine_scoped_execs_have_valid_identity() {
+        let mut event = named(row(DAY, "completed"), "lf help");
+        event.repo = None;
+        assert_eq!(status_of(&[event], "identity"), Status::Ok);
     }
 
     #[test]

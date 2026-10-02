@@ -277,6 +277,9 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
 Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+After integrating Session kind changes, run `scripts/test_desktop.sh --filter
+'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
+participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
 

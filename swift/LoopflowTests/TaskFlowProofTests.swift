@@ -45,8 +45,7 @@ struct TaskFlowTests {
         value["kind"] = "conversation"
         let independent = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         #expect(!independent.offersParticipation)
-        value["kind"] = "ask"
-        value["flow_membership"] = ["kind": "independent"]
+        value["kind"] = "flow"
         value["actions"] = []
         let failed = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         #expect(!failed.offersParticipation)

@@ -231,6 +231,32 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
+    /// A launch that named its account switches on a person's behalf; one
+    /// that was routed switches because the active account ran out.
+    fn shared(
+        provider: Provider,
+        account_id: ProviderAccountId,
+        store: SharedStore,
+        home: PathBuf,
+        named: bool,
+    ) -> Self {
+        Self {
+            provider,
+            account_id,
+            // A shared conversation is in the native home whichever account runs it.
+            resume_requested_session: true,
+            authority: AccountRouteAuthority::Shared {
+                store,
+                home,
+                cause: if named {
+                    activation::SwitchCause::Person
+                } else {
+                    activation::SwitchCause::Exhaustion
+                },
+            },
+        }
+    }
+
     pub(crate) fn account_id(&self) -> &ProviderAccountId {
         &self.account_id
     }
@@ -275,14 +301,9 @@ impl ProviderAccountRoute {
                 // The native home holds the active account's live credential;
                 // its stored profile is only current as of the last switch.
                 let native = activation::native_home(self.provider, None);
-                let home = match &self.authority {
-                    AccountRouteAuthority::Shared { .. }
-                        if identity::same_codex_login(&native, home) =>
-                    {
-                        &native
-                    }
-                    _ => home,
-                };
+                let active = matches!(self.authority, AccountRouteAuthority::Shared { .. })
+                    && identity::same_codex_login(&native, home);
+                let home = if active { &native } else { home };
                 crate::provider_auth::prepare_provider_account_access_token(self.provider, home)
                     .await
                     .map_err(|error| ProviderAccountError::ForwardingCredential {
@@ -411,20 +432,19 @@ impl ProviderAccountRoute {
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
-        self.apply(command);
-        if !matches!(self.authority, AccountRouteAuthority::Shared { .. }) {
-            return Ok(None);
-        }
-        let route = self.clone();
-        let mut environment = Command::new(self.provider.as_str());
-        for (name, value) in command.get_envs() {
-            match value {
-                Some(value) => environment.env(name, value),
-                None => environment.env_remove(name),
-            };
-        }
-        _run_blocking_account(self.provider, "activate", move |runtime| {
-            runtime.block_on(route.launch_as(&mut environment))
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
+                        .block_on(self.launch_as(command))
+                })
+                .join()
+                .map_err(|_| {
+                    ProviderAccountError::Runtime("account activate worker panicked".into())
+                })?
         })
     }
 
@@ -931,20 +951,13 @@ pub(crate) async fn resolve_provider_account_exact(
         }
     };
     if !isolated {
-        return Ok(Some(ProviderAccountRoute {
+        return Ok(Some(ProviderAccountRoute::shared(
             provider,
             account_id,
-            // A shared conversation is in the native home whichever account runs it.
-            resume_requested_session: true,
-            authority: AccountRouteAuthority::Shared {
-                store,
-                home,
-                cause: match exact_account_id {
-                    Some(_) => activation::SwitchCause::Person,
-                    None => activation::SwitchCause::Exhaustion,
-                },
-            },
-        }));
+            store,
+            home,
+            exact_account_id.is_some(),
+        )));
     }
     Ok(Some(ProviderAccountRoute {
         provider,
@@ -961,23 +974,15 @@ async fn route_isolated(
     provider: Provider,
     provider_session_id: Option<&str>,
 ) -> Result<bool, ProviderAccountError> {
-    if let Some(session_id) = provider_session_id {
-        if store
-            .provider_session_account(provider, session_id)
-            .await?
-            .is_some()
-        {
-            return Ok(true);
-        }
-        if provider == Provider::Codex
-            && store
-                .provider_session_is_shared(provider, session_id)
+    let recorded = match provider_session_id {
+        Some(session_id) => {
+            store
+                .provider_session_isolated(provider, session_id)
                 .await?
-        {
-            return Ok(false);
         }
-    }
-    Ok(activation::launch_isolated(provider))
+        None => None,
+    };
+    Ok(recorded.unwrap_or_else(|| activation::launch_isolated(provider)))
 }
 
 /// Shared routing stays on the active account while it is eligible and
@@ -1056,20 +1061,13 @@ async fn resolve_merged_provider_account(
                     None => false,
                 };
                 if !route_isolated(store, provider, provider_session_id).await? {
-                    return Ok(Some(ProviderAccountRoute {
+                    return Ok(Some(ProviderAccountRoute::shared(
                         provider,
-                        account_id: candidate.account.account_id.clone(),
-                        resume_requested_session: true,
-                        authority: AccountRouteAuthority::Shared {
-                            store: Arc::clone(store),
-                            home: home.clone(),
-                            cause: if explicit {
-                                activation::SwitchCause::Person
-                            } else {
-                                activation::SwitchCause::Exhaustion
-                            },
-                        },
-                    }));
+                        candidate.account.account_id.clone(),
+                        Arc::clone(store),
+                        home.clone(),
+                        explicit,
+                    )));
                 }
                 return Ok(Some(ProviderAccountRoute {
                     provider,

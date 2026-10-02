@@ -1563,22 +1563,22 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether this conversation was recorded in the provider's native home.
-    pub fn provider_session_is_shared(
+    /// The home a recorded conversation lives in: its account's own
+    /// (`true`) or the provider's native one.
+    pub fn provider_session_isolated(
         &self,
         provider: Provider,
         provider_session_id: &str,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<bool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT 1 FROM provider_session_accounts
-                 WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 0",
+                "SELECT isolated FROM provider_session_accounts
+                 WHERE provider = ?1 AND provider_session_id = ?2",
                 params![provider.as_str(), provider_session_id],
-                |_| Ok(()),
+                |row| row.get(0),
             )
-            .optional()?
-            .is_some())
+            .optional()?)
     }
 
     pub fn record_provider_account_switch(

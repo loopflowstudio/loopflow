@@ -888,14 +888,14 @@ impl Store {
         .await
     }
 
-    pub async fn provider_session_is_shared(
+    pub async fn provider_session_isolated(
         &self,
         provider: Provider,
         provider_session_id: &str,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<bool>> {
         let provider_session_id = provider_session_id.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_is_shared(provider, &provider_session_id)
+            store.provider_session_isolated(provider, &provider_session_id)
         })
         .await
     }

@@ -152,7 +152,7 @@ Claude's Keychain path is macOS-only; its fixture runs in the macOS CI job and t
 
 ## Evidence
 
-Check: `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo test -p loopflow --lib provider_account`, and `--test agent_tests --test auth_tests --test flow_tests` — pass. `store::migrations::tests::remove_ask_preserves_conversations_and_history` fails with and without this branch's draft; not caused here. The e2e gate fixture is owed by slice 1.
+Check: `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo test -p loopflow --lib provider_account`, and `--test agent_tests --test auth_tests --test flow_tests` — pass. Rerun after compress (one shared-route constructor, `provider_session_isolated` replacing the two-query mode lookup, `launch_as_blocking` running `launch_as` on a scoped thread): pass. `store::migrations::tests::remove_ask_preserves_conversations_and_history` fails with and without this branch's draft; not caused here. The e2e gate fixture is owed by slice 1.
 
 Check: Codex credential probe with synthetic credentials in a temporary home (start under A, replace native with B, query auth status on the running and a fresh process) — running process kept A, fresh process took B, native file unchanged; no live credential read or changed, no implementation tests run.
 

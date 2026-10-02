@@ -9,6 +9,27 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## Optional chapters and Task workflows (2026-10-02)
+
+The current briefs for [LOO-366](https://linear.app/loopflow/issue/LOO-366/keep-every-wave-ready-for-work-without-requiring-a-chapter)
+and [LOO-367](https://linear.app/loopflow/issue/LOO-367/start-and-finish-tasks-without-unrelated-workflow-prerequisites),
+read through `lf wave status infrastructure --json` on October 2, record Jack
+Heart's accepted direction: ordinary Projects do not require chapters or a
+default Flow; Tasks do not require a managed Flow or delivery workflow merely
+to exist and record an outcome. Chapters remain optional coordinated resets.
+This supersedes older mandatory-chapter/default-Flow assumptions in this memory;
+it does not establish implementation or authorize a repository reset.
+
+LOO-366 owns explicit Project ensure/adoption and optional resets. LOO-367 owns
+Task admission/completion and preserves unresolved delivery and unfinished work.
+Keep that interface distinct: observational reads must not create Projects, and
+Task operations must not acquire unrelated coordination prerequisites. The
+October 2 Task detail showed LOO-367 starting implementation after Jack's design
+review; LOO-366 remained planning-only (`lf task status` found no local Task).
+Retain the current serial implementation allocation rather than launch a second
+worker during this pass. Neither unchecked current Project KR has outcome proof;
+the metric portfolio and Project metric targets were empty in this observation.
+
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
 Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
@@ -42,6 +63,41 @@ because they had live file handles: `installed/local-04115a69e0c34b198bf110976b3
 `worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
 reinspect live ownership before cleanup. Older running builds can recreate side
 stores until the published cutover. No active database was removed or process killed.
+
+October 2 readback from `lf task status LOO-342 --json` records
+[PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged at
+`6c73356074c47a90491c1ed4de8e063d85eb3a30`; its merge observation was checked at
+18:14 UTC. The Task remains ready with an idle saved `ship` Flow at `pr land -c`.
+This establishes landing, superseding the branch-only delivery evidence above,
+but not installed acceptance or retirement of the retained stores. Resuming that
+completion step was deferred because those obligations remain unproven. Resolve
+their outcome or explicit remaining disposition before treating the Task as done;
+do not recreate a PR merely because the generic action suggests a next PR.
+
+Configured acceptance attempted October 2 at 19:12 UTC after Jack Heart requested
+the checks and retirement. The machine install receipt selects published v0.12.29
+(`61d21f88564783a5fc8f63e385ec035f096fc069`) and `~/.lf/loopflow.db`.
+`gh release view` confirmed [v0.12.29](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.29)
+was still the latest published release (September 30, 23:45 UTC). Git ancestry
+confirms it excludes the October 1 one-Home merge. Installed `lf home id` returned
+the main Home, but an explicit fresh `LF_HOME` through both the public entry gate
+and selected artifact still returned main's identity and Waves without creating
+the experimental database. The available source CLI was v0.12.27. These are
+pre-cutover observations, not failures of the merged implementation. Installed
+acceptance requires a published release containing #1381; do not repeat the same
+checks against v0.12.29 or treat a source-only proof as installed acceptance.
+
+Fresh `lsof +D` inspection found live database handles in all four retained
+`installed/local-*` stores above (15 distinct processes in the initial read).
+No process was stopped and those stores remain untouched. Seven inactive
+worktree snapshots, including `loopflow-growth-thoughts-1c80b40d4504`, were checked
+again individually and moved intact to
+`~/.lf-retired/20261002T191224Z/worktrees/`; `retirement.json` there records exact
+source and destination paths. This retires their old routing locations while
+preserving history; it does not reclaim their disk space. The four live stores
+remain pending until their owners settle. After release, repeat default/source,
+nested Flow/agent and disposable-Home acceptance, then recheck live ownership
+before retiring the remaining stores. LOO-342 remains open.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

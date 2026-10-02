@@ -21,6 +21,8 @@ lf schedule         # check at login and weekly (macOS)
 lf schedule daily   # also accepts weekly, hourly, 5min
 ```
 
+Run `lf install` from any checkout, including a Task checkout. Promotion checks
+the candidate release against the installed database before changing it.
 Use `lf task sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of

@@ -257,7 +257,7 @@ fn classify(output: &std::process::Output) -> Outcome {
     let combined = format!("{stderr}{stdout}");
     let resolution_text = combined
         .lines()
-        .filter(|line| !line.contains("ambient wave identity failed validation; run attributed"))
+        .filter(|line| !line.contains("ambient wave identity failed validation;"))
         .collect::<Vec<_>>()
         .join("\n");
 

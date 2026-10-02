@@ -14,9 +14,7 @@ Publication remains incomplete. Candidate `8cbd0c5b1c99a12151908c59f923b0128706a
 
 The release runner currently resumes that incomplete tag before considering a newer closing patch. It needs a supported recovery path for an already-tagged, unpublished, un-installable candidate. Do not delete release intermediates or rewrite the tag manually. PR #1402 merged while this investigation was in progress.
 
-Checks: journal tests (16), resource-envelope tests (12), checkout CLI proof (1), cargo build, formatting, and all-target Clippy passed; doctor identity tests passed before duplicate edits were removed in favor of PR #1402.
-
-Publisher tests (6) passed; the actual v0.12.30 executable was rejected by the repaired fresh-Home preflight for its pending remove_ask migration.
+The actual v0.12.30 executable was rejected by the repaired fresh-Home preflight for its pending remove_ask migration.
 
 ## Selected execution: finish releases despite concurrent migration merges
 
@@ -26,8 +24,7 @@ implementation. The core outcome is that `lf release run minor` can recover from
 the invalid unpublished 0.12.30 candidate, produce an installable closing patch,
 and publish the minor from that patch's exact product snapshot. A concurrent
 migration merge must lead to a newly prepared candidate rather than a falsely
-verified release. This is the selected implementation scope; details below that
-are marked tentative still require code-level resolution.
+verified release. This is the selected implementation scope.
 
 ### Contract and implementation boundary
 
@@ -45,10 +42,9 @@ immutable migration history, tags, and valid interrupted publication retries.
 - Release preparation applies to the integrated candidate source. Reassess that
   source after merge; if integration introduces drafts, converge through another
   prepared candidate before tagging. Preserve canonical migrations already on
-  main and immutable tags. Tentative approach: advance to a fresh patch version
-  when another preparation cut is required, using the existing release operation
-  and minor-pair state rather than a second orchestration mechanism. Re-running
-  canonicalization against an already frozen batch is not an assumed solution.
+  main and immutable tags. Advance to a fresh patch version when another
+  preparation cut is required, using the existing release operation and minor
+  pair. Do not canonicalize into an already frozen batch.
 - Validate the packaged candidate in a disposable Home and require successful
   preflight. Keep the existing local publisher and package-CI changes. A cached
   candidate receipt produced under the old acceptance rule cannot substitute for
@@ -118,14 +114,12 @@ the invalid patch after a corrected patch had published. Service errors now rema
 errors; same-cycle successor tags recover the interrupted pair. Existing canonical
 migrations and valid publication retries retain their owners.
 
-Remaining: delivery verification and publication of this branch, then the real
-closing-patch/minor release and installation. Live replacement must first prove
+Remaining: publication and the already authorized landing of this branch through
+the existing owner, then the real closing-patch/minor release and installation. Live replacement must first prove
 absence across GitHub, crates.io and versioned R2 downloads; the earlier “no GitHub
 Release” observation alone is insufficient. No release tags, provider records, or
 installed selection were changed by this implementation. No Flow or worker was
 launched.
-
-Checks: release integration suite 62 passed, final source-fetch change's 18 release-run tests passed; publisher 13 and automation 10 passed; cargo fmt, all-target Clippy, Ruff and diff checks passed. Live publication/installation remains delivery work.
 
 Compression removed duplicate Exec terminal classification and repeated release
 scope resolution, and finished internal trace/Exec naming without moving Session
@@ -134,4 +128,11 @@ compatibility implementation remains to maintain. Review retained separate
 source-preparation and publication evidence so unknown provider state cannot
 become permission to replace a tag.
 
-Checks: `cargo test -p loopflow --lib journal::tests` (16), resource-envelope tests (12), `cargo fmt --all`, all-target Clippy, Ruff and diff checks passed; refreshed-tree gate follows.
+`lf sync` merged main at `101a19b8c` without conflicts. Gate found a test
+classifier still filtering the old journal warning text; it now uses the stable
+warning prefix. The original failed gate log remains under
+`.lf/tmp/gate/run-21176/rust/rust.log`; the corrected wave-resolution suite passed.
+No second landing watcher was launched. No release was published or installed
+by this preparation run.
+
+Checks: `uv run python scripts/test.py --reuse-passing` passed architecture, Python (316), website (78; 3 skipped), headless Swift (339 reported) and static checks; Rust had 2,096 passes and one stale-warning failure, repaired and verified with materialized `cargo nextest run -p loopflow --test wave_resolution_matrix` (3 passed); final fmt/Clippy/Ruff/diff checks passed; full hosted matrix and package preflight remain CI-owned, live publication/installation remains delivery work.

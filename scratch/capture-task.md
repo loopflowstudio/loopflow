@@ -1,18 +1,30 @@
-# Capture Task
+# Capture Tasks
 
 Accepted by Jack Heart — 2026-10-01. Scope, conversation behavior, and Desktop
-interaction are agreed. Jack Heart authorized filing under Product and launching
-the work on 2026-10-01.
+interaction were initially agreed. Jack Heart authorized filing under Product
+and launching the work on 2026-10-01. Review clarifications below supersede the
+initial naming and decomposition guidance; the Desktop button label is open.
+Jack Heart approved continuing with the revised design on 2026-10-01 after
+clarifying Task sizing. That approval does not select a final button label.
 
 ## What to build
 
-Desktop's **Create Task** button opens **`capture-task`**, a conversation that
-shapes ideas into Tasks for their owning Waves to operate.
+Desktop's **Create Task** button opens **`capture-tasks`**, a conversation that
+shapes intention into any number of Tasks across Waves and repositories for
+their owners to operate. Launch context does not constrain filing destinations.
 
 ## Accepted direction
 
-Jack Heart settled the naming: “capture-task as the prompt name, create task
-is the button name.” There is one skill, with no `create-task` alias.
+Jack Heart revised the skill name to **capture-tasks** on 2026-10-01. The
+Desktop button label is under discussion; **Create Task** below is provisional.
+Jack Heart suggested **New**, **New Session**, or **Design**; **Explore an idea**
+is an agent proposal, not an accepted label. There is one skill, with no
+`capture-task` or `create-task` alias.
+
+Jack Heart clarified that Tasks are the data model for expressing intention.
+One conversation can produce many Tasks, cross Wave boundaries, and span
+repositories. The initial Wave attribution may be wrong; it is a starting
+context, not an ownership decision. No separate intention record is introduced.
 
 The dedicated session's job is to “make tasks that the right owner will later
 operate.” Wave conversations also capture Tasks while “making sure all tasks
@@ -26,7 +38,7 @@ partly future design, not an implementation prerequisite here.
 ## Placement and scope
 
 Wave: `product`. Its current Project recommends `feature`, which begins with
-kickoff and design review. Continue this accepted design through that Flow.
+kickoff and design review. That Flow retains the review boundaries for this work.
 
 Task: [Capture new Tasks from Desktop conversations · LOO-368](https://linear.app/loopflow/issue/LOO-368/capture-new-tasks-from-desktop-conversations).
 
@@ -41,10 +53,11 @@ operational conversations. Neither is required or allocated by this design.
 
 ## The demo
 
-Click Create Task, describe an idea, explore it, and capture a Task under the
-agreed Wave. The Task appears in that Wave's plan, without a worker launched by
-capture. Continue discussing another idea in the same conversation. The owner
-can operate each Task without reconstructing the conversation.
+Click Create Task from one Wave, describe an idea, and explore it into several
+Tasks. Discover that some belong to other Waves or repositories, correct the
+initial attribution, and file each in its agreed destination without launching
+workers. Continue with another idea in the same conversation. Each owner can
+operate its Tasks without reconstructing the conversation.
 
 ## Conversation contract
 
@@ -64,20 +77,40 @@ acceptance, real constraints, and consequential open decisions. Distinguish
 accepted choices from possible mechanisms. Use people's names for attribution.
 Keep implementation sequencing in a design when one exists. Essential intent
 must survive in the Task; a path to another checkout or a transcript is
-insufficient handoff. Split only independently useful outcomes. Reuse or refine
-an existing Task for the same work rather than filing a duplicate.
+insufficient handoff. Reuse or refine an existing Task for the same work rather
+than filing a duplicate.
 
-Resolve ownership as the idea develops. A selected Wave is the expected owner,
-not a restriction if another Wave fits better. Repository capture has no
-preselected owner. Consult `lf wave list --json` and relevant
-`lf wave status <wave> --json` to check objectives, current plans, and overlap.
-File through `lf task create --wave <owner>` without `--run`; use `lf task edit`
-for subsequent authorized refinements. Return the actual Task link and owner.
+Jack Heart clarified Task sizing on 2026-10-01: favor larger, cohesive Tasks
+with obvious behavioral promises and benefits. Early decomposition often fails
+to match how implementation actually unfolds. Choose boundaries carefully;
+do not apply a formula such as one Task per independently useful outcome.
+Useful opportunities to pipeline or parallelize work can justify splitting,
+but they are considerations, not requirements to fragment an idea. Keep speculative
+implementation steps inside the Task or its design until a useful boundary is
+clear. Several Tasks are supported, never a quota or a goal of capture.
 
-Missing ownership or an unavailable Project leaves an explicit unfiled brief
+Resolve each Task's repository and owning Wave as the idea develops. Treat the
+selected Wave and repository as clues that may be wrong. Do not force related
+intent into one Task or one owner, or split a cohesive outcome merely because
+it touches multiple repositories. A Task retains one owning Wave; several Tasks
+can express distinct outcomes with dependencies and shared context made explicit.
+
+Consult `lf wave list --json` and relevant `lf wave status <wave> --json` in
+each relevant repository to check objectives, current plans, and overlap. Use
+the destination repository as the working directory for each scoped CLI call;
+the capture Session itself stays in its original checkout. File through
+`lf task create --wave <owner>` without `--run`; use `lf task edit` for subsequent
+authorized refinements. Return each actual Task link, repository, and owner.
+Do not treat a same-named Wave in another repository as the same destination.
+
+An unavailable destination repository, missing ownership, or an unavailable
+Project leaves an explicit unfiled brief
 in the conversation. A provider failure never becomes a success claim. After
 an uncertain write, reconcile before retrying; retain the identical creation
-input when retrying the existing CLI's idempotent creation path.
+input and destination repository when retrying the existing CLI's idempotent
+creation path. Report each Task separately: successful filings remain successful
+when another fails. Reconcile uncertain writes in their destination before retrying;
+never recreate the entire batch or silently file in the launch repository.
 
 Wave conversations use the same skill within their current conversation when
 capture is requested. They retain their existing operational authority;
@@ -91,11 +124,13 @@ scope. With a Wave selected, use that Wave; with a Task selected, use its parent
 Wave. The explicit Wave action captures its own target before launch.
 
 Open an ordinary interactive Session in the repository checkout with either
-`lf --mode interactive capture-task` or
-`lf --mode interactive --wave <wave> capture-task`.
+`lf --mode interactive capture-tasks` or
+`lf --mode interactive --wave <wave> capture-tasks`.
 Keep the Session at repo/Wave scope after filing, so it can produce several
 Tasks. Do not bind it to the first Task, switch checkouts, or change focus after
-filing. Existing roadmap refresh exposes the filed Tasks. Launch errors appear
+filing. Repository-specific CLI calls may target other checkouts without moving
+the Session. Existing roadmap refresh exposes filed Tasks in each destination
+repository's Wave plan; return links without redirecting Desktop to those plans. Launch errors appear
 at the entry point and preserve other panes and drafts.
 
 ## Kickoff findings (2026-10-01)
@@ -111,7 +146,7 @@ Source inspection only; each finding changes the plan below.
   selecting first.
 - **A named skill stays in the repository checkout.** Only the bare default
   agent (`run_default_agent` in `bin/lf.rs`) calls
-  `move_default_agent_to_worktree`. `lf --mode interactive [--wave W] capture-task`
+  `move_default_agent_to_worktree`. `lf --mode interactive [--wave W] capture-tasks`
   takes the same path as today's `lf --mode interactive [--wave W] : <prompt>`
   with a skill name in place of the inline prompt. The skill declares
   `requires: none` and no scratch artifact, so nothing asks for a worktree.
@@ -119,17 +154,18 @@ Source inspection only; each finding changes the plan below.
   from `sha256(wave \0 title \0 report)`. Rerunning the identical command
   reuses the committed issue; a brief reworded between attempts files a second
   Task. The skill states this plainly: after an uncertain write, read
-  `lf wave status <wave> --json` first, then rerun the same command unchanged,
+  `lf wave status <wave> --json` in the destination repository first, then rerun
+  the same command unchanged in that repository,
   and refine through `lf task edit` only once the Task is confirmed.
 - **Registration is automatic and flat.** `build.rs` registers
-  `task/skill/capture-task.md` as `capture-task`. The catalog needs a
+  `task/skill/capture-tasks.md` as `capture-tasks`. The catalog needs a
   `description:` frontmatter line. No registry edit.
 - **Wave conversations already carry a competing paragraph.**
   `wave/skill/wave_session.md` has a "Develop direction" section that writes
   ideas to `scratch/` and files "only once the direction is ready and the user
   has agreed". Leaving it beside capture would be the second prompt copy this
   design forbids. That section shrinks to: when the user brings an idea, read
-  `lf skill show capture-task` and follow it in this conversation; operating
+  `lf skill show capture-tasks` and follow it in this conversation; operating
   authority is unchanged. `lf skill show <name>` prints a builtin body today.
 - **Desktop already has a headless interaction harness.**
   `DesktopHeadlessTests` taps `WorkspaceNavigator` buttons by accessibility
@@ -152,13 +188,13 @@ DTO, queue, or draft lifecycle. Rust `task_create` remains the filing authority.
 `ConversationLaunch.swift`:
 
 ```swift
-/// Create Task: the capture-task skill at repository or Wave scope, always in
+/// Create Task: the capture-tasks skill at repository or Wave scope, always in
 /// the repository checkout. Desktop names the skill; lf owns its prompt.
 struct TaskCaptureLaunch: Equatable {
     let repoPath: String
     let wave: String?
     func arguments(lf: String) -> [String]
-    // [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["capture-task"]
+    // [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["capture-tasks"]
 }
 
 extension PodiumModel {
@@ -185,7 +221,9 @@ defaulting to nil like its sibling callbacks:
 
 `SessionsView.captureTask(_:)` mirrors `launch`: resolve `controlLfPath()`,
 select the repository worktree slot, show terminals, then
-`multiplexer.newShell(command: launch.arguments(lf:))`. A throw sets the
+`workspaces.workspace(for: launch.repoPath).multiplexer.newShell(command: launch.arguments(lf:))`.
+Address the destination workspace explicitly, matching the existing conversation
+launcher. A throw sets the
 existing `launchError` alert and mutates nothing. `launch(_:in:)` and
 `ConversationLaunch` are untouched; the two do not merge, since capture has no
 inline prompt and no Task scope.
@@ -194,8 +232,8 @@ inline prompt and no Task scope.
 
 | Surface | Change |
 | --- | --- |
-| `rust/loopflow/src/engine/builtins/task/skill/capture-task.md` | new skill |
-| `rust/loopflow/src/engine/builtins/wave/skill/wave_session.md` | "Develop direction" defers to capture-task |
+| `rust/loopflow/src/engine/builtins/task/skill/capture-tasks.md` | new skill |
+| `rust/loopflow/src/engine/builtins/wave/skill/wave_session.md` | "Develop direction" defers to capture-tasks |
 | `rust/loopflow/src/engine/builtins.rs` tests | registration + description |
 | `swift/LoopflowMac/ConversationLaunch.swift` | `TaskCaptureLaunch`, model derivation |
 | `swift/LoopflowMac/Views/WorkspaceNavigator.swift` | button, Wave action |
@@ -212,7 +250,7 @@ No wire DTO, CLI flag, schema, or fixture changes.
 - `lf` unresolvable: alert at the entry point; panes, drafts and selection keep.
 - Skill missing in the bundled `lf`: the pane shows lf's own error and returns
   to a shell, as any launched conversation does.
-- No owner, no current Project, or a provider failure: the skill leaves an
+- Unavailable destination repository, no owner, no current Project, or a provider failure: the skill leaves an
   explicit unfiled brief and says so. Never a success claim.
 
 ## Current system and deletion boundary
@@ -224,14 +262,14 @@ their panes. Capture sits alongside them. `kickoff` accepts briefs/designs;
 this feature does not change that lifecycle.
 
 **Delete — do not maintain:** the "Develop direction" body of
-`wave_session.md`, replaced by the pointer to capture-task. Nothing else.
+`wave_session.md`, replaced by the pointer to capture-tasks. Nothing else.
 Preserve `design`, existing general conversations, Task conversations, and
 Flow review boundaries.
 
 **Forbidden outcomes:** capture starts a worker; a Task needs the capture
 transcript to make sense; filing permanently binds the capture Session; a
 second prompt copy (in Swift or in `wave_session.md`) or a `create-task`
-alias; a new background operating loop; a capture launch that changes
+alias (including the former `capture-task` spelling); a new background operating loop; a capture launch that changes
 selection or opens in a Task worktree.
 
 ## Alternatives considered
@@ -249,7 +287,7 @@ selection or opens in a Task worktree.
 
 ## Internal slices
 
-1. **This slice:** write `capture-task.md` from the conversation contract
+1. Write `capture-tasks.md` from the conversation contract
    above, including exact-input retry; point `wave_session.md` at it; extend
    the builtins registration test. Focused check:
    `cargo test -p loopflow --lib engine::builtins`.
@@ -257,27 +295,57 @@ selection or opens in a Task worktree.
    `SessionsView.captureTask`; `swift/README.md`. Focused check:
    `scripts/test_desktop.sh --filter TaskCapture`.
 3. Demo/review: sample conversations for a vague idea, an already clear
-   request, duplicate work, several owners, and failed filing, in the
+   request, duplicate work, wrong initial attribution, several Waves and repositories,
+   and partial or uncertain filing, in the
    branch-built app.
 
 ## Done when
 
-- `cargo test -p loopflow --lib engine::builtins` passes with `capture-task`
+- `cargo test -p loopflow --lib engine::builtins` passes with `capture-tasks`
   registered, described and resolvable by bare name, `design` still
-  registered, and no `create-task` skill. Tests assert registration, not
+  registered, and neither a `capture-task` nor a `create-task` skill. Tests assert registration, not
   phrases.
 - `scripts/test_desktop.sh` passes with tests showing: tapping
   `workspace-create-task` yields repository scope from the overview, the Wave
   for a selected Wave, the parent Wave for a selected Task, all with the
   repository path and without changing `model.selection`; the Wave action
   yields its own Wave while another subject is selected; the resulting command
-  is exactly `lf --mode interactive [--wave W] capture-task`; opening it beside
+  is exactly `lf --mode interactive [--wave W] capture-tasks`; opening it beside
   a live shell and another conversation leaves both intact; an unresolvable
   `lf` throws before any pane exists.
+- Exercise launch from a Task checkout with existing panes there and in the
+  repository checkout: capture opens in the repository workspace, preserves
+  both layouts' existing panes, and leaves the selected Task unchanged.
 - `swift build --package-path swift` succeeds.
-- Demo/review, not gate: a real conversation files a Task under the agreed
-  Wave, it appears in that Wave's plan with no worker started, a second idea
-  is captured in the same Session, and the owner can act on each Task from its
-  text alone.
+- Demo/review, not gate: a real conversation produces multiple Tasks across
+  Waves and repositories, corrects a wrong initial ownership guess, and files
+  each in its agreed plan with no worker started. A second idea is captured
+  in the same Session; each owner can act from Task text alone.
+- Exercise partial filing: one Task succeeds, another fails or has an uncertain
+  result. Preserve the successful Task, reconcile the uncertain destination,
+  and retry only that exact input there without duplicates. An inaccessible
+  repository leaves an explicit unfiled brief, never a substitute local Task.
 
 Check: 2026-10-01 kickoff source inspection of launch, navigator, headless harness, skill registration and creation marker; plan-only change, no builds run.
+
+## Capture launch review (2026-10-01)
+
+Jack Heart clarified the scope during review: many Tasks, cross-Wave and
+multi-repository capture, revisable initial attribution, and Tasks as the data
+model for intention. The skill name is now `capture-tasks`. Source review supports
+keeping capture separate from `ConversationLaunch`: the latter derives a Task
+checkout and Task binding when a Task is selected. Capture needs neither.
+
+The implementation detail above now names the repository workspace explicitly,
+following [the existing launcher](../swift/LoopflowMac/Views/SessionsView.swift).
+The added cross-checkout acceptance case proves preservation at the production
+entry point, beyond `MultiplexerStore.newShell` in isolation. This is a technical
+clarification of the accepted behavior, not a new product decision.
+
+The reversible assumptions remain in [questions.md](questions.md). The Desktop
+button label remains unresolved. Remaining work is the builtin skill,
+Desktop controls, destination-scoped filing/retry verification, focused checks,
+and the real capture-to-owner demo described
+above; none is established by this source review.
+
+Check: 2026-10-01 review of ConversationLaunch, SessionsView, WorkspaceNavigator and wave_session; prose-only changes, no builds run.

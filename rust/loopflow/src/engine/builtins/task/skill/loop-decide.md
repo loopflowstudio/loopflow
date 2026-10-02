@@ -3,7 +3,7 @@ requires: objective, current evidence and feedback, and the caller's decision pr
 produces: Advance or Iterate with evidence, or a Blocked outcome for human resolution
 action_style: procedural
 ---
-Decide whether the Flow should advance, iterate, or ask a human to resolve stalled progress.
+Decide whether the Flow should advance, iterate, or stop because progress is blocked.
 
 Use the objective, success conditions, and constraints supplied by the caller.
 Do not impose a particular workflow, producer skill, artifact format, or
@@ -42,18 +42,13 @@ The runner owns edge targets and execution identity. There is no pass limit;
 judge whether to continue from the work and evidence, not the iteration count.
 
 Use the supplied decision protocol for this exact occurrence. Advance and
-Iterate navigate; Blocked reports a stopped execution requiring an Ask. Include
-the attempted direction, before/after evidence, and the question in that outcome.
-Let the supplied protocol own how help is requested; do not open a second
-Session alongside its request.
+Iterate navigate; Blocked stops execution at the current position. Explain the
+missing input or repeated failure in the declared outcome. Existing output and
+logs are sufficient; no separate handoff or conversation is required.
 
-After the human completes the Ask, read its summary and the changed artifacts.
-Reassess using the new evidence or direction. Completion of an Ask does not establish
-that the work is done and does not choose a navigation decision. If the
-same blocker remains unresolved, report that fact instead of cycling through
-identical Asks automatically.
-
-The same applies to other reviews: completion returns feedback, not a verdict.
+On an explicit retry, reassess using the new evidence or direction. Retry does
+not establish that the work is done and does not choose navigation. Authored
+reviews return feedback for this assessment, not a verdict.
 Carry accepted changes, unresolved questions, and the concrete next action into
 the decision summary, with references the next step can follow.
 

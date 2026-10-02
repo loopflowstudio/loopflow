@@ -55,10 +55,9 @@ lf task sync --continue
 - **Files central to the branch's intent:** Preserve the branch's changes named by the conflict context and surrounding code.
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
-- **Ambiguous or high-risk conflicts:** Do not guess. Ask the user in
-  conversation. In headless execution, record the ambiguity and run
-  `lf ask "<exact request>"`; the session shares the checkout and blocks
-  until explicit resolution.
+- **Ambiguous or high-risk conflicts:** Ask in the current interactive conversation.
+  Headless work explains the unresolved conflict and stops for the Wave operator
+  to inspect its existing logs.
 
 `lf task sync --continue` stages the resolved conflict paths and checks that this
 agent owns the operation. The merge resolves the combined branch changes in one
@@ -83,6 +82,4 @@ lf task sync --abort
 
 Then:
 - interactive: explain the failure and ask the present User how to proceed
-- headless: note what went wrong in `scratch/questions.md` and open one exact
-  `lf ask` session; stop with the exact blocker when the required action
-  cannot be performed through that shared checkout
+- headless: explain the exact blocker in ordinary output and stop

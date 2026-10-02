@@ -327,11 +327,6 @@ impl FlowSession {
         })
     }
 
-    /// The unblock Ask key of this position's decision (`flow:<invocation>:…`).
-    pub fn blocker_key(&self) -> anyhow::Result<String> {
-        self.invocation.blocker_key(&self.cursor)
-    }
-
     /// The Run a pending review's agent is running in, once launched.
     pub fn review_artifact_key(&self) -> Option<&String> {
         self.current_attempt

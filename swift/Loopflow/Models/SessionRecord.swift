@@ -23,7 +23,6 @@ public enum SessionAttention: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionKind: String, Codable, Sendable, Hashable {
-    case ask
     case flow
     case conversation
 }
@@ -189,18 +188,15 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let terminalIds: [String]
 
     public var offersParticipation: Bool {
-        guard state != .closed else { return false }
-        let boundary: Bool
-        if kind == .ask { boundary = true }
-        else if kind == .flow, case .step(_, _, _, _, _, .current) = flowMembership { boundary = true }
-        else { boundary = false }
-        return boundary && actions.contains { ($0.kind == .open || $0.kind == .moveHere || $0.kind == .complete) && $0.unavailableReason == nil }
+        guard state != .closed, kind == .flow,
+              case .step(_, _, _, _, _, .current) = flowMembership else { return false }
+        return actions.contains { ($0.kind == .open || $0.kind == .moveHere || $0.kind == .complete) && $0.unavailableReason == nil }
     }
 
     public var participationLabel: String {
         if state == .ready { return "Ready to complete" }
         if offersParticipation { return state == .active ? "Available · discussing" : "Available · preparing" }
-        if kind == .ask || kind == .flow { return "Needs recovery" }
+        if kind == .flow { return "Needs recovery" }
         return state == .active ? "Active" : "Conversation"
     }
 

@@ -549,7 +549,7 @@ impl SqliteStore {
         Ok(current)
     }
 
-    /// Record the exact driver's exit without settling a Flow or releasing an Ask.
+    /// Record the exact driver's exit without settling a Flow review.
     pub(crate) fn finish_session_driver(
         &self,
         session: &str,
@@ -574,7 +574,7 @@ impl SqliteStore {
                 now, payload.to_string()],
         )?;
         // Ordinary disposable conversations retire on an observed exit. Primary
-        // conversations, Task work and all Flow/Ask boundaries keep their identity.
+        // conversations, Wave conversations, Task work and Flow reviews stay open.
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1

@@ -405,7 +405,7 @@ struct DTOFixtureTests {
     @Test("Every Session kind retains its identity without a Run field")
     func sessionIdentityHasNoRun() throws {
         let data = try loadFixtureData("session.json")
-        for kind in ["conversation", "ask", "flow"] {
+        for kind in ["conversation", "flow"] {
             var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             value["kind"] = kind
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))

@@ -515,19 +515,5 @@ mod tests {
 
 #[cfg(not(test))]
 pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_home_session_with_env(session, cwd, argv, &[]).await
-}
-
-#[cfg(not(test))]
-pub(crate) async fn start_home_session_with_env(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let context = execution_context()?;
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    environment.extend_from_slice(env);
-    start_session_with_context(session, cwd, argv, &environment, context).await
+    start_lf_session_with_env(session, cwd, argv, &[]).await
 }

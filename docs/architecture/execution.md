@@ -31,7 +31,7 @@ argv -> Exec admission -> Skill discovery -> prompt -> provider route
 ```
 
 The same admission applies to headless and interactive skills, inline prompts,
-helpers, Asks and reviews. It needs no planning parents, but requires its Home's
+helpers and reviews. It needs no planning parents, but requires its Home's
 writable conversation store before provider launch. Optional Work enrichment does
 not confer a Flow claim. A failed admission cannot become an invisible file-only
 conversation. Large captured payloads remain outside SQLite behind indexed references.
@@ -124,10 +124,10 @@ waits for a surviving step before replacing the driver claim; a missing result
 after process death still requires inspection before retry. Cursor movement
 cannot prove exactly-once external effects.
 
-A successful `blocked` decision opens a keyed Ask after its turn ends. Recovery
-reuses the same question and answer. Consuming the answer retains the cursor and
-pass, then captures a new input in the same conversation. A later blocked turn
-can ask another question; answering never supplies an Advance or Iterate verdict.
+Blocked records the reason and stops at the current Flow position. Existing logs
+and outcomes provide the evidence. The Wave operator resolves authorized
+impediments or discusses missing judgment in its ongoing chat. Explicit retry
+retains the position and pass; unchanged failures do not automatically retry.
 
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate

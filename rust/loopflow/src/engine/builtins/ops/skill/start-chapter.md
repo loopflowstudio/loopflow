@@ -28,9 +28,9 @@ Ask what mattered, surprised, or should become possible; reflect the user's
 language and unresolved tensions. Discuss any Wave boundary changes.
 
 **Gate 1:** the user explicitly accepts direction before scoped planning contributions.
-In an interactive session, ask in the conversation. Headless, use `lf ask` and wait
-for an explicit completed decision. Silence, elapsed time, or provider exit is
-not acceptance. Existing accepted direction remains valid; do not ask again.
+In an interactive session, ask in the conversation. Headless work without accepted
+direction explains the missing decision and stops. Silence, elapsed time, or
+provider exit is not acceptance. Existing accepted direction remains valid; do not ask again.
 
 Tracked charter edits belong in a Task worktree. If not in one, return the
 direction draft and continue those edits in a Task worktree. Keep temporary

@@ -142,7 +142,15 @@ accepted direction; use `concept-review` when existing work needs rethinking.
 
 ## Sessions and reviews
 
-Use `lf session list --json` to identify conversations and unresolved reviews.
+Use `lf session list --needs-me --json` to identify current review/reply
+obligations through `attention`. `task_ids` is the shared Task membership,
+including checkout association; `work` alone is not. An open or interrupted
+conversation does not by itself mean its Task is blocked.
+
+Use `lf session list --json` for all current conversations. Refresh after
+Session mutations; never rely on Session content remembered from an earlier
+turn or embedded in the launch prompt. Compare CLI and Desktop only against
+the same runtime/Home; a failed read is not an empty list.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.

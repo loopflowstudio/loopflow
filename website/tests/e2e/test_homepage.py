@@ -26,23 +26,29 @@ def test_hero_ctas(homepage: Page):
     assert any(h.endswith(".dmg") for h in hrefs), "hero must offer the Mac app"
 
 
-def test_getting_started_links_reach_guides(homepage: Page, base_url: str) -> None:
-    section = homepage.locator(".getting-started-section")
-    expect(section.get_by_role("listitem")).to_have_count(4)
-    links = section.get_by_role("link")
-    destinations = [link.get_attribute("href") for link in links.all()]
-    assert len(destinations) == 2
-    for destination in destinations:
-        response = homepage.goto(f"{base_url}{destination}")
-        assert response is not None and response.ok
-        fragment = urlsplit(destination).fragment
-        expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
+def test_example_loopflow_names_its_steps(homepage: Page) -> None:
+    diagram = homepage.locator(".hero svg[role=img]")
+    expect(diagram).to_be_visible()
+    assert diagram.locator("circle").count() >= 2
+    assert "returns to" in diagram.get_attribute("aria-label")
 
 
-def test_building_blocks(homepage: Page):
-    section = homepage.locator(".building-blocks-section")
-    assert section.is_visible()
-    assert section.locator(".code-block").count() >= 1
+def test_ownership_strip_lists_what_stays_yours(homepage: Page) -> None:
+    cells = homepage.locator(".home-owned h2")
+    assert cells.count() >= 3
+    for cell in cells.all():
+        expect(cell).not_to_be_empty()
+
+
+def test_autonomy_levels_mark_where_the_person_comes_in(homepage: Page, base_url: str) -> None:
+    levels = homepage.locator(".home-level")
+    expect(levels).to_have_count(3)
+    present = [level.locator("li.you").count() for level in levels.all()]
+    assert present[0] > 0 and present[-1] == 0
+    destination = homepage.locator(".home-legend a").get_attribute("href")
+    response = homepage.goto(f"{base_url}{destination}")
+    assert response is not None and response.ok
+    expect(homepage.locator(f'[id="{urlsplit(destination).fragment}"]')).to_have_count(1)
 
 
 def test_features_explain_subsystems_and_link_to_guides(homepage: Page, base_url: str) -> None:
@@ -51,7 +57,6 @@ def test_features_explain_subsystems_and_link_to_guides(homepage: Page, base_url
     destinations = []
     for feature in features.all():
         expect(feature.locator("h3")).not_to_be_empty()
-        expect(feature.locator(".feature-summary")).not_to_be_empty()
         expect(feature.locator(".feature-description")).not_to_be_empty()
         destinations.append(feature.get_by_role("link").get_attribute("href"))
 
@@ -63,24 +68,28 @@ def test_features_explain_subsystems_and_link_to_guides(homepage: Page, base_url
             expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
-def test_wave_building_block_does_not_define_measures(homepage: Page):
-    section = homepage.locator(".building-blocks-section")
-    wave = section.locator(".building-block-item", has_text="wave/auth/GOAL.md")
-    assert wave.count() == 1
-    assert "## Measures" not in wave.text_content()
+def test_product_window_steps_through_its_captures(homepage: Page) -> None:
+    stage = homepage.locator(".home-stage")
+    tabs = homepage.locator(".home-stage-tabs button")
+    assert tabs.count() >= 2
+    last = tabs.nth(tabs.count() - 1)
+    last.click()
+    expect(last).to_have_attribute("aria-pressed", "true")
+    expect(stage.locator(".home-shot.is-current")).to_have_attribute(
+        "data-frame", last.get_attribute("data-frame")
+    )
+    expect(homepage.locator(".home-stage-caption")).to_have_text(last.get_attribute("data-caption"))
 
 
-def test_screenshot_section_only_when_capture_exists(homepage: Page, base_url: str):
-    """The demo section renders only when the capture file is present —
-    a missing image never ships as a 404."""
-    section = homepage.locator(".loopflow-showcase-section")
-    if section.count():
-        figures = section.locator("figure")
-        assert figures.count() >= 1
-        for i in range(figures.count()):
-            src = figures.nth(i).locator("img").get_attribute("src")
-            response = homepage.request.get(f"{base_url}{src}")
-            assert response.ok, f"screenshot {src} rendered but does not resolve"
+def test_desktop_pictures_open_at_full_size(homepage: Page, base_url: str) -> None:
+    links = homepage.locator(".home-stage-links a")
+    sources = homepage.locator(".home-stage img").evaluate_all(
+        "images => images.map(image => image.getAttribute('src'))"
+    )
+    assert [link.get_attribute("href") for link in links.all()] == sources
+    for source in sources:
+        response = homepage.request.get(f"{base_url}{source}")
+        assert response.ok, f"screenshot {source} rendered but does not resolve"
 
 
 def test_no_legacy_homepage_sections(homepage: Page):

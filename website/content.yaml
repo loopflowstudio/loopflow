@@ -5,209 +5,200 @@ homepage:
   hero:
     tagline: "Loopflow is a software instrument."
     subline: >-
-      Make software through agents, your way.
-    description: >-
-      Work closely with an agent, hand off a task, or coordinate several
-      streams of work. Shape the workflow around how you want to build.
-      Loopflow takes care of the branches, context, checks, and handoffs
-      that keep it moving.
+      An open-source shared language for conducting your software orchestra,
+      with free native macOS and terminal interfaces.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+    example:
+      label: "Example loopflow:"
+      steps:
+        - name: "kickoff"
+          detail: "writes a design note"
+          you: false
+        - name: "review-design"
+          detail: "a conversation with you"
+          you: true
+        - name: "implement"
+          detail: "builds it"
+          you: false
+        - name: "gate"
+          detail: "runs the checks"
+          you: false
+        - name: "demo"
+          detail: "a conversation with you"
+          you: true
+      loop_to: "implement"
+      loop_label: "another pass"
+      exit_label: "done"
+      exit_to: "land"
+      caption: >-
+        A Flow is a file that lists the steps agents run and marks the ones
+        that are conversations with you.
+      file: ".lf/flows/feature.yaml"
+
+  ownership:
+    items:
+      - title: "Your models"
+        text: "Claude Code, Codex, or OpenCode, on your own accounts."
+      - title: "Your machines"
+        text: "Runs locally, and over SSH where you choose."
+      - title: "Your methods"
+        text: "Skills and workflows are files in your repo (or use the built-ins). MIT licensed."
+      - title: "Your company’s practice"
+        text: "A Flow is a file, so a team can review how it works with agents the way it reviews code."
 
   showcase:
+    # The pointer and highlight locate the task row in the first frame, as
+    # percentages of the image.
+    pointer: {left: 36, top: 62.8}
+    highlight: {left: 21.4, top: 61, width: 75.6, height: 3.7}
     items:
-      - image: "/static/wave-surface.png"
-        image_alt: "A Wave with its objective, projects, tasks, and live conversation"
-        caption: "A Wave: its goal, its work, and a conversation you can steer."
+      - id: "plan"
+        label: "The plan"
+        image: "/static/wave-surface.png"
+        image_alt: "Loopflow Desktop showing a goal, its key results, and ten tasks with their status"
+        caption: "A goal and the tasks that serve it."
+      - id: "session"
+        label: "The agent terminal"
+        image: "/static/session-full.png"
+        image_alt: "Loopflow Desktop with a Codex terminal session open, with Bind to Task and Complete controls above it"
+        caption: "Open a task and you are in a Claude Code or Codex terminal, in that task’s working copy."
+      - id: "result"
+        label: "The result"
+        image: "/static/pr-result.png"
+        image_alt: "The merged GitHub pull request for the highlighted task, Watch GitHub CI and start repairs from Desktop or the CLI, number 1384"
+        caption: "The task lands as a pull request you have seen running."
+    note: >-
+      Actual captures, unedited. The terminal is from a different task than
+      the plan and the pull request. Transitions are animated on this page.
+    notes:
+      - title: "The goal stays in view."
+        text: "What the work is for sits above the tasks that serve it."
+      - title: "Each task holds its work."
+        text: "Its working copy, sessions, and pull request stay together."
+      - title: "A conversation is a step."
+        text: "Complete hands your feedback back to the loopflow, which continues from its recorded step."
 
-  getting_started:
-    heading: "Start with a workflow. Make it yours."
+  why:
+    label: "Why it exists"
+    claim: "To empower any human being to build with endless scale."
+    lead: "With great agents comes a need for great software process."
+    paragraphs:
+      - >-
+        Agents make it possible for one engineer to build what used to take a
+        team. They make it just as easy to bury yourself in a mess. The more
+        you zoom out, the more you need to zoom in to counterbalance.
+      - >-
+        The emphasis of the Loopflow product is around the work done by you.
+        Its purpose is to make your time more effective, to help you mentally
+        organize around the work happening with your agents.
+
+  autonomy:
+    heading: "Scale the autonomy."
     introduction: >-
-      A workflow defines the steps agents take and the conversations you
-      have along the way.
-    items:
-      - title: "Start with the defaults"
+      Three Flows, from every step with you to none. Choose one per task or
+      per project.
+    legend_you: "a conversation with you"
+    legend_agent: "runs without you"
+    link:
+      label: "Write your own Flow"
+      href: "/docs/authoring#flows"
+    levels:
+      - label: "You are in every step"
+        title: "In the session"
+        description: "Stay in one session and steer as you go."
+        steps:
+          - {name: "implement", you: true}
+      - label: "You are in two steps"
+        title: "Design and demo"
+        description: "Shape the design before anything is built, then see it running."
+        steps:
+          - {name: "kickoff", you: false}
+          - {name: "review-design", you: true}
+          - {name: "implement", you: false}
+          - {name: "gate", you: false}
+          - {name: "demo", you: true}
+      - label: "You are in none"
+        title: "Unattended"
         description: >-
-          Use a ready-made workflow to take a task from an idea to working
-          software. You can start building before deciding how to
-          customize the process.
-      - title: "Capture your tasks"
-        description: >-
-          Write down the features, fixes, and questions you want to work
-          on. Tasks live in Linear, organized into projects. Choose a
-          task to start when you're ready.
-      - title: "Come back for design and demo"
-        description: >-
-          The default workflow gives you follow-up conversations to shape
-          the design and review a working demo. Agents build and check
-          the work in between. Your feedback guides the next pass.
-      - title: "Choose where you join in"
-        description: >-
-          Add, move, or remove conversations to choose when you're involved
-          and what you work through together. Select a workflow for each
-          task, or set a default for a project. For projects you want to
-          run autonomously, remove the planned conversations while keeping
-          automated checks in place.
-    links:
-      - label: "Start your first task"
-        href: "/docs/getting-started#build-features"
-      - label: "Customize a workflow"
-        href: "/docs/authoring#flows"
-
-  independence:
-    heading: "Choose your models. Own your process."
-    text: >-
-      Loopflow's job is to make your way of working dependable. We have
-      no stake in which model you choose. Use your own agent accounts,
-      run on your own machines, and keep your skills, workflows, and
-      memory in files you can read, change, and version. Loopflow is
-      open source.
+          Finds its own work from what it can measure or read. A failed check
+          can still need your decision.
+        steps:
+          - {name: "measure", you: false}
+          - {name: "kickoff", you: false}
+          - {name: "implement", you: false}
+          - {name: "gate", you: false}
 
   features:
-    heading: "Features"
-    introduction: "The pieces of your agent workflow, working together."
+    heading: "Parts that play together in harmony."
+    introduction: >-
+      Many people have built these parts on their own. Loopflow does all of
+      them, and builds on them working together.
     items:
-      - title: "Worktree & Git management"
-        summary: "Give each task its own place to work."
+      - title: "Skills & workflows"
         description: >-
-          A worktree is a separate working copy of your project. Loopflow
-          creates or reuses one for each Task and keeps track of its branch
-          and pull requests. Several tasks can move forward at once. When
-          it's time to bring changes together, Loopflow handles syncing,
-          delivery, and cleanup.
-        href: "/architecture/delivery"
-        link_label: "Worktrees and delivery"
-      - title: "CI & PR review"
-        summary: "Check the work. Give it another pass."
-        description: >-
-          Loopflow prepares changes for review and can walk you through
-          the result. Review feedback feeds another round of implementation.
-          Once a Task's pull request is handed off for landing, the CI
-          watcher can start a repair when required checks fail.
-        href: "/docs/authoring#loopflows"
-        link_label: "Review workflows"
-      - title: "Project management"
-        summary: "Keep the plan connected to the work."
-        description: >-
-          Projects and Tasks live in Linear. Loopflow connects each Task
-          to its working copy, conversations, workflow, and pull requests.
-          See what's moving, what's waiting, and what needs a decision.
-          Waves hold longer-running goals and memory as plans change.
-        href: "/docs/waves"
-        link_label: "Tasks and Waves"
-      - title: "Credential forwarding"
-        summary: "Your accounts, on another machine."
-        description: >-
-          Start work over SSH using accounts from your laptop. For Claude
-          and Codex, Loopflow supplies a short-lived access token when
-          needed, without copying your saved login. Background work that
-          continues after disconnecting uses credentials installed remotely.
-        href: "/docs/security#understand-account-authority-over-ssh"
-        link_label: "Remote access"
-      - title: "Customizable skills & workflows"
-        summary: "Write down how you work. Change any step."
-        description: >-
-          A skill is a text file containing instructions. A workflow
-          connects skills, commands, and conversations—including loops for
-          another attempt. Loopflow supplies a library for designing,
-          building, debugging, reviewing, and shipping. Those files are
-          yours to edit.
+          Instructions are Markdown and sequences are YAML, kept in your
+          repository, or use the built-ins. Choose the steps, and which of
+          them are conversations with you.
+        sketch: |
+          .lf/skills/design.md      what a good design note contains
+          .lf/flows/feature.yaml    the steps, and where you come in
         href: "/docs/authoring"
         link_label: "Skills and workflows"
       - title: "Memory & context"
-        summary: "Leave useful notes for the next round."
         description: >-
-          Working notes stay with the current change. Longer-lived goals
-          and lessons live in readable, editable files. Loopflow brings
-          the relevant material into later work, with controls for
-          inspecting and budgeting the context it sends to the agent.
+          Reviewed notes carry goals and lessons into later sessions, so you
+          do not rebuild context by hand.
+        sketch: |
+          wave/product/MEMORY.md
+          + Rate limits are per organization.
         href: "/docs/waves#nested-waves"
         link_label: "Memory and context"
-    connection:
-      heading: "The connections are part of the product, too."
-      text: >-
-        A Task in your plan gets a working copy. Its workflow brings in
-        the relevant instructions and memory, builds the change, and brings
-        you in at the steps you've chosen. Feedback can send it through
-        another pass. When the
-        pull request is handed off for landing, CI repair returns to that
-        Task's checkout. Lessons can be saved for the next task.
-
-  scale:
-    heading: "Develop your company's way of working with agents."
-    text: >-
-      Give people a shared language and toolset for trying ideas,
-      comparing approaches, and keeping what works. A useful instruction
-      becomes a shared skill. A successful sequence becomes a workflow.
-      Teams can review and improve those files together, choosing the
-      agents and level of involvement that suit the work.
-
-  building_blocks:
-    heading: "Every step is a file you can change"
-    items:
-      - label: "A skill"
-        filename: ".lf/skills/implement.md"
-        content: |
-          Turn the design doc into working code.
-
-          ## Workflow
-          1. Understand the design
-          2. Implement data structures and functions
-          3. Verify with tests and done-when checks
-
-      - label: "A flow"
-        filename: ".lf/flows/feature.yaml"
-        content: |
-          - kickoff
-          - step:
-              id: review_plan
-              name: review-design
-              human: true
-          - step:
-              id: implement
-              name: implement
-          - compress
-          - flow: refresh
-          - step:
-              id: decide
-              name: loop-decide
-              repeat:
-                from: implement
-          - pr-publish
-          - step:
-              id: review_demo
-              name: demo
-              human: true
-      - label: "A task"
-        filename: "terminal"
-        content: |
-          lf task create --run --wave auth \
-            --title "Unify token validation"
-          lf comment AUTH-12 \
-            "prefer the middleware approach"
-          lf task status AUTH-12 --json
-          lf land -c
-      - label: "A wave"
-        filename: "wave/auth/GOAL.md"
-        content: |
-          ## Objective
-
-          Unify authentication. Each wake, pick the next gap — duplicate
-          token validation, session refresh, a slow startup path — direct
-          the concrete Task that closes it, and record what shipped in
-          memory.
-
-          ## Process
-
-          Read current Projects, KR proof, and Project-owned metrics. Route
-          the most important gap to its owning Project; record only
-          strategy-changing learning in memory.
+      - title: "Worktrees & Git"
+        description: >-
+          Each task gets its own working copy, branch, and pull request.
+          Return to a task and its work is where you left it.
+        sketch: |
+          main
+           ├─ rate-limit   PR open
+           └─ csv-export   PR open
+        href: "/architecture/delivery"
+        link_label: "Worktrees and delivery"
+      - title: "Checks & review"
+        description: >-
+          Checks run on each change. After a task’s pull request is handed
+          off for landing, a failed required check can start a repair in the
+          same task.
+        sketch: |
+          ✓ fmt   ✓ lint   ✗ test
+                  └─ back to rate-limit
+        href: "/docs/authoring#loopflows"
+        link_label: "Review workflows"
+      - title: "Project plans"
+        description: >-
+          Linear holds the plan. Each task links to its working copy,
+          sessions, and pull request.
+        sketch: |
+          LOO-293 ─ working copy
+                  ─ sessions
+                  ─ pull request
+        href: "/docs/waves"
+        link_label: "Tasks and Waves"
+      - title: "Credential forwarding"
+        description: >-
+          Work on a remote machine over SSH with the Claude and Codex accounts
+          you are signed into at home. Work that outlives the connection uses
+          credentials on the remote machine.
+        sketch: |
+          laptop ──ssh──▶ build box
+          saved logins stay on the laptop
+        href: "/docs/security#understand-account-authority-over-ssh"
+        link_label: "Remote access"
 
   install:
-    heading: "Get Loopflow"
-    facts: >-
-      Free and open source · Runs on your computer · Every step is a file
-      you can change · Needs Claude Code or Codex, which have their own cost
+    label: "Install"
+    heading: "Start playing."
     note: "The Mac app includes the command line tool."
+    requirement: "Needs Claude Code, Codex, or OpenCode, which have their own cost."
     cli_label: "Or just the command line tool (macOS or Linux):"
     command_display: |
       curl -fsSL https://loopflow.studio/install.sh | sh

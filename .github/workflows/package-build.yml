@@ -69,6 +69,8 @@ jobs:
             expected="${LOOPFLOW_RELEASE_TAG##*/}"
             expected="${expected#v}"
             test "$(package-smoke/lf --version)" = "lf ${expected}"
+            LF_HOME="$RUNNER_TEMP/release-preflight-${{ matrix.target }}" \
+              package-smoke/lf install preflight --json
           fi
       - uses: actions/upload-artifact@v7
         with:

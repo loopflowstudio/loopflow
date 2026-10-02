@@ -1478,7 +1478,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn ad_hoc_batch_launch_uses_generic_run_record_without_planning_registry() {
+    fn ad_hoc_batch_launch_captures_session_without_planning_registry() {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");

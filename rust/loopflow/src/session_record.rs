@@ -2816,6 +2816,8 @@ fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
     (manifest.artifact_key == artifact_key).then_some(artifact_key)
 }
 
+// Session captures retain their published on-disk layout; the directory name
+// does not make Run an owner. SQLite selects captures by artifact key.
 pub(crate) fn record_dir(lf_home: &Path, artifact_key: &str) -> Option<PathBuf> {
     parse_artifact_key(artifact_key).ok()?;
     let prefix = artifact_key

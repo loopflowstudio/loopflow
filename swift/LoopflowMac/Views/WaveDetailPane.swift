@@ -204,27 +204,33 @@ private struct WavePlanView: View {
     private var chapterAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let chapter = displayedPlan.currentProject { WaveChapterView(chapter: chapter) }
-            Text("Tasks").font(Typography.sectionTitle(17))
             if isAwaitingDetail {
+                WorkspaceSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
             } else if let workMap {
                 switch workMap.tasks {
-                case .unavailable(let reason): Text(reason).foregroundStyle(Color.statusWarning)
+                case .unavailable(let reason):
+                    WorkspaceSectionHeading("Tasks")
+                    Text(reason).foregroundStyle(Color.statusWarning)
                 case .available(let inventory, let truncated):
                     let filter = historyFilters[identity] ?? TaskHistoryFilter()
                     let tasks = inventory.filter {
                         filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: historyNow)
                     }
-                    TaskHistoryControls(filter: Binding(
-                        get: { historyFilters[identity] ?? TaskHistoryFilter() },
-                        set: { historyFilters[identity] = $0; historyNow = Date() }
-                    ))
-                    Text("Tasks · \(tasks.count)")
+                    WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                        TaskHistoryControls(filter: Binding(
+                            get: { historyFilters[identity] ?? TaskHistoryFilter() },
+                            set: { historyFilters[identity] = $0; historyNow = Date() }
+                        ))
+                    }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
                     ForEach(tasks) { task in WaveTaskWorkView(task: task, selection: $selection) }
                 }
-            } else { Text("Task status unavailable.").foregroundStyle(palette.textSecondary) }
+            } else {
+                WorkspaceSectionHeading("Tasks")
+                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
+            }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
                     .foregroundStyle(Color.statusWarning)

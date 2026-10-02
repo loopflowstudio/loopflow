@@ -172,12 +172,13 @@ struct WorkSurfaceView: View {
                         filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: model.taskHistoryNow)
                     }
                     section {
-                        TaskHistoryControls(filter: Binding(
-                            get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
-                            set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
-                        ))
-                        WorkspaceSectionHeading("Tasks", count: tasks.count)
-                            .accessibilityIdentifier("wave-task-count")
+                        WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                            TaskHistoryControls(filter: Binding(
+                                get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
+                                set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
+                            ))
+                        }
+                        .accessibilityIdentifier("wave-task-count")
                         if tasks.isEmpty {
                             Text("No current Tasks").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                         } else {

@@ -44,13 +44,17 @@ struct TaskHistoryFilter: Equatable {
 struct TaskHistoryControls: View {
     @Binding var filter: TaskHistoryFilter
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Show completed", isOn: $filter.showCompleted)
-                .accessibilityIdentifier("task-history-show")
-            if filter.showCompleted {
-                HStack {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: Spacing.sm) {
+                Toggle("Show completed", isOn: $filter.showCompleted)
+                    .toggleStyle(.button)
+                    .accessibilityIdentifier("task-history-show")
+                if filter.showCompleted {
                     Toggle("All time", isOn: $filter.allTime)
+                        .toggleStyle(.button)
                         .accessibilityIdentifier("task-history-all")
                     if !filter.allTime {
                         Text("Last")
@@ -60,9 +64,14 @@ struct TaskHistoryControls: View {
                         Text("days")
                     }
                 }
-                if !filter.allTime, let message = filter.validationMessage {
-                    Text(message).foregroundStyle(Color.statusWarning)
-                }
+            }
+            .controlSize(.small)
+            .font(Typography.caption())
+            .tint(palette.accentInk)
+            if filter.showCompleted, !filter.allTime, let message = filter.validationMessage {
+                Text(message)
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusWarning)
             }
         }
     }

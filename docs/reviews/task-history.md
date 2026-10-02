@@ -3,6 +3,11 @@
 Jack Heart requested a reviewable LOO-369 change and a concrete Growth demo.
 Publication is authorized; feature landing and demo approval are not.
 
+Jack Heart's October 2 screenshot shows the six retained Tasks and no canceled
+duplicates. Jack requested moving the underdesigned standalone completed checkbox
+into the Tasks header. The revision puts compact history controls beside the
+heading and count; its visual review remains pending.
+
 ## Open the prepared snapshot demo
 
 ```sh

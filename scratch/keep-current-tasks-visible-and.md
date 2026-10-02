@@ -262,3 +262,12 @@ pending: the configured installed CLI still omits the new planning fields.
 See [the durable demo instructions and limits](../docs/reviews/task-history.md).
 
 Check: Rust affected suites + DTO fixtures — 145 passed, 2 intentional ignores; Swift affected suites — 68 passed, final Task history — 5 passed; fmt, Clippy, architecture, Swift boundaries, configured Xcode build-for-testing and diff check — passed; native Growth/Session demo pending compatible installed runtime and Jack Heart's review.
+
+## Demo revision · 2026-10-02
+
+Jack Heart supplied a Growth screenshot showing six current Tasks and no canceled
+duplicates. Jack called the separate completed checkbox underdesigned and requested
+integration into the Tasks header. The header now places its count on the left and
+compact history toggle buttons on the right, with the selected time window inline.
+Filtering behavior and validation remain unchanged. Visual acceptance of this
+revision remains pending; no landing approval was given.

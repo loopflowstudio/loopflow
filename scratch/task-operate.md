@@ -5,7 +5,13 @@ history, preserves an existing Task Flow or chooses an appropriate one using the
 Project default, ensures progression, and returns a Loopflow Desktop command.
 Jack identified Desktop addressing as the intended handoff.
 
-Accepted scope: shared task-operate skill and an optional Session query on the
+2026-10-02 — Jack Heart refined the operating contract: advance automatically
+through the correct Loopflow process as far as possible. This is primarily
+interactive; ask for judgment in the present conversation and continue after
+resolution. Headless runs exit at a blocker or landed outcome. A blocker report
+includes a CLI command opening the exact blocking Session in Desktop.
+
+Accepted scope: shared `task/operate` skill and an optional Session query on the
 existing Task URL. Opening a link preserves Task/Flow identity and uses the
 existing conversation-opening path. Missing Sessions remain explicit failures;
 Task-only links retain their current behavior.

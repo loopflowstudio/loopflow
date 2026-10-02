@@ -102,7 +102,7 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf task-operate "INF-123"                            # continue its Flow and return a Desktop Session link
+lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf arm -c                                          # request exact-head auto-merge and return
 lf land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges

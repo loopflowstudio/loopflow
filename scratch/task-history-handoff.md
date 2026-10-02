@@ -26,25 +26,27 @@ counts. The unresolved runtime variant and retained Session proof are simulated.
 No configured Growth refresh, live provider write, installation or visual approval
 is claimed.
 
-Remaining: affected gate suites, configured app build, then the authored Desktop
-demo/review. The existing design retains that command plan and demo scenario.
-Publication, landing and Task completion remain outside this implementation step.
+The earlier affected gate passed: 145 Rust tests (two intentional ignores), 68
+Swift tests and the final five-test history suite, plus formatting, Clippy,
+architecture, Swift boundaries and configured Xcode compilation. It closed
+intermediate-window exclusion and production Start-action assertion gaps.
 
-Compression removed the unconditional ready-to-start action fallback. Unplaced
-Tasks now reuse their projected next-move reason, including cancellation and
-completion. Swift history predicates no longer depend on display labels; tests
-load individual rows without assembling a roadmap except for the view scenario.
-The implementation checkpoint is `e2a9277b0`; compression remains in the diff.
+Jack Heart then approved the inline checkbox/number prototype. The Desktop
+revision uses Completed / N Days / All Tasks, with zero meaning unbounded.
+One native text surface preserves glyph placement during editing; long integers
+scroll within the compact viewport. Compression removed duplicate editability
+assignments and repeated row reads. Seven focused tests and SwiftPM app
+compilation passed after compression.
 
-Check: `cargo test -p loopflow --lib task_history` — 3 passed; `swift test --package-path swift --filter 'TaskHistoryFilterTests|RoadmapViewTests'` — 7 passed, SwiftPM app compiled; `cargo fmt --check` and `git diff --check` — passed; `cargo clippy --all-targets -- -D warnings` passed on the implementation checkpoint, final affected suites/Clippy/configured build to gate, visible judgment to demo/review.
+Jack's Growth screenshot shows six current Tasks without canceled duplicates.
+The prepared offline demo contains those thirteen provider items but no successful
+completions or Sessions. It cannot prove live refresh or Session continuation.
+The matching packaged source CLI makes an installed-runtime upgrade unnecessary
+for that isolated demo. See [durable evidence](../docs/reviews/task-history.md).
 
-## Gate update · 2026-10-02
+Remaining: queue gate for the inline revision, native appearance/focus review,
+live Growth refresh and retained workspace/Session continuation. Publication,
+landing and Task completion remain with the caller. The
+[current plan](keep-current-tasks-visible-and.md) owns acceptance and scope.
 
-Affected headless acceptance and configured app compilation passed. Gate added
-all seven duplicate exclusions at every window, row-opening actions, invalid-input
-feedback, and production Start-button assertions for canceled/completed/open Tasks.
-The earlier pending gate notes are superseded by this result. Live demo remains
-pending: the configured installed CLI still omits the new planning fields.
-See [the durable demo instructions and limits](../docs/reviews/task-history.md).
-
-Check: Rust affected suites + DTO fixtures — 145 passed, 2 intentional ignores; Swift affected suites — 68 passed, final Task history — 5 passed; fmt, Clippy, architecture, Swift boundaries, configured Xcode build-for-testing and diff check — passed; native Growth/Session demo pending compatible installed runtime and Jack Heart's review.
+Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — recorded 7 passed after compression, SwiftPM app compiled; reconciliation changes prose only and reuses this result.

@@ -27,10 +27,21 @@ filtering. Current planning, nonterminal runtime, unresolved pinned Flow executi
 and observed unsettled files/commits remain visible; open Sessions stay reachable
 independently. This agrees with the Task workspace's checkout association contract.
 
-Source inspection and recorded focused Rust/Swift checks support the local
-implementation, including the removed-checkout regression. Affected gate suites,
-configured app compilation and the Growth/retained-Session demo remain pending;
-this is not live deployment, visual acceptance or evidence for sustained-use KRs.
+Jack Heart subsequently approved the inline checkbox/number prototype and
+requested Desktop implementation. Completed enables the remembered range
+(initially seven days); the active label edits N Days, with zero shown as All
+Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
+One native text surface handles display and editing to preserve glyph placement;
+long integers scroll within the compact viewport. Wave identity bounds drafts.
+
+The earlier affected gate and configured app compilation passed. The later inline
+revision and compression have seven focused passing tests and SwiftPM compilation;
+queue gate and native visual/focus review remain separate. Jack's Growth screenshot
+shows six current Tasks without the seven duplicates. The isolated offline capture
+has no successful completions or Sessions, so it cannot prove recency or native
+Session continuation. Live refresh and retained-Session review remain unproven.
+See [the review evidence](../../docs/reviews/task-history.md). These observations
+provide no sustained-use KR or external-progress credit.
 
 ## Ask removal decision (2026-10-01)
 

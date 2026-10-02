@@ -57,18 +57,19 @@ native Session reopening still belong to the authored demo review.
 
 ## Preserved recovery boundary
 
-Fresh `lf task status LOO-369 --json` reports blocked execution at `loop-decide`,
+The earlier `lf task status LOO-369 --json` observation reported blocked execution at `loop-decide`,
 index 6, iteration 0, invocation `f8730e54-25b0-411d-aa13-4a478d5138ff`, failed
 event 4293. The worker field is null. The latest earlier manual contributions
 are completed; this pass is the current manual contribution. `lf ps --json`
 also shows the existing unblock conversation's waiting Execs; their presence
 does not authorize interrupting them or launching a competing worker.
 
-Fresh Session inventory retains
+That earlier Session inventory retained
 `ask_once_5bba44fcd30bd861ec7b3bb093d627151a93ef75dd5455a27e7eec79efd0946c`
 as ready, with the tested schema-repair summary. Ready is not completion.
-Its captured runtime still points at the installed executable. The branch repair
-cannot change that running caller merely by existing on disk.
+Its captured runtime still points at the installed executable. Source changes alone do not change a running caller. The repair is now identical
+to the active base; the historical observation does not establish current runtime
+or Flow state.
 
 An authorized recovery must first use a runtime containing the repaired schema,
 then preserve the exact failed occurrence and existing review completion contract.

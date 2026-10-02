@@ -12,8 +12,8 @@ and the final Desktop review.
 ## Accepted inline control · 2026-10-02
 
 Jack Heart approved `task-history-inline-prototype.html` in the live conversation
-and requested implementing it in Desktop. This supersedes the separate buttons,
-range menu, and positive-only input choices below. One compact checkbox and label
+and requested implementing it in Desktop. This supersedes the earlier separate buttons,
+range menu, and positive-only input proposals. One compact checkbox and label
 shows Completed when off, N Days when bounded, and All Tasks when days is zero.
 Click the off label to enable the remembered range (initially 7); click the active
 label to edit and select the number in place. Enter/blur applies, Escape cancels.
@@ -21,12 +21,11 @@ Empty, negative, fractional and overflowing drafts retain the applied range.
 The checkbox hides history and remembers the range. No permanent border or fill.
 The checkbox, number glyphs and Days baseline must not move on entering editing.
 
-### Delete — do not maintain
-
-Remove the separate Show completed/All time toggles, redundant `allTime` and
-persisted `daysText`, and positive-only validation. Preserve one applied day count,
-zero for unbounded history, existing caller bindings, lifecycle predicates,
-completion dates, counts and Session access. Native transient editing owns drafts.
+The separate Show completed/All time toggles, redundant `allTime`, persisted
+`daysText`, and positive-only validation are removed. One applied day count
+represents the range; zero means unbounded history. Native transient editing
+owns drafts. Existing bindings, lifecycle predicates, dates, counts and Session
+access are preserved.
 
 ## Problem and demo
 
@@ -34,11 +33,19 @@ Jack sees seven canceled duplicates among 13 Tasks on Growth. Current work must
 be easy to scan, with completed Tasks hidden initially and history available
 through Completed: initially 7 Days, another positive day count, or zero/All Tasks.
 
-At the authored demo boundary, open Growth in the configured Desktop and refresh.
-The seven canceled duplicates are absent from current work; LOO-309, LOO-316,
-LOO-312 and LOO-306 remain reachable. Enable Completed, click 7 Days, apply 30, then apply 0 for All Tasks. Rows and the Tasks count change together; Show completed adds only successful
-completions. The seven canceled duplicates stay absent at every time setting. Reopen a retained Task workspace and its Session. The review
-judges this actual Wave interaction; headless fixtures do not claim visual approval.
+Jack Heart's October 2 Growth screenshot shows six current Tasks and no canceled
+duplicates. The prepared offline capture retains all thirteen provider items,
+including the seven cancellations and four requested retained targets. It has no
+successful completions or Sessions. The matching packaged CLI projects those
+facts correctly; the older installed CLI is not a prerequisite for this isolated
+demo. [Demo evidence and review path](../docs/reviews/task-history.md) distinguish
+snapshot refresh from live provider refresh.
+
+Remaining native review covers the approved inline control, number/suffix
+stability, keyboard focus traversal, and reopening a retained Task workspace and
+its real Session. A live Growth refresh remains unproven. The offline capture
+cannot demonstrate completion recency or Session continuation; synthetic checks
+cover recency and membership without claiming that native experience.
 
 ## Findings and cause
 
@@ -198,129 +205,57 @@ reader had discarded Flow evidence needed to retain reviews, and the missing-pla
 fallback called local abandonment successful completion. Neither now supplies a
 false history or success signal.
 
-Remaining: run the affected gate suites and configured app-build check below;
-then demonstrate Growth and retained Session navigation at the authored review.
-No provider edits, installation, publication, merge or visual approval is claimed.
+## Reconciled evidence and remaining work · 2026-10-02
 
-## Reconciliation and remaining work
+The earlier affected gate passed 145 Rust tests (two intentional ignores), 68
+Swift tests, then five Task history tests with added production Start-button
+assertions. Formatting, all-target Clippy, architecture, Swift boundaries and
+configured Xcode build-for-testing passed. Gate closed the earlier gaps for all
+seven duplicate exclusions at hidden/7-day/30-day/unbounded settings, row-opening
+actions, invalid-input feedback and enabled Start actions. The shared fixture
+crosses provider validation, storage, projection and RegistryQuery into the
+production view. Runtime and Session variants remain synthetic.
 
-October 2 source review confirms the implementation and compression agree with
-the reviewed behavior. Unplaced actions reuse the projected next-move reason;
-the unconditional ready-to-start fallback is deleted. Swift lifecycle predicates
-read facts independently of display labels. No schema migration or cancellation
-timestamp was needed. The existing Task workspace association and Session
-membership remain independent of Wave history visibility.
+The subsequent approved inline revision and compression passed seven focused
+TaskHistoryFilterTests and rebuilt the SwiftPM app. One persistent NSTextView
+handles display and editing; the custom renderer is deleted. Headless bitmap
+comparison uses the same viewport bounds, origin, scale and clipping without
+selection paint, and verifies nonempty glyph ink and native baselines for one
+and multiple digits and Int.max. Long values scroll in the compact viewport.
+The Days suffix activates editing. Blur preserves the next responder;
+Enter/Escape retain traversal and Tab/Shift-Tab commit and traverse. Wave identity
+owns the control so a draft cannot cross Waves. Compression derives editability
+from editing state and reuses publication; production row assertions read each
+checkpoint once. No separate unbounded toggle or persisted draft remains.
 
-The shared fixture proves provider/storage/projection facts. The production-view
-test exercises hidden, 7-day, 30-day, invalid and All-time controls and counts;
-runtime and Session variants are synthetic. It checks all seven duplicate IDs
-initially and at All time, but does not yet explicitly check each intermediate
-window or enabled actions in the production view. Retained Session coverage
-proves working-set membership, not reopening the native Session. Gate retains
-those acceptance obligations below; source review does not promote them to passed.
+Source review confirms the plan, production bindings and tests agree. Rust owns
+terminal facts and legal actions; Swift owns only the visible range. Unplaced
+actions reuse the projected next-move reason. Missing planning does not infer
+success from runtime abandonment. No migration or cancellation timestamp was
+needed. Shared Task association and Session membership remain independent.
 
-Remaining work is affected gate acceptance and configured app compilation,
-followed by the Growth refresh and retained-workspace/Session demo. The existing
-Product memory now retains the lifecycle, recency and stale-recovery lessons.
-No additional product decision is required by this reconciliation.
+Remaining acceptance:
+- Queue gate covers the revised inline control and configured app compilation;
+  earlier gate results describe the preceding revision. CI owns the full matrix.
+- Native review judges the approved control's appearance, focus traversal and
+  retained workspace/Session continuation. Jack's screenshot and prototype
+  approval do not establish acceptance of the final native revision.
+- Live provider refresh remains distinct from the prepared offline snapshot.
+  Publication, landing and Task completion remain with the caller.
 
-## Done when and gate
+The decision-schema repair is now identical to active base 2064555c4; it is no
+longer a feature-branch overlap. Historical failed-occurrence notes do not establish
+current Flow state or successful recovery. No Flow navigation follows from this
+reconciliation, and no additional product decision is needed.
 
-One cross-boundary synthetic scenario includes the seven canceled duplicates,
-four retained targets, recent/old/unknown-date completions, a reopened Task and
-a closed Task with unresolved execution. Feed provider facts through Rust PM
-storage and projection, assert the shared DTO fixture, then load that same
-shape through `RegistryQuery` into the production Wave view with ViewInspector.
-Exercise Completed, 30 Days, invalid input and zero/All Tasks through the native
-control and the actual production filter binding. Assert row
-identities, outcome labels, enabled actions and displayed count, not just helper
-return values. The seven canceled duplicates remain absent for hidden, 7 days,
-30 days and All time; a canceled Task with unresolved execution remains visible.
-Verify canceled history remains in the full inventory and retained Session access
-survives filter changes. No window server, provider writes or UI automation are required.
+The retained acceptance uses fixed-time boundaries (exact lower bound, one
+subsecond before, now, future, UTC offsets and DST), missing dates, reopening,
+unknown provider states, absent versus observed-null keys, older revisions and
+equal-revision conflicts. Missing checks never weaken these requirements.
 
-Planned headless gate commands and expected results:
+This serves Product's Wave → Task clarity. Snapshot and headless evidence do not
+prove sustained Desktop-use KRs or external repository progress. Scope excludes
+provider edits, cancellation sweeps, Project rotation, automatic recovery,
+Session retirement and primary-runtime changes.
 
-```sh
-cargo test -p loopflow --lib pm::linear::
-cargo test -p loopflow --lib store::sqlite::planning
-cargo test -p loopflow --lib lf::commands::waves
-cargo test -p loopflow --lib ops::task_flow
-cargo test -p loopflow --test dto_fixtures
-swift test --package-path swift --filter 'DTOFixtureTests|DesktopHeadlessTests|WaveDetailReadingTests|WorkspaceNavigationTests|RoadmapViewTests|TaskHistoryFilterTests'
-uv run python scripts/test.py --loopflow
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-```
-
-Acceptance requires affected suites and configured app compilation at gate.
-The focused TaskHistoryFilterTests suite and SwiftPM app compilation are covered
-by implementation sanity checks; they do not replace gate or visual review.
-Time tests use a fixed clock: exactly 7 days, one subsecond before, now, future,
-timezone offsets, DST crossing, missing dates, another positive day count and
-All time. Provider tests cover completed/canceled/duplicate/open/unknown states,
-reopening, genuine null versus absent fields, older-revision replay, and equal
-revision enrichment/conflict. Build unavailability belongs to capable gate/CI;
-native visual judgment belongs to demo/review. Implementation runs only its
-focused proof and changed-code build before the affected gate suites.
-
-This serves Product's Wave → Task clarity and sustained Desktop-use KRs. It
-does not itself prove three working days or three two-hour sessions, external
-repository progress, a new performance target, or successful live deployment.
-Excluded: another cancellation sweep, edits to retained targets, Project
-rotation, automatic lifecycle recovery, Session retirement, and primary runtime.
-
-Check: `git diff --check` — passed for reconciliation; recorded focused implementation/compression results reused from task-history-handoff.md; affected suites, final Clippy and configured build remain with gate, native judgment with demo/review.
-
-## Gate update · 2026-10-02
-
-Affected headless acceptance and configured app compilation passed. Gate added
-all seven duplicate exclusions at every window, row-opening actions, invalid-input
-feedback, and production Start-button assertions for canceled/completed/open Tasks.
-The earlier pending gate notes are superseded by this result. Live demo remains
-pending: the configured installed CLI still omits the new planning fields.
-See [the durable demo instructions and limits](../docs/reviews/task-history.md).
-
-Check: Rust affected suites + DTO fixtures — 145 passed, 2 intentional ignores; Swift affected suites — 68 passed, final Task history — 5 passed; fmt, Clippy, architecture, Swift boundaries, configured Xcode build-for-testing and diff check — passed; native Growth/Session demo pending compatible installed runtime and Jack Heart's review.
-
-## Demo revision · 2026-10-02
-
-Jack Heart supplied a Growth screenshot showing six current Tasks and no canceled
-duplicates. Jack called the separate completed checkbox underdesigned and requested
-integration into the Tasks header. The header now places its count on the left and
-compact history toggle buttons on the right, with the selected time window inline.
-Filtering behavior and validation remain unchanged. Visual acceptance of this
-revision remains pending; no landing approval was given.
-
-Check: `swift test --package-path swift --filter TaskHistoryFilterTests` — 5 passed; configured Dev app install/build and `git diff --check` — passed; header visual review pending.
-
-## Approved inline implementation · 2026-10-02
-
-The Desktop header now consumes the approved single checkbox/range control in
-both Wave views through the existing binding. One persistent native NSTextView
-displays and edits the number; Days and the checkbox keep their positions.
-Long valid values scroll inside the available numeric space rather than widen
-into the Task heading. Zero is the only unbounded-range representation.
-
-Review found that the Days suffix must also activate editing; it now shares the
-label action. Implementation review removed the custom text renderer; one actual
-NSTextView now handles both modes. This removes the cell/editor comparison and
-its frame/clipping ambiguity. The bitmap proof captures that same native surface
-through identical viewport bounds, origin and scale, with selection paint removed.
-Wave identity also owns the native control so drafts cannot cross Waves. The headless interaction proof uses the production binding and
-AppKit control; layout proof covers one/multiple digits and Int.max, the same
-text surface, native glyph baselines, rasterized glyph bounds, and selection.
-Blur commits without changing first responder; Enter/Escape keep the text surface
-in the key loop, and Tab/Shift-Tab commit and traverse normally. Native visual
-judgment and windowed focus traversal remain with the caller's review; no GUI
-was launched in this pass. Long numbers scroll within the compact numeric
-viewport; selection and replacement still use the complete value.
-
-Compression derives native editability from `editing` in `update` and reuses
-`publish` when entering editing. The production-view proof reads row identities
-once per checkpoint for exclusions, opening actions and counts; its redundant
-final exclusion loop is removed. Review confirmed that the Delete list above
-is satisfied: no separate All-time toggle or persisted draft remains. The shared
-projection and retained Session paths need no further cut.
-
-Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — 7 passed (1.634s), SwiftPM Desktop app rebuilt after compression; `git diff --check` — passed; caller owns full queue gate and delivery, native judgment remains with demo/review.
+Check: `git diff --check` — passed; unchanged code reuses recorded seven-test/SwiftPM compression evidence; revised queue gate and native review remain with their authored owners.

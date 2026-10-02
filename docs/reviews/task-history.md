@@ -93,7 +93,7 @@ No visual approval, live refresh, Session continuity or Flow recovery is claimed
 ## Inline revision evidence
 
 `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests`
-passed seven tests (5.210s) and compiled the SwiftPM Desktop app. The production Wave binding still drives filtering and
+passed seven tests after compression (1.634s) and compiled the SwiftPM Desktop app. The production Wave binding still drives filtering and
 counts. Native tests cover Enter, blur, Escape, invalid drafts, remembered ranges
 and zero; headless bitmap captures compare number glyph bounds in display/edit
 for 7, 30, 365 and Int.max, alongside checkbox/suffix frames and baselines.
@@ -141,8 +141,7 @@ the intermediate-window and production action test gaps. No second archive,
 timestamp backfill, lifecycle mutation or display-owned execution authority was
 introduced.
 
-The independently published [Fix structured Flow decisions rejected by Codex ·
-PR #1401](https://github.com/loopflowstudio/loopflow/pull/1401) remains open at
-this review. Its existing repair is preserved in a separate local checkpoint;
-this feature branch currently includes it until upstream integration removes
-that overlap. It does not authorize retrying the saved decision occurrence.
+The structured Flow decision schema repair is identical to active base
+`2064555c4` after integration; it no longer adds a feature-branch overlap.
+Historical failed-occurrence evidence does not establish current Flow state,
+provider acceptance or recovery, and does not authorize navigation.

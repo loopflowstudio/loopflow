@@ -52,7 +52,8 @@ The earlier production gate and configured app build passed as recorded in
 `docs/reviews/task-history.md`. The accepted Swift revision now has seven passing
 focused tests and SwiftPM app compilation, including native control interactions
 and rasterized glyph-position comparison. The main design records the exact
-command/result; full gate belongs to the caller. Growth refresh and retained workspace /
+command/result; the subsequent affected gate passed 142 Rust and 100 Swift tests,
+required static checks and configured Xcode compilation. Growth refresh and retained workspace /
 native Session reopening still belong to the authored demo review.
 
 ## Preserved recovery boundary

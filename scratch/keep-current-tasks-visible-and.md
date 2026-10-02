@@ -235,8 +235,8 @@ success from runtime abandonment. No migration or cancellation timestamp was
 needed. Shared Task association and Session membership remain independent.
 
 Remaining acceptance:
-- Queue gate covers the revised inline control and configured app compilation;
-  earlier gate results describe the preceding revision. CI owns the full matrix.
+- Revised inline gate passed: 142 Rust tests, 100 headless Swift tests, required
+  static checks and configured Xcode compilation. CI owns the full matrix.
 - Native review judges the approved control's appearance, focus traversal and
   retained workspace/Session continuation. Jack's screenshot and prototype
   approval do not establish acceptance of the final native revision.
@@ -258,4 +258,4 @@ prove sustained Desktop-use KRs or external repository progress. Scope excludes
 provider edits, cancellation sweeps, Project rotation, automatic recovery,
 Session retirement and primary-runtime changes.
 
-Check: `git diff --check` — passed; unchanged code reuses recorded seven-test/SwiftPM compression evidence; revised queue gate and native review remain with their authored owners.
+Check: bounded affected gate (`/tmp/loo369-gate.py`, standard scripts/test.py runner) + terminal admission regression — 142 Rust and 100 Swift tests passed; fmt, Clippy, architecture, Swift boundaries, SwiftPM and Xcode build-for-testing passed; `git diff --check` passed; full matrix to CI, native/live review remains with demo. Exact commands and evidence: docs/reviews/task-history.md.

@@ -104,8 +104,36 @@ and clipping, excluding selection paint; native glyph baseline coordinates are
 checked separately. Both snapshots exclude selection paint and verify nonempty
 glyph ink rather than an opaque viewport rectangle. Days activates editing too. Blur does not redirect focus;
 Enter/Escape retain keyboard traversal and Tab/Shift-Tab apply and move focus. This is headless evidence, not a new native
-visual approval. Long values scroll within the fixed numeric viewport. Windowed focus traversal,
-full queue gate and delivery belong to the caller.
+visual approval. Long values scroll within the fixed numeric viewport. Windowed focus traversal and delivery belong to the caller. The revised gate
+result below supersedes the earlier pending-gate note.
+
+## Revised inline gate · 2026-10-02
+
+The current revision passed 142 Rust tests: 123 affected library tests, 18 DTO
+fixtures, and the terminal-Task admission regression. All 100 selected Swift tests
+passed under `scripts/test_desktop.sh`, which denies WindowServer connections.
+These include all seven Task history tests, native glyph bitmap comparisons,
+production filter bindings/counts/actions, DTOs, registry reads and navigation.
+No additional code repair was needed during this review.
+
+Commands: `cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::) | test(store::sqlite::planning) | test(lf::commands::waves) | test(ops::task_flow)'`; `cargo test -p loopflow --test dto_fixtures`; `cargo test -p loopflow --lib task_preparation_rejects_unpublished_parent_before_allocating_child`; `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DTOFixtureTests|DesktopHeadlessTests|WaveDetailReadingTests|WorkspaceNavigationTests|RoadmapViewTests|TaskHistoryFilterTests|RegistryQueryTests|WaveLensTests'`.
+
+Formatting, all-target Clippy, architecture and Swift boundary checks passed.
+The bounded gate runner built the current CLI, SwiftPM app and configured signed
+Xcode app/test runners. Xcode `build-for-testing` passed in 221 seconds; the four
+selected gate suites completed in 572 seconds. Logs remain under
+`.lf/tmp/gate/run-67566/`; the separate admission regression passed in 0.94 seconds.
+The full matrix, including Linux-only deletion integration, remains with CI.
+
+Review confirmed that absent completion dates can be enriched without weakening
+same-revision conflicts, and that removed settled checkouts cannot bypass history
+filtering. Native appearance/focus, live Growth refresh and real retained Session
+continuation still require the authored demo. Compilation does not establish them.
+
+For later Product measurement, extend `hierarchy_interaction_ms` with range
+application through visible rows and count at the existing small/large populations.
+This proposes a measurement; these headless checks establish correctness, not
+rendering latency or a sustained-use KR.
 
 ## Earlier headless evidence
 

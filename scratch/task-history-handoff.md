@@ -44,9 +44,10 @@ completions or Sessions. It cannot prove live refresh or Session continuation.
 The matching packaged source CLI makes an installed-runtime upgrade unnecessary
 for that isolated demo. See [durable evidence](../docs/reviews/task-history.md).
 
-Remaining: queue gate for the inline revision, native appearance/focus review,
-live Growth refresh and retained workspace/Session continuation. Publication,
+The revised inline gate passed 142 Rust and 100 Swift tests, static checks and
+configured Xcode compilation. Remaining: native appearance/focus review, live
+Growth refresh and retained workspace/Session continuation. Publication,
 landing and Task completion remain with the caller. The
 [current plan](keep-current-tasks-visible-and.md) owns acceptance and scope.
 
-Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — recorded 7 passed after compression, SwiftPM app compiled; reconciliation changes prose only and reuses this result.
+Check: revised affected gate — 142 Rust / 100 headless Swift passed, including seven Task history tests; fmt, Clippy, architecture, boundaries and both app builds passed; full matrix to CI and native judgment to demo (docs/reviews/task-history.md).

@@ -1191,7 +1191,11 @@ pub fn ensure_agent_worktree(
         .write(true)
         .open(lock_path)?;
     fs2::FileExt::lock_exclusive(&lock)?;
-    let mut plan = deterministic_agent_plan(&main_repo, segment)?;
+    let mut plan = plan_placement(&main_repo, segment)?;
+    if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
+        worktree_remove(&main_repo, &plan.worktree_path)?;
+        plan.strategy = PlacementStrategy::CheckoutExisting;
+    }
     if plan.strategy == PlacementStrategy::Create {
         plan.base_ref = agent_base_ref(&main_repo)?;
     }
@@ -1243,7 +1247,7 @@ pub(crate) fn existing_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
 ) -> Result<Option<AgentWorktree>, GitError> {
-    let plan = deterministic_agent_plan(main_repo, segment)?;
+    let plan = plan_placement(main_repo, segment)?;
     match plan.strategy {
         PlacementStrategy::UseExistingWorktree => Ok(Some(AgentWorktree {
             path: plan.worktree_path,
@@ -1321,28 +1325,6 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     }
 
     Ok(Some(worktree))
-}
-
-fn deterministic_agent_plan(
-    main_repo: &Path,
-    segment: WorktreeSegment,
-) -> Result<PlacementPlan, GitError> {
-    let expected_path = worktree_path(main_repo, segment.as_str());
-    let mut plan = plan_placement(main_repo, segment)?;
-    if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
-        worktree_remove(main_repo, &plan.worktree_path)?;
-        plan.strategy = PlacementStrategy::CheckoutExisting;
-    }
-    if plan.strategy != PlacementStrategy::UseExistingWorktree && expected_path.exists() {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "expected agent worktree path is occupied: {}",
-                expected_path.display()
-            ),
-        });
-    }
-    Ok(plan)
 }
 
 fn create_agent_worktree(

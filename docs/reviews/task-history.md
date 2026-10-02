@@ -3,51 +3,84 @@
 Jack Heart requested a reviewable LOO-369 change and a concrete Growth demo.
 Publication is authorized; feature landing and demo approval are not.
 
-## View the changed Desktop
-
-From this checkout, use the configured development launcher:
+## Open the prepared snapshot demo
 
 ```sh
-cd /Users/jack/src/loopflow.keep-current-tasks-visible-and
-uv run python scripts/loopflow-dev.py run-debug
+/Users/jack/.lf-demo-loo369/launch.command
 ```
 
-This builds the SwiftPM app, packages it at `~/Applications/Loopflow Dev.app`,
-and opens this repository. It uses the native Ghostty dependency and keeps the
-Dev app's preferences separate. No launch or installation was performed during
-this gate. The signed Xcode compile artifact is also available locally at
-`swift/.build/xcode-derived-data/Build/Products/Debug/Loopflow.app`; compilation
-is not a native Session demo.
+The branch app and matching CLI are built at
+`~/Applications/Loopflow Dev.app`. The command opens this checkout using the
+explicit private `LF_HOME=/Users/jack/.lf-demo-loo369`. It runs the packaged
+native executable under `sandbox-exec`, with a clean environment, no network,
+and no writes outside the disposable Home and system temporary directories.
+Production Home and common credential directories are unreadable. Sandbox
+restrictions apply to child processes, including Desktop's automatic CI watcher.
+The private Growth placement is disabled for admission; no Tasks, Flows,
+Sessions, landing operations, credentials, or cron registrations were imported.
+Do not launch this snapshot through an unsandboxed `open` command.
 
-**Live demo prerequisite:** the installed runtime must include this PR's PM
-projection. The configured Dev app bundles a development CLI that forwards
-ordinary commands to the installed runtime. Building the app does not update
-that runtime. The October 2 configured `lf roadmap --wave growth --json` read
-still omits `state` and `completed_at`; LOO-318 remains `completed:false` and
-`section:available`. Launching the new app against that runtime can show the new
-controls but cannot demonstrate correct cancellation or recent history.
-Deploying a compatible runtime requires separate authorization; this gate did
-not install source, recover the blocked Flow, or modify provider state.
+Preparation used the documented launcher:
 
-After the compatible runtime is deployed, check `lf roadmap --wave growth --json`:
-Task summaries must carry `state` and `completed_at`, and LOO-318 must retain its
-canceled state. Then launch the Dev app using the command above.
+```sh
+uv run python scripts/loopflow-dev.py install
+```
 
-1. Select Growth and refresh. Show completed starts off. LOO-318, LOO-315,
-   LOO-314, LOO-313, LOO-310, LOO-308 and LOO-307 should be absent. LOO-309,
-   LOO-316, LOO-312 and LOO-306 should remain reachable.
-2. Enable Show completed. It starts at 7 days. Change the value to 30, then
-   select All time. Successful completions enter according to actual completion
-   dates; the count matches the rows. All time also admits unknown completion
-   dates with a date-unavailable label. The seven duplicates stay absent.
-3. Enter 0 with All time off. A validation message appears and the last valid
-   window stays in effect. Restore 30.
-4. Open a retained Task workspace and its existing Session, visit Growth,
-   change the history setting, and return. Confirm native Session access and
-   input are retained. Do not start or settle a Flow to demonstrate the filter.
+This built SwiftPM, built the matching development/validation-only CLI, and
+signed the separate Dev app. The production application and installed CLI were
+not changed. An explicit private Home keeps the bundled source CLI from
+forwarding to the older installed runtime; an installed-runtime upgrade is
+**not** a prerequisite for this demo. The native process was launched successfully
+and remained running with bundled CLI children. There is no rendering environment
+in this preparation session, so this establishes launch, not visual acceptance.
 
-These are proposed review steps, not observed live results. No screenshot,
-mock view, provider simulation or old installed UI supplies demo approval.
+### Captured data and observed checks
+
+A read-only SQLite transaction captured Growth's Wave identity and existing
+planning snapshot from the installed Home. Only that Wave and its one Project
+and 13 planning items were imported into a freshly initialized private database.
+The private Home has its own identity and a local disabled placement. Provider
+states, issue identities, descriptions and timestamps were preserved; no runtime
+or Session state was manufactured. Snapshot observation time is
+`2026-10-02T09:56:54Z` (`1790935014`), not the demo launch time.
+
+The **packaged source CLI under the launch sandbox** returned:
+
+- LOO-318, LOO-315, LOO-314, LOO-313, LOO-310, LOO-308 and LOO-307:
+  `state:canceled`, `completed:false`, `section:later`, canceled next-move reason.
+- Six open Tasks: LOO-317, LOO-316, LOO-312, LOO-311, LOO-309 and LOO-306.
+  All four requested retained targets are present. The expected default visible
+  count is six; the full shared inventory still has thirteen.
+- No successful completions in this snapshot. All completion dates remain
+  unknown (`null`), because the captured provider data omitted them. No date
+  was inferred from update or observation time.
+- Zero local Tasks, FlowSessions, AgentSessions and landing operations.
+  A sandbox write probe against the production checkout failed with
+  `Operation not permitted`; network access was also denied.
+
+Local artifacts in `~/.lf-demo-loo369/`: `growth-capture.json` preserves captured
+planning, `sandbox-roadmap.json` records the matching CLI projection,
+`snapshot.sb` defines isolation, `launch.command` launches, and `app.log` captures
+native output. These disposable artifacts are local, not published fixtures.
+
+### Jack Heart's review path
+
+1. Select Growth and refresh its local projection. Show completed starts off.
+   Confirm the seven duplicates are absent and all six open Tasks remain,
+   including LOO-309, LOO-316, LOO-312 and LOO-306. The heading should say six.
+2. Enable Show completed: 7 days, then 30, then All time. Counts stay at six
+   for this real captured data, because it contains no successful completions.
+   Confirm the duplicates remain absent throughout.
+3. With All time off, enter 0. Confirm validation appears and the last valid
+   filter remains effective. Restore 30.
+
+This is an offline snapshot demo. A provider-sync action cannot fetch fresh
+facts under its sandbox. Recent/old completion rows and unknown-date successful
+completions are covered by the existing synthetic headless acceptance below,
+not by this Growth capture. Existing Task workspaces and native Sessions were
+intentionally not imported: reopening and continuing a real retained Session
+still needs a separate live review. Do not start work from this snapshot.
+No visual approval, live refresh, Session continuity or Flow recovery is claimed.
 
 ## Headless evidence
 

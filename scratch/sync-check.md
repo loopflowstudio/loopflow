@@ -1,1 +1,0 @@
-`cargo test -p loopflow --lib lf::discovery::tests::operate_resolves_to_repo_and_wave_operate_stays_explicit -- --exact` — passed; preserved the retired `loopflow` skill's deletion and carried main's removal of `lf ask` guidance into `repo/operate`.

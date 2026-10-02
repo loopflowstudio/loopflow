@@ -1,23 +1,42 @@
 # Keep current Tasks visible and completed history out of the way
 
-2026-10-02 · LOO-369 · reviewed design, reconciled with local implementation; gate and demo pending.
+2026-10-02 · LOO-369 · Jack Heart approved the inline prototype and requested Desktop implementation. Caller owns queue and delivery.
 Jack Heart requested getting LOO-369 running and ready to demo, as relayed by
 his existing control conversation. Coordinator guidance limits Show completed
 to successful completions; this refinement is not attributed as a direct new
 statement from Jack. Routine filter details below are implementation choices.
-The shared projection and Desktop filter are implemented. Affected gate acceptance
-and the final Desktop demo remain pending.
+The shared projection and Desktop filter passed the earlier affected gate.
+The approved inline revision is implemented locally; caller owns its queue gate
+and the final Desktop review.
+
+## Accepted inline control · 2026-10-02
+
+Jack Heart approved `task-history-inline-prototype.html` in the live conversation
+and requested implementing it in Desktop. This supersedes the separate buttons,
+range menu, and positive-only input choices below. One compact checkbox and label
+shows Completed when off, N Days when bounded, and All Tasks when days is zero.
+Click the off label to enable the remembered range (initially 7); click the active
+label to edit and select the number in place. Enter/blur applies, Escape cancels.
+Empty, negative, fractional and overflowing drafts retain the applied range.
+The checkbox hides history and remembers the range. No permanent border or fill.
+The checkbox, number glyphs and Days baseline must not move on entering editing.
+
+### Delete — do not maintain
+
+Remove the separate Show completed/All time toggles, redundant `allTime` and
+persisted `daysText`, and positive-only validation. Preserve one applied day count,
+zero for unbounded history, existing caller bindings, lifecycle predicates,
+completion dates, counts and Session access. Native transient editing owns drafts.
 
 ## Problem and demo
 
 Jack sees seven canceled duplicates among 13 Tasks on Growth. Current work must
 be easy to scan, with completed Tasks hidden initially and history available
-through Show completed: last 7 days, another positive day count, or All time.
+through Completed: initially 7 Days, another positive day count, or zero/All Tasks.
 
 At the authored demo boundary, open Growth in the configured Desktop and refresh.
 The seven canceled duplicates are absent from current work; LOO-309, LOO-316,
-LOO-312 and LOO-306 remain reachable. Enable Show completed, change 7 to 30, then
-select All time. Rows and the Tasks count change together; Show completed adds only successful
+LOO-312 and LOO-306 remain reachable. Enable Completed, click 7 Days, apply 30, then apply 0 for All Tasks. Rows and the Tasks count change together; Show completed adds only successful
 completions. The seven canceled duplicates stay absent at every time setting. Reopen a retained Task workspace and its Session. The review
 judges this actual Wave interaction; headless fixtures do not claim visual approval.
 
@@ -103,11 +122,11 @@ production Wave rows and their count. Default is hidden on first opening; retain
 the chosen filter per Wave during the current window lifetime. No global saved
 preference is needed. The existing alternate Wave detail uses the same rule.
 
-- Show completed initially selects Last 7 days. Offer an editable positive
-  integer and All time. An empty, zero, negative, non-integer or overflowing
-  input shows a short validation message and leaves the last valid filter in
-  effect; it must not silently mean All time.
-- Show completed reveals successful completions only, using `completed_at`.
+- Completed initially selects 7 Days. Offer inline nonnegative integer editing;
+  zero selects All Tasks (unbounded successful completion history). Empty,
+  negative, non-integer or overflowing input shows feedback and retains the
+  last applied range. Enter/blur applies; Escape cancels.
+- The enabled control reveals successful completions only, using `completed_at`.
   Canceled/duplicate Tasks remain excluded at every time setting unless shared
   execution evidence requires them in current work. Label those exceptions
   Canceled/Duplicate while preserving their execution reason and legal actions.
@@ -211,8 +230,9 @@ One cross-boundary synthetic scenario includes the seven canceled duplicates,
 four retained targets, recent/old/unknown-date completions, a reopened Task and
 a closed Task with unresolved execution. Feed provider facts through Rust PM
 storage and projection, assert the shared DTO fixture, then load that same
-shape through `RegistryQuery` into the production Wave view. Interact with Show
-completed, 30 days, invalid input and All time using ViewInspector. Assert row
+shape through `RegistryQuery` into the production Wave view with ViewInspector.
+Exercise Completed, 30 Days, invalid input and zero/All Tasks through the native
+control and the actual production filter binding. Assert row
 identities, outcome labels, enabled actions and displayed count, not just helper
 return values. The seven canceled duplicates remain absent for hidden, 7 days,
 30 days and All time; a canceled Task with unresolved execution remains visible.
@@ -273,3 +293,27 @@ Filtering behavior and validation remain unchanged. Visual acceptance of this
 revision remains pending; no landing approval was given.
 
 Check: `swift test --package-path swift --filter TaskHistoryFilterTests` — 5 passed; configured Dev app install/build and `git diff --check` — passed; header visual review pending.
+
+## Approved inline implementation · 2026-10-02
+
+The Desktop header now consumes the approved single checkbox/range control in
+both Wave views through the existing binding. One persistent native NSTextView
+displays and edits the number; Days and the checkbox keep their positions.
+Long valid values scroll inside the available numeric space rather than widen
+into the Task heading. Zero is the only unbounded-range representation.
+
+Review found that the Days suffix must also activate editing; it now shares the
+label action. Implementation review removed the custom text renderer; one actual
+NSTextView now handles both modes. This removes the cell/editor comparison and
+its frame/clipping ambiguity. The bitmap proof captures that same native surface
+through identical viewport bounds, origin and scale, with selection paint removed.
+Wave identity also owns the native control so drafts cannot cross Waves. The headless interaction proof uses the production binding and
+AppKit control; layout proof covers one/multiple digits and Int.max, the same
+text surface, native glyph baselines, rasterized glyph bounds, and selection.
+Blur commits without changing first responder; Enter/Escape keep the text surface
+in the key loop, and Tab/Shift-Tab commit and traverse normally. Native visual
+judgment and windowed focus traversal remain with the caller's review; no GUI
+was launched in this pass. Long numbers scroll within the compact numeric
+viewport; selection and replacement still use the complete value.
+
+Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — 7 passed (5.210s), SwiftPM Desktop app built; `git diff --check` — passed; caller owns full queue gate and delivery.

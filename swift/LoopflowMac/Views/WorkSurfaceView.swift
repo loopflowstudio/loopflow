@@ -177,6 +177,7 @@ struct WorkSurfaceView: View {
                                 get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
                                 set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
                             ))
+                            .id(roadmap.wave.id)
                         }
                         .accessibilityIdentifier("wave-task-count")
                         if tasks.isEmpty {

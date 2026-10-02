@@ -222,6 +222,7 @@ private struct WavePlanView: View {
                             get: { historyFilters[identity] ?? TaskHistoryFilter() },
                             set: { historyFilters[identity] = $0; historyNow = Date() }
                         ))
+                        .id(identity)
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }

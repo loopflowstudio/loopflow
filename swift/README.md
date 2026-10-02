@@ -192,8 +192,10 @@ workspace and offer Retry. Only one workspace window receives a link.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
 Flow template, current Tasks and chapter history. Completed Tasks start hidden.
-**Show completed** adds the last 7 days; edit the positive day count or choose
-**All time**. Canceled and duplicate history stays out of this list. Unresolved
+**Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
+Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
+(successful completions of any age); click that label to edit again. The checkbox
+hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
 execution and retained Session access remain available. Templates fold composed Flows;
 click a group or its disclosure control to expand it. Repeated uses disclose
 independently, and both return edges remain visible at folded boundaries. Tab to

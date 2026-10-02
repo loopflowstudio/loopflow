@@ -6,7 +6,10 @@ Publication is authorized; feature landing and demo approval are not.
 Jack Heart's October 2 screenshot shows the six retained Tasks and no canceled
 duplicates. Jack requested moving the underdesigned standalone completed checkbox
 into the Tasks header. The revision puts compact history controls beside the
-heading and count; its visual review remains pending.
+heading and count. Jack Heart subsequently approved the compact inline HTML
+prototype and requested its Desktop implementation. The native revision uses
+Completed / N Days / All Tasks, with zero meaning unbounded. Desktop visual
+review and delivery remain the caller’s work.
 
 ## Open the prepared snapshot demo
 
@@ -70,14 +73,14 @@ native output. These disposable artifacts are local, not published fixtures.
 
 ### Jack Heart's review path
 
-1. Select Growth and refresh its local projection. Show completed starts off.
+1. Select Growth and refresh its local projection. Completed starts unchecked.
    Confirm the seven duplicates are absent and all six open Tasks remain,
    including LOO-309, LOO-316, LOO-312 and LOO-306. The heading should say six.
-2. Enable Show completed: 7 days, then 30, then All time. Counts stay at six
+2. Click Completed: 7 Days, then edit to 30, then 0 (All Tasks). Counts stay at six
    for this real captured data, because it contains no successful completions.
    Confirm the duplicates remain absent throughout.
-3. With All time off, enter 0. Confirm validation appears and the last valid
-   filter remains effective. Restore 30.
+3. Click All Tasks to edit 0 Days; enter -1. Confirm validation appears and
+   the last applied range remains effective. Escape cancels an edit. Restore 30.
 
 This is an offline snapshot demo. A provider-sync action cannot fetch fresh
 facts under its sandbox. Recent/old completion rows and unknown-date successful
@@ -87,7 +90,24 @@ intentionally not imported: reopening and continuing a real retained Session
 still needs a separate live review. Do not start work from this snapshot.
 No visual approval, live refresh, Session continuity or Flow recovery is claimed.
 
-## Headless evidence
+## Inline revision evidence
+
+`swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests`
+passed seven tests (5.210s) and compiled the SwiftPM Desktop app. The production Wave binding still drives filtering and
+counts. Native tests cover Enter, blur, Escape, invalid drafts, remembered ranges
+and zero; headless bitmap captures compare number glyph bounds in display/edit
+for 7, 30, 365 and Int.max, alongside checkbox/suffix frames and baselines.
+Implementation review selected one actual native text surface in both modes. The custom
+renderer is deleted: the same NSTextView displays and edits the number. Bitmap
+comparisons capture the actual control through identical viewport origin, scale
+and clipping, excluding selection paint; native glyph baseline coordinates are
+checked separately. Both snapshots exclude selection paint and verify nonempty
+glyph ink rather than an opaque viewport rectangle. Days activates editing too. Blur does not redirect focus;
+Enter/Escape retain keyboard traversal and Tab/Shift-Tab apply and move focus. This is headless evidence, not a new native
+visual approval. Long values scroll within the fixed numeric viewport. Windowed focus traversal,
+full queue gate and delivery belong to the caller.
+
+## Earlier headless evidence
 
 The shared synthetic fixture crosses Linear decoding, PM storage and Rust Task
 projection, then RegistryQuery and the production Swift views. Every history

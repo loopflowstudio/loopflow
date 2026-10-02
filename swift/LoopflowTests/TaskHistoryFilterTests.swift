@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import SwiftUI
 import Testing
@@ -66,12 +67,12 @@ struct TaskHistoryFilterTests {
         #expect(!visible(try task("completed", date: nil), filter))
         filter.editDays("30")
         #expect(visible(try task("completed", date: "2026-09-12T12:00:00Z"), filter))
-        for invalid in ["", "0", "-1", "1.5", "999999999999999999999999999"] {
+        for invalid in ["", "-1", "1.5", "+1", "999999999999999999999999999"] {
             filter.editDays(invalid)
             #expect(filter.validationMessage != nil)
             #expect(filter.days == 30)
         }
-        filter.allTime = true
+        filter.editDays("0")
         #expect(visible(try task("completed", date: nil), filter))
         for state in ["canceled", "duplicate"] {
             #expect(!visible(try task(state, date: nil), filter))
@@ -113,6 +114,112 @@ struct TaskHistoryFilterTests {
         #expect(!filter.includes(before.task, runtime: nil, condition: before.condition, flow: before.flow, now: springNow))
     }
 
+    @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {
+        var applied = TaskHistoryFilter()
+        let view = TaskHistoryInlineView(filter: applied, onChange: { applied = $0 })
+        #expect(view.number.string == "Completed")
+        view.activateLabel()
+        #expect(applied.showCompleted && applied.days == 7)
+        #expect(!view.editing)
+        #expect(view.suffix.accessibilityPerformPress())
+        #expect(view.editing && view.number.isEditable)
+        #expect(view.number.selectedRange() == NSRange(location: 0, length: 1))
+        view.number.string = "30"
+        #expect(applied.days == 7)
+        #expect(view.textView(view.number, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        #expect(applied.days == 30 && !view.editing)
+        #expect(view.number.acceptsFirstResponder && view.number.canBecomeKeyView)
+        view.activateLabel()
+        #expect(view.textView(view.number, doCommandBy: #selector(NSResponder.insertTab(_:))))
+        #expect(!view.editing && applied.days == 30)
+        view.activateLabel()
+        view.number.string = "90"
+        #expect(view.textView(view.number, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+        #expect(applied.days == 30 && view.number.string == "30")
+        for invalid in ["", "-1", "1.5", "999999999999999999999999999"] {
+            view.activateLabel()
+            view.number.string = invalid
+            #expect(view.number.resignFirstResponder())
+            #expect(applied.days == 30 && applied.validationMessage != nil)
+        }
+        view.activateLabel()
+        view.number.string = "0"
+        view.finishEditing()
+        #expect(applied.days == 0 && view.number.string == "All Tasks")
+        view.activateLabel()
+        #expect(view.number.string == "0" && !view.suffix.isHidden)
+        view.number.string = "14"
+        view.checkbox.state = .off
+        view.toggleHistory()
+        #expect(!applied.showCompleted && applied.days == 14)
+        #expect(view.number.string == "Completed")
+        view.activateLabel()
+        #expect(applied.showCompleted && applied.days == 14)
+        #expect(view.number.string == "14")
+    }
+
+    private func inkBounds(_ view: NSView) throws -> (ink: CGRect, pixels: CGSize) {
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        var bounds = CGRect.null
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                if let color = bitmap.colorAt(x: x, y: y), color.alphaComponent > 0.1 {
+                    bounds = bounds.union(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+        #expect(!bounds.isNull)
+        return (bounds, CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh))
+    }
+
+    @Test func numberGlyphsSuffixAndCheckboxDoNotMoveWhenEditing() throws {
+        for days in ["7", "30", "365", String(Int.max)] {
+            var filter = TaskHistoryFilter()
+            filter.showCompleted = true
+            filter.editDays(days)
+            let view = TaskHistoryInlineView(filter: filter, onChange: { _ in })
+            view.layoutSubtreeIfNeeded()
+            let text = view.number
+            let layout = try #require(text.layoutManager)
+            let container = try #require(text.textContainer)
+            layout.ensureLayout(for: container)
+            let baseline = layout.location(forGlyphAt: 0)
+            let displayInk = try inkBounds(view.numberViewport.contentView)
+            #expect(displayInk.ink.height < displayInk.pixels.height)
+            let displayBounds = view.numberViewport.contentView.bounds
+            let textBounds = text.bounds
+            let textOrigin = text.textContainerOrigin
+            let numberFrame = view.numberViewport.frame
+            let suffixFrame = view.suffix.frame
+            let suffixInk = try inkBounds(view.suffix)
+            let checkboxFrame = view.checkbox.frame
+            view.activateLabel()
+            view.layoutSubtreeIfNeeded()
+            #expect(view.number === text)
+            #expect(text.selectedRange() == NSRange(location: 0, length: days.count))
+            #expect(text.textContainerOrigin == textOrigin)
+            #expect(text.bounds == textBounds)
+            #expect(view.numberViewport.contentView.bounds == displayBounds)
+            // Remove only selection paint; capture the same actual native surface
+            // through the same clip view, bounds and bitmap scale in both modes.
+            text.setSelectedRange(NSRange(location: 0, length: 0))
+            let editingInk = try inkBounds(view.numberViewport.contentView)
+            #expect(editingInk.pixels == displayInk.pixels)
+            #expect(editingInk.ink == displayInk.ink)
+            layout.ensureLayout(for: container)
+            #expect(layout.location(forGlyphAt: 0) == baseline)
+            #expect(view.numberViewport.frame == numberFrame)
+            #expect(view.suffix.frame == suffixFrame)
+            #expect(try inkBounds(view.suffix).ink == suffixInk.ink)
+            #expect(view.checkbox.frame == checkboxFrame)
+            #expect(view.suffix.frame.maxX <= view.bounds.maxX)
+            view.finishEditing()
+            view.layoutSubtreeIfNeeded()
+            #expect(view.numberViewport.frame == numberFrame && view.suffix.frame == suffixFrame)
+        }
+    }
+
     @Test func waveControlsFilterRowsAndCountTogether() async throws {
         let wire = try roadmapWire()
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
@@ -140,7 +247,7 @@ struct TaskHistoryFilterTests {
             #expect(try rows().contains("unresolved"))
             for id in try rows() {
                 let button = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-\(id)").button()
-                #expect(try button.isDisabled() == false)
+                #expect(button.isDisabled() == false)
                 try button.tap()
                 #expect(opened == .task(id: id))
             }
@@ -151,20 +258,28 @@ struct TaskHistoryFilterTests {
         try checkCount()
         _ = try view.inspect().find(text: "Canceled")
         #expect(try rows() == ["LOO-309", "LOO-316", "LOO-312", "LOO-306", "reopened", "unresolved"])
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-show").toggle().tap()
+        let control = try view.inspect().find(TaskHistoryInlineControl.self).actualView()
+        let native = TaskHistoryInlineView(filter: control.filter, onChange: { control.filter = $0 })
+        native.activateLabel()
         model.taskHistoryNow = now
         #expect(try rows().contains("recent"))
         try checkCount()
         #expect(try !rows().contains("old"))
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-days").textField().setInput("30")
+        native.activateLabel()
+        native.number.string = "30"
+        native.finishEditing()
         model.taskHistoryNow = now
         #expect(try rows().contains("old"))
         try checkCount()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-days").textField().setInput("0")
+        native.activateLabel()
+        native.number.string = "-1"
+        native.finishEditing()
         #expect(model.taskHistoryFilters[wave.wave.id]?.days == 30)
         try checkCount()
-        _ = try view.inspect().find(text: "Enter a positive number of days.")
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-all").toggle().tap()
+        _ = try view.inspect().find(text: "Enter a whole number of 0 or more. Previous range kept.")
+        native.activateLabel()
+        native.number.string = "0"
+        native.finishEditing()
         #expect(try rows().contains("unknown"))
         try checkCount()
         _ = try view.inspect().find(text: "Completed · date unavailable")
@@ -177,7 +292,7 @@ struct TaskHistoryFilterTests {
         for id in ["LOO-318", "recent", "LOO-309"] {
             model.select(.task(id: id))
             let start = try view.inspect().find(viewWithAccessibilityIdentifier: "task-flow-start").button()
-            #expect(try start.isDisabled() == (id != "LOO-309"))
+            #expect(start.isDisabled() == (id != "LOO-309"))
         }
     }
 }

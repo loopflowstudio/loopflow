@@ -11,6 +11,10 @@ the last valid filter. Choices persist per Wave within the current window and
 start hidden in a fresh window. No cancellation timestamps or second history
 control are needed for this slice.
 
+Jack Heart approved the final inline prototype on October 2: zero now means
+unbounded history (All Tasks), superseding the positive-only input choice.
+Enter/blur applies; Escape cancels; the checkbox retains the applied range.
+
 No design question blocks gate. See the
 [current design](keep-current-tasks-visible-and.md) and
 [implementation handoff](task-history-handoff.md). Final Desktop judgment remains

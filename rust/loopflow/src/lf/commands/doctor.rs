@@ -74,40 +74,45 @@ struct StoreReport {
 
 pub fn run(json: bool) -> Result<()> {
     let database_path = crate::store::database_path_from_env()?;
-    let opened = crate::store::sqlite::SqliteStore::new(&database_path);
-    let mut store_report = inspect_store(&database_path);
-    let (events, mut checks) = match opened {
-        Ok(store) => {
-            let events = store.execs_since(0)?;
-            let now = OffsetDateTime::now_utc().unix_timestamp();
-            let checks = match crate::ops::default_launch_agents_dir()
-                .and_then(|directory| crate::ops::list_cron_obligations(&directory))
-            {
-                Ok(obligations) => audit_at(&events, &obligations, now),
-                Err(error) => {
-                    let mut checks = audit_at(&events, &[], now);
-                    let continuity = Check::fail(
-                        "continuity",
-                        format!("cannot read durable scheduler obligations: {error}"),
-                    );
-                    if let Some(existing) =
-                        checks.iter_mut().find(|check| check.name == "continuity")
-                    {
-                        *existing = continuity;
-                    } else {
-                        checks.insert(0, continuity);
-                    }
-                    checks
-                }
-            };
-            (events, checks)
-        }
+    let store_report = inspect_store(&database_path);
+    let mut checks = vec![match &store_report.migration_error {
+        Some(error) => Check::fail("store", error.clone()),
+        None => Check::ok("store", "selected database is compatible with this build"),
+    }];
+    let events = match crate::store::sqlite::SqliteStore::open_execs_read_only(&database_path)
+        .and_then(|store| store.execs_since(0))
+    {
+        Ok(events) => Some(events),
         Err(error) => {
-            let detail = error.to_string();
-            store_report.migration_error = Some(detail.clone());
-            (Vec::new(), vec![Check::fail("store", detail)])
+            checks.push(Check::fail(
+                "execs",
+                format!("cannot read Exec evidence: {error}"),
+            ));
+            None
         }
     };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    match crate::ops::default_launch_agents_dir()
+        .and_then(|directory| crate::ops::list_cron_obligations(&directory))
+    {
+        Ok(obligations) => checks.push(check_continuity(
+            events.as_deref().unwrap_or(&[]),
+            &obligations,
+            now,
+        )),
+        Err(error) => checks.push(Check::fail(
+            "continuity",
+            format!("cannot read durable scheduler obligations: {error}"),
+        )),
+    }
+    if let Some(events) = &events {
+        checks.extend([
+            check_attribution(events),
+            check_identity(events),
+            check_lineage(events),
+        ]);
+    }
+    let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_machine_install(&database_path));
     checks.push(check_binary_freshness());
@@ -116,12 +121,12 @@ pub fn run(json: bool) -> Result<()> {
             "{}",
             serde_json::to_string(&DoctorReport {
                 store: store_report,
-                rows: events.len(),
+                rows,
                 checks: &checks,
             })?
         );
     } else {
-        print_checks(&store_report, &checks, events.len());
+        print_checks(&store_report, &checks, rows);
     }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
@@ -132,7 +137,6 @@ pub fn run(json: bool) -> Result<()> {
 
 const FRESHNESS: &str = "binary-freshness";
 const UPSTREAM: &str = "origin/main";
-const UPSTREAM_REFSPEC: &str = "+refs/heads/main:refs/remotes/origin/main";
 
 /// Report whether the running binary predates merged upstream work.
 fn check_binary_freshness() -> Check {
@@ -149,18 +153,11 @@ fn check_binary_freshness() -> Check {
         );
     };
 
-    if let Err(error) = crate::engine::git::fetch(&repo, "origin", UPSTREAM_REFSPEC) {
-        return Check::warn(
-            FRESHNESS,
-            format!("cannot prove whether the running lf is current: could not refresh {UPSTREAM}: {error}"),
-        );
-    }
-
     match crate::build_info::classify_revision(revision, &repo, UPSTREAM) {
         crate::build_info::BuildFreshness::Current { revision } => Check::ok(
             FRESHNESS,
             format!(
-                "running lf is built from {}, current with {UPSTREAM}",
+                "running lf is built from {}, current with cached {UPSTREAM} (not refreshed)",
                 crate::build_info::short_revision(&revision)
             ),
         ),
@@ -181,17 +178,17 @@ fn check_binary_freshness() -> Check {
             Check::warn(
                 FRESHNESS,
                 format!(
-                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}; \
+                    "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
                      latest merged changes: {commits}. Run `lf install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
             )
         }
-        crate::build_info::BuildFreshness::OffMain { revision } => Check::ok(
+        crate::build_info::BuildFreshness::OffMain { revision } => Check::warn(
             FRESHNESS,
             format!(
-                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare",
+                "running lf is built from {}, which is not on cached {UPSTREAM}; release freshness is unproven",
                 crate::build_info::short_revision(&revision)
             ),
         ),
@@ -234,7 +231,14 @@ fn inspect_store(path: &Path) -> StoreReport {
                         crate::build_info::migration_draft_manifest(),
                     )
                 } else {
-                    crate::store::migrations::validate_sqlite(&connection)
+                    crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                        if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
+                            return Err(crate::store::StoreError::InvalidData(format!(
+                                "selected database is missing {pending}; run `lf install` to install a published release"
+                            )));
+                        }
+                        Ok(())
+                    })
                 };
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
@@ -242,6 +246,9 @@ fn inspect_store(path: &Path) -> StoreReport {
             }
             Err(error) => migration_error = Some(error.to_string()),
         }
+    }
+    if !path.exists() {
+        migration_error = Some(format!("selected database {} does not exist; run `lf install` to initialize a published installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),

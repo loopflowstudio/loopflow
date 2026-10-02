@@ -26,8 +26,13 @@ use `lf cron sync --repo` for repository Task checks. New scheduled invocations
 follow the selected machine installation across promotions. Existing Sessions
 retain their runtime ownership.
 
-Binary freshness compares against merged source, which may be newer than the
-latest published release. `lf install` installs that published release; Doctor
+Doctor reads storage without initializing it or applying migrations. An incompatible
+store still reports readable Exec evidence, scheduler obligations and installation
+selection.
+
+Binary freshness compares against locally cached `origin/main`, without fetching.
+That reference may be stale, and merged source may be newer than the latest
+published release. `lf install` installs that published release; Doctor
 itself installs nothing.
 
 ## A Wave has no active conversation

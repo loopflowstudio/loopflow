@@ -1340,6 +1340,10 @@ fn run() -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Install { .. }
+                | loopflow::lf::HomeCommand::Doctor {
+                    planning: false,
+                    ..
+                }
         })
     );
     if !bypasses_machine_startup_gate
@@ -1362,6 +1366,10 @@ fn run() -> anyhow::Result<()> {
         Some(
             Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Install { .. }
+                    | loopflow::lf::HomeCommand::Doctor {
+                        planning: false,
+                        ..
+                    }
             } | Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Screenshot { .. }
             } | Commands::ScreenshotSupervisor { .. }
@@ -1383,6 +1391,19 @@ fn run() -> anyhow::Result<()> {
             return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
         }
         _ => {}
+    }
+
+    // Machine diagnosis must reach incompatible or uninitialized Homes without
+    // ordinary admission creating or migrating the database first.
+    if let Some(Commands::Home {
+        cmd:
+            loopflow::lf::HomeCommand::Doctor {
+                json,
+                planning: false,
+            },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::doctor::run(*json);
     }
 
     // Global-promotion commands dispatch before home routing, journal emission,

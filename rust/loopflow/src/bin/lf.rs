@@ -418,11 +418,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+                loopflow::lf::commands::run::run(Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+            loopflow::lf::commands::run::run(Some("default"), None, cli)
         }),
     }
 }
@@ -2060,17 +2060,6 @@ mod tests {
                 cmd: loopflow::lf::HomeCommand::Desktop
             })
         ));
-    }
-
-    #[test]
-    fn bare_lf_has_a_terminal_control_skill() {
-        let cli = Cli::try_parse_from(["lf"]).unwrap();
-        assert!(cli.command.is_none());
-        let skill = loopflow::engine::builtins::get_builtin_skill("loopflow")
-            .expect("builtin terminal control skill");
-        assert!(skill.contains("lf session list --json"));
-        assert!(skill.contains("lf session connect <session-id> --json"));
-        assert!(skill.contains("Keep this conversation open"));
     }
 
     #[test]

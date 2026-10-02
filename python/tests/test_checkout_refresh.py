@@ -67,10 +67,12 @@ def test_main_refresh_repeats_and_observes_each_new_upstream(checkout: Checkout)
         _run(main, str(LF), "task", "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
 
-    journals = list((main / ".lf/journal/runs").glob("*/events.jsonl"))
+    journals = list((main / ".lf/journal/traces").glob("*/events.jsonl"))
     assert len(journals) == 4
     for journal in journals:
         events = [json.loads(line) for line in journal.read_text().splitlines()]
+        assert events[0]["node"] == "exec"
+        assert all(event["trace_id"] == journal.parent.name for event in events)
         assert events[0]["command"][-1] == "sync"
         assert events[0]["event"] == "started"
         assert events[-1]["event"] == "completed"

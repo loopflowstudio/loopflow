@@ -17,7 +17,7 @@ use crate::exec::{AgentCaller, Exec, AGENT_CALLER_ENV};
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
 
-const JOURNAL_ROOT: &str = ".lf/journal/runs";
+const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub(crate) const EXEC_PROCESS_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
@@ -86,7 +86,7 @@ impl Drop for TestLedgerGuard {
 }
 
 thread_local! {
-    static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
+    static EXEC_CONTEXT: RefCell<Option<ExecContext>> = const { RefCell::new(None) };
 }
 
 // Only the executable entry point sets this. Library calls retain their own
@@ -94,11 +94,11 @@ thread_local! {
 static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
 // An actual lf process keeps one identity across async and blocking workers.
 // Library callers retain the thread-scoped with_runtime lifetime above.
-static PROCESS_CONTEXT: Mutex<Option<RunContext>> = Mutex::new(None);
+static PROCESS_CONTEXT: Mutex<Option<ExecContext>> = Mutex::new(None);
 
 #[derive(Debug, Clone)]
-struct RunContext {
-    run_id: TraceId,
+struct ExecContext {
+    trace_id: TraceId,
     process_id: ExecId,
     parent_process_id: Option<ExecId>,
     agent_caller: Option<AgentCaller>,
@@ -113,13 +113,13 @@ struct RunContext {
     command: Option<String>,
     /// Optional repository trace journal. Early process observation uses only
     /// SQLite; ordinary dispatch also writes this when Git exclusion succeeds.
-    run_dir: Option<PathBuf>,
+    trace_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
     finished: Arc<AtomicBool>,
-    /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
+    /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
-    minted_run_id: bool,
+    minted_trace_id: bool,
 }
 
 /// Exact, process-local ownership evidence for a live Loopflow Exec.
@@ -154,7 +154,7 @@ pub(crate) enum ProcessIdentityEvidence {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LfNode {
-    Run,
+    Exec,
     Flow,
     Skill,
 }
@@ -183,7 +183,7 @@ pub struct LfEventFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LfEvent {
-    pub run_id: TraceId,
+    pub trace_id: TraceId,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     pub node: LfNode,
@@ -255,7 +255,7 @@ pub fn observe_process(command: &[String]) {
             ..LfEventFields::default()
         };
         create_run_context(&directory, &fields, path, Some(ledger))?;
-        try_emit(&directory, LfNode::Run, LfEventType::Started, fields)?;
+        try_emit(&directory, LfNode::Exec, LfEventType::Started, fields)?;
         Ok(())
     };
     if let Err(error) = observe() {
@@ -304,7 +304,7 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
     }
     emit(
         repo_root,
-        LfNode::Run,
+        LfNode::Exec,
         LfEventType::Started,
         LfEventFields {
             wave_name: attribution.wave,
@@ -320,7 +320,7 @@ fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
     let code = command_exit_code(result);
     emit(
         directory,
-        LfNode::Run,
+        LfNode::Exec,
         if code == 0 {
             LfEventType::Completed
         } else {
@@ -338,16 +338,16 @@ fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
     );
 }
 
-pub fn runs_root(worktree: &Path) -> PathBuf {
+pub fn traces_root(worktree: &Path) -> PathBuf {
     worktree.join(JOURNAL_ROOT)
 }
 
-pub fn events_path(run_dir: &Path) -> PathBuf {
-    run_dir.join("events.jsonl")
+pub fn events_path(trace_dir: &Path) -> PathBuf {
+    trace_dir.join("events.jsonl")
 }
 
-pub fn read_events(run_dir: &Path) -> Result<Vec<LfEvent>, std::io::Error> {
-    let path = events_path(run_dir);
+pub fn read_events(trace_dir: &Path) -> Result<Vec<LfEvent>, std::io::Error> {
+    let path = events_path(trace_dir);
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -371,9 +371,9 @@ fn try_emit(
     event: LfEventType,
     fields: LfEventFields,
 ) -> Result<(), std::io::Error> {
-    let is_run_started = matches!((node, event), (LfNode::Run, LfEventType::Started));
+    let is_run_started = matches!((node, event), (LfNode::Exec, LfEventType::Started));
     let maybe_context = if is_run_started {
-        ensure_run_context(repo_root, &fields)?
+        ensure_exec_context(repo_root, &fields)?
     } else {
         current_context()
     };
@@ -382,7 +382,7 @@ fn try_emit(
         return Ok(());
     };
 
-    let terminal = matches!(node, LfNode::Run)
+    let terminal = matches!(node, LfNode::Exec)
         && matches!(
             event,
             LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
@@ -393,7 +393,7 @@ fn try_emit(
 
     let exit_code = fields.exit_code;
     let event = LfEvent {
-        run_id: context.run_id.clone(),
+        trace_id: context.trace_id.clone(),
         ts: if is_run_started {
             OffsetDateTime::from_unix_timestamp(context.started_at)
                 .map_err(std::io::Error::other)?
@@ -412,22 +412,22 @@ fn try_emit(
         signal: fields.signal,
     };
 
-    if let Some(run_dir) = &context.run_dir {
-        if let Err(error) = append_event(run_dir, &event) {
-            warn!(%error, path = %run_dir.display(), "file journal append failed; recording to ledger");
+    if let Some(trace_dir) = &context.trace_dir {
+        if let Err(error) = append_event(trace_dir, &event) {
+            warn!(%error, path = %trace_dir.display(), "file journal append failed; recording to ledger");
         }
     }
 
     ledger_insert(&context, &event, repo_root, exit_code);
 
-    if matches!(node, LfNode::Run)
+    if matches!(node, LfNode::Exec)
         && matches!(
             event.event,
             LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
         )
     {
         remove_exec_process_receipt();
-        if context.minted_run_id {
+        if context.minted_trace_id {
             std::env::remove_var(LF_TRACE_ID_ENV);
         }
         std::env::remove_var(LF_PROCESS_ID_ENV);
@@ -440,8 +440,8 @@ fn try_emit(
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
 /// run: the first failure warns, and later failures log at debug. Local-only —
 /// the ledger never leaves the machine.
-fn ledger_insert(context: &RunContext, event: &LfEvent, repo_root: &Path, exit_code: Option<i32>) {
-    if event.node != LfNode::Run {
+fn ledger_insert(context: &ExecContext, event: &LfEvent, repo_root: &Path, exit_code: Option<i32>) {
+    if event.node != LfNode::Exec {
         return;
     }
     let outcome = match event.event {
@@ -452,7 +452,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, repo_root: &Path, exit_c
     };
     let record = Exec {
         id: context.process_id.clone(),
-        trace_id: event.run_id.clone(),
+        trace_id: event.trace_id.clone(),
         parent_exec_id: context.parent_process_id.clone(),
         via_agent: Some(context.agent_caller.is_some()),
         caller_session_id: context
@@ -487,15 +487,15 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, repo_root: &Path, exit_c
         Ok(store) => {
             if let Err(err) = store.record_exec(&record) {
                 if first_ledger_failure() {
-                    warn!(error = %err, run_id = %record.trace_id, "ledger insert failed — this run is not being recorded");
+                    warn!(error = %err, trace_id = %record.trace_id, "ledger insert failed — this Exec is not being recorded");
                 } else {
-                    debug!(error = %err, run_id = %record.trace_id, "ledger insert failed");
+                    debug!(error = %err, trace_id = %record.trace_id, "ledger insert failed");
                 }
             }
         }
         Err(err) => {
             if first_ledger_failure() {
-                warn!(error = %err, "ledger unavailable — runs are not being recorded");
+                warn!(error = %err, "ledger unavailable — Execs are not being recorded");
             } else {
                 debug!(error = %err, "ledger unavailable");
             }
@@ -540,10 +540,10 @@ fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
         .join("loopflow.db"))
 }
 
-fn ensure_run_context(
+fn ensure_exec_context(
     repo_root: &Path,
     fields: &LfEventFields,
-) -> Result<Option<RunContext>, std::io::Error> {
+) -> Result<Option<ExecContext>, std::io::Error> {
     if let Some(context) = current_context() {
         return Ok(Some(context));
     }
@@ -561,7 +561,7 @@ fn create_run_context(
     fields: &LfEventFields,
     ledger_path: PathBuf,
     ledger: Option<SqliteStore>,
-) -> Result<Option<RunContext>, std::io::Error> {
+) -> Result<Option<ExecContext>, std::io::Error> {
     let early = ledger.is_some();
     let same_store = ledger_db_path()
         .is_ok_and(|path| crate::store::same_database_file(&path, &ledger_path).unwrap_or(false));
@@ -606,17 +606,17 @@ fn create_run_context(
             .as_ref()
             .and_then(|(_, trace)| TraceId::parse(trace).ok())
     } else {
-        same_store.then(|| configured_run_id(repo_root)).flatten()
+        same_store.then(|| configured_trace_id(repo_root)).flatten()
     };
-    let (run_id, minted_run_id) = match inherited_trace {
-        Some(run_id) => (run_id, false),
+    let (trace_id, minted_trace_id) = match inherited_trace {
+        Some(trace_id) => (trace_id, false),
         None => {
             // Mint and export the run id so prompt logs and child processes
             // carry the same identity as the ledger rows. The export is
             // removed when the run ends (see try_emit).
-            let run_id = TraceId::default();
-            std::env::set_var(LF_TRACE_ID_ENV, run_id.as_str());
-            (run_id, true)
+            let trace_id = TraceId::default();
+            std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
+            (trace_id, true)
         }
     };
 
@@ -630,7 +630,7 @@ fn create_run_context(
     let parent_process_id = if agent_caller.is_some() {
         agent_parent.map(|(parent, _)| parent)
     } else {
-        (!minted_run_id)
+        (!minted_trace_id)
             .then(|| {
                 std::env::var(LF_PROCESS_ID_ENV)
                     .ok()
@@ -639,14 +639,14 @@ fn create_run_context(
             .flatten()
             .filter(parent_is_recorded)
     };
-    std::env::set_var(LF_TRACE_ID_ENV, run_id.as_str());
+    std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
     let process_id = ExecId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
     // git-excluded (e.g. not a git repo).
-    let run_dir = if early {
+    let trace_dir = if early {
         None
     } else {
         match crate::repo::discover_repo_root(repo_root)
@@ -656,7 +656,7 @@ fn create_run_context(
             })
             .and_then(|root| {
                 ensure_journal_ignored(&root)?;
-                let dir = runs_root(&root).join(run_id.as_str());
+                let dir = traces_root(&root).join(trace_id.as_str());
                 fs::create_dir_all(&dir)?;
                 Ok(dir)
             }) {
@@ -682,8 +682,8 @@ fn create_run_context(
         debug!(%error, "Exec process evidence unavailable; recording command history only");
         None
     });
-    let context = RunContext {
-        run_id,
+    let context = ExecContext {
+        trace_id,
         process_id,
         parent_process_id,
         agent_caller,
@@ -699,11 +699,11 @@ fn create_run_context(
             .command
             .as_ref()
             .and_then(|argv| serde_json::to_string(argv).ok()),
-        run_dir,
+        trace_dir,
         repo: (!early).then_some(repo),
         wave: wave_name.clone(),
         finished: Arc::new(AtomicBool::new(false)),
-        minted_run_id,
+        minted_trace_id,
     };
     set_context(context.clone());
     let interrupted = context.clone();
@@ -713,9 +713,9 @@ fn create_run_context(
             return;
         }
         let event = LfEvent {
-            run_id: interrupted.run_id.clone(),
+            trace_id: interrupted.trace_id.clone(),
             ts: OffsetDateTime::now_utc(),
-            node: LfNode::Run,
+            node: LfNode::Exec,
             event: LfEventType::Escalated,
             wave_name: interrupted.wave.clone(),
             worktree: Some(directory.display().to_string()),
@@ -745,7 +745,7 @@ fn create_run_context(
                 expected_wave = %wave_name,
                 observed_wave = ?fields.wave_name,
                 repo = %repo_root.display(),
-                "journal run start received mismatched wave metadata"
+                "Exec start received mismatched wave metadata"
             );
         }
     }
@@ -787,7 +787,7 @@ fn parent_is_recorded(parent: &ExecId) -> bool {
     }
 }
 
-fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
+fn configured_trace_id(repo_root: &Path) -> Option<TraceId> {
     let value = std::env::var(LF_TRACE_ID_ENV).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -795,25 +795,25 @@ fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
     }
 
     match trimmed.parse() {
-        Ok(run_id) => Some(run_id),
+        Ok(trace_id) => Some(trace_id),
         Err(err) => {
             debug!(
                 env = LF_TRACE_ID_ENV,
                 value = trimmed,
                 repo = %repo_root.display(),
                 error = %err,
-                "ignoring invalid journal run id override"
+                "ignoring invalid journal trace id override"
             );
             None
         }
     }
 }
 
-fn append_event(run_dir: &Path, event: &LfEvent) -> Result<(), std::io::Error> {
+fn append_event(trace_dir: &Path, event: &LfEvent) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(events_path(run_dir))?;
+        .open(events_path(trace_dir))?;
     let _lock = lock_file(&file)?;
     let mut line = serde_json::to_vec(event).map_err(std::io::Error::other)?;
     line.push(b'\n');
@@ -858,20 +858,20 @@ fn lock_file(_file: &File) -> Result<FileLock, std::io::Error> {
     Ok(FileLock)
 }
 
-fn current_context() -> Option<RunContext> {
+fn current_context() -> Option<ExecContext> {
     if is_cli_process() {
         return PROCESS_CONTEXT
             .lock()
             .expect("process context mutex poisoned")
             .clone();
     }
-    RUN_CONTEXT.with(|cell| cell.borrow().clone())
+    EXEC_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
 pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwner> {
     let context = current_context()?;
     Some(crate::durable::TaskWorkerOwner {
-        trace_id: context.run_id,
+        trace_id: context.trace_id,
         exec_id: context.process_id,
         pid: std::process::id(),
         started_at: context.process_started_at?,
@@ -976,14 +976,14 @@ fn elapsed_seconds(value: &str) -> Option<u64> {
     days.checked_mul(86_400)?.checked_add(clock)
 }
 
-fn set_context(context: RunContext) {
+fn set_context(context: ExecContext) {
     if is_cli_process() {
         *PROCESS_CONTEXT
             .lock()
             .expect("process context mutex poisoned") = Some(context);
         return;
     }
-    RUN_CONTEXT.with(|cell| {
+    EXEC_CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(context);
     });
 }
@@ -995,7 +995,7 @@ fn clear_context() {
             .expect("process context mutex poisoned") = None;
         return;
     }
-    RUN_CONTEXT.with(|cell| {
+    EXEC_CONTEXT.with(|cell| {
         *cell.borrow_mut() = None;
     });
 }
@@ -1050,7 +1050,7 @@ pub(crate) fn remove_exec_process_receipt_at(
     }
 }
 
-fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error> {
+fn write_exec_process_receipt(context: &ExecContext) -> Result<(), std::io::Error> {
     let Some(started_at) = context.process_started_at else {
         return Ok(());
     };
@@ -1059,7 +1059,7 @@ fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error
     let pid = std::process::id();
     let receipt = ExecProcessReceipt {
         schema_version: 1,
-        trace_id: context.run_id.to_string(),
+        trace_id: context.trace_id.to_string(),
         exec_id: context.process_id.to_string(),
         pid,
         started_at,
@@ -1125,7 +1125,7 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        emit, events_path, read_events, runs_root, LfEvent, LfEventFields, LfEventType, LfNode,
+        emit, events_path, read_events, traces_root, LfEvent, LfEventFields, LfEventType, LfNode,
         ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
@@ -1165,7 +1165,7 @@ mod tests {
         }
     }
 
-    fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
+    fn with_trace_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = journal_test_guard();
         super::clear_context();
         let previous = std::env::var(super::LF_TRACE_ID_ENV).ok();
@@ -1214,7 +1214,7 @@ mod tests {
         let repo = TestRepo::new();
         emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(
                 &["lf".to_string(), "task".to_string()],
@@ -1222,7 +1222,7 @@ mod tests {
                 "runtime",
             ),
         );
-        let owner = super::current_process_identity().expect("live Run identity");
+        let owner = super::current_process_identity().expect("live Exec identity");
 
         assert_eq!(
             super::task_worker_owner_evidence(&owner),
@@ -1231,7 +1231,7 @@ mod tests {
 
         emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
@@ -1306,8 +1306,8 @@ mod tests {
         }
     }
 
-    fn only_run_dir(worktree: &std::path::Path) -> std::path::PathBuf {
-        let mut entries = std::fs::read_dir(runs_root(worktree))
+    fn only_trace_dir(worktree: &std::path::Path) -> std::path::PathBuf {
+        let mut entries = std::fs::read_dir(traces_root(worktree))
             .expect("read runs")
             .map(|entry| entry.expect("run dir entry").path())
             .collect::<Vec<_>>();
@@ -1318,8 +1318,8 @@ mod tests {
     #[test]
     fn concurrent_child_process_appends_keep_events_jsonl_parseable() {
         let tmp = tempfile::TempDir::new().expect("temp journal");
-        let run_dir = tmp.path().join("run");
-        std::fs::create_dir_all(&run_dir).expect("create run dir");
+        let trace_dir = tmp.path().join("run");
+        std::fs::create_dir_all(&trace_dir).expect("create run dir");
 
         let current_exe = std::env::current_exe().expect("current test binary");
         let writers = 8;
@@ -1330,7 +1330,7 @@ mod tests {
                 .arg("journal_child_process_appends_events_for_concurrency_regression")
                 .arg("--nocapture")
                 .env(CHILD_APPEND_ENV, "1")
-                .env(CHILD_RUN_DIR_ENV, &run_dir)
+                .env(CHILD_RUN_DIR_ENV, &trace_dir)
                 .env(CHILD_WRITER_ENV, writer.to_string())
                 .env(CHILD_EVENT_COUNT_ENV, events_per_writer.to_string())
                 .stdout(Stdio::null())
@@ -1345,7 +1345,7 @@ mod tests {
             assert!(status.success(), "child journal writer failed: {status}");
         }
 
-        let raw = std::fs::read_to_string(events_path(&run_dir)).expect("read events.jsonl");
+        let raw = std::fs::read_to_string(events_path(&trace_dir)).expect("read events.jsonl");
         let lines = raw
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -1358,7 +1358,7 @@ mod tests {
             });
         }
 
-        let parsed = read_events(&run_dir).expect("parse all events");
+        let parsed = read_events(&trace_dir).expect("parse all events");
         assert_eq!(parsed.len(), writers * events_per_writer);
     }
 
@@ -1368,22 +1368,22 @@ mod tests {
             return;
         }
 
-        let run_dir = PathBuf::from(std::env::var(CHILD_RUN_DIR_ENV).expect("child run dir env"));
+        let trace_dir = PathBuf::from(std::env::var(CHILD_RUN_DIR_ENV).expect("child run dir env"));
         let writer = std::env::var(CHILD_WRITER_ENV).expect("child writer env");
         let event_count = std::env::var(CHILD_EVENT_COUNT_ENV)
             .expect("child event count env")
             .parse::<usize>()
             .expect("child event count");
-        let run_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+        let trace_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
 
         for index in 0..event_count {
             let event = LfEvent {
-                run_id: run_id.clone(),
+                trace_id: trace_id.clone(),
                 ts: time::OffsetDateTime::now_utc(),
                 node: LfNode::Skill,
                 event: LfEventType::Errored,
                 wave_name: Some("meta".to_string()),
-                worktree: Some(run_dir.display().to_string()),
+                worktree: Some(trace_dir.display().to_string()),
                 command: None,
                 flow: Some("garden".to_string()),
                 skill: Some(format!("writer-{writer}-{index}")),
@@ -1394,7 +1394,7 @@ mod tests {
                 )),
                 signal: None,
             };
-            super::append_event(&run_dir, &event).expect("child append event");
+            super::append_event(&trace_dir, &event).expect("child append event");
         }
     }
 
@@ -1409,19 +1409,19 @@ mod tests {
         // ledger holds, so the write is the thing under test, not a fixture.
         super::emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             fields.clone(),
         );
         let parent = super::current_context().expect("parent");
         super::clear_context();
-        let child = super::ensure_run_context(repo.path(), &fields)
+        let child = super::ensure_exec_context(repo.path(), &fields)
             .expect("child context")
             .expect("child");
 
         assert_ne!(parent.process_id, child.process_id);
         assert_eq!(
-            child.run_id, parent.run_id,
+            child.trace_id, parent.trace_id,
             "a nested lf stays in the trace"
         );
         assert_eq!(child.parent_process_id, Some(parent.process_id));
@@ -1445,7 +1445,7 @@ mod tests {
         // every id, and this passes with the lookup hardwired to `true`.
         super::emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             fields.clone(),
         );
@@ -1454,10 +1454,10 @@ mod tests {
 
         // A parent that exported its identity but never reached the ledger.
         let ghost = ExecId::new();
-        std::env::set_var(super::LF_TRACE_ID_ENV, recorded.run_id.as_str());
+        std::env::set_var(super::LF_TRACE_ID_ENV, recorded.trace_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
-        let context = super::ensure_run_context(repo.path(), &fields)
+        let context = super::ensure_exec_context(repo.path(), &fields)
             .expect("run context")
             .expect("context");
 
@@ -1472,7 +1472,7 @@ mod tests {
             "a parent the ledger never recorded is a ghost, not lineage"
         );
         assert!(
-            !context.minted_run_id,
+            !context.minted_trace_id,
             "the trace still groups; only the false pointer goes"
         );
 
@@ -1492,30 +1492,30 @@ mod tests {
         // still resolves and must survive the drop rule.
         super::emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             fields.clone(),
         );
         let launcher = super::current_context().expect("launcher");
         super::emit(
             repo.path(),
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
 
         // The body carries what the launcher handed it, not what the launcher
         // left behind: a terminal run clears LF_PROCESS_ID from the env.
-        std::env::set_var(super::LF_TRACE_ID_ENV, launcher.run_id.as_str());
+        std::env::set_var(super::LF_TRACE_ID_ENV, launcher.trace_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.process_id.as_str());
         super::clear_context();
 
-        let body = super::ensure_run_context(repo.path(), &fields)
+        let body = super::ensure_exec_context(repo.path(), &fields)
             .expect("body context")
             .expect("body");
 
         assert_eq!(body.parent_process_id, Some(launcher.process_id));
-        assert_eq!(body.run_id, launcher.run_id);
+        assert_eq!(body.trace_id, launcher.trace_id);
 
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
@@ -1537,11 +1537,14 @@ mod tests {
         // new trace with a parent from the old one.
         std::env::set_var(super::LF_PROCESS_ID_ENV, ExecId::new().as_str());
 
-        let context = super::ensure_run_context(repo.path(), &fields)
+        let context = super::ensure_exec_context(repo.path(), &fields)
             .expect("run context")
             .expect("context");
 
-        assert!(context.minted_run_id, "no LF_TRACE_ID means a fresh trace");
+        assert!(
+            context.minted_trace_id,
+            "no LF_TRACE_ID means a fresh trace"
+        );
         assert_eq!(
             context.parent_process_id, None,
             "a fresh trace has no in-trace parent to name"
@@ -1560,7 +1563,7 @@ mod tests {
 
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
@@ -1601,15 +1604,15 @@ mod tests {
         );
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
 
-        let run_dir = only_run_dir(&worktree);
-        let events = read_events(&run_dir).expect("read events");
+        let trace_dir = only_trace_dir(&worktree);
+        let events = read_events(&trace_dir).expect("read events");
         assert_eq!(events.len(), 6);
-        assert_eq!(events[0].node, LfNode::Run);
+        assert_eq!(events[0].node, LfNode::Exec);
         assert_eq!(events[0].event, LfEventType::Started);
         assert_eq!(events[0].wave_name.as_deref(), Some("runtime"));
         assert_eq!(events[1].node, LfNode::Flow);
@@ -1619,7 +1622,7 @@ mod tests {
         assert_eq!(events[2].index, Some(0));
         assert_eq!(events[3].event, LfEventType::Completed);
         assert_eq!(events[4].node, LfNode::Flow);
-        assert_eq!(events[5].node, LfNode::Run);
+        assert_eq!(events[5].node, LfNode::Exec);
         assert_eq!(events[5].event, LfEventType::Completed);
     }
 
@@ -1632,7 +1635,7 @@ mod tests {
 
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
@@ -1649,7 +1652,7 @@ mod tests {
 
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
@@ -1664,7 +1667,7 @@ mod tests {
 
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
@@ -1682,94 +1685,94 @@ mod tests {
 
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Started,
             started_fields(&command, &worktree, "runtime"),
         );
         emit(
             &worktree,
-            LfNode::Run,
+            LfNode::Exec,
             LfEventType::Completed,
             LfEventFields::default(),
         );
 
-        let entries = std::fs::read_dir(runs_root(&worktree))
+        let entries = std::fs::read_dir(traces_root(&worktree))
             .expect("read runs")
             .count();
         assert_eq!(entries, 2);
     }
 
     #[test]
-    fn journal_uses_configured_run_id_when_present() {
-        with_run_id_env(Some("7c22895f-e4c1-49cc-a95d-2267e2356f16"), || {
+    fn journal_uses_configured_trace_id_when_present() {
+        with_trace_id_env(Some("7c22895f-e4c1-49cc-a95d-2267e2356f16"), || {
             let repo = TestRepo::new();
             let worktree = repo.create_named_worktree("runtime");
             let command = vec!["lf".to_string(), "build".to_string()];
 
             emit(
                 &worktree,
-                LfNode::Run,
+                LfNode::Exec,
                 LfEventType::Started,
                 started_fields(&command, &worktree, "runtime"),
             );
             emit(
                 &worktree,
-                LfNode::Run,
+                LfNode::Exec,
                 LfEventType::Completed,
                 LfEventFields::default(),
             );
 
-            let run_dir = only_run_dir(&worktree);
-            let run_id = run_dir
+            let trace_dir = only_trace_dir(&worktree);
+            let trace_id = trace_dir
                 .file_name()
                 .and_then(|name| name.to_str())
                 .expect("run dir name");
-            assert_eq!(run_id, "7c22895f-e4c1-49cc-a95d-2267e2356f16");
+            assert_eq!(trace_id, "7c22895f-e4c1-49cc-a95d-2267e2356f16");
         });
     }
 
     #[test]
-    fn invalid_configured_run_id_falls_back_to_generated_id() {
-        with_run_id_env(Some("not-a-uuid"), || {
+    fn invalid_configured_trace_id_falls_back_to_generated_id() {
+        with_trace_id_env(Some("not-a-uuid"), || {
             let repo = TestRepo::new();
             let worktree = repo.create_named_worktree("runtime");
             let command = vec!["lf".to_string(), "build".to_string()];
 
             emit(
                 &worktree,
-                LfNode::Run,
+                LfNode::Exec,
                 LfEventType::Started,
                 started_fields(&command, &worktree, "runtime"),
             );
             emit(
                 &worktree,
-                LfNode::Run,
+                LfNode::Exec,
                 LfEventType::Completed,
                 LfEventFields::default(),
             );
 
-            let run_dir = only_run_dir(&worktree);
-            let run_id = run_dir
+            let trace_dir = only_trace_dir(&worktree);
+            let trace_id = trace_dir
                 .file_name()
                 .and_then(|name| name.to_str())
                 .expect("run dir name");
             assert!(
-                TraceId::parse(run_id).is_ok(),
+                TraceId::parse(trace_id).is_ok(),
                 "expected generated UUID run id"
             );
-            assert_ne!(run_id, "not-a-uuid");
+            assert_ne!(trace_id, "not-a-uuid");
         });
     }
 }

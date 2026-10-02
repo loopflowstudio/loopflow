@@ -160,17 +160,25 @@ def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
 
 
 def _validate_release_candidate(binary: Path, scratch: Path) -> None:
+    home = scratch / "preflight-home"
+    home.mkdir()
     result = _run(
         [str(binary), "install", "preflight", "--json"],
         capture=True,
         check=False,
+        env={**os.environ, "LF_HOME": str(home)},
     )
     try:
-        candidate = json.loads(result.stdout)["candidate"]
+        preview = json.loads(result.stdout)
+        candidate = preview["candidate"]
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("release candidate did not emit a promotion identity") from exc
     if candidate.get("authority") != "published":
         raise RuntimeError("release candidate has validation-only migration authority")
+    verdict = preview.get("verdict", {})
+    if result.returncode != 0 or verdict.get("kind") not in {"promote", "promote_and_migrate"}:
+        reasons = "; ".join(verdict.get("reasons", [])) or result.stderr.strip()
+        raise RuntimeError(f"release candidate cannot install into a fresh Home: {reasons}")
 
 
 def _sha256(path: Path) -> str:
@@ -189,7 +197,6 @@ def _write_checksums(paths: tuple[Path, ...], destination: Path) -> None:
 def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
     command = [
         "lf",
-        "repo",
         "release",
         "publish",
         artifacts.tag,
@@ -406,7 +413,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")
     stages.append("latest_dmg_uploaded")
 
-    _run(["lf", "repo", "release", "publish", tag, "--finalize"])
+    _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
     paths = (*archives, dmg, installer, checksums)

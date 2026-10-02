@@ -71,7 +71,7 @@ def test_publisher_rejects_validation_only_control_plane(
         publish_release._validate_release_candidate(binary, tmp_path)
 
 
-def test_publisher_accepts_published_identity_when_home_preflight_refuses(tmp_path: Path):
+def test_publisher_rejects_published_candidate_that_cannot_install(tmp_path: Path):
     binary = tmp_path / "lf"
     binary.write_text(
         "#!/bin/sh\n"
@@ -82,7 +82,8 @@ def test_publisher_accepts_published_identity_when_home_preflight_refuses(tmp_pa
     )
     binary.chmod(0o755)
 
-    publish_release._validate_release_candidate(binary, tmp_path)
+    with pytest.raises(RuntimeError, match="cannot install into a fresh Home"):
+        publish_release._validate_release_candidate(binary, tmp_path)
 
 
 def test_publisher_prepares_exact_artifacts_before_marking_release_published(
@@ -116,7 +117,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
             return subprocess.CompletedProcess(
                 command,
                 0,
-                '{"candidate":{"authority":"published"}}\n',
+                '{"candidate":{"authority":"published"},"verdict":{"kind":"promote"}}\n',
                 "",
             )
         if command[-1:] == ["scripts/release-loopflow.py"]:
@@ -173,7 +174,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     }
     assert receipts == [receipt]
     assert not any(
-        command[:4] == ["lf", "repo", "release", "publish"]
+        command[:3] == ["lf", "release", "publish"]
         for command in commands[:prepare_commands]
     )
     deploy = next(command for command in commands if "deploy_website.py" in command[1])

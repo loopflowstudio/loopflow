@@ -30,7 +30,7 @@ def _policy(**overrides) -> "resources.ResourcePolicy":
         "cleanup_target_free_disk_bytes": 1_000,
         "build_cache_retention_hours": 0,
         "worktree_build_cleanup_bytes": 100,
-        "maximum_run_record_bytes": 100,
+        "maximum_session_capture_bytes": 100,
         "maximum_uv_cache_bytes": 100,
         "maximum_cargo_cache_bytes": 100,
         "maximum_gate_artifact_bytes": 100,
@@ -92,7 +92,7 @@ def _snapshot(
     )
 
 
-def test_snapshot_measures_home_run_records_and_names_retention(
+def test_snapshot_measures_home_session_captures_and_names_retention(
     tmp_path: Path, monkeypatch
 ) -> None:
     repo = tmp_path / "repo"
@@ -114,11 +114,11 @@ def test_snapshot_measures_home_run_records_and_names_retention(
 
     snapshot = resources.collect_snapshot(
         repo,
-        _policy(maximum_run_record_bytes=1),
+        _policy(maximum_session_capture_bytes=1),
     )
 
-    source = next(source for source in snapshot.sources if source.id == "runs:home")
-    assert source.kind == "runs"
+    source = next(source for source in snapshot.sources if source.id == "session-captures:home")
+    assert source.kind == "session-captures"
     assert source.paths == (home / "runs",)
     assert source.bytes > 0
     assert source.disposable is False
@@ -147,8 +147,8 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
         _source(active, id="build:active", owner="active", active=True),
         _source(inactive, id="build:inactive", owner="inactive"),
         resources.ResourceSource(
-            id="runs:home",
-            kind="runs",
+            id="session-captures:home",
+            kind="session-captures",
             owner="Loopflow Home",
             root=durable,
             paths=(durable / "runs",),

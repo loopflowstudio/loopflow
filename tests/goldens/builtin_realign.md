@@ -70,8 +70,10 @@ ask when possible or leave the attribution explicitly unresolved. Do not write
 approval without evidence.
 
 Answer the user in this conversation. Never open another
-session merely to reach them. Headless, `lf ask "<request>"` opens a durable
-session and waits for completion. Respect existing authorization.
+session merely to reach them. Headless work that lacks required input or
+authorization explains its failure in ordinary output and stops. The Wave
+operator reads existing logs and discusses unresolved judgment in its ongoing
+Wave chat. Taskless callers receive the failure. Respect existing authorization.
 A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
@@ -121,13 +123,12 @@ conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary contribution explicitly with
-`lf --task <task> : "<prompt>"`. When progress genuinely requires a decision from the user,
-run `lf ask "<exact request>"`. It opens a durable session in this
-checkout and blocks until the user completes the conversation. The session
-agent marking itself ready does not complete or remove the session.
+`lf --task <task> : "<prompt>"`. When required input or authorization is missing,
+explain the failure in ordinary output and stop. Existing logs and outcomes are
+sufficient; no extra report, conversation, or notification is required.
 
-If no user authorization is required, record a material assumption in
-`scratch/questions.md` and proceed with the simpler safe choice. Do not stop.
+For reversible ambiguity within existing authorization, record a material
+assumption in `scratch/questions.md` and proceed with the simpler safe choice.
 
 No rendering environment. Output is logged, not displayed.
 

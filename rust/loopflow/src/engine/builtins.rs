@@ -276,7 +276,7 @@ mod tests {
         for contract in [
             "human feedback, revised artifact references, and remaining",
             "headless surface",
-            "run `lf ask \"<exact request>\"`",
+            "blocker in ordinary output and stop",
             "closing, detaching, provider exit, or lack of response",
         ] {
             assert!(demo.contains(contract), "demo omits {contract:?}");

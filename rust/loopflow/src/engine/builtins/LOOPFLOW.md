@@ -69,8 +69,10 @@ ask when possible or leave the attribution explicitly unresolved. Do not write
 approval without evidence.
 
 Answer the user in this conversation. Never open another
-session merely to reach them. Headless, `lf ask "<request>"` opens a durable
-session and waits for completion. Respect existing authorization.
+session merely to reach them. Headless work that lacks required input or
+authorization explains its failure in ordinary output and stops. The Wave
+operator reads existing logs and discusses unresolved judgment in its ongoing
+Wave chat. Taskless callers receive the failure. Respect existing authorization.
 A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.

@@ -81,7 +81,7 @@ history. Cursor movement alone never proves an external operation happened once.
 ## Admission and publication
 
 Agent admission requires a writable store before provider side effects. This
-holds for headless work, interactive conversations, Asks, reviews and helpers,
+holds for headless work, interactive conversations, reviews and helpers,
 even when no planning Work is registered. Optional planning enrichment is a
 different dependency from required conversation persistence.
 

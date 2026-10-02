@@ -1,0 +1,994 @@
+[
+  {
+    "task": {
+      "id": "LOO-318",
+      "identifier": "LOO-318",
+      "name": "LOO-318",
+      "description": "",
+      "rank": 0,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-315",
+      "identifier": "LOO-315",
+      "name": "LOO-315",
+      "description": "",
+      "rank": 1,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-314",
+      "identifier": "LOO-314",
+      "name": "LOO-314",
+      "description": "",
+      "rank": 2,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-313",
+      "identifier": "LOO-313",
+      "name": "LOO-313",
+      "description": "",
+      "rank": 3,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-310",
+      "identifier": "LOO-310",
+      "name": "LOO-310",
+      "description": "",
+      "rank": 4,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-308",
+      "identifier": "LOO-308",
+      "name": "LOO-308",
+      "description": "",
+      "rank": 5,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-307",
+      "identifier": "LOO-307",
+      "name": "LOO-307",
+      "description": "",
+      "rank": 6,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "LOO-309",
+      "identifier": "LOO-309",
+      "name": "LOO-309",
+      "description": "",
+      "rank": 7,
+      "completed": false,
+      "state": "unstarted",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  {
+    "task": {
+      "id": "LOO-316",
+      "identifier": "LOO-316",
+      "name": "LOO-316",
+      "description": "",
+      "rank": 8,
+      "completed": false,
+      "state": "unstarted",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  {
+    "task": {
+      "id": "LOO-312",
+      "identifier": "LOO-312",
+      "name": "LOO-312",
+      "description": "",
+      "rank": 9,
+      "completed": false,
+      "state": "unstarted",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  {
+    "task": {
+      "id": "LOO-306",
+      "identifier": "LOO-306",
+      "name": "LOO-306",
+      "description": "",
+      "rank": 10,
+      "completed": false,
+      "state": "unstarted",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  {
+    "task": {
+      "id": "recent",
+      "identifier": "recent",
+      "name": "recent",
+      "description": "",
+      "rank": 11,
+      "completed": true,
+      "state": "completed",
+      "completed_at": "2026-10-01T12:00:00Z",
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is complete"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is complete",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is complete"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is complete"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "old",
+      "identifier": "old",
+      "name": "old",
+      "description": "",
+      "rank": 12,
+      "completed": true,
+      "state": "completed",
+      "completed_at": "2026-09-12T12:00:00Z",
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is complete"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is complete",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is complete"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is complete"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "unknown",
+      "identifier": "unknown",
+      "name": "unknown",
+      "description": "",
+      "rank": 13,
+      "completed": true,
+      "state": "completed",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is complete"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is complete",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is complete"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is complete"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is complete"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  },
+  {
+    "task": {
+      "id": "reopened",
+      "identifier": "reopened",
+      "name": "reopened",
+      "description": "",
+      "rank": 14,
+      "completed": false,
+      "state": "unstarted",
+      "completed_at": "2026-09-01T12:00:00Z",
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": null
+        },
+        {
+          "kind": "resume",
+          "unavailable": "No pinned Flow to resume; start one"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Task has no Work yet; start a Flow instead"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  {
+    "task": {
+      "id": "unresolved",
+      "identifier": "unresolved",
+      "name": "unresolved",
+      "description": "",
+      "rank": 15,
+      "completed": false,
+      "state": "canceled",
+      "completed_at": null,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Linear Task is canceled"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Linear Task is canceled",
+      "observed_at": "2026-10-02T12:00:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    },
+    "actions": {
+      "recommended": null,
+      "reason": "Linear Task is canceled"
+    },
+    "flow": {
+      "recommended": "feature",
+      "record": {
+        "kind": "none"
+      },
+      "controls": [
+        {
+          "kind": "start",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "resume",
+          "unavailable": "Linear Task is canceled"
+        },
+        {
+          "kind": "restart",
+          "unavailable": "Linear Task is canceled"
+        }
+      ]
+    },
+    "active_pr": null,
+    "section": "later"
+  }
+]

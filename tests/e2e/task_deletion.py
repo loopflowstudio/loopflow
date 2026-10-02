@@ -207,6 +207,7 @@ def main() -> None:
         "description": "",
         "url": None,
         "sortOrder": 1,
+        "completedAt": None,
         "prioritySortOrder": 1,
         "assignee": None,
         "state": {"type": "unstarted"},

@@ -141,6 +141,7 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
+    pub completed_at: Option<String>,
     /// Provider workflow category; absent in historical snapshots.
     pub state: Option<String>,
     /// Stable owning Project id. Task-to-Wave resolution follows this edge.
@@ -151,6 +152,22 @@ pub struct PmItem {
     pub team_id: String,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
+}
+
+impl PmItem {
+    pub fn terminal_reason(&self) -> Option<&'static str> {
+        terminal_reason(self.state.as_deref(), self.completed)
+    }
+}
+
+pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static str> {
+    match state {
+        Some("canceled") => Some("Linear Task is canceled"),
+        Some("duplicate") => Some("Linear Task is duplicate"),
+        Some("completed") => Some("Linear Task is complete"),
+        None if completed => Some("Linear Task is complete"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

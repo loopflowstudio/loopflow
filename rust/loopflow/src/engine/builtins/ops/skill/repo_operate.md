@@ -169,8 +169,8 @@ installations.
 
 Questions for the participant stay in this conversation. A separate Work
 perspective is an ordinary `lf --task <task> : "<prompt>"` contribution.
-`lf ask` creates a new session, so do not use it merely to reach the participant
-already here.
+Headless work that lacks required input explains its failure and stops; the
+Wave operator reads its logs.
 
 ## Launching and advancing work
 

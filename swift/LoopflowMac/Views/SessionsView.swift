@@ -648,6 +648,13 @@ struct SessionsContentView: View {
                 }
             }
         }
+        .onChange(of: model.linkedSession, initial: true) { _, record in
+            guard let record,
+                  model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+            model.linkedSession = nil
+            store.reconcile(model.sessions.value ?? [])
+            openSession(record)
+        }
         .onChange(of: store.sessions.map(\.id)) { previous, ids in
             for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
             workspaces.removeSessions(Set(previous).subtracting(ids))

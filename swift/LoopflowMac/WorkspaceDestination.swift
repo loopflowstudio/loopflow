@@ -18,6 +18,7 @@ enum WorkspaceDestination: Hashable {
 struct TaskLink: Equatable, Sendable {
     let issue: String
     let repo: String?
+    let session: String?
 
     init(url: URL) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -34,12 +35,13 @@ struct TaskLink: Equatable, Sendable {
             throw RegistryQueryError("Task links require one issue identifier")
         }
         let items = components.queryItems ?? []
-        guard items.allSatisfy({ $0.name == "repo" }), items.count <= 1,
-              items.first.map({ $0.value?.isEmpty == false }) ?? true else {
-            throw RegistryQueryError("Task links accept one optional repo query")
+        guard items.allSatisfy({ ["repo", "session"].contains($0.name) && $0.value?.isEmpty == false }),
+              Set(items.map(\.name)).count == items.count else {
+            throw RegistryQueryError("Task links accept one optional repo and session query")
         }
         self.issue = issue
-        repo = items.first?.value
+        repo = items.first(where: { $0.name == "repo" })?.value
+        session = items.first(where: { $0.name == "session" })?.value
     }
 }
 

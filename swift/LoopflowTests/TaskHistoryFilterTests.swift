@@ -241,11 +241,12 @@ struct TaskHistoryFilterTests {
             }
         }
         func checkCount() throws {
+            let visibleRows = try rows()
             for id in [318, 315, 314, 313, 310, 308, 307] {
-                #expect(try !rows().contains("LOO-\(id)"))
+                #expect(!visibleRows.contains("LOO-\(id)"))
             }
-            #expect(try rows().contains("unresolved"))
-            for id in try rows() {
+            #expect(visibleRows.contains("unresolved"))
+            for id in visibleRows {
                 let button = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-\(id)").button()
                 #expect(button.isDisabled() == false)
                 try button.tap()
@@ -253,7 +254,7 @@ struct TaskHistoryFilterTests {
             }
             let heading = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-count")
             let count = try heading.findAll(ViewType.Text.self).map { try $0.string() }
-            #expect(count.contains(String(try rows().count)))
+            #expect(count.contains(String(visibleRows.count)))
         }
         try checkCount()
         _ = try view.inspect().find(text: "Canceled")
@@ -283,9 +284,6 @@ struct TaskHistoryFilterTests {
         #expect(try rows().contains("unknown"))
         try checkCount()
         _ = try view.inspect().find(text: "Completed · date unavailable")
-        for id in [318, 315, 314, 313, 310, 308, 307] {
-            #expect(try !rows().contains("LOO-\(id)"))
-        }
         #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
         // Inspection remains available even for hidden terminal inventory;
         // Rust's admission decision still governs the production Start button.

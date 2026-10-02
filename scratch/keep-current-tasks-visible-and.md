@@ -316,4 +316,11 @@ judgment and windowed focus traversal remain with the caller's review; no GUI
 was launched in this pass. Long numbers scroll within the compact numeric
 viewport; selection and replacement still use the complete value.
 
-Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — 7 passed (5.210s), SwiftPM Desktop app built; `git diff --check` — passed; caller owns full queue gate and delivery.
+Compression derives native editability from `editing` in `update` and reuses
+`publish` when entering editing. The production-view proof reads row identities
+once per checkpoint for exclusions, opening actions and counts; its redundant
+final exclusion loop is removed. Review confirmed that the Delete list above
+is satisfied: no separate All-time toggle or persisted draft remains. The shared
+projection and retained Session paths need no further cut.
+
+Check: `swift test --package-path swift --no-parallel --filter TaskHistoryFilterTests` — 7 passed (1.634s), SwiftPM Desktop app rebuilt after compression; `git diff --check` — passed; caller owns full queue gate and delivery, native judgment remains with demo/review.

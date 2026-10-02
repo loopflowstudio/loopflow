@@ -136,10 +136,10 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
         checkbox.contentTintColor = color
         number.textColor = color
         suffix.textColor = color
+        number.isEditable = editing
+        number.isSelectable = editing
         if !editing {
             number.string = !filter.showCompleted ? "Completed" : filter.days == 0 ? "All Tasks" : String(filter.days)
-            number.isEditable = false
-            number.isSelectable = false
             numberViewport.contentView.scroll(to: .zero)
         }
         suffix.isHidden = !editing && (!filter.showCompleted || filter.days == 0)
@@ -179,13 +179,10 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
         editing = true
         filter.clearValidation()
         number.string = String(filter.days)
-        number.isEditable = true
-        number.isSelectable = true
-        update(filter, color: number.textColor ?? .labelColor)
+        publish()
         layoutSubtreeIfNeeded()
         window?.makeFirstResponder(number)
         number.setSelectedRange(NSRange(location: 0, length: number.string.utf16.count))
-        onChange(filter)
     }
 
     @objc func toggleHistory() {

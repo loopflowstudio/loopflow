@@ -133,3 +133,19 @@ Conversational responsiveness is judged in demo/review, not by brittle prose
 assertions or a live-provider gate.
 
 Check (gate): `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py` passed; `cd website && uv run python dev.py test` passed (78 passed, 3 skipped); `cargo nextest run -p loopflow --lib --bin lf --test default_conversation_tests --test context_tests --test discovery_tests --test cli_discovery --test flow_discovery_tests --test golden_prompt --test documented_commands --build-jobs 4 --test-threads 4 --no-fail-fast -E 'binary(default_conversation_tests) | binary(context_tests) | binary(discovery_tests) | binary(cli_discovery) | binary(flow_discovery_tests) | binary(golden_prompt) | binary(documented_commands) | binary(lf) | test(engine::builtins::) | test(engine::prompt::) | test(lf::discovery::) | test(lf::commands::run::) | test(skill_launch) | test(context_delivery) | test(engine::flow_graph::tests)'` passed (220 tests); after the prose repair, `cargo nextest run -p loopflow --lib --test documented_commands --build-jobs 4 --test-threads 4 -E 'test(engine::builtins::) | test(assembled_prompts_deliver_procedures_to_the_owning_skill) | binary(documented_commands)'` passed (17 tests); `git diff --check` passed; `uv run python scripts/test.py --reuse-passing` failed resource preflight before suites; full matrix remains with CI.
+
+## Review refinement — 2026-10-02
+
+Jack Heart requested restoration of explicit stale-work cleanup from
+`review-open-work`. The consolidated skill now includes participant ownership,
+worktree condition, PR history, remote-only branches inactive for 60 days,
+evidence-led cleanup, supported commands, and outcome verification.
+`lf wt delete <branch>` supports remote-only origin branches; no raw Git
+deletion recipe is needed. The prompt review snapshot matches the source.
+Jack Heart then requested a fluid structure that does not make the participant
+resolve every issue. The skill directs independent investigation and authorized
+cleanup, flexible working notes, and escalation only for consequential judgment
+or missing authorization; unresolved items do not block other work or requests.
+
+Check (review refinement): `git diff --check` passed; cleanup command semantics
+verified against CLI and operation source; prose-only changes, no build needed.

@@ -44,29 +44,92 @@ through their Waves, and capture new Tasks as direction emerges.
 
 ## Clear old work state
 
+### Find stale work
+
 Read `lf roadmap --json`, `lf session list --json`, and `lf wt list --json`.
-Identify worktrees, branches, PRs, Tasks, and Loopflow database records that
-are obsolete or left behind by completed or abandoned work. Follow uncertain
-cases to their source; age alone does not establish that work is disposable.
-Missing provider data stays unknown.
+Join Task and Session state to worktrees using Loopflow's returned identities
+and paths. Inspect branches and PRs to explain gaps in that shared picture.
 
-Use the supported operation that owns the state:
+Scope cleanup to the participant's own work. Read `gh api user --jq .login`
+and `git config user.email`, then check PR authorship and the repository's
+configured branch naming convention. A tip commit's author alone does not
+establish branch ownership. Leave uncertain ownership unresolved and continue with the rest; do not
+triage teammates' PRs or delete their branches.
 
-- `lf wt prune --dry-run` previews worktree cleanup; apply authorized removals
-  through `lf wt`.
-- `lf task abandon <issue>` retires a Task and its delivery state together.
-  Use `lf task delete <issue>` when the issue itself should be removed.
-- For branches and PRs outside a Task, use the existing `lf pr` and `lf wt`
-  cleanup paths. Preserve useful changes and settled outcomes.
-- Include stale Loopflow database state in the cleanup. Use supported
-  reconciliation and cleanup commands; inspect installed help for their exact
-  scope. Do not edit SQLite directly or discard durable history as a substitute
-  for reconciliation. If a needed cleanup operation is missing, capture it as
-  a Task and continue the rest of the upkeep.
+Use these checks where they help establish what can be cleared:
 
-Carry out cleanup within existing authorization. Present concrete destructive
-choices when authorization is missing. Preserve active work, unfinished changes,
-and evidence still needed for recovery or decisions.
+- Open PRs: `gh pr list --author @me --state open --limit 1000 --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`.
+  Paginate if the result reaches the limit; missing or incomplete data stays unknown.
+- Remote branch candidates: `git for-each-ref --format='%(refname:short) %(committerdate:iso8601) %(authoremail)' refs/remotes/origin`.
+  Filter to the participant's branch namespace and corroborate ownership with
+  PR history. These are cached refs; check `git ls-remote --heads origin`
+  before treating a branch as present or gone. Exclude the default branch
+  and symbolic refs.
+- Worktree condition: inspect `git -C <path> status --short`, unpushed commits,
+  associated Tasks, and active Sessions/Flows. Run `lf wt prune --dry-run` to
+  identify merged, squash-merged, closed-PR, remote-gone, terminal, and inactive
+  cleanup candidates. Review the preview; inactivity alone is not abandonment.
+- Branch disposition: compare ahead/behind the repository's default branch,
+  inspect unique commits, and check PR history for merged or squash-merged work.
+  Check for commits added after a merge; a merged PR does not settle later work.
+- Remote-only stale candidates: no worktree, no open PR, and no commits in
+  60 days. Check each candidate with
+  `gh pr list --head <branch> --state all --limit 1000 --json number,state,author,url,mergedAt,headRepository`.
+  Match the head repository as well as the branch name. Check open PRs regardless
+  of author before deletion. Age selects candidates, not permission to delete.
+
+### Clear what can be cleared
+
+Follow the evidence to useful actions. Combine related cleanup, finish clear
+cases, and keep moving when one item is uncertain. Use `scratch/open-work.md`
+for findings worth retaining: affected branches or paths, Task/PR links,
+recommendations, supporting evidence, and unresolved work. Choose a format
+that fits the findings; a table is useful for many items, not a required agenda.
+Do not create Waves for waveless branches.
+
+Decide whether work should ship, ship partially, be abandoned, or be pruned.
+Investigate uncertainties that can be answered from available evidence. Bring
+only consequential choices requiring the participant's judgment or missing
+authorization to the conversation, with a recommendation and its reason.
+An unresolved item need not hold up the rest of the upkeep.
+
+Use the appropriate operation within existing authorization:
+
+- **Ship / ship-partial:** use the delivery skill appropriate to the requested
+  outcome in the owning checkout. Preserve useful unfinished scope in a Task
+  when authorized. Keep existing workers and review gates intact; a cleanup
+  scan does not authorize publication or merge.
+- **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
+  together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
+  and removes its checkout and branches. Use `lf task delete <issue>` only when
+  the issue itself should be removed.
+- **Prune:** `lf wt delete <branch>` removes the checkout, local branch, and
+  origin branch while retaining PR and Task outcomes. It also accepts a full
+  branch name with no worktree, including remote-only branches; omit the
+  `origin/` prefix. Use it for agreed stale branches and settled leftovers.
+  Do not prune a branch with an open PR unless explicitly authorized; use
+  abandon when the intended outcome includes closing that PR.
+- **Batch worktree cleanup:** apply `lf wt prune` only when the entire preview
+  is authorized; otherwise delete the agreed branches individually. Recheck
+  the preview before applying it. Worktree pruning does not replace the
+  remote-only branch scan.
+- **Database upkeep:** use supported reconciliation and cleanup commands;
+  inspect installed help for their exact scope. Do not edit SQLite directly
+  or discard durable history as a substitute for reconciliation. If a needed
+  cleanup operation is missing, capture it as a Task within existing filing
+  authorization, or leave the gap in the punch list.
+
+Present the exact destructive choices when authorization is missing. Preserve
+active work, dirty files, unpushed commits, and evidence needed for recovery.
+Do not use force to bypass these findings without explicit discard authority.
+Use Loopflow's cleanup commands rather than raw branch or worktree deletion.
+
+After actions, reread the relevant worktree, remote branch, PR, and Task state.
+Keep notes of observed outcomes and remaining work. Report useful results and
+any decisions that need attention; do not walk the participant through every
+item or make clearing the entire backlog a prerequisite for their next request.
+Record partial cleanup accurately rather than treating an attempted command
+as success.
 
 ## Summarize current activity
 

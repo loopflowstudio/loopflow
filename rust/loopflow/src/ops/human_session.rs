@@ -1,3 +1,6 @@
+mod workspace;
+pub use workspace::SessionWorkspace;
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
@@ -113,6 +116,7 @@ pub enum SessionState {
     Active,
     Ready,
     Closed,
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,8 +219,12 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub primary_scope: Option<String>,
+    /// A current obligation, independent of process liveness.
+    pub attention: Option<SessionAttention>,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
+    pub workspace: Option<SessionWorkspace>,
     pub kind: SessionKind,
     pub interactive: bool,
     pub work: Option<WorkRef>,
@@ -235,6 +243,53 @@ pub struct SessionRecord {
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAttention {
+    Review,
+    Reply,
+}
+
+fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
+    if session.completed_at.is_some() {
+        SessionState::Closed
+    } else if session.ready_summary.is_some() {
+        SessionState::Ready
+    } else if has_clients {
+        SessionState::Active
+    } else if session.driver_outcome.as_deref() == Some("interrupted") {
+        SessionState::Interrupted
+    } else if session.kind != crate::session::SessionKind::Conversation {
+        SessionState::Waiting
+    } else {
+        SessionState::Unknown
+    }
+}
+
+fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
+    if session.completed_at.is_some() {
+        return None;
+    }
+    let current_review = session.kind == crate::session::SessionKind::FlowReview
+        && !session.task_terminal
+        && session.flow.as_ref().is_some_and(|flow| {
+            flow.state == crate::session::FlowSummaryState::Current
+                && flow.pending_session.as_deref() == Some(&session.id)
+        });
+    let ready_conversation = session.kind == crate::session::SessionKind::Conversation
+        && session.ready_summary.is_some();
+    if session.kind == crate::session::SessionKind::Ask || current_review || ready_conversation {
+        Some(SessionAttention::Review)
+    } else if session.interactive
+        && session.latest_turn.as_deref() == Some("completed")
+        && session.driver_outcome.is_none()
+    {
+        Some(SessionAttention::Reply)
+    } else {
+        None
+    }
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -737,11 +792,91 @@ pub(crate) async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
+    // Checkout resolution must precede Task filtering and pagination: SQL path
+    // prefixes cannot recognize symlink aliases or nested repositories.
+    let association_filter = filter.orphan || filter.task.is_some();
+    let mut selection = filter.clone();
+    if association_filter {
+        selection.task = None;
+        selection.orphan = false;
+        selection.limit = 0;
+        selection.offset = 0;
+    }
     let mut sessions = Vec::new();
-    for session in store.session_summaries(filter).await? {
+    for session in store.session_summaries(&selection).await? {
         sessions.push(summary_surface(&session));
     }
+    workspace::associate(store, &mut sessions).await?;
+    if association_filter {
+        let task = if let Some(selector) = &filter.task {
+            store
+                .task_checkouts()
+                .await?
+                .into_iter()
+                .find(|task| {
+                    task.task_id.as_str() == selector
+                        || task.issue_id == *selector
+                        || task.issue_identifier == *selector
+                })
+                .map(|task| task.task_id)
+        } else {
+            None
+        };
+        sessions.retain(|session| {
+            (!filter.orphan || session.task_ids.is_empty())
+                && (filter.task.is_none()
+                    || task
+                        .as_ref()
+                        .is_some_and(|task| session.task_ids.contains(task)))
+        });
+        let offset = if filter.after.is_some() {
+            0
+        } else {
+            filter.offset
+        };
+        sessions = sessions
+            .into_iter()
+            .skip(offset)
+            .take(if filter.limit == 0 {
+                usize::MAX
+            } else {
+                filter.limit
+            })
+            .collect();
+    }
     Ok(sessions)
+}
+
+/// Filter before applying the caller's page size, using the same attention
+/// metadata reading. Scan bounded metadata pages, never provider transcripts.
+pub(crate) async fn list_attention(
+    store: &SharedStore,
+    filter: &crate::session::SessionFilter,
+) -> Result<Vec<SessionRecord>> {
+    let mut page = filter.clone();
+    page.after = Some(filter.after.clone().unwrap_or_default());
+    page.offset = 0;
+    page.limit = 100;
+    let mut skip = filter.offset;
+    let mut matches = Vec::new();
+    loop {
+        let rows = list(store, &page).await?;
+        let exhausted = rows.len() < page.limit;
+        page.after = rows.last().map(|row| row.id.clone());
+        for row in rows.into_iter().filter(|row| row.attention.is_some()) {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            matches.push(row);
+            if filter.limit > 0 && matches.len() == filter.limit {
+                return Ok(matches);
+            }
+        }
+        if exhausted {
+            return Ok(matches);
+        }
+    }
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
@@ -832,17 +967,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     } else {
         Vec::new()
     };
-    let state = if session.completed_at.is_some() {
-        SessionState::Closed
-    } else if session.ready_summary.is_some() {
-        SessionState::Ready
-    } else if !clients.is_empty() {
-        SessionState::Active
-    } else {
-        // No active client does not establish provider history, engine death,
-        // waiting, or completion. SQL publication/outcome is not OS evidence.
-        SessionState::Unknown
-    };
+    let state = session_state(session, !clients.is_empty());
     let mut actions = session_actions(kind, state);
     let open_argv = if unavailable.is_none() {
         match human_open_argv(remote, Some(&session.cwd), &session.id) {
@@ -862,8 +987,16 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        primary_scope: session.primary_scope.clone(),
+        attention: session_attention(session),
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
+        workspace: remote.map(|home| SessionWorkspace {
+            home_id: home.clone(),
+            worktree: session.cwd.clone(),
+            task_id: session.task_id.clone(),
+            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+        }),
         kind,
         interactive: session.interactive,
         work,
@@ -1513,6 +1646,11 @@ async fn connect_live_codex(
     let driver = store
         .sqlite
         .claim_session_driver(&session.id, expected.as_ref(), &exec, false)?;
+    crate::session_record::register_session_driver_interrupt(
+        &store.sqlite,
+        session.id.clone(),
+        driver.clone(),
+    );
     let connected = async {
         store.sqlite.make_session_interactive(&session.id, &driver)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
@@ -1552,7 +1690,10 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match store.sqlite.release_session_driver(&session.id, &driver) {
+    match store
+        .sqlite
+        .finish_session_driver(&session.id, &driver, "detached")
+    {
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
     }
@@ -1750,24 +1891,11 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         }
         _ => Vec::new(),
     };
-    let launched = match remote {
-        Some(_) => session.input_published,
-        None => store
-            .sqlite
-            .input_provider_session(&session.artifact_key)?
-            .is_some(),
-    };
-    let state = if session.completed_at.is_some() {
-        SessionState::Closed
-    } else if session.ready_summary.is_some() {
-        SessionState::Ready
-    } else if !clients.is_empty() {
-        SessionState::Active
-    } else if launched {
-        SessionState::Closed
-    } else {
-        SessionState::Waiting
-    };
+    let metadata = store
+        .sqlite
+        .session_summary(&session.id)?
+        .ok_or_else(|| session_not_found(&session.id))?;
+    let state = session_state(&metadata, !clients.is_empty());
     let mut actions = session_actions(kind, state);
     let flow_membership = match &session.flow_session_id {
         None => match store.sqlite.session_summary(&session.id)? {
@@ -1828,9 +1956,17 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             Err(error) => return Err(error.into()),
         },
     };
-    Ok(SessionRecord {
+    let mut reading = SessionRecord {
+        primary_scope: metadata.primary_scope.clone(),
+        attention: session_attention(&metadata),
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
+        workspace: remote.as_ref().map(|home| SessionWorkspace {
+            home_id: home.clone(),
+            worktree: session.cwd.clone(),
+            task_id: session.task_id.clone(),
+            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+        }),
         kind,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
@@ -1857,7 +1993,9 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             .filter_map(|client| client.terminal_id)
             .collect(),
         open_argv: human_open_argv(remote.as_ref(), Some(&session.cwd), &session.id)?,
-    })
+    };
+    workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    Ok(reading)
 }
 
 /// The `provider[:model]` a Run launched with.
@@ -2551,6 +2689,10 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            primary_scope: None,
+            driver_outcome: None,
+            latest_turn: None,
+            task_terminal: false,
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
@@ -2636,6 +2778,29 @@ mod tests {
         let row = super::summary_surface(&summary);
         assert_eq!(row.state, super::SessionState::Ready);
         assert_eq!(row.ready_summary, summary.ready_summary);
+        assert_eq!(row.attention, Some(super::SessionAttention::Review));
+        summary.ready_summary = None;
+        summary.driver_outcome = Some("interrupted".into());
+        assert_eq!(
+            super::summary_surface(&summary).state,
+            super::SessionState::Interrupted
+        );
+        summary.kind = crate::session::SessionKind::FlowReview;
+        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Current;
+        summary.flow.as_mut().unwrap().pending_session = Some(summary.id.clone());
+        assert_eq!(
+            super::summary_surface(&summary).attention,
+            Some(super::SessionAttention::Review)
+        );
+        summary.task_terminal = true;
+        assert_eq!(super::summary_surface(&summary).attention, None);
+        summary.kind = crate::session::SessionKind::Ask;
+        assert_eq!(
+            super::summary_surface(&summary).attention,
+            Some(super::SessionAttention::Review)
+        );
+        summary.completed_at = Some(1);
+        assert_eq!(super::summary_surface(&summary).attention, None);
     }
 
     use std::collections::HashSet;

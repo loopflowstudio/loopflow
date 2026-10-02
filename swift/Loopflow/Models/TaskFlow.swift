@@ -9,8 +9,11 @@ import Foundation
 public struct FlowGraph: Decodable, Sendable, Hashable {
     public let name: String
     public let steps: [FlowNode]
+    public let interactions: InteractionGraph
 
-    public init(name: String, steps: [FlowNode]) { self.name = name; self.steps = steps }
+    public init(name: String, steps: [FlowNode], interactions: InteractionGraph) {
+        self.name = name; self.steps = steps; self.interactions = interactions
+    }
 
     /// Locate an exact captured occurrence, including nested XOR paths.
     public func node(_ key: UInt32) -> FlowNode? {
@@ -25,6 +28,24 @@ public struct FlowGraph: Decodable, Sendable, Hashable {
         }
         return find(steps)
     }
+}
+
+public struct InteractionGraph: Decodable, Sendable, Hashable {
+    public let stages: [String]
+    public let transitions: [InteractionTransition]
+}
+
+public struct InteractionTransition: Decodable, Sendable, Hashable {
+    public let from: String
+    public let to: String
+    public let nodes: [String]
+    public let routes: [InteractionRoute]
+}
+
+public struct InteractionRoute: Decodable, Sendable, Hashable {
+    public let from: String
+    public let to: String
+    public let condition: String?
 }
 
 public struct FlowNode: Decodable, Sendable, Hashable {
@@ -251,7 +272,7 @@ public struct FlowTemplateProjection {
                 }
             }
         }
-        self.graph = FlowGraph(name: graph.name, steps: nodes(items))
+        self.graph = FlowGraph(name: graph.name, steps: nodes(items), interactions: graph.interactions)
         visibleKeys = visible
         self.groups = groups
     }

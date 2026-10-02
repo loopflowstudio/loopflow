@@ -26,8 +26,8 @@ struct SessionChromeProofTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell()
@@ -161,8 +161,8 @@ struct SessionChromeProofTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/tmp"
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId
         let terminal = registry.surfaces.view(for: .shell(pane))
@@ -237,7 +237,7 @@ struct SessionChromeProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let workspace = registry.workspace(for: WorkspaceIdentity(homeId: "local", worktree: repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell()

@@ -99,7 +99,7 @@ final class PodiumModel {
                 }
             }
             taskLinkReading = .available(result)
-            if matches.count == 1, !unavailable, let match = matches.first {
+            if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 openTaskDestination(wave: match.0, task: match.1)
             }
         } catch {
@@ -176,12 +176,14 @@ final class PodiumModel {
             .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
     }
 
-    /// Visibility never changes the inventory used by panes and selection.
+    /// Task membership is independent of provider mode or attention state.
     var visibleWorkspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
-            navigation.showsHeadlessSessions || $0.interactive
+            $0.state != .closed && (!$0.taskIds.isEmpty || $0.workspace?.taskId != nil
+                || $0.primaryScope != nil || navigation.showsHeadlessSessions || $0.interactive)
         })
     }
+
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
         didSet {
             // Retain the latest observed Task across temporary chapter membership

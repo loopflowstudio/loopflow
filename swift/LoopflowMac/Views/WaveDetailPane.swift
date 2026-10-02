@@ -37,13 +37,13 @@ struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
     let onClose: () -> Void
+    let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
     @State private var selection: WaveWorkSelection?
     @State private var showHistory = false
     @State private var historyReference: String?
     @State private var workRefresh: UInt64 = 0
-    @StateObject private var terminalStore = TaskTerminalStore()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,8 +57,7 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     selection: $selection,
                     refreshSignal: workRefresh,
-
-                    terminalStore: terminalStore
+                    onOpenTask: onOpenTask
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
 
@@ -102,7 +101,7 @@ private struct WavePlanView: View {
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let refreshSignal: UInt64
-    @ObservedObject var terminalStore: TaskTerminalStore
+    let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
@@ -128,7 +127,7 @@ private struct WavePlanView: View {
                     WaveWorkInspector(
                         selection: selection,
                         workMap: workMap,
-                        terminalStore: terminalStore
+                        onOpenTask: onOpenTask
                     )
                 }
                 liveStatusFooter
@@ -741,10 +740,9 @@ private struct WaveTaskWorkView: View {
 private struct WaveWorkInspector: View {
     let selection: WaveWorkSelection
     let workMap: WaveWorkMap
-    @ObservedObject var terminalStore: TaskTerminalStore
+    let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var showsTaskWorkspace = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -767,7 +765,9 @@ private struct WaveWorkInspector: View {
                     prs: task.prs
                 )
                 if task.reference.workspace != nil {
-                    Button("Open Task workspace") { showsTaskWorkspace = true }
+                    Button("Open Task workspace") {
+                        onOpenTask(task.task.id)
+                    }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                 }
@@ -776,18 +776,6 @@ private struct WaveWorkInspector: View {
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .sheet(isPresented: $showsTaskWorkspace) {
-            if let task {
-                TaskWorkspaceView(
-                    task: task.task,
-                    reference: task.reference,
-                    runtime: task.runtime,
-                    prURL: task.prs.first { $0.id == task.activePr }?.publication?.github?.url,
-                    terminalStore: terminalStore,
-                    initialSection: .changes
-                )
-            }
-        }
     }
 
     private var task: WaveTaskWork? {

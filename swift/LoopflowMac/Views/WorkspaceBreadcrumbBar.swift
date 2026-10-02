@@ -12,6 +12,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
     let crumb: WorkspaceBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
     let onMonitor: (String) -> Void
+    var onTaskDetails: (() -> Void)? = nil
     @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
     @State private var showsMembershipDetails = false
@@ -58,7 +59,13 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                 if crumb.waveWork != nil { separator }
                 // The Task overview shows its title once below; inside a
                 // Session the ancestor carries the title to navigate upward.
-                if crumb.session != nil {
+                if let onTaskDetails {
+                    Button(task.task.task.name, action: onTaskDetails)
+                        .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).truncationMode(.tail).layoutPriority(-2)
+                        .help("Task details and Flow")
+                        .accessibilityIdentifier("breadcrumb-task")
+                } else if crumb.session != nil {
                     // The ancestor's title gives way first when the bar is narrow.
                     Button(task.task.task.name) { model.select(task.id.work) }
                         .buttonStyle(.plain)

@@ -194,7 +194,9 @@ attempt object. History entries have stable references, not independent lifecycl
 
 Every agent conversation is an AgentSession: skills, inline prompts, helpers,
 Asks, reviews, interactive and headless work. Default views select interactive
-conversations. Explicit filters expose headless and completed history; `--all`
+conversations. `lf session list --needs-me` selects current review/reply obligations,
+including headless Asks, using the same projection as Desktop. Explicit filters
+expose headless and completed history; `--all`
 continues to mean all repositories. Interactive mode grants neither review
 completion nor Flow authority.
 
@@ -220,6 +222,15 @@ conversations running. Flow retry can resume the recorded native conversation on
 a new engine after confirmed engine exit. Missing process evidence remains unknown.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
+
+An exact driver exit writes a generation-fenced Session receipt. An observed
+normal or interrupted exit retires an unbound, non-primary conversation only
+when that driver owns its provider engine. Task/Wave conversations, primary
+Sessions, Asks and Flow reviews remain available. A stopped turn or missing
+process never completes a conversation, and retirement never settles a Flow.
+Completed Sessions retain their history but contribute no current rows or counts.
+Terminal Tasks cannot acquire current review obligations from retained Flow cursors;
+independent unresolved Asks remain discoverable.
 
 AgentSession history records provider starts, successful/failed/interrupted
 outcomes, retries, durations and usage, correlated with driving Exec and native
@@ -304,8 +315,9 @@ or bind one member of a taskless Flow inconsistently with its owner.
 
 Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
-The history reader owns this single choice; a separate Intelligence Task may
-re-evaluate it. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
+The history reader owns this single choice. `lf usage --binds` compares it with
+post-hoc attribution from the same history; the
+[evaluation](../performance/bind-attribution.md) holds the reading and recommendation. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
 Authorized Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
@@ -877,7 +889,7 @@ model.
 <!-- architecture-vocabulary:start -->
 | Retired term | Allowed scopes | Current language |
 | --- | --- | --- |
-| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; FlowSession owns captured progression. |
+| `Project Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; FlowSession owns captured progression. |
 | `session context`, `LF_SESSION` | — | Typed Work ancestry and Exec/AgentSession provenance; transitional launch environment names are listed in cutover status. |
 | `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
 | `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
@@ -961,3 +973,9 @@ CI runs the same command for every proposed merge. The weekly Architecture
 Drift workflow retains the JSON result as time-based evidence. A new owner,
 projection, shim, or API either maps to an existing concept or updates this page
 in the same change.
+
+A Task Session is an AgentSession associated with a Task checkout. A Task can have
+any number; repo and Wave Sessions retain their explicit scopes. This term does
+not restore the retired Task Session controller or a second conversation store.
+`session list --orphan` selects Sessions without Task association; it cannot opt
+a Session out of checkout membership.

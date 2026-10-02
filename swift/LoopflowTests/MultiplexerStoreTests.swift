@@ -4,6 +4,91 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Opening in the active pane preserves split geometry and other visible Sessions")
+    func activePaneSelectionPreservesSplits() throws {
+        let store = MultiplexerStore()
+        store.load(sessionId: "design")
+        let left = store.focusedPaneId
+        store.reveal(sessionId: "review")
+        let right = store.focusedPaneId
+        store.updateRatio(between: left, and: right, ratio: 0.35)
+        let arrangement = store.layout
+        store.load(sessionId: "ask")
+        #expect(store.layout == arrangement.replacingContent(of: right, with: .session(id: "ask")))
+        store.load(sessionId: "design")
+        #expect(store.focusedPaneId == left)
+        #expect(store.visibleLayout?.allPanes.count == 2)
+        store.setCollapsed(paneId: right, collapsed: true)
+        store.load(sessionId: "ask")
+        #expect(store.focusedPaneId == left)
+        #expect(store.focusedPane.content == .session(id: "ask"))
+        #expect(store.visibleLayout?.allPanes.count == 1)
+        #expect(store.layout.pane(for: right)?.content == .session(id: "design"))
+        store.reveal(sessionId: "design")
+        #expect(store.layout == arrangement.replacingContent(of: left, with: .session(id: "ask"))
+            .replacingContent(of: right, with: .session(id: "design")))
+        #expect(store.visibleLayout == store.layout)
+        store.setCollapsed(paneId: left, collapsed: true)
+        store.setCollapsed(paneId: right, collapsed: true)
+        store.load(sessionId: "ask")
+        #expect(store.visibleLayout?.allPanes.map(\.content) == [.session(id: "ask")])
+    }
+
+    @Test("Opening a Session preserves a running shell and restores a hidden final pane")
+    func selectingBesideShell() {
+        let store = MultiplexerStore()
+        store.newShell(command: ["server"])
+        let shell = store.focusedPaneId
+        store.load(sessionId: "design")
+        #expect(store.layout.pane(for: shell)?.content == .shell)
+        #expect(store.shellCommands[shell] == ["server"])
+        store.setCollapsed(paneId: shell, collapsed: true)
+        store.setCollapsed(paneId: store.focusedPaneId, collapsed: true)
+        store.load(sessionId: "design")
+        #expect(store.visibleLayout?.allPanes.map(\.content) == [.session(id: "design")])
+    }
+
+    @Test("Focus restores the prior selection and collapsed arrangement")
+    func focusCollapsedPaneAndRestore() {
+        let store = MultiplexerStore()
+        store.reveal(sessionId: "design")
+        let design = store.focusedPaneId
+        store.reveal(sessionId: "ask")
+        let ask = store.focusedPaneId
+        store.setCollapsed(paneId: design, collapsed: true)
+        let original = store.layout
+        store.toggleZoom(design)
+        #expect(store.zoomedPaneId == design)
+        #expect(store.layout.pane(for: design)?.content == .session(id: "design"))
+        store.toggleZoom(design)
+        #expect(store.focusedPaneId == ask)
+        #expect(store.collapsedPaneIds == [design])
+        #expect(store.layout == original)
+        #expect(store.visibleLayout?.allPanes.map(\.id) == [ask])
+    }
+
+    @Test("Collapse preserves the layout, shell command and ratios; reveal restores the same pane")
+    func collapseRetainsPane() throws {
+        let store = MultiplexerStore()
+        store.newShell(command: ["server"])
+        let shell = store.focusedPaneId
+        store.reveal(sessionId: "ask")
+        let ask = store.focusedPaneId
+        store.updateRatio(between: shell, and: ask, ratio: 0.37)
+        let original = store.layout
+        store.setCollapsed(paneId: shell, collapsed: true)
+        #expect(store.layout == original)
+        #expect(store.visibleLayout?.allPanes.map(\.id) == [ask])
+        #expect(store.shellCommands[shell] == ["server"])
+        store.setCollapsed(paneId: ask, collapsed: true)
+        #expect(store.visibleLayout == nil)
+        store.reveal(sessionId: "ask")
+        #expect(store.focusedPaneId == ask)
+        store.setCollapsed(paneId: shell, collapsed: false)
+        #expect(store.visibleLayout == original)
+        #expect(store.shellCommands[shell] == ["server"])
+    }
+
     @Test("starts with one focused empty pane")
     func startsWithOnePane() {
         let store = MultiplexerStore()
@@ -156,7 +241,7 @@ struct MultiplexerStoreTests {
         let store = MultiplexerStore()
         store.load(sessionId: "session-1")
 
-        store.reconcileSessions([])
+        store.removeSessions(["session-1"])
 
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
@@ -171,7 +256,7 @@ struct MultiplexerStoreTests {
         store.load(sessionId: "session-1")
         store.close(store.focusedPaneId)
 
-        store.reconcileSessions(retained ? ["session-1"] : [])
+        store.removeSessions(retained ? [] : ["session-1"])
 
         #expect(store.canUndoClose == retained)
         store.undoClose()

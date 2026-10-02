@@ -64,6 +64,14 @@ rename paths, scratch listing, and lossless content with a byte revision and
 explicit file state, Save outcome, recovery access and late-change disclosure.
 Rust round-trips the same fixture Swift decodes.
 
+`task_checkout.json` pins the prepared Task receipt, including owning Home and
+resolved checkout. Rust round-trips the full Task snapshot; Swift reads the
+workspace identity used before the next roadmap refresh. Flow graph fixtures
+include the derived interaction stages and route references alongside steps.
+
+`ask_session.json` keeps the caller Run separate from the Ask conversation Run.
+A waiting Ask is available before its summary permits Complete.
+
 `context_report.json` pins `lf usage --context --json`: each recorded step's
 submitted input by source, flagged against budgets, with Task totals. One step
 is LOO-298-shaped (384 steers over the goal budget); the other has no retained

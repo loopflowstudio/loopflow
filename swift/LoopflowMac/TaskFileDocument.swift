@@ -23,16 +23,18 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private var deferredSnapshot: TaskFileSnapshot?
     private var applyingIncoming = false
     private(set) var saveFailed = false
+    private(set) var readOnlyReason: String?
     var onEdit: (() -> Void)?
 
     var canSave: Bool {
         dirty && !saving && external == nil && deferredSnapshot == nil
-            && !editor.hasMarkedText()
+            && editor.isEditable && !editor.hasMarkedText()
     }
 
     func reconcile(_ next: TaskFileSnapshot) async {
         incomingGeneration += 1
         let generation = incomingGeneration
+        updateAccess(next)
         // Content reads skip history; keep what the last Save disclosed.
         if !next.recoveries.isEmpty { recoveries = next.recoveries }
         guard !saving, !editor.hasMarkedText() else {
@@ -45,6 +47,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             return
         }
         if next.revision == snapshot?.revision {
+            snapshot = next
             external = nil
             onEdit?()
             return
@@ -156,8 +159,13 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         text = next.content ?? ""
         editor.string = text
         editor.undoManager?.removeAllActions()
-        editor.isEditable = next.state == .text
         editVersion += 1
+    }
+
+    private func updateAccess(_ next: TaskFileSnapshot) {
+        readOnlyReason = next.readOnlyReason
+        editor.isEditable = next.state == .text && next.readOnlyReason == nil
+        onEdit?()
     }
 
     func save(issue: String, cwd: String, query: RegistryQuery) async {
@@ -170,6 +178,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             let result = try await query.saveTaskFile(issue: issue, path: path, revision: revision,
                                                       content: submitted, cwd: cwd)
             saveMessage = result.message
+            updateAccess(result.file)
             recoveries = result.file.recoveries
             if result.published, result.file.content == submitted {
                 // Advance the disk baseline without replacing newer typing, selection or Undo.
@@ -269,6 +278,14 @@ final class TaskFilesStore {
         didSet { if base != oldValue { changes = nil; diff = nil } }
     }
     private(set) var changes: TaskChangesSnapshot?
+    private(set) var directories: [String: TaskDirectory] = [:]
+    private(set) var directoryErrors: [String: String] = [:]
+    private(set) var changesError: String?
+    var expandedDirectories: Set<String> = []
+    var showIgnored = false
+    var showsChanges = false
+    var needsComparison: Bool { showsChanges || mode == .diff }
+    private var directoryGenerations: [String: Int] = [:]
     private(set) var documents: [String: TaskFileDocument] = [:]
     private(set) var diff: TaskDiffSnapshot?
     private(set) var patchLines: [TaskPatchLine] = []
@@ -297,7 +314,7 @@ final class TaskFilesStore {
 
     private func invalidate(_ paths: [String]) {
         for path in paths {
-            if path.hasPrefix(".git/") || path.hasPrefix("target/") || path.contains("/.build/") { continue }
+            if path == ".git" || path.hasPrefix(".git/") { continue }
             changedPaths.insert(path)
         }
         guard !changedPaths.isEmpty else { return }
@@ -324,7 +341,17 @@ final class TaskFilesStore {
                 } catch { self.error = error.localizedDescription }
             }
             guard !Task.isCancelled else { return }
-            await self.refresh()
+            for directory in Array(self.directories.keys) where changed.contains(where: {
+                let parent = ($0 as NSString).deletingLastPathComponent
+                if ($0 as NSString).lastPathComponent == ".gitignore" {
+                    return parent.isEmpty || directory == parent || directory.hasPrefix(parent + "/")
+                }
+                return $0.isEmpty || $0 == directory || directory.hasPrefix($0 + "/")
+                    || parent == directory
+            }) {
+                await self.loadDirectory(directory)
+            }
+            if self.needsComparison { await self.refreshChanges() }
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
         }
     }
@@ -375,6 +402,35 @@ final class TaskFilesStore {
 
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
+        await loadDirectory("")
+        if needsComparison { await refreshChanges() }
+    }
+
+    func loadDirectory(_ path: String, more: Bool = false) async {
+        let previous = directories[path]
+        guard !more || previous?.nextCursor != nil else { return }
+        let generation = (directoryGenerations[path] ?? 0) + 1
+        directoryGenerations[path] = generation
+        let ignored = showIgnored
+        do {
+            let page = try await query.taskFiles(issue: issue, directory: path,
+                cursor: more ? previous?.nextCursor : nil, showIgnored: ignored, cwd: cwd)
+            guard !Task.isCancelled, generation == directoryGenerations[path], ignored == showIgnored else { return }
+            directories[path] = TaskDirectory(path: page.path,
+                entries: (more ? previous?.entries ?? [] : []) + page.entries, nextCursor: page.nextCursor)
+            directoryErrors[path] = nil
+            if selection == nil { selection = page.entries.first(where: { $0.kind == .file })?.path }
+        } catch {
+            guard !Task.isCancelled, generation == directoryGenerations[path], ignored == showIgnored else { return }
+            directoryErrors[path] = error.localizedDescription
+        }
+    }
+
+    func refreshDirectories() async {
+        for path in Set(directories.keys).union([""]) { await loadDirectory(path) }
+    }
+
+    func refreshChanges() async {
         refreshGeneration += 1
         let generation = refreshGeneration
         let base = base
@@ -383,10 +439,12 @@ final class TaskFilesStore {
             guard !Task.isCancelled, generation == refreshGeneration, self.base == base else { return }
             self.changes = changes
             if selection == nil { selection = changes.scratch.first ?? changes.files.first?.path }
-            error = nil
+            changesError = nil
         } catch {
             guard !Task.isCancelled, generation == refreshGeneration else { return }
-            self.error = error.localizedDescription
+            changes = nil
+            diff = nil
+            changesError = error.localizedDescription
         }
     }
 
@@ -409,6 +467,7 @@ final class TaskFilesStore {
     }
 
     func loadDiff() async {
+        if changes == nil { await refreshChanges() }
         diffGeneration += 1
         let generation = diffGeneration
         // Keep the displayed patch for the same document while its replacement loads.
@@ -429,10 +488,10 @@ final class TaskFilesStore {
                   selectedDocument?.editVersion == version else { return }
             patchLines = lines
             diff = next
-            error = nil
+            changesError = nil
         } catch {
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base else { return }
-            self.error = error.localizedDescription
+            changesError = error.localizedDescription
         }
     }
 }

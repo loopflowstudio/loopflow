@@ -106,17 +106,26 @@ fn inventory_query(
     if !filter.history {
         sql.push_str(
             " AND s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
-            SELECT 1 FROM flow_sessions f WHERE f.pending_session_id=s.id AND f.state='current'))",
+            SELECT 1 FROM flow_sessions f WHERE f.pending_session_id=s.id AND f.state='current' AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id AND t.work_state IN ('done','abandoned'))))",
         );
     }
     if let Some(repo) = &filter.repo {
-        sql.push_str(&format!(" AND s.repo={}", bind(Value::Text(repo.clone()))));
+        sql.push_str(&format!(
+            " AND COALESCE(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id))={}",
+            bind(Value::Text(repo.clone()))
+        ));
     }
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
         sql.push_str(&format!(
             " AND s.id IN ({})",
             super::task_work::session_ids(&task)
+        ));
+    }
+    if filter.orphan {
+        sql.push_str(&format!(
+            " AND NOT EXISTS ({})",
+            super::task_work::session_tasks("s")
         ));
     }
     if let Some(search) = &filter.search {
@@ -167,8 +176,17 @@ fn summary_query(page: &str, by_id: bool) -> String {
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
-        (SELECT json_group_array(id) FROM ({}))
-        FROM page s
+        (SELECT json_group_array(id) FROM ({})),
+        a.primary_scope,
+        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
+            WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
+        (SELECT COALESCE(CASE WHEN json_valid(done.payload) THEN json_extract(done.payload,'$.status') END,'running') FROM session_events start
+            LEFT JOIN session_events done INDEXED BY session_turn_attention ON done.session_id=start.session_id
+                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn AND done.kind='completed'
+            WHERE start.session_id=s.id AND start.captured_event=s.current_capture AND start.kind='started'
+            ORDER BY start.seq DESC LIMIT 1),
+        COALESCE(t.work_state IN ('done','abandoned'),0)
+        FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN flows f ON f.id=s.flow_session_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
@@ -183,6 +201,10 @@ fn read_summary(
     Ok((|| {
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(32)?)?,
+            primary_scope: row.get(33)?,
+            driver_outcome: row.get(34)?,
+            latest_turn: row.get(35)?,
+            task_terminal: row.get(36)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -876,6 +898,25 @@ impl SqliteStore {
         Ok(bound)
     }
 
+    /// Sessions assigned to a Task after they began, oldest bind first.
+    pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT s.id,s.bound_at,t.issue_identifier,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
+             FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
+             WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok(crate::session::SessionBind {
+                session_id: row.get(0)?,
+                at: row.get(1)?,
+                task: row.get(2)?,
+                wave: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every open Session. A review is open while its invocation waits on it.
     pub fn sessions(
         &self,
@@ -1389,6 +1430,42 @@ mod metadata_tests {
     use crate::session::{FlowSummaryState, SessionFilter};
 
     #[test]
+    fn retained_sessions_without_repo_use_their_recorded_wave() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("retained", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'Product','/repo',1)",
+                [wave.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET wave_id=?1,repo=NULL WHERE id='retained'",
+                [wave.as_str()],
+            )
+            .unwrap();
+        }
+        let filter = SessionFilter {
+            repo: Some("/repo".into()),
+            ..SessionFilter::default()
+        };
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "retained");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET repo='/other' WHERE id='retained'",
+                [],
+            )
+            .unwrap();
+        assert!(store.session_summaries(&filter).unwrap().is_empty());
+    }
+
+    #[test]
     fn captured_reservation_survives_interruption_and_fences_replacement() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
@@ -1501,20 +1578,9 @@ mod metadata_tests {
                     .any(|line| line.contains("SEARCH f USING COVERING INDEX flow_pending_review")),
                 "{plan:?}"
             );
-            let instructions: Vec<(String, Option<String>)> = conn
-                .prepare(&format!("EXPLAIN {sql}"))
-                .unwrap()
-                .query_map(rusqlite::params_from_iter(&values), |row| {
-                    Ok((row.get(1)?, row.get(5)?))
-                })
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
-            assert!(
-                !instructions.iter().any(|(op, args)| op == "Function"
-                    && args.as_ref().is_some_and(|s| s.starts_with("json_"))),
-                "Summary must read indexed scalars without decoding captures/history"
-            );
+            for index in ["session_driver_exit", "session_turn_attention"] {
+                assert!(plan.iter().any(|line| line.contains(index)), "{plan:?}");
+            }
             let started = std::time::Instant::now();
             let ids: Vec<String> = conn
                 .prepare(&sql)

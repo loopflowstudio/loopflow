@@ -1315,7 +1315,9 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let branch = "jack/task-resume-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    // Planning lookup uses the canonical repository path, including macOS /var aliases.
+    let canonical_repo = repo.path().canonicalize().expect("canonical fixture repo");
+    let task = register_task(home.path(), &canonical_repo, branch, &base);
     let now = time::OffsetDateTime::now_utc();
     let head = repo.head_sha();
     let mut pr = task.pr.clone();

@@ -19,8 +19,8 @@ struct TaskMonitorProofTests {
         let query = try query()
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
-        let multiplexer = registry.workspace(for: "/src/loopflow").multiplexer
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let multiplexer = registry.workspace(for: fixtureWorkspace("/src/loopflow")).multiplexer
         multiplexer.load(sessionId: "monitor-review")
         let ownPane = multiplexer.focusedPaneId
         _ = multiplexer.split(ownPane, axis: .vertical)
@@ -57,14 +57,14 @@ struct TaskMonitorProofTests {
         let query = try query()
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let records = try #require(model.sessions.value)
-        let store = registry.workspace(for: "/src/loopflow").sessionStore(repoPath: "/src/loopflow", query: query)
+        let store = registry.workspace(for: fixtureWorkspace("/src/loopflow")).sessionStore(repoPath: "/src/loopflow", query: query)
         store.reconcile(records)
         let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
         navigator.onOpenSession(records[0])
-        let multiplexer = registry.workspace(for: "/src/loopflow").multiplexer
+        let multiplexer = registry.workspace(for: fixtureWorkspace("/src/loopflow")).multiplexer
         let firstPane = multiplexer.focusedPaneId
         navigator.onOpenSession(records[1])
         try #require(multiplexer.focusedPaneId == firstPane)
@@ -86,8 +86,8 @@ struct TaskMonitorProofTests {
         let query = try query(feed: feed)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/src/loopflow")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "monitor-review")
         let sessionPane = multiplexer.focusedPaneId

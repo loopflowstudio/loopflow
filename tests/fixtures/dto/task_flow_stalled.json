@@ -19,7 +19,31 @@
           ],
           "paths": []
         }
-      ]
+      ],
+      "interactions": {
+        "stages": [],
+        "transitions": [
+          {
+            "from": "@start",
+            "to": "@end",
+            "nodes": [
+              "0"
+            ],
+            "routes": [
+              {
+                "from": "@start",
+                "to": "0",
+                "condition": null
+              },
+              {
+                "from": "0",
+                "to": "@end",
+                "condition": null
+              }
+            ]
+          }
+        ]
+      }
     },
     "current": 0,
     "completed": [],

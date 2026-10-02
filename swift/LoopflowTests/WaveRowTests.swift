@@ -45,7 +45,7 @@ struct WaveRowViewTests {
         let row = makeRow(wave: wave)
 
         let nameText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-name").text()
-        #expect(try nameText.string() == "aurora-melody")
+        #expect(try nameText.string() == "Aurora Melody")
     }
 
     @Test("Row renders an operational lens")

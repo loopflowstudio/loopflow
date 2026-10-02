@@ -21,6 +21,7 @@ use crate::engine::flow::ConcreteStep;
 pub struct FlowGraph {
     pub name: String,
     pub steps: Vec<FlowNode>,
+    pub interactions: Box<InteractionGraph>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,11 +168,161 @@ pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
         .collect()
 }
 
+/// Participation stages and bounded references to the captured automated routes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractionGraph {
+    pub stages: Vec<String>,
+    pub transitions: Vec<InteractionTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractionTransition {
+    /// Structural human occurrence or `@start` / `@end` anchor.
+    pub from: String,
+    pub to: String,
+    pub nodes: Vec<String>,
+    pub routes: Vec<InteractionRoute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractionRoute {
+    pub from: String,
+    pub to: String,
+    /// Authored XOR path name, or the deciding occurrence's repeat/advance route.
+    pub condition: Option<String>,
+}
+
+pub fn project_interactions(graph: &FlowGraph) -> InteractionGraph {
+    project_interaction_nodes(&graph.steps)
+}
+
+fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
+    use std::collections::BTreeSet;
+    fn connect(
+        steps: &[FlowNode],
+        end: &str,
+        routes: &mut Vec<InteractionRoute>,
+        stages: &mut Vec<String>,
+    ) {
+        for (index, node) in steps.iter().enumerate() {
+            let next = steps
+                .get(index + 1)
+                .map_or_else(|| end.to_string(), |node| node.key.to_string());
+            if node.human {
+                stages.push(node.key.to_string());
+            }
+            if node.kind == FlowNodeKind::Xor {
+                for path in &node.paths {
+                    routes.push(InteractionRoute {
+                        from: node.key.to_string(),
+                        to: path
+                            .steps
+                            .first()
+                            .map_or_else(|| next.clone(), |node| node.key.to_string()),
+                        condition: Some(path.name.clone()),
+                    });
+                    connect(&path.steps, &next, routes, stages);
+                }
+            } else {
+                routes.push(InteractionRoute {
+                    from: node.key.to_string(),
+                    to: next,
+                    condition: node.returns_to.as_ref().map(|_| "advance".into()),
+                });
+            }
+            if let Some(target) = &node.returns_to {
+                routes.push(InteractionRoute {
+                    from: node.key.to_string(),
+                    to: target.to_string(),
+                    condition: Some("repeat".into()),
+                });
+            }
+        }
+    }
+    let mut routes = vec![InteractionRoute {
+        from: "@start".into(),
+        to: steps
+            .first()
+            .map_or_else(|| "@end".to_string(), |node| node.key.to_string()),
+        condition: None,
+    }];
+    let mut stages = Vec::new();
+    connect(steps, "@end", &mut routes, &mut stages);
+    let boundaries: BTreeSet<_> = stages.iter().map(String::as_str).chain(["@end"]).collect();
+    let mut transitions = Vec::new();
+    for source in std::iter::once("@start").chain(stages.iter().map(String::as_str)) {
+        let mut visited = BTreeSet::new();
+        let mut pending = vec![source];
+        let mut reachable_routes = Vec::new();
+        let mut targets = BTreeSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            for route in routes.iter().filter(|route| route.from == current) {
+                reachable_routes.push(route);
+                if boundaries.contains(route.to.as_str()) {
+                    targets.insert(route.to.as_str());
+                } else {
+                    pending.push(route.to.as_str());
+                }
+            }
+        }
+        for target in targets {
+            // Stop at every other stage before walking backward. In particular,
+            // a repeat back to the source cannot leak work into its exit edge.
+            let candidates: Vec<_> = reachable_routes
+                .iter()
+                .copied()
+                .filter(|route| route.to == target || !boundaries.contains(route.to.as_str()))
+                .collect();
+            let mut ancestors = BTreeSet::from([target]);
+            loop {
+                let before = ancestors.len();
+                for route in &candidates {
+                    if ancestors.contains(route.to.as_str()) {
+                        ancestors.insert(route.from.as_str());
+                    }
+                }
+                if ancestors.len() == before {
+                    break;
+                }
+            }
+            let selected: Vec<_> = candidates
+                .into_iter()
+                .filter(|route| ancestors.contains(route.to.as_str()))
+                .cloned()
+                .collect();
+            let nodes = selected
+                .iter()
+                .flat_map(|route| [&route.from, &route.to])
+                .filter(|key| !key.starts_with('@') && !boundaries.contains(key.as_str()))
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            transitions.push(InteractionTransition {
+                from: source.into(),
+                to: target.into(),
+                nodes,
+                routes: selected,
+            });
+        }
+    }
+    InteractionGraph {
+        stages,
+        transitions,
+    }
+}
+
 impl FlowGraph {
     pub fn new(name: impl Into<String>, steps: &[ConcreteStep]) -> Self {
+        let steps = nodes(steps, &mut 0);
+        let interactions = Box::new(project_interaction_nodes(&steps));
         Self {
             name: name.into(),
-            steps: nodes(steps, &mut 0),
+            steps,
+            interactions,
         }
     }
 
@@ -506,6 +657,123 @@ mod tests {
             }),
             sources: Vec::new(),
         })
+    }
+
+    #[test]
+    fn participation_preserves_loops_repeated_skills_and_background_only_flows() {
+        let steps = vec![
+            skill("review", Some("start"), true, None),
+            skill("implement", Some("build"), false, None),
+            skill("decide", None, false, Some("build")),
+            skill("review", Some("second"), true, None),
+            skill("decide", None, false, Some("start")),
+        ];
+        let graph = FlowGraph::new("example", &steps);
+        let projection = super::project_interactions(&graph);
+        assert_eq!(projection.stages, ["0", "3"]);
+        let edge = projection
+            .transitions
+            .iter()
+            .find(|e| e.from == "0" && e.to == "3")
+            .unwrap();
+        assert_eq!(edge.nodes, ["1", "2"]);
+        assert!(edge
+            .routes
+            .iter()
+            .any(|r| r.from == "2" && r.to == "1" && r.condition.as_deref() == Some("repeat")));
+        assert!(projection
+            .transitions
+            .iter()
+            .any(|e| e.from == "3" && e.to == "0"));
+        let background = FlowGraph::new("background", &steps[1..3]);
+        assert!(background.interactions.stages.is_empty());
+        assert_eq!(background.interactions.transitions.len(), 1);
+        assert_eq!(background.interactions.transitions[0].nodes, ["0", "1"]);
+    }
+
+    #[test]
+    fn participation_exit_excludes_work_that_requires_another_review() {
+        let graph = FlowGraph::new(
+            "review-loop",
+            &[
+                skill("build", Some("build"), false, None),
+                skill("review", None, true, None),
+                skill("decide", None, false, Some("build")),
+            ],
+        );
+        let exit = graph
+            .interactions
+            .transitions
+            .iter()
+            .find(|edge| edge.from == "1" && edge.to == "@end")
+            .unwrap();
+        assert_eq!(exit.nodes, ["2"]);
+        assert_eq!(exit.routes.len(), 2);
+        assert!(exit.routes.iter().all(|route| route.to != "0"));
+        let repeat = graph
+            .interactions
+            .transitions
+            .iter()
+            .find(|edge| edge.from == "1" && edge.to == "1")
+            .unwrap();
+        assert_eq!(repeat.nodes, ["0", "2"]);
+    }
+
+    #[test]
+    fn participation_fixtures_preserve_exact_branch_alternatives() {
+        let entries: Vec<super::FlowCatalogEntry> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/flow_catalog.json"
+        ))
+        .unwrap();
+        for entry in entries {
+            if let Some(graph) = entry.graph {
+                assert_eq!(*graph.interactions, super::project_interactions(&graph));
+            }
+        }
+        let graph = FlowGraph::new(
+            "branch",
+            &[
+                skill("review", None, true, None),
+                ConcreteStep::Xor(ConcreteXor {
+                    router: Skill::named("route"),
+                    paths: HashMap::from([
+                        (
+                            "build".into(),
+                            ConcretePath {
+                                description: "build it".into(),
+                                steps: vec![
+                                    skill("implement", None, false, None),
+                                    skill("review", None, true, None),
+                                ],
+                            },
+                        ),
+                        (
+                            "skip".into(),
+                            ConcretePath {
+                                description: "skip it".into(),
+                                steps: vec![],
+                            },
+                        ),
+                    ]),
+                    sources: vec![],
+                }),
+                skill("finish", None, true, None),
+            ],
+        );
+        assert_eq!(graph.interactions.stages, ["0", "3", "4"]);
+        let edges: Vec<_> = graph
+            .interactions
+            .transitions
+            .iter()
+            .filter(|edge| edge.from == "0")
+            .collect();
+        assert_eq!(edges.len(), 2);
+        let skipped = edges.iter().find(|edge| edge.to == "4").unwrap();
+        assert!(skipped
+            .routes
+            .iter()
+            .any(|r| r.condition.as_deref() == Some("skip")));
+        assert!(!skipped.nodes.contains(&"2".into()));
     }
 
     #[test]

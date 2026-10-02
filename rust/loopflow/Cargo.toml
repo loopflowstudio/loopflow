@@ -55,7 +55,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # --- Runtime dependencies ---
 async-trait = "0.1"
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 base64 = "0.23"
 bytes = "1"
 cron = "0.17"

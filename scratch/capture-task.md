@@ -349,3 +349,39 @@ and the real capture-to-owner demo described
 above; none is established by this source review.
 
 Check: 2026-10-01 review of ConversationLaunch, SessionsView, WorkspaceNavigator and wave_session; prose-only changes, no builds run.
+
+
+## Reviewable implementation (2026-10-02)
+
+Jack Heart authorized this manual contribution after ordinary Task launch failed
+before claiming a worker. The pre-edit and final Task status reads both report
+the existing feature Flow idle at implement with no advancement worker claimed.
+This contribution changes neither the Flow cursor nor its review boundaries.
+
+The builtin `capture-tasks`, Wave conversation pointer, Desktop button and Wave
+action, launch scope, and user documentation are implemented together. Create Task
+remains a provisional label, not a recorded final naming decision.
+
+Code review found that the original launch sketch selected a repository slot but
+Desktop still rendered the selected Task's checkout. `showsRetainedTerminals` now
+records this presentation choice on the existing repository navigation owner;
+capture shows the repository layout without changing Task selection. Selecting a
+subject restores normal Task presentation. No execution or persisted owner was added.
+The production-control test proves both checkout layouts survive and a missing
+helper changes neither layout nor selection. It uses an owned test host and does
+not launch a provider or establish live PTY/draft continuity.
+
+Remaining review/demo work:
+
+- Select the final button label and judge its placement in the configured app.
+- Exercise the Wave context-menu control in the app; focused tests cover its
+  explicit launch value while another subject is selected, not native menu dispatch.
+- Demonstrate real multi-idea capture, useful self-contained Task briefs, corrected
+  ownership, and filing across Waves and repositories without workers or Session
+  binding. Prove partial success and uncertain-write reconciliation at each actual
+  destination. The skill specifies these rules; registration and UI checks alone
+  do not establish agent behavior or provider idempotency.
+- Gate owns the broader automated acceptance suite and configured build coverage;
+  demo owns appearance, native drafts and the real capture-to-owner handoff.
+
+Check: 2026-10-02 `cargo test -p loopflow --lib engine::builtins` 14 passed; `scripts/test_desktop.sh --filter TaskCapture` 4 passed (including production launch subprocess); `scripts/test_desktop.sh --filter WorkspaceNavigationTests` 26 passed; `swift build --package-path swift`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; native menu/provider handoff deferred to gate/demo as above.

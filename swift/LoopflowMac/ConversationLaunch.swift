@@ -64,3 +64,30 @@ extension PodiumModel {
         }
     }
 }
+
+/// Capture stays in the repository checkout even when a Task is selected.
+struct TaskCaptureLaunch: Equatable {
+    let repoPath: String
+    let wave: String?
+
+    func arguments(lf: String) -> [String] {
+        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["capture-tasks"]
+    }
+}
+
+extension PodiumModel {
+    var taskCaptureLaunch: TaskCaptureLaunch? {
+        guard navigation.content != .overview, let selection else {
+            return repoPath.map { TaskCaptureLaunch(repoPath: $0, wave: nil) }
+        }
+        return taskCaptureLaunch(wave: selection)
+    }
+
+    func taskCaptureLaunch(wave work: WorkReference) -> TaskCaptureLaunch? {
+        guard let repoPath else { return nil }
+        let name = waveId(for: work).flatMap { id in
+            wave(id: id)?.wave.name ?? rosterWave(id: id)?.api.name
+        }
+        return TaskCaptureLaunch(repoPath: repoPath, wave: name)
+    }
+}

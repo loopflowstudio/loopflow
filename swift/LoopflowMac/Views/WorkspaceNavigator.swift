@@ -6,6 +6,7 @@ struct WorkspaceNavigator: View {
     let onOpenSession: (SessionRecord) -> Void
     let onOpenTask: ((WorkReference) -> Void)?
     let onConversation: ((WorkReference?) -> Void)?
+    let onCaptureTask: ((TaskCaptureLaunch) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
@@ -15,11 +16,13 @@ struct WorkspaceNavigator: View {
     init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
-         onOpenTask: ((WorkReference) -> Void)? = nil) {
+         onOpenTask: ((WorkReference) -> Void)? = nil,
+         onCaptureTask: ((TaskCaptureLaunch) -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
         self.onOpenTask = onOpenTask
         self.onConversation = onConversation
+        self.onCaptureTask = onCaptureTask
         self.onNewShell = onNewShell
         self.onShowTerminals = onShowTerminals
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
@@ -43,6 +46,17 @@ struct WorkspaceNavigator: View {
         let rows = rows
         VStack(spacing: 0) {
             header
+            if let onCaptureTask, let launch = model.taskCaptureLaunch {
+                Button { onCaptureTask(launch) } label: {
+                    Label("Create Task", systemImage: "plus.bubble")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 7))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("workspace-create-task")
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
@@ -397,6 +411,10 @@ struct WorkspaceNavigator: View {
     }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
+        if work.kind == .wave, let onCaptureTask, let launch = model.taskCaptureLaunch(wave: work) {
+            Button("Create Task · \(title)") { onCaptureTask(launch) }
+                .accessibilityIdentifier("workspace-capture-wave-\(work.id)")
+        }
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }

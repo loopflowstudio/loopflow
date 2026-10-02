@@ -51,10 +51,19 @@ This supersedes the earlier decomposition rule.
 Jack Heart approved continuing with this revised design on 2026-10-01. The
 button label remains open; no candidate was selected by that approval.
 
-Next useful action: implement the builtin capture skill and shared Wave pointer,
-then Desktop launch and production-control checks as one delivery unit. The real
-demo must still establish useful Task text, no worker launch, multiple ideas
-in the same capture Session, corrected attribution, and cross-repository filing.
-Verify destination-scoped CLI reads, writes, and uncertain-write reconciliation;
-partial success must not cause successful Tasks to be recreated. Review completion and Flow navigation remain outside
-these design notes.
+## Implementation assumptions and remaining decisions (2026-10-02)
+
+Jack Heart's manual implementation authorization leaves naming open. The code
+retains the provisional **Create Task** label to make the accepted interaction
+reviewable; no candidate is recorded as finally approved.
+
+A capture launch needs an explicit retained-workspace presentation choice while
+keeping Task selection. The existing navigation owner carries that reversible UI
+state and clears it on ordinary subject selection. Source review showed that
+selecting a repository slot alone still rendered the Task checkout.
+
+Implementation and focused checks are complete; the remaining work is review,
+final naming, broader gate acceptance and the real capture-to-owner demo listed
+in [the design](capture-task.md#reviewable-implementation-2026-10-02). No external
+Tasks were filed to manufacture demo evidence, no publication occurred, and no
+Flow navigation or completion was performed.

@@ -337,7 +337,7 @@ struct SessionsView: View {
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
-        let path = navigation.selectedSessionId == nil
+        let path = !usesWorktreeLayout
             ? taskPath ?? worktreeLayout.focusedPath ?? store.repoPath
             : worktreeLayout.focusedPath ?? store.repoPath
         return workspaces.workspace(for: path).multiplexer
@@ -366,6 +366,9 @@ struct SessionsView: View {
     }
 
     private var navigation: WorkspaceNavigation { model.navigation }
+    private var usesWorktreeLayout: Bool {
+        navigation.showsRetainedTerminals || navigation.selectedSessionId != nil || fileTask == nil
+    }
     private var terminalsVisible: Bool { navigation.content == .terminals }
     private var fileTask: WorkspaceTask? {
         // A departing repository view must not mount the next repository's
@@ -390,7 +393,7 @@ struct SessionsView: View {
                     if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
                     multiplexer.newShell()
                     navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onCaptureTask: captureTask)
                     .frame(width: 264)
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
@@ -405,20 +408,20 @@ struct SessionsView: View {
                                     .buttonStyle(.plain).fixedSize()
                             }
                             if terminalsVisible {
-                                if navigation.selectedSessionId != nil { worktreeChip }
+                                if usesWorktreeLayout { worktreeChip }
                                 else if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
                                         .foregroundStyle(palette.textSecondary).help(taskPath)
                                         .accessibilityLabel("Task worktree")
                                         .accessibilityIdentifier("task-worktree-location")
-                                } else if fileTask == nil { worktreeChip }
-                                if navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil { completionControls }
+                                }
+                                if usesWorktreeLayout || taskPath != nil { completionControls }
                             }
                         }
                         ZStack {
                             Group {
-                                if navigation.selectedSessionId != nil || fileTask == nil {
+                                if usesWorktreeLayout {
                                     // Binding changes ancestry, never the conversation's panes.
                                     WorktreeNodeView(
                                         node: worktreeLayout.layout, layout: worktreeLayout,
@@ -478,7 +481,7 @@ struct SessionsView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, navigation.palette == nil, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil, usesWorktreeLayout || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -614,6 +617,16 @@ struct SessionsView: View {
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
         model.observeActiveSessions()
+    }
+
+    private func captureTask(_ launch: TaskCaptureLaunch) {
+        do {
+            let lf = try LocalWaveAgentLauncher.controlLfPath()
+            worktreeLayout.select(launch.repoPath)
+            navigation.showsRetainedTerminals = true
+            navigation.content = .terminals
+            workspaces.workspace(for: launch.repoPath).multiplexer.newShell(command: launch.arguments(lf: lf))
+        } catch { launchError = error.localizedDescription }
     }
 
     private func startConversation() {

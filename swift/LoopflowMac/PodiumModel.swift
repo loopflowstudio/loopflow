@@ -538,6 +538,7 @@ final class PodiumModel {
             }
         } else { selection = requested }
         navigation.selectedSessionId = nil
+        navigation.showsRetainedTerminals = false
         navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()

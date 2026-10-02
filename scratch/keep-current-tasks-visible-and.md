@@ -251,3 +251,14 @@ Excluded: another cancellation sweep, edits to retained targets, Project
 rotation, automatic lifecycle recovery, Session retirement, and primary runtime.
 
 Check: `git diff --check` — passed for reconciliation; recorded focused implementation/compression results reused from task-history-handoff.md; affected suites, final Clippy and configured build remain with gate, native judgment with demo/review.
+
+## Gate update · 2026-10-02
+
+Affected headless acceptance and configured app compilation passed. Gate added
+all seven duplicate exclusions at every window, row-opening actions, invalid-input
+feedback, and production Start-button assertions for canceled/completed/open Tasks.
+The earlier pending gate notes are superseded by this result. Live demo remains
+pending: the configured installed CLI still omits the new planning fields.
+See [the durable demo instructions and limits](../docs/reviews/task-history.md).
+
+Check: Rust affected suites + DTO fixtures — 145 passed, 2 intentional ignores; Swift affected suites — 68 passed, final Task history — 5 passed; fmt, Clippy, architecture, Swift boundaries, configured Xcode build-for-testing and diff check — passed; native Growth/Session demo pending compatible installed runtime and Jack Heart's review.

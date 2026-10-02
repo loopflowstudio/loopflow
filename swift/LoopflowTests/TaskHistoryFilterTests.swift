@@ -116,14 +116,17 @@ struct TaskHistoryFilterTests {
     @Test func waveControlsFilterRowsAndCountTogether() async throws {
         let wire = try roadmapWire()
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
-        let query = RegistryQuery { _, _ in payload }
+        let catalog = try String(contentsOf: fixtures.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
+        let query = RegistryQuery { args, _ in args == ["flow", "list", "--json"] ? catalog : payload }
         let roadmap = try await query.roadmap()
         let wave = try #require(roadmap.waves.first)
         let model = PodiumModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), processActivity: .loading, workActivity: .loading, repos: [])
+        await model.loadFlowCatalog()
         model.select(.wave(id: wave.wave.id))
         model.taskHistoryNow = now
-        let view = WorkSurfaceView(model: model)
+        var opened: WorkReference?
+        let view = WorkSurfaceView(model: model, onOpenTask: { opened = $0 })
         func rows() throws -> [String] {
             try view.inspect().findAll(ViewType.Button.self).compactMap { button in
                 guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("podium-task-") else { return nil }
@@ -131,6 +134,16 @@ struct TaskHistoryFilterTests {
             }
         }
         func checkCount() throws {
+            for id in [318, 315, 314, 313, 310, 308, 307] {
+                #expect(try !rows().contains("LOO-\(id)"))
+            }
+            #expect(try rows().contains("unresolved"))
+            for id in try rows() {
+                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-\(id)").button()
+                #expect(try button.isDisabled() == false)
+                try button.tap()
+                #expect(opened == .task(id: id))
+            }
             let heading = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-count")
             let count = try heading.findAll(ViewType.Text.self).map { try $0.string() }
             #expect(count.contains(String(try rows().count)))
@@ -149,6 +162,8 @@ struct TaskHistoryFilterTests {
         try checkCount()
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-days").textField().setInput("0")
         #expect(model.taskHistoryFilters[wave.wave.id]?.days == 30)
+        try checkCount()
+        _ = try view.inspect().find(text: "Enter a positive number of days.")
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-history-all").toggle().tap()
         #expect(try rows().contains("unknown"))
         try checkCount()
@@ -157,6 +172,13 @@ struct TaskHistoryFilterTests {
             #expect(try !rows().contains("LOO-\(id)"))
         }
         #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
+        // Inspection remains available even for hidden terminal inventory;
+        // Rust's admission decision still governs the production Start button.
+        for id in ["LOO-318", "recent", "LOO-309"] {
+            model.select(.task(id: id))
+            let start = try view.inspect().find(viewWithAccessibilityIdentifier: "task-flow-start").button()
+            #expect(try start.isDisabled() == (id != "LOO-309"))
+        }
     }
 }
 #endif

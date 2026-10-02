@@ -37,3 +37,14 @@ load individual rows without assembling a roadmap except for the view scenario.
 The implementation checkpoint is `e2a9277b0`; compression remains in the diff.
 
 Check: `cargo test -p loopflow --lib task_history` — 3 passed; `swift test --package-path swift --filter 'TaskHistoryFilterTests|RoadmapViewTests'` — 7 passed, SwiftPM app compiled; `cargo fmt --check` and `git diff --check` — passed; `cargo clippy --all-targets -- -D warnings` passed on the implementation checkpoint, final affected suites/Clippy/configured build to gate, visible judgment to demo/review.
+
+## Gate update · 2026-10-02
+
+Affected headless acceptance and configured app compilation passed. Gate added
+all seven duplicate exclusions at every window, row-opening actions, invalid-input
+feedback, and production Start-button assertions for canceled/completed/open Tasks.
+The earlier pending gate notes are superseded by this result. Live demo remains
+pending: the configured installed CLI still omits the new planning fields.
+See [the durable demo instructions and limits](../docs/reviews/task-history.md).
+
+Check: Rust affected suites + DTO fixtures — 145 passed, 2 intentional ignores; Swift affected suites — 68 passed, final Task history — 5 passed; fmt, Clippy, architecture, Swift boundaries, configured Xcode build-for-testing and diff check — passed; native Growth/Session demo pending compatible installed runtime and Jack Heart's review.

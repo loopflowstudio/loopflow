@@ -137,7 +137,9 @@ runs in its own child lf Exec through the ordinary command path. The Flow driver
 owns navigation; a child's command outcome alone cannot settle agent work.
 
 A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
-`summary`, or `blocked` with a nonempty `reason`. A router returns a JSON object containing
+`summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
+keys are required in the provider schema. Settlement also accepts persisted receipts
+that omitted the unused field. A router returns a JSON object containing
 `path`, constrained to the captured branch's path names. Each provider receives
 the schema before generation. Session history retains the native output and
 completion separately; only the exact selected successful result is consumed

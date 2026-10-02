@@ -21,6 +21,8 @@ lf home install schedule         # check at login and weekly (macOS)
 lf home install schedule daily   # also accepts weekly, hourly, 5min
 ```
 
+Run `lf home install` from any checkout, including a Task checkout. Promotion checks
+the candidate release against the installed database before changing it.
 Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
@@ -109,6 +111,7 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
+lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges

@@ -73,6 +73,7 @@ final class PodiumModel {
     private(set) var taskLinkURL: URL?
     private(set) var taskLinkReading: PodiumReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
+    var linkedSession: SessionRecord?
     @ObservationIgnored private var destinationGeneration = 0
 
     @ObservationIgnored private var taskLinkExpectedID: String?
@@ -100,7 +101,7 @@ final class PodiumModel {
             }
             taskLinkReading = .available(result)
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
-                openTaskDestination(wave: match.0, task: match.1)
+                try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation)
             }
         } catch {
             guard destinationGeneration == generation else { return }
@@ -111,6 +112,44 @@ final class PodiumModel {
     func dismissTaskLink() {
         destinationGeneration &+= 1
         showsTaskLink = false
+        linkedSession = nil
+    }
+
+    func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
+        guard let taskLinkURL else { return }
+        let generation = destinationGeneration
+        do {
+            try await openLinkedTask(wave: wave, task: task, link: TaskLink(url: taskLinkURL), generation: generation)
+        } catch {
+            guard destinationGeneration == generation else { return }
+            taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+        }
+    }
+
+    private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+        guard let sessionID = link.session else {
+            openTaskDestination(wave: wave, task: task)
+            return
+        }
+        var after: String?
+        var records: [SessionRecord] = []
+        repeat {
+            let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
+            guard destinationGeneration == generation else { return }
+            records += page.entries
+            after = page.next
+        } while after != nil
+        guard let taskID = task.runtime?.workId,
+              let record = records.first(where: { $0.id == sessionID }),
+              record.taskIds.contains(taskID) || record.workspace?.taskId == taskID else {
+            throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
+        }
+        openTaskDestination(wave: wave, task: task)
+        sessionsGeneration &+= 1
+        sessions = .available(records)
+        navigation.selectedSessionId = record.id
+        navigation.content = .terminals
+        linkedSession = record
     }
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {

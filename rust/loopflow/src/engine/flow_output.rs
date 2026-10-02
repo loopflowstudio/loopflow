@@ -55,15 +55,16 @@ impl FlowOutput {
                 "type": "object",
                 "properties": {
                     "decision": {"type": "string", "enum": ["advance", "iterate", "blocked"]},
-                    "summary": {"type": "string", "pattern": "\\S"},
-                    "reason": {"type": "string", "pattern": "\\S"}
+                    "summary": {
+                        "type": ["string", "null"],
+                        "description": "Nonempty evidence or next action for advance/iterate; null for blocked."
+                    },
+                    "reason": {
+                        "type": ["string", "null"],
+                        "description": "Nonempty question and evidence for blocked; null for advance/iterate."
+                    }
                 },
-                "required": ["decision"],
-                "maxProperties": 2,
-                "anyOf": [
-                    {"properties": {"decision": {"enum": ["advance", "iterate"]}}, "required": ["summary"]},
-                    {"properties": {"decision": {"const": "blocked"}}, "required": ["reason"]}
-                ],
+                "required": ["decision", "summary", "reason"],
                 "additionalProperties": false
             }),
             Self::Route(paths) => json!({
@@ -82,7 +83,11 @@ impl FlowOutput {
             .ok_or("expected a structured output object")?;
         match self {
             Self::Decision => {
-                if object.len() != 2 {
+                if object
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "decision" | "summary" | "reason"))
+                    || object.values().filter(|value| !value.is_null()).count() != 2
+                {
                     return Err(
                         "expected exactly decision and its summary or blocked reason".into(),
                     );
@@ -131,12 +136,63 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn provider_schemas_use_required_fields_without_root_unions() {
+        for output in [FlowOutput::Decision, FlowOutput::Route(vec!["work".into()])] {
+            let schema = output.schema();
+            assert_eq!(schema["type"], "object");
+            assert_eq!(schema["additionalProperties"], false);
+            assert!(schema.get("maxProperties").is_none());
+            assert!(schema.get("anyOf").is_none());
+            let properties = schema["properties"].as_object().unwrap();
+            let required = schema["required"].as_array().unwrap();
+            assert_eq!(properties.len(), required.len());
+            for key in properties.keys() {
+                assert!(required.contains(&json!(key)));
+            }
+        }
+    }
+
+    #[test]
+    fn nullable_provider_decisions_decode_from_selected_receipts() {
+        let output = FlowOutput::Decision;
+        for (decision, field, unused) in [
+            ("advance", "summary", "reason"),
+            ("iterate", "summary", "reason"),
+            ("blocked", "reason", "summary"),
+        ] {
+            let value = json!({"decision": decision, field: "evidence", unused: null});
+            assert_eq!(
+                output.schema()["properties"][unused]["type"],
+                json!(["string", "null"])
+            );
+            let expected = output
+                .decode(&json!({"decision": decision, field: "evidence"}))
+                .unwrap();
+            assert_eq!(
+                output.decode_receipt(&json!({"value": value})).unwrap(),
+                expected
+            );
+            assert_eq!(
+                output
+                    .decode_receipt(&json!({"text": value.to_string()}))
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn decisions_require_the_declared_value_and_evidence() {
         let output = FlowOutput::Decision;
         for invalid in [
             json!({"decision":"next","summary":"legacy alias"}),
             json!({"decision":"advance","summary":"  "}),
             json!({"decision":"advance","summary":"proven","confidence":0.9}),
+            json!({"decision":"advance","summary":"proven","extra":null}),
+            json!({"decision":"advance","summary":"proven","reason":"conflicting"}),
+            json!({"decision":"advance","summary":null,"reason":"wrong field"}),
+            json!({"decision":"blocked","summary":null,"reason":null}),
+            json!({"decision":"blocked","summary":null,"reason":"  "}),
             json!({"decision":"advance"}),
             json!({"decision":"blocked","summary":"wrong field"}),
             json!({"decision":"blocked","reason":"  "}),

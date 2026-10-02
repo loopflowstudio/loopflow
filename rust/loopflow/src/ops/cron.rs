@@ -151,6 +151,9 @@ pub(crate) struct CronObligation {
     pub(crate) home_id: HomeId,
     pub(crate) activated_at: i64,
     pub(crate) receipts: Vec<CronReceipt>,
+    pub(crate) repo: PathBuf,
+    pub(crate) lf_path: PathBuf,
+    pub(crate) log_path: PathBuf,
 }
 
 /// Reconcile summary from [`sync_crons`].
@@ -657,6 +660,20 @@ pub fn default_launch_agents_dir() -> OpsResult<PathBuf> {
 }
 
 pub fn resolve_lf_path() -> OpsResult<PathBuf> {
+    // Scheduled work follows future promotions; Sessions pin their own runtime.
+    if !crate::store::custom_home_selected() {
+        let gate = crate::machine_install::root()
+            .and_then(|root| {
+                crate::machine_install::entry_gate_path(
+                    &root,
+                    &crate::machine_install::ArtifactRole::Cli,
+                )
+            })
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        if gate.is_file() {
+            return Ok(gate);
+        }
+    }
     std::env::current_exe().map_err(Into::into)
 }
 
@@ -752,7 +769,11 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
                 ))
             })?,
     };
+    let log_path = spec.log_path();
     Ok(CronObligation {
+        repo: spec.working_directory,
+        lf_path: spec.lf_path,
+        log_path,
         wave: spec.wave,
         flow: spec.flow,
         target_kind: spec.target_kind,
@@ -1521,6 +1542,37 @@ mod tests {
         let second = sync_crons(&agents, "infra", &[release], &launchctl).unwrap();
         assert_eq!(second.installed[0].flow, "release-run");
         assert_eq!(second.removed[0].flow, "telemetry-daily");
+    }
+
+    #[test]
+    fn scheduled_work_follows_the_entry_gate_without_reinstalling_the_job() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let agents = temp.path().join("agents");
+        let root = crate::machine_install::root_for_home(temp.path());
+        let role = crate::machine_install::ArtifactRole::Cli;
+        let gate =
+            crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/false"))
+                .unwrap();
+        let spec = spec(temp.path(), &gate);
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        let installed = add_cron(&agents, &spec, &FakeLaunchctl::default()).unwrap();
+        let declaration = fs::read(&installed.path).unwrap();
+
+        crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/true"))
+            .unwrap();
+        let receipt = run_cron(
+            &agents,
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Scheduled,
+        )
+        .unwrap();
+
+        assert_eq!(receipt.outcome, CronOutcome::Succeeded);
+        assert_eq!(receipt.lf_path, gate);
+        assert_eq!(fs::read(&installed.path).unwrap(), declaration);
     }
 
     #[test]

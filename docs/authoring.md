@@ -201,9 +201,9 @@ feedback and revised design to the second loop-decide. Its own explicit edge
 also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
-At the deciding occurrence, return `{"decision":"advance","summary":"evidence"}`
-or `{"decision":"iterate","summary":"next action and proof"}`, or
-`{"decision":"blocked","reason":"question and evidence"}`. The provider receives
+At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
+or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
+`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The provider receives
 this schema before generation. The Flow validates and consumes the exact selected
 successful completion; invalid output gets at most two corrective turns in the
 same conversation. Failed turns, older results and command exit cannot navigate.

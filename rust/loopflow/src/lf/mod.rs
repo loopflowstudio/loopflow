@@ -1314,7 +1314,7 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
-    /// Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
+    /// Diagnose installation, storage, Exec integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]

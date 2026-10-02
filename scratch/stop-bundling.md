@@ -1,6 +1,6 @@
 # Shared provider homes, multiple credentials
 
-Draft plan — 2026-10-02. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Slice 1 is implemented on this branch, less its gate fixture; slices 2–4 remain. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
+Draft plan — 2026-10-02. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Slice 1 is mostly implemented on this branch; its gate fixture, provider session IDs in `lf session`, and the items listed under it remain, as do slices 2–4. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
 
 ## Problem
 
@@ -125,8 +125,10 @@ One Task, complete end state above. Each slice leaves the tree working.
    - **Quota probes for the active account.** `subscription.rs` and `lf account` still probe every account through its stored profile. While an account is active its live credential is the native one, and the profile copy is only current as of the last switch. If Codex rotates refresh tokens, a probe that refreshes the stale profile copy and the native process refreshing its own would invalidate each other. Launch readiness (`verify_ready`) already reads the native home for the active account; probes need the same rule before this ships. Unproven either way: no live credential was exercised.
    - Shared launches under a forwarded lease or an explicit `--account` list take the first eligible candidate rather than preferring the active account.
    - `lf account route --json` does not report the mode or active account; the text form does.
-2. **Claude shared by default.** Keychain writer and activation for Claude, then drop the `provider != Codex` branch in `launch_isolated`. Starts with the fixture proving a started Claude accepts an activated credential, using a temporary config directory and its hashed Keychain item on macOS and the file elsewhere.
-3. **“Everyone now” for Codex.** Gated on the research below. Resume each running shared Codex agent under the new account; exhaustion switches use it. Needs a record of running shared agents, which slice 1 does not keep: the credential lock is held across activate and spawn only.
+   - **Provider session IDs in `lf session`.** Not started. `find_session` (`ops/human_session.rs`) resolves only Session and Run IDs (`resolve_history_input` matches Session IDs and captured receipt keys). The gate asserts `lf session connect` / `history <native-id>`, including for a conversation plain Codex started, so the resolver's third form ships with this slice; Claude IDs then come free in slice 2.
+   - **Switch-log reader.** Activation writes `provider_account_switches`, but nothing reads it: usage is still attributed to the launch's named account. That is correct for Codex at “from now on”, since a running Codex process keeps its login (probe above). It becomes wrong once a running shared agent can change account underneath its launch record: Claude following the native login (slice 2) and “everyone now” (slice 3). The reader must exist before either ships.
+2. **Claude shared by default.** Keychain writer and activation for Claude (`activate` returns `UnsupportedProvider` for anything but Codex), then drop the `provider != Codex` branch in `launch_isolated`. Needs the switch-log reader from slice 1's list. Starts with the fixture proving a started Claude accepts an activated credential, using a temporary config directory and its hashed Keychain item on macOS and the file elsewhere.
+3. **“Everyone now” for Codex.** Gated on the research below. Resume each running shared Codex agent under the new account; exhaustion switches use it (today a strained active account makes routing activate the next one at “from now on”, logged with cause `exhaustion`). Needs a record of running shared agents, which slice 1 does not keep: the credential lock is held across activate and spawn only.
 4. Remaining docs: security and environment pages.
 
 ## Remaining questions
@@ -157,3 +159,5 @@ Check: `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo test -p l
 Check: Codex credential probe with synthetic credentials in a temporary home (start under A, replace native with B, query auth status on the running and a fresh process) — running process kept A, fresh process took B, native file unchanged; no live credential read or changed, no implementation tests run.
 
 Observed on Jack's machine, 2026-10-02: Codex access-token lifetime 240 hours (lifetime only); about 3,011 Codex rollouts and 315 Claude transcripts in per-account homes against 3,595 and 58 native. Retained but unused: Codex 0.160.0's schema includes external-token login and refresh; [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server); [Claude environment documentation](https://code.claude.com/docs/en/env-vars).
+
+Check (realign, 2026-10-02): no tests run; code read against plan — provider session IDs and the switch-log reader found unbuilt and added to slice 1; no repair made.

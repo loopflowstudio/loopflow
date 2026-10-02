@@ -111,10 +111,13 @@ lf account --details
 The profile is an authentication venue, not the identity that spends provider
 usage. It is never a run-time account selector.
 
-At launch, Loopflow points the provider child at the selected account home with
-`CLAUDE_CONFIG_DIR` or `CODEX_HOME`. The provider CLI reads and refreshes its own
+Codex conversations run in Codex's ordinary home, signed in as one stored
+account at a time, so plain `codex resume` finds them. See
+[Switch the shared account](#switch-the-shared-account). Claude launches, and
+Codex launches under `--isolate`, run in the selected account's own home through
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`; the provider CLI reads and refreshes its
 credential there. Loopflow records health and session ownership against the
-same account ID so fallback and resume do not silently change identities.
+account ID, and reopens each conversation in the home it started in.
 
 ## Inspect account state
 
@@ -289,6 +292,34 @@ keeps its captured choices; restart it to choose again. Steps have no account
 overrides. Native Session affinity remains authoritative within that selection.
 Local choices use the Home's catalog directly and survive the initiating CLI's
 exit; a forwarded SSH credential still needs its origin broker.
+
+## Switch the shared account
+
+```bash
+lf -m codex : "say hi"                    # runs in ~/.codex as the active account
+codex resume                              # plain Codex sees that conversation
+lf account use codex work@                # ~/.codex is now work@, for lf and codex
+lf account route                          # shows the mode and the active account
+lf --isolate --account codex=work@ -m codex : "say hi"   # stays in work@'s own home
+```
+
+`lf account use` is the only command that changes which stored account Codex's
+home is signed in as. It first saves the current login back to its stored
+account, so a token Codex refreshed while active is kept; a login Loopflow has
+never seen is kept as a new explicit-only account. Running Codex processes keep
+the login they started with until they restart.
+
+A shared launch follows the active account while it is eligible and below the
+95% threshold, and otherwise moves the home to the next account in the route.
+`--account codex=work@` makes that account active before launching.
+
+`--isolate` runs the invocation and its children in the selected account's own
+home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the
+default, and `--shared` overrides it for one invocation. Flow invocations keep
+the mode they were launched with.
+
+A Codex home whose `config.toml` sets `cli_auth_credentials_store` to anything
+but `file` cannot be switched; set it to `file` or launch with `--isolate`.
 
 ## Banked Codex resets
 

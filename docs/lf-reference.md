@@ -51,6 +51,8 @@ Open Loopflow or run its CLI
 | `--model / -m` | Model to use (harness or harness:model) |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
+| `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
+| `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
 | `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
 | `--mode` | Choose the provider surface; omission inherits configuration and terminal context |
@@ -427,6 +429,16 @@ Spend one banked Codex reset for this named login
 | `--idempotency-key` | Reuse this key when retrying the same redemption |
 | `--credit-id` | Opaque credit ID returned by live status (otherwise the service chooses) |
 | `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf account use
+
+Sign the provider's ordinary home in as a stored login, from now on
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
 | `--help / -h` | Print help |
 
 ## lf account route

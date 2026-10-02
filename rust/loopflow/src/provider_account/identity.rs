@@ -141,6 +141,17 @@ fn current_credential_digest(account: &ProviderAccount) -> Option<String> {
     Some(credential_digest(&raw))
 }
 
+/// Whether two Codex homes hold a credential for the same person.
+pub(crate) fn same_codex_login(left: &Path, right: &Path) -> bool {
+    match (
+        codex_identity_from_home(left),
+        codex_identity_from_home(right),
+    ) {
+        (Some(left), Some(right)) => left.same_login(&right),
+        _ => false,
+    }
+}
+
 pub(crate) fn credential_digest(credential: &str) -> String {
     format!("{:x}", Sha256::digest(credential.as_bytes()))
 }

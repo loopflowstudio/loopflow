@@ -693,12 +693,8 @@ fn session_command_status_with_env(
         .flatten();
 
     let mut process = Command::new(&command.program);
-    if provider == Some(Provider::Codex)
-        && account_route
-            .as_ref()
-            .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
-    {
-        process.args(["-c", "cli_auth_credentials_store=\"file\""]);
+    if let Some(route) = &account_route {
+        process.args(route.provider_args());
     }
     if command.program == "codex"
         && provider_session_id.is_none()
@@ -721,9 +717,12 @@ fn session_command_status_with_env(
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
         .envs(environment);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
+    let mut activation = None;
     if let Some(route) = &account_route {
         tracing::info!(provider = %command.program, "selected managed provider account");
-        route.apply(&mut process);
+        activation = route
+            .launch_as_blocking(&mut process)
+            .map_err(|error| anyhow!("failed to activate provider account: {error}"))?;
         process.env(
             crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
             route.account_id().as_str(),
@@ -743,6 +742,7 @@ fn session_command_status_with_env(
         )?;
     }
     let mut child = process.spawn()?;
+    drop(activation);
     let client = match ProviderClientGuard::publish(environment, child.id()) {
         Ok(client) => client,
         Err(error) => {
@@ -766,6 +766,19 @@ fn session_command_status_with_env(
         observer
             .join()
             .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
+    }
+    // Record which home this conversation lives in, so reopening returns there.
+    if let (Some(route), Some(run_dir)) = (
+        &account_route,
+        environment.get(crate::session_record::RUN_DIR_ENV),
+    ) {
+        if let Ok(Some(session)) = crate::session_record::read_provider_session(Path::new(run_dir))
+        {
+            if let Err(error) = route.record_exec_blocking(Some(session.provider_session_id), None)
+            {
+                tracing::warn!(%error, "failed to record the provider session's account home");
+            }
+        }
     }
     let stop_reason = client
         .as_ref()

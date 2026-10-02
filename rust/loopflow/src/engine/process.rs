@@ -313,6 +313,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
 const FORWARDED_AUTHORITY_ENV: &[&str] = &[
     crate::provider_account::lease::ACCOUNT_LEASE_ENV,
     crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+    crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
     crate::ops::pm::FORWARDED_PM_TOKEN_ENV,
     crate::ops::pm::FORWARDED_PM_PROVIDER_ENV,
     "LF_FORWARDED_SECRET_NAMES",

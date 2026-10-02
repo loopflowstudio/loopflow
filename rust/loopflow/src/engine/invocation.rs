@@ -20,6 +20,8 @@ pub struct QueuedInvocation {
     pub id: String,
     pub flow: String,
     pub accounts: Option<Box<crate::provider_account::lease::AccountSelection>>,
+    /// `--isolate` / `--shared` as launched; `None` follows configuration.
+    pub isolate: Option<bool>,
     pub steps: Vec<ConcreteStep>,
 }
 
@@ -93,7 +95,18 @@ impl QueuedInvocation {
             accounts: Some(Box::new(
                 crate::provider_account::lease::AccountSelection::from_env()?,
             )),
+            isolate: crate::provider_account::activation::isolation_from_env(),
             steps,
+        })
+    }
+
+    /// The captured launch mode, for a process relaunched from this invocation.
+    pub(crate) fn isolation_env(&self) -> Option<(&'static str, &'static str)> {
+        self.isolate.map(|isolate| {
+            (
+                crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
+                crate::provider_account::activation::isolation_env_value(isolate),
+            )
         })
     }
 

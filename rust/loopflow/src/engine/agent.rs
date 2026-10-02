@@ -1912,20 +1912,24 @@ fn _exec_agent_once(
             ));
         }
     };
-    if account_route
-        .as_ref()
-        .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
-        && managed_provider == Some(Provider::Codex)
-    {
-        cmd.args(["-c", "cli_auth_credentials_store=\"file\""]);
-    }
+    let mut activation = None;
     if let Some(route) = &account_route {
         tracing::info!(
             provider = %harness,
             account_id = %route.account_id(),
             "selected provider account"
         );
-        route.apply(&mut cmd);
+        cmd.args(route.provider_args());
+        activation = match route.launch_as_blocking(&mut cmd) {
+            Ok(activation) => activation,
+            Err(error) => {
+                return Ok(AgentAttempt::AccountUnavailable(
+                    CoreError::ExecutionFailed(format!(
+                        "failed to activate provider account: {error}"
+                    )),
+                ));
+            }
+        };
     }
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {
@@ -1952,13 +1956,19 @@ fn _exec_agent_once(
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        exec_streaming(&mut cmd, process.stream_format, process.timeout, capture)
+        exec_streaming(
+            &mut cmd,
+            process.stream_format,
+            process.timeout,
+            capture,
+            activation,
+        )
     } else if process.auto {
         // Batch mode: capture all output
-        exec_batch(&mut cmd, process.timeout, capture)
+        exec_batch(&mut cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        exec_interactive(&mut cmd, process.timeout, capture)
+        exec_interactive(&mut cmd, process.timeout, capture, activation)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -1996,11 +2006,15 @@ fn _exec_agent_once(
     })
 }
 
+/// `activation` is the native credential lock a shared launch took; it is
+/// released once the provider process exists.
 fn spawn_agent_child(
     cmd: &mut Command,
     capture: Option<&CaptureHandle>,
+    activation: Option<std::fs::File>,
 ) -> Result<Child, CoreError> {
     let mut child = cmd.spawn()?;
+    drop(activation);
     if let Some(capture) = capture {
         if let Err(error) = capture.record_provider_process(child.id()) {
             let _ = child.kill();
@@ -2015,11 +2029,12 @@ fn exec_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
+    activation: Option<std::fs::File>,
 ) -> Result<AgentExecResult, CoreError> {
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let mut child = spawn_agent_child(cmd, capture)?;
+    let mut child = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
 
     let stdout = child
@@ -2094,9 +2109,10 @@ fn exec_interactive(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
+    activation: Option<std::fs::File>,
 ) -> Result<AgentExecResult, CoreError> {
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture)?;
+    let mut child = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -2127,12 +2143,13 @@ fn exec_streaming(
     stream_format: StreamFormat,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
+    activation: Option<std::fs::File>,
 ) -> Result<AgentExecResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture)?;
+    let mut child = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 

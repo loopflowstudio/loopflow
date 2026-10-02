@@ -878,11 +878,38 @@ impl Store {
         provider: Provider,
         provider_session_id: &str,
         account_id: &ProviderAccountId,
+        isolated: bool,
     ) -> StoreResult<()> {
         let provider_session_id = provider_session_id.to_string();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &provider_session_id, &account_id)
+            store.pin_provider_session_route(provider, &provider_session_id, &account_id, isolated)
+        })
+        .await
+    }
+
+    pub async fn provider_session_is_shared(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<bool> {
+        let provider_session_id = provider_session_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_session_is_shared(provider, &provider_session_id)
+        })
+        .await
+    }
+
+    pub async fn record_provider_account_switch(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        strength: &'static str,
+        cause: &'static str,
+    ) -> StoreResult<()> {
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_switch(provider, &account_id, strength, cause)
         })
         .await
     }
@@ -3348,6 +3375,10 @@ mod tests {
         {
             let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
             super::migrations::apply_sqlite(&conn).expect("apply migrations");
+            // The open below expects this build's schema, drafts included.
+            for draft in crate::build_info::migration_draft_manifest() {
+                conn.execute_batch(draft.sql).expect("apply draft");
+            }
             conn.execute(
                 "INSERT INTO provider_tokens
                  (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)

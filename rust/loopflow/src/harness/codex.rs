@@ -1063,12 +1063,8 @@ impl CodexHarness {
                     .join("engine.sock")
             });
         let mut command = Command::new("codex");
-        if self
-            .account_route
-            .as_ref()
-            .is_some_and(ProviderAccountRoute::uses_native_home)
-        {
-            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        if let Some(route) = &self.account_route {
+            command.args(route.provider_args());
         }
         command
             // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
@@ -1085,9 +1081,12 @@ impl CodexHarness {
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut command);
-        }
+        // Held until the engine has spawned, so a concurrent switch cannot
+        // replace the native login between activation and startup.
+        let _activation = match &self.account_route {
+            Some(route) => route.launch_as(command.as_std_mut()).await?,
+            None => None,
+        };
         // Own process group so stop() can kill everything under the `codex`
         // entry point, including the real app-server binary that npm shims
         // spawn as a grandchild.

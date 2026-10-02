@@ -169,6 +169,25 @@ async fn show_routes(
     } else {
         for report in reports {
             println!("{} ({})", report.provider, report.scope);
+            if crate::provider_account::activation::launch_isolated(report.provider) {
+                println!("  isolated: each conversation runs in its account's own home");
+            } else {
+                let native =
+                    crate::provider_account::activation::native_home(report.provider, None);
+                let accounts = match store {
+                    Some(store) => {
+                        store
+                            .list_provider_accounts(Some(report.provider.as_str()))
+                            .await?
+                    }
+                    None => vec![],
+                };
+                let active =
+                    crate::provider_account::activation::active_account(&native, &accounts)
+                        .map(crate::provider_account::account_login)
+                        .unwrap_or("no stored account");
+                println!("  shared: {} is signed in as {active}", native.display());
+            }
             if report.ambient {
                 println!("  ambient");
             } else if report.candidates.is_empty() {

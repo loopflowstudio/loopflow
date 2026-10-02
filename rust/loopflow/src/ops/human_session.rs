@@ -1005,7 +1005,8 @@ async fn serve_flow_locked(
         .env(
             crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
             accounts.env_value()?,
-        );
+        )
+        .envs(position.invocation.isolation_env());
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;

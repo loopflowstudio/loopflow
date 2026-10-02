@@ -1541,20 +1541,64 @@ impl SqliteStore {
         provider: Provider,
         provider_session_id: &str,
         account_id: &ProviderAccountId,
+        isolated: bool,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at
-             ) VALUES (?1, ?2, ?3, ?4)
+                provider, provider_session_id, account_id, created_at, isolated
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
-                created_at = excluded.created_at",
+                created_at = excluded.created_at,
+                isolated = excluded.isolated",
             params![
                 provider.as_str(),
                 provider_session_id,
                 account_id.as_str(),
                 now_unix(),
+                isolated,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Whether this conversation was recorded in the provider's native home.
+    pub fn provider_session_is_shared(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM provider_session_accounts
+                 WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 0",
+                params![provider.as_str(), provider_session_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    pub fn record_provider_account_switch(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        strength: &str,
+        cause: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_account_switches (
+                provider, account_id, switched_at, strength, cause
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                provider.as_str(),
+                account_id.as_str(),
+                now_unix(),
+                strength,
+                cause
             ],
         )?;
         Ok(())
@@ -1568,7 +1612,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT account_id FROM provider_session_accounts
-             WHERE provider = ?1 AND provider_session_id = ?2",
+             WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
             params![provider.as_str(), provider_session_id],
             |row| row.get::<_, String>(0),
         )
@@ -1602,7 +1646,7 @@ impl SqliteStore {
             Some(session_id) => transaction
                 .query_row(
                     "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2",
+                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
                     params![provider.as_str(), session_id],
                     |row| row.get::<_, String>(0),
                 )

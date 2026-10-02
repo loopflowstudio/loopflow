@@ -63,6 +63,18 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
+```bash
+lf task create --wave exports --title "Investigate export latency"
+lf task status EXP-13 --json
+lf task complete EXP-13 --summary "Recorded the bottleneck and recommended fix"
+```
+
+Planning-only Tasks need no agent, checkout, PR or Flow. Filing selects the current
+Project; confirmation after creation, edits and completion reads the affected
+issue without another whole-Wave refresh. If issue confirmation fails, retry the
+same command. Creation reuses its marker, and completion preserves the first
+published outcome summary.
+
 ## Inspect and continue
 
 ```bash

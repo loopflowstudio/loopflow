@@ -209,6 +209,20 @@ as execution authority, broad directory adoption or fake checkout creation.
 One coherent architectural change; these are internal steps, not compatibility
 stages to ship independently.
 
+Implementation status · 2026-10-02: post-creation confirmation and Task mutation
+confirmation now acquire the affected issue through normalized planning ingestion.
+They no longer refresh the entire Wave after the mutation. The existing current
+Project selection before filing remains unchanged. Stateful provider tests cover
+unrelated Wave acquisition failure, failed issue confirmation, creation-marker
+recovery, completion summary preservation and zero invented delivery objects.
+This completes only the narrow planning-confirmation portion of step 3; admission,
+placement, execution, requesting-conversation completion and Desktop remain below.
+
+Review finding: a retry of `task create` still acquires current-Project routing
+before reusing the creation marker. The new confirmation path must not be described
+as eliminating all filing reads. Failed issue acquisition remains an explicit
+failure; registered completion retains its existing pending-writeback state.
+
 1. **This slice:** remove mandatory placement from admission and membership,
    migrate existing rows and update minimum readers/DTO consumers. Add a focused
    `task_without_delivery` test: bind an existing conversation to an admitted Task,
@@ -218,10 +232,8 @@ stages to ship independently.
    and unattributed captures/cursors, review waits, failures and retry counters.
    Switching the managed selection retains independent work and rejects late writes
    from the replaced worker. Completed Flow leaves Task open.
-3. Narrow planning confirmation and completion/action dependencies. Extend existing
-   stateful planning tests for unrelated Wave refresh failure with successful issue
-   confirmation, issue-confirmation failure, canceled outcomes, lost completion or
-   summary responses and safe retry. A registered no-placement Task completes with
+3. Remove remaining completion/action dependencies. Narrow planning confirmation
+   and its stateful failure/retry coverage are implemented. A registered no-placement Task completes with
    evidence through the existing writer, once its associated work is settled.
    Apply Jack Heart's requesting-conversation decision: its own active turn may
    remain open, while other associated work and delivery obligations must settle.
@@ -286,7 +298,7 @@ weaken delivery. The complete deletion cut therefore starts with registration
 and placement and preserves the gate's evidence obligations. No implementation
 or configured acceptance is claimed by this draft.
 
-Check: source trace and `git diff --check` — pass; prose-only kickoff, no build or behavioral tests run.
+Check: `cargo test -p loopflow ops::pm::task_planning_tests --lib` — 15 passed, 1 subprocess entry ignored; added `cargo test -p loopflow task_without_delivery --lib` — 2 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — pass; full acceptance remains with gate after implementation.
 
 Review source finding: `ops/task/lifecycle.rs::execution_blockers` exempts the
 current Exec but still checks the non-managed conversation's pending turn and

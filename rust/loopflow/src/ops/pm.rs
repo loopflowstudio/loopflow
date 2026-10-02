@@ -1274,15 +1274,15 @@ pub(crate) async fn pm_update_async(
         apply_update(&ctx, &options, progress).await?;
     }
     let reconcile = async {
-        progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
-        let snapshot = refresh_pm_snapshot(repo, &wave, &ctx).await?;
-        let item = snapshot
-            .items
-            .iter()
-            .find(|updated| updated.id == item.id)
-            .ok_or_else(|| {
-                OpsError::Message("updated issue is absent from the refreshed snapshot".into())
-            })?;
+        progress.status(&format!("confirming Task {}", item.identifier));
+        let confirmed = resolve_owned_issue(repo, &item.id).await?;
+        if confirmed.wave != wave {
+            return Err(OpsError::Message(format!(
+                "updated Task {} now belongs to wave/{}, expected wave/{wave}",
+                item.identifier, confirmed.wave
+            )));
+        }
+        let item = &confirmed.item;
         if matches!(options.update, PmTaskUpdate::Complete { .. }) {
             validate_completion_outcome(item)?;
         }
@@ -1298,7 +1298,6 @@ pub(crate) async fn pm_update_async(
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            let row = read_pm_snapshot(repo, &wave).await?;
             store
                 .update_task_plan(
                     &task.id,
@@ -1307,7 +1306,7 @@ pub(crate) async fn pm_update_async(
                         identifier: item.identifier.clone(),
                         title: item.name.clone(),
                         description: item.description.clone(),
-                        pm_snapshot_synced_at: row.synced_at,
+                        pm_snapshot_synced_at: confirmed.observed_at,
                     },
                 )
                 .await
@@ -1318,7 +1317,7 @@ pub(crate) async fn pm_update_async(
     .await;
     reconcile.map_err(|error| match error {
         conflict @ OpsError::TaskCompletionConflict { .. } => conflict,
-        error => OpsError::Message(format!("Linear task {} was updated, but local refresh failed: {error}. Retry the same Task command to reconcile it.", item.identifier)),
+        error => OpsError::Message(format!("Linear task {} was updated, but issue confirmation failed: {error}. Retry the same Task command to reconcile it.", item.identifier)),
     })?;
     Ok(PmUpdateResult { wave, id: item.id })
 }

@@ -56,6 +56,8 @@ struct PlanningState {
     project_name: Option<String>,
     fail_confirmation: bool,
     fail_snapshot: bool,
+    fail_issue_read: bool,
+    fail_after_update: bool,
     fail_completion: bool,
     lose_completion: bool,
     lose_comment: bool,
@@ -167,6 +169,10 @@ async fn planning_graphql(
         let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
+        if state.fail_issue_read {
+            state.fail_issue_read = false;
+            return axum::Json(json!({"errors":[{"message":"issue confirmation unavailable"}]}));
+        }
         if state.trashed {
             return axum::Json(
                 json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
@@ -253,6 +259,7 @@ async fn planning_graphql(
             }
         }
         mark_issue_updated(issue);
+        state.fail_issue_read = std::mem::take(&mut state.fail_after_update);
         json!({"issueUpdate":{"success":true}})
     } else if query.contains("query UnstartedWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
@@ -402,7 +409,16 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
 }
 
 #[test]
-fn task_creation_snapshot_failure_retries_without_starting_backlog() {
+fn task_without_delivery_creation_and_edit_ignore_unrelated_snapshot_failure() {
+    assert_task_without_delivery(false);
+}
+
+#[test]
+fn task_without_delivery_creation_retries_failed_issue_confirmation() {
+    assert_task_without_delivery(true);
+}
+
+fn assert_task_without_delivery(fail_issue_read: bool) {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -414,6 +430,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
     runtime.block_on(fixture.seed(now() + 86_400));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
         fail_snapshot: true,
+        fail_issue_read,
         ..Default::default()
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
@@ -427,23 +444,25 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
                 None,
             )
         };
-        {
+        if fail_issue_read {
             let error = create().unwrap_err().to_string();
             assert!(
                 error.contains("Linear task issue-1 is committed"),
                 "{error}"
             );
-            assert!(error.contains("snapshot unavailable"), "{error}");
+            assert!(error.contains("issue confirmation unavailable"), "{error}");
             assert!(error.contains("Retry the same `lf task create`"), "{error}");
-            assert!(!error.contains("lf task run"), "{error}");
-            assert_eq!(
-                runtime.block_on(async { state.lock().await.issues.len() }),
-                1
-            );
+            // A fresh filing request still resolves its current Project.
+            runtime.block_on(async {
+                state.lock().await.fail_snapshot = false;
+            });
         }
         let crate::ops::task::TaskCreateResult::Created(first) = create().unwrap() else {
             panic!("creation without --run must return the issue");
         };
+        runtime.block_on(async {
+            state.lock().await.fail_snapshot = true;
+        });
         let edit = || {
             crate::ops::task::task_edit(
                 &repo,
@@ -455,19 +474,19 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
         };
         {
             runtime.block_on(async {
-                state.lock().await.fail_snapshot = true;
+                state.lock().await.fail_after_update = true;
             });
             let error = edit().unwrap_err().to_string();
             assert!(
-                error.contains("was updated, but local refresh failed"),
+                error.contains("was updated, but issue confirmation failed"),
                 "{error}"
             );
             assert!(error.contains("Retry the same Task command"), "{error}");
         }
         edit().unwrap();
-        let crate::ops::task::TaskCreateResult::Created(retry) = create().unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+        let retry = crate::ops::task_pm::resolve_task(&repo, "FIX-1", PmRefresh::Never)
+            .unwrap()
+            .item;
         assert_eq!(first.id, retry.id);
         assert_eq!(first.name, "Future work");
         assert_eq!(retry.name, "Edited future work");
@@ -478,8 +497,23 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
             .nth(1)
             .unwrap();
         assert!(retry.description.ends_with(marker));
-        let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![*retry]);
+        let resolved = crate::ops::task_pm::resolve_task(&repo, "FIX-1", PmRefresh::Never).unwrap();
+        assert_eq!(resolved.item, retry);
+        assert!(runtime.block_on(async { state.lock().await.fail_snapshot }));
+        crate::ops::task::task_complete(&repo, "FIX-1", "Recorded research findings".into())
+            .unwrap();
+        crate::ops::task::task_complete(&repo, "FIX-1", "Replacement summary".into()).unwrap();
+        runtime.block_on(async {
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "completed");
+            assert_eq!(provider.completion_writes, 1);
+            assert_eq!(provider.comments.len(), 1);
+            assert!(provider.comments[0]["body"]
+                .as_str()
+                .unwrap()
+                .contains("Recorded research findings"));
+            assert!(provider.fail_snapshot);
+        });
     });
     assert_eq!(
         runtime.block_on(async { state.lock().await.issues.len() }),
@@ -489,6 +523,15 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
         .block_on(fixture.store.list_tasks(None))
         .unwrap()
         .is_empty());
+    let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+    for table in ["task_prs", "flow_sessions"] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "planning must not allocate {table}");
+    }
     assert_eq!(
         crate::engine::worktrees::list_worktrees(&repo)
             .unwrap()
@@ -1106,18 +1149,18 @@ fi
             }));
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_snapshot = true;
+                provider.fail_issue_read = true;
                 provider.lose_comment = true;
             });
             assert!(complete("Delivered the requested outcome")
                 .unwrap_err()
                 .to_string()
-                .contains("local refresh failed"));
+                .contains("issue confirmation unavailable"));
         }
         if registered {
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_snapshot = true;
+                provider.fail_issue_read = true;
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
                 mark_issue_updated(&mut provider.issues[0]);
@@ -1128,7 +1171,7 @@ fi
             assert!(matches!(
                 retry.pm_writeback,
                 PmWritebackState::Pending { ref error, .. }
-                    if error.contains("local refresh failed")
+                    if error.contains("issue confirmation unavailable")
             ));
         }
         let result = complete("Delivered the requested outcome").unwrap();

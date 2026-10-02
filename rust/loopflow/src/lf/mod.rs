@@ -1607,14 +1607,13 @@ mod tests {
             );
         }
         assert!(command.find_subcommand("op").is_none());
-        let shorthand = crate::lf::navigation::normalize_args(
+        let literal = crate::lf::navigation::normalize_args(
             ["lf", "wt", "create", "csv-export"]
                 .map(String::from)
                 .to_vec(),
-        )
-        .unwrap();
-        assert_eq!(shorthand, ["lf", "wt", "create", "csv-export"]);
-        assert!(Cli::try_parse_from(shorthand).is_ok());
+        );
+        assert_eq!(literal, ["lf", "wt", "create", "csv-export"]);
+        assert!(Cli::try_parse_from(literal).is_ok());
         assert!(command
             .find_subcommand("task")
             .unwrap()

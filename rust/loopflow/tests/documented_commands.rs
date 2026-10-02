@@ -142,6 +142,6 @@ fn wrapped_inline_commands_retain_literal_paths() {
     assert_eq!(extracted, [(1, "lf\npr land"), (2, "lf help\npr land")]);
     for (_, example) in extracted {
         let args = words(example);
-        assert_eq!(normalize_args(args.clone()).unwrap(), args);
+        assert_eq!(normalize_args(args.clone()), args);
     }
 }

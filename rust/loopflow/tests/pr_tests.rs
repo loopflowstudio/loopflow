@@ -184,11 +184,8 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 execute_flow_command(
                     repo.path(),
                     &FlowCommand {
-                        command: "task".to_string(),
-                        args: std::iter::once("pr")
-                            .chain(args.iter().copied())
-                            .map(str::to_string)
-                            .collect(),
+                        command: "pr".to_string(),
+                        args: args.iter().map(|arg| (*arg).to_string()).collect(),
                     },
                     &NullProgress,
                 )
@@ -1712,8 +1709,10 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
 }
 
 #[test]
-fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
+fn default_branch_refuses_pr_before_committing_or_pushing() {
     let repo = TestRepo::new();
+    let head = repo.head_sha();
+    repo.create_file("notes.md", "unpublished\n");
 
     let result = create_or_update_pr(
         repo.path(),
@@ -1729,9 +1728,14 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
     assert!(matches!(
         result,
         Err(OpsError::Message(message))
-            if message.contains("canonical checkout")
-                && message.contains("lf --task <issue-id> flow start")
+            if message.contains("default branch")
+                && message.contains("lf wt create")
     ));
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("notes.md")).unwrap(),
+        "unpublished\n"
+    );
 }
 
 #[test]

@@ -39,6 +39,68 @@ fn lock_shared(repo: &Path, name: &str) -> OpsResult<File> {
     Ok(lock)
 }
 
+// The resolver can write notes while the caller's untracked files are stashed.
+// Move collisions aside before apply: a failed apply can already have restored
+// tracked edits, so retrying the whole stash afterward is not safe.
+fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
+    if rev_parse(repo, &format!("{stash}^3")).is_err() {
+        return Ok(());
+    }
+    let paths = git(
+        repo,
+        &["ls-tree", "-rz", "--name-only", &format!("{stash}^3")],
+    )?;
+    for relative in paths.split('\0').filter(|path| !path.is_empty()) {
+        let path = repo.join(relative);
+        let ancestors: Vec<_> = path.ancestors().take_while(|path| *path != repo).collect();
+        let Some(collision) = ancestors.into_iter().rev().find(|path| {
+            std::fs::symlink_metadata(path)
+                .is_ok_and(|metadata| *path == repo.join(relative) || !metadata.is_dir())
+        }) else {
+            continue;
+        };
+        let relative_collision = collision
+            .strip_prefix(repo)
+            .expect("path belongs to checkout");
+        if !git(
+            repo,
+            &[
+                "ls-files",
+                "-z",
+                "--",
+                &relative_collision.to_string_lossy(),
+            ],
+        )?
+        .is_empty()
+        {
+            return Err(OpsError::Message(format!(
+                "tracked path {} collides with stashed untracked files",
+                collision.display()
+            )));
+        }
+        let mut suffix = 1;
+        let destination = loop {
+            let mut name = collision.as_os_str().to_os_string();
+            name.push(format!(".lf-sync-{suffix}"));
+            let candidate = std::path::PathBuf::from(name);
+            let stashed = paths.split('\0').any(|path| repo.join(path) == candidate);
+            if !stashed
+                && !candidate.try_exists()?
+                && std::fs::symlink_metadata(&candidate).is_err()
+            {
+                break candidate;
+            }
+            suffix += 1;
+        };
+        std::fs::rename(collision, &destination)?;
+        eprintln!(
+            "Preserved checkout update file at {}",
+            destination.display()
+        );
+    }
+    Ok(())
+}
+
 /// Restore index, working edits and untracked files even when an update fails.
 /// A conflicted operation retains the named stash instead of applying edits
 /// into its sequencer. Failures name the durable recovery object.
@@ -85,7 +147,8 @@ pub fn with_preserved_edits<T>(repo: &Path, update: impl FnOnce() -> OpsResult<T
             "Git operation needs resolution".to_string(),
         ))
     } else {
-        git(repo, &["stash", "apply", "--index", &stash]).map(|_| ())
+        preserve_untracked_collisions(repo, &stash)
+            .and_then(|()| git(repo, &["stash", "apply", "--index", &stash]).map(|_| ()))
     };
     if let Err(error) = restore {
         return Err(OpsError::Message(format!(

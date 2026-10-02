@@ -102,7 +102,7 @@ lf pr publish                         # push a ready PR
 lf pr submit                          # prepare for a reviewer's merge click
 lf pr arm                             # prepare and request auto-merge; return
 lf pr land                            # record delivery and return
-lf --task EXP-12 land -c            # also request completion after merge
+lf --task EXP-12 pr land -c            # also request completion after merge
 lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
 lf repo release check                   # inspect release eligibility
@@ -242,6 +242,11 @@ Resident workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
 before publishing. Ordinary Task delivery retains its existing cleanup policy.
+
+If a sync resolver creates a file where an untracked file was stashed, sync restores
+the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the
+next unused number). Read both notes and reconcile them locally. Tracked conflicts
+retain the recovery stash and report its identity; resolve them before restoring it.
 
 Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and after a
 merged document PR. Network failures leave local work usable; conflicts stay visible

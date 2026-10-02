@@ -1300,12 +1300,7 @@ fn run() -> anyhow::Result<()> {
         .init();
 
     // Reorder args so flags can appear after the skill name
-    let normalized =
-        loopflow::lf::navigation::normalize_args(std::env::args().collect()).map_err(|error| {
-            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
-            let _ = error.print();
-            loopflow::exec::CommandExit(code)
-        })?;
+    let normalized = loopflow::lf::navigation::normalize_args(std::env::args().collect());
     let args = reorder_args(normalize_ssh_args(normalized));
 
     let cli = match Cli::try_parse_from(args.clone()) {
@@ -1952,8 +1947,7 @@ mod tests {
         let resolve = |args: &[&str]| {
             let args = loopflow::lf::navigation::normalize_args(
                 args.iter().map(|arg| arg.to_string()).collect(),
-            )
-            .unwrap();
+            );
             let args = reorder_args(args);
             let cli = Cli::try_parse_from(&args).unwrap();
             super::resolve_cli_target(&cli, &args).unwrap().unwrap()
@@ -2309,7 +2303,7 @@ mod tests {
             .map(String::from)
             .to_vec();
         assert_eq!(
-            reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
+            reorder_args(loopflow::lf::navigation::normalize_args(args)),
             vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
     }

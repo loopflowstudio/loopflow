@@ -181,43 +181,39 @@ decisions and evidence somewhere that survives shipping.
 
 ## Resident workspace and document publication
 
-This scope has a persistent checkout, reused when its conversation is replaced.
-Keep proposals and working plans in `scratch/`. Put accepted Wave decisions in
-`wave/<wave>/MEMORY.md`; repository decisions belong in the existing repository
-guide or the documentation that owns the subject. Use names and dates. Do not
-invent a Wave, Task, or duplicate memory file merely to publish documents.
+Keep accepted decisions in `wave/<wave>/MEMORY.md`, with names and dates.
+Keep working plans in `scratch/`. The scope's resident checkout survives conversation
+replacement; publication needs no synthetic Task or separate export checkout.
 
-At the start of a deliberate maintenance or publication pass, inspect
-`git status --short` and `lf sync --plan`, then run `lf sync`. This is an explicit
-maintenance boundary, not a per-message action. Coordinate with any active
-writer in this checkout first. Fetch failures leave local work usable. Conflicts
-remain in place: inspect them, resolve the files, and use `lf sync --continue`;
-`lf sync --abort` returns to the saved operation's starting point. Commit any
-local changes that block integration deliberately, without including unrelated work.
+At a deliberate maintenance or publication boundary, coordinate with active writers,
+inspect `git status --short` and `lf sync --plan`, then run `lf sync`. Do not sync on
+every message. Fetch failure leaves local work usable. Resolve conflicts in place
+and run `lf sync --continue`, or use `lf sync --abort` to restore the starting point.
+Commit changes that block integration deliberately, preserving unrelated work.
+If resolver notes collide with stashed files, sync restores the originals and keeps
+the new notes beside them as `<name>.lf-sync-N`. Reconcile both locally. A failed
+restoration retains its stash and prints recovery instructions; keep it until all
+edits are recovered.
 
-Publish only after existing authorization covers publication:
+When publication is authorized:
 
 ```bash
 git diff -- wave/<wave>/MEMORY.md
-lf commit -m "Record accepted Wave decisions" wave/<wave>/MEMORY.md
+lf commit -m "Record accepted decisions" wave/<wave>/MEMORY.md
 git diff origin/main...HEAD --stat
 lf pr publish
 ```
 
-For repository documents, substitute their actual paths. Selected-path commits
-preserve unrelated staged and unstaged changes. Resident commit and publication
-remove tracked scratch from the index without deleting its local files. The PR
-contains the branch's committed range, so inspect the whole range before pushing.
-Publication does not include subsequent local edits. It needs no export checkout
-or Task. Scratch, including prepared PR copy, survives publication and landing.
+Selected-path commits preserve unrelated staged and unstaged edits. Inspect the
+entire committed range before publishing: that is what the PR contains. Resident
+commit and publication untrack scratch without deleting local files. Scratch,
+including PR copy, and edits made after the selected commit survive delivery.
 
-After merge, run `lf sync` in the same checkout before the next document commit.
-The resident branch stays reusable; scratch and follow-up edits stay local.
-Pruning retains resident checkouts. Missing worktrees recover committed branch
-state only; missing uncommitted files cannot be recovered by Git. A moved worktree
-is reused at its actual path. Existing live conversations stay in place until an
-idle driver boundary allows their workspace to be updated.
+After merge, run `lf sync` before the next document commit. Reuse the same branch;
+automatic pruning retains it. Moved worktrees are reused at their actual path.
+Missing checkouts recover committed state only. Live conversations retain their
+placement until an idle driver boundary permits adoption of the resident workspace.
 
-For an independent persistent document workspace, `lf wt create <name> --resident`
-creates or reuses it. Ordinary Task delivery keeps its own lifecycle and authority.
-PR publication is optional for memory updates; no distribution schedule is implied.
+`lf wt create <name> --resident` creates or reuses an independent document workspace.
+Ordinary Task delivery retains its lifecycle and authority. Memory updates need no
+PR or distribution schedule.

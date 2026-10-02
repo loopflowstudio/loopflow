@@ -13,17 +13,6 @@ pub fn command_tree() -> Command {
     command
 }
 
-pub fn resolve_child(
-    command: &Command,
-    name: &str,
-    _prefix: &[String],
-) -> Result<Option<Vec<String>>, clap::Error> {
-    Ok(command
-        .get_subcommands()
-        .find(|child| child.get_name() == name)
-        .map(|child| vec![child.get_name().to_string()]))
-}
-
 fn flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Arg> {
     let value = value.split('=').next().unwrap_or(value);
     command.get_arguments().find(|arg| {
@@ -46,9 +35,9 @@ fn descendant_flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Ar
 }
 
 /// Route literal command paths and help before execution or account selection.
-pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
+pub fn normalize_args(args: Vec<String>) -> Vec<String> {
     if args.len() < 2 {
-        return Ok(args);
+        return args;
     }
     let tree = command_tree();
     let mut current = &tree;
@@ -111,14 +100,10 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if !boundary {
-            if let Some(expansion) = resolve_child(current, value, &path)? {
-                for owner in &expansion {
-                    current = current
-                        .find_subcommand(owner)
-                        .expect("resolved child exists");
-                }
-                output.extend(expansion.clone());
-                path.extend(expansion);
+            if let Some(child) = current.find_subcommand(value) {
+                current = child;
+                output.push(value.clone());
+                path.push(value.clone());
                 if current.get_subcommands().next().is_none()
                     && !current.is_allow_external_subcommands_set()
                     && current.get_name() != "run"
@@ -142,9 +127,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
         request.extend(location);
         request.push("help".to_string());
         request.extend(path);
-        Ok(request)
+        request
     } else {
-        Ok(output)
+        output
     }
 }
 
@@ -197,25 +182,17 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     })())
 }
 
-pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
+pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<&'a Command> {
     let mut current = tree;
-    let mut canonical = Vec::new();
     for name in path {
-        let Some(expansion) = resolve_child(current, name, &canonical)? else {
-            return Err(clap::Error::raw(
+        current = current.find_subcommand(name).ok_or_else(|| {
+            clap::Error::raw(
                 clap::error::ErrorKind::InvalidSubcommand,
                 format!("unknown command: lf {}", path.join(" ")),
             )
-            .into());
-        };
-        for owner in &expansion {
-            current = current
-                .find_subcommand(owner)
-                .expect("resolved child exists");
-        }
-        canonical.extend(expansion);
+        })?;
     }
-    Ok((current, canonical))
+    Ok(current)
 }
 
 pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
@@ -256,7 +233,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .find_subcommand(owner)
             .expect("definition collection exists");
         // Collection verbs win unless explicitly escaped; `run` always selects a definition.
-        if escaped || owner == "run" || resolve_child(command, name, &path[..1])?.is_none() {
+        if escaped || owner == "run" || command.find_subcommand(name).is_none() {
             let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
                 "flow" => Some(DefinitionKind::Flow),
@@ -265,13 +242,11 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             return definition_help(&tree, repo, name, kind);
         }
     }
-    if path.len() == 1 && resolve_child(&tree, &path[0], &[])?.is_none() {
+    if path.len() == 1 && tree.find_subcommand(&path[0]).is_none() {
         return definition_help(&tree, repo, &path[0], None);
     }
-    let (command, canonical) = resolve_path(&tree, path)?;
-    let mut command = command
-        .clone()
-        .bin_name(format!("lf {}", canonical.join(" ")));
+    let command = resolve_path(&tree, path)?;
+    let mut command = command.clone().bin_name(format!("lf {}", path.join(" ")));
     Ok(command.render_help().to_string())
 }
 
@@ -299,8 +274,7 @@ pub(crate) fn definition_invocation(tree: &Command, name: &str, kind: Definition
     let owner = tree
         .find_subcommand(label)
         .expect("definition kind has a command");
-    let escaped =
-        resolve_child(owner, name, &[label.to_string()]).map_or(true, |path| path.is_some());
+    let escaped = owner.find_subcommand(name).is_some();
     format!("lf {label} {}{name}", if escaped { "-- " } else { "" })
 }
 
@@ -359,7 +333,7 @@ fn definition_help(
         }
         _ => {
             output.push_str(&format!("  lf run {name} [message]\n"));
-            if matches!(resolve_child(tree, name, &[]), Ok(None)) {
+            if tree.find_subcommand(name).is_none() {
                 output.push_str(&format!("  lf {name} [message]\n"));
             }
         }

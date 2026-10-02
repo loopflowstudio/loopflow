@@ -1381,7 +1381,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
     }
-    let activity = fixture.json(&["activity", "--wave", "task-pr-tests", "--json"]);
+    let activity = fixture.json(&["monitor", "activity", "--wave", "task-pr-tests", "--json"]);
     let captures = activity["items"]
         .as_array()
         .unwrap()

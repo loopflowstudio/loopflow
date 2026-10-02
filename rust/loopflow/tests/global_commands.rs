@@ -383,7 +383,8 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
         serde_json::from_str(&success(output)).unwrap()
     };
     let plist = read_plist();
-    assert_eq!(plist["ProgramArguments"][1], "install");
+    assert_eq!(plist["ProgramArguments"][1], "home");
+    assert_eq!(plist["ProgramArguments"][2], "install");
     assert_eq!(
         plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
         home.path().join("installed & current").to_str().unwrap()

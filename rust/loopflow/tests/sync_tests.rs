@@ -60,6 +60,81 @@ fn start_conflicting_recovery(repo: &TestRepo) -> SyncRecovery {
 }
 
 #[test]
+fn checkout_restoration_preserves_resolver_notes_index_and_retry() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("edits.txt", "base\n");
+    repo.stage_all();
+    repo.commit("base");
+    repo.create_file("edits.txt", "staged\n");
+    repo.stage_all();
+    repo.create_file("edits.txt", "unstaged\n");
+    repo.create_file("scratch/questions.md", "original\n");
+    repo.create_file("scratch/plan.md", "plan\n");
+    let staged = git(repo.path(), &["diff", "--cached"]);
+    let unstaged = git(repo.path(), &["diff"]);
+
+    for attempt in 1..=2 {
+        let result = loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+            repo.create_file("scratch/questions.md", &format!("resolver {attempt}\n"));
+            if attempt == 1 {
+                Err(OpsError::Message("update failed after resolution".into()))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result.is_ok(), attempt == 2);
+        assert_eq!(git(repo.path(), &["diff", "--cached"]), staged);
+        assert_eq!(git(repo.path(), &["diff"]), unstaged);
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scratch/questions.md")).unwrap(),
+            "original\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scratch/plan.md")).unwrap(),
+            "plan\n"
+        );
+        assert!(git(repo.path(), &["stash", "list"]).is_empty());
+    }
+    for attempt in 1..=2 {
+        assert_eq!(
+            std::fs::read_to_string(
+                repo.path()
+                    .join(format!("scratch/questions.md.lf-sync-{attempt}"))
+            )
+            .unwrap(),
+            format!("resolver {attempt}\n")
+        );
+    }
+}
+
+#[test]
+fn resolved_sync_restores_original_scratch_through_checkout_boundary() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    repo.create_file("scratch/questions.md", "original question\n");
+    loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+        start_conflicting_recovery(&repo);
+        repo.create_file("scratch/questions.md", "resolver finding\n");
+        repo.create_file("conflict.txt", "resolved\n");
+        git(repo.path(), &["add", "conflict.txt"]);
+        continue_sync_for_resolution(repo.path(), false)?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(git(repo.path(), &["show", "HEAD:conflict.txt"]), "resolved");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch/questions.md")).unwrap(),
+        "original question\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch/questions.md.lf-sync-1")).unwrap(),
+        "resolver finding\n"
+    );
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
 fn sync_onto_main_succeeds() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
@@ -1051,7 +1126,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     );
     assert_eq!(
         serde_json::to_value(command).unwrap(),
-        serde_json::json!({"command":"task", "args":["sync", "origin/main"]})
+        serde_json::json!({"command":"sync", "args":["origin/main"]})
     );
 }
 

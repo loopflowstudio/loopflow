@@ -68,17 +68,9 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["run", "debug", "--help"],
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
-        vec![
-            vec!["wt", "create", "--help"],
-            vec!["wt", "create", "--help"],
-        ],
+        vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
         vec![vec!["sync", "--help"], vec!["help", "sync"]],
-        vec![
-            vec!["help", "pr", "land"],
-            vec!["pr", "land", "--help"],
-            vec!["pr", "land", "--help"],
-            vec!["pr", "land", "--help"],
-        ],
+        vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
         vec![
             vec!["help", "account", "route"],
             vec!["account", "route", "--help"],
@@ -181,7 +173,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         vec!["lf", "skill", "list"],
         vec!["lf", "skill", "--", "list"],
     ] {
-        let args = normalize_args(args.into_iter().map(str::to_string).collect()).unwrap();
+        let args = normalize_args(args.into_iter().map(str::to_string).collect());
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(matches!(cli.command,
             Some(Commands::Skill { cmd: SkillCommand::External(args) }) if args == ["list"]));
@@ -429,7 +421,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let ConcreteStep::Command(captured) = &restored else {
         panic!("expected saved command");
     };
-    let canonical = normalize_args(captured.item.argv()).unwrap();
+    let canonical = normalize_args(captured.item.argv());
     assert_eq!(canonical, step.item.argv());
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
@@ -454,7 +446,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
 #[test]
 fn literal_paths_preserve_leaf_and_passthrough_arguments() {
     let normalized =
-        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect());
     assert_eq!(
         normalized(&["lf", "account", "rou"]),
         ["lf", "account", "rou"]
@@ -493,10 +485,8 @@ fn help_preserves_location_without_promoting_query_filters() {
             None,
         ),
     ] {
-        let cli = Cli::try_parse_from(
-            normalize_args(args.into_iter().map(String::from).collect()).unwrap(),
-        )
-        .unwrap();
+        let cli = Cli::try_parse_from(normalize_args(args.into_iter().map(String::from).collect()))
+            .unwrap();
         assert_eq!(cli.task.as_deref(), task);
         assert!(matches!(cli.command, Some(Commands::Help { .. })));
     }
@@ -506,9 +496,7 @@ fn help_preserves_location_without_promoting_query_filters() {
 fn command_lookup_requires_literal_immediate_children() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["land", "mon", "syn", "rou", "id"] {
-        assert!(loopflow::lf::navigation::resolve_child(&tree, name, &[])
-            .unwrap()
-            .is_none());
+        assert!(loopflow::lf::navigation::resolve_path(&tree, &[name.into()]).is_err());
     }
     for name in ["pr", "wt", "sync", "commit"] {
         assert!(tree.find_subcommand(name).is_some());

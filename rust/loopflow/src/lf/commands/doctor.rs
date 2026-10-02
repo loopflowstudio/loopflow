@@ -905,7 +905,9 @@ mod tests {
         let check = check_continuity(&[], &[cron], now);
         assert_eq!(check.status, Status::Fail);
         assert!(check.detail.contains("lf wave cron sync --repo"));
-        assert!(check.detail.contains("lf wave cron history --wave '' --flow"));
+        assert!(check
+            .detail
+            .contains("lf wave cron history --wave '' --flow"));
     }
 
     #[test]

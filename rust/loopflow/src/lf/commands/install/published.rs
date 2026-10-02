@@ -273,7 +273,7 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>com.loopflow.refresh</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
+<key>ProgramArguments</key><array><string>{binary_path}</string><string>home</string><string>install</string></array>
 <key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 <key>RunAtLoad</key><true/>
 <key>StartCalendarInterval</key>{calendar}

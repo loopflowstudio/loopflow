@@ -1,9 +1,11 @@
 # Keep current Tasks visible and completed history out of the way
 
-2026-10-02 · LOO-369 · implementation proposal for authored design review.
-Jack Heart's requested behavior is accepted direction; the mechanisms and the
-history treatment below are proposed. No implementation or Desktop acceptance
-is claimed by this kickoff.
+2026-10-02 · LOO-369 · reviewed design, ready for implementation handoff.
+Jack Heart requested getting LOO-369 running and ready to demo, as relayed by
+his existing control conversation. Coordinator guidance limits Show completed
+to successful completions; this refinement is not attributed as a direct new
+statement from Jack. Routine filter details below are implementation choices.
+Implementation, headless acceptance and the final Desktop demo remain pending.
 
 ## Problem and demo
 
@@ -14,8 +16,8 @@ through Show completed: last 7 days, another positive day count, or All time.
 At the authored demo boundary, open Growth in the configured Desktop and refresh.
 The seven canceled duplicates are absent from current work; LOO-309, LOO-316,
 LOO-312 and LOO-306 remain reachable. Enable Show completed, change 7 to 30, then
-select All time. Rows and the Tasks count change together, with terminal outcomes
-labeled accurately. Reopen a retained Task workspace and its Session. The review
+select All time. Rows and the Tasks count change together; Show completed adds only successful
+completions. The seven canceled duplicates stay absent at every time setting. Reopen a retained Task workspace and its Session. The review
 judges this actual Wave interaction; headless fixtures do not claim visual approval.
 
 ## Findings and cause
@@ -50,7 +52,7 @@ judges this actual Wave interaction; headless fixtures do not claim visual appro
   The source has the same lossy summary. Installed status for unplaced LOO-318
   returns `no Task exists`, so it cannot supply additional planning evidence.
 - `put_item` rejects differing facts at equal provider revisions. Adding newly
-  fetched timestamp fields to an old persisted item can otherwise trigger this
+  fetched completion-time field to an old persisted item can otherwise trigger this
   conflict without any provider edit. This is a required upgrade test, not a
   reason to weaken revision ordering generally.
 
@@ -60,7 +62,7 @@ Linear owns planning state and transition dates. Existing PM storage owns the
 captured facts; Rust owns the Task projection, execution evidence and legal
 actions. Swift owns only history visibility and the selected time window.
 
-Carry `state`, nullable `completed_at` and nullable `canceled_at` through
+Carry `state` and nullable `completed_at` through
 `PmItem` → `PmTaskSummary` → Swift `PlanningItem` / `TaskPlanningSnapshot`.
 Use RFC3339 timestamps consistently with existing projection times. Add the
 fields to list and issue-detail GraphQL selections sharing `IssueFields`, and
@@ -84,7 +86,7 @@ Session access independent of provider closure. Do not change Task status,
 settle a Flow, kill a process, remove a checkout or complete a conversation as a
 side effect of this display change.
 
-Old persisted JSON may lack the added dates: absence means unknown until a fresh
+Old persisted JSON may lack the added completion date: absence means unknown until a fresh
 observation. Permit enrichment at equal revision only for keys genuinely absent
 in the stored JSON; once a nullable key was observed, differing same-revision
 values remain a conflict. Older revisions must not erase newer facts. This is
@@ -104,16 +106,24 @@ preference is needed. The existing alternate Wave detail uses the same rule.
   integer and All time. An empty, zero, negative, non-integer or overflowing
   input shows a short validation message and leaves the last valid filter in
   effect; it must not silently mean All time.
-- Proposed history convention: this control also reveals canceled/duplicate
-  history, labeled Canceled/Duplicate rather than Completed. A caption makes
-  that inclusion explicit. Successful completions use only `completed_at`;
-  cancellations/duplicates use their actual cancellation time when supplied.
+- Show completed reveals successful completions only, using `completed_at`.
+  Canceled/duplicate Tasks remain excluded at every time setting unless shared
+  execution evidence requires them in current work. Label those exceptions
+  Canceled/Duplicate while preserving their execution reason and legal actions.
+  Keep canceled history in the unfiltered shared inventory, accessible through
+  `lf roadmap --wave growth --json` and Linear; preserve existing Task workspace
+  and Session navigation. Do not add a second cancellation-history control.
+  Cancellation timestamps are unnecessary for this slice and are not added.
 - Last N days is a rolling UTC duration: `now - N * 86400 <= timestamp <= now`.
   Capture one `now` per projection and refresh it on the existing refresh path
   and filter changes. Preserve subsecond precision. Exactly at the lower bound
   is included; future dates and unknown dates are excluded from bounded history.
-  All time includes unknown dates, labeled date unavailable. Reopening a Task
+  All time includes successful completions with unknown dates, labeled date unavailable. Reopening a Task
   makes it current regardless of a retained historical timestamp.
+- Apply visibility in this order: preserve current planning and shared unresolved
+  execution; hide remaining canceled/duplicate rows; apply the selected history
+  window only to remaining successful completions. A historical timestamp,
+  mere checkout existence or a terminal local status alone cannot decide visibility.
 - Current planning rows remain visible even if their old local runtime is
   terminal: LOO-309 demonstrates why runtime abandonment alone cannot hide an
   open Linear Task. Closed planning with nonterminal or unresolved execution
@@ -177,7 +187,10 @@ storage and projection, assert the shared DTO fixture, then load that same
 shape through `RegistryQuery` into the production Wave view. Interact with Show
 completed, 30 days, invalid input and All time using ViewInspector. Assert row
 identities, outcome labels, enabled actions and displayed count, not just helper
-return values. No window server, provider writes or UI automation are required.
+return values. The seven canceled duplicates remain absent for hidden, 7 days,
+30 days and All time; a canceled Task with unresolved execution remains visible.
+Verify canceled history remains in the full inventory and retained Session access
+survives filter changes. No window server, provider writes or UI automation are required.
 
 Planned headless gate commands and expected results:
 
@@ -193,7 +206,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-All affected tests and app compilation pass; new filter suite name is planned.
+Acceptance requires affected tests and app compilation to pass; no such pass is
+claimed yet. The new filter suite name is planned.
 Time tests use a fixed clock: exactly 7 days, one subsecond before, now, future,
 timezone offsets, DST crossing, missing dates, another positive day count and
 All time. Provider tests cover completed/canceled/duplicate/open/unknown states,

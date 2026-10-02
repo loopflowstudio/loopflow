@@ -1,15 +1,17 @@
-# LOO-369 assumptions · 2026-10-02
+# LOO-369 implementation choices · 2026-10-02
 
-- Proposed: Show completed includes canceled/duplicate history with explicit
-  outcome labels and a clarifying caption; use cancellation timestamps for those
-  outcomes, never label cancellation successful. Jack requested history access
-  but did not specify a separate cancellation control.
-- Proposed: days are rolling 24-hour UTC intervals, inclusive at both ends;
-  unknown-date history is available only under All time. Preserve the last valid
-  positive day count while input is invalid.
-- Proposed: filter choices persist per Wave within the current window, starting
-  hidden in a fresh window. Preserve open planning and unresolved execution or
-  Session access regardless of local historical abandonment.
+Coordinator guidance resolves the history scope: Show completed contains only
+successful completions. Canceled/duplicate history stays in the full shared
+inventory and Linear, with workspace/Session access and unresolved work preserved.
+This guidance is not recorded as a direct new statement from Jack Heart.
 
-These are reversible implementation choices for authored design review, not
-additional decisions attributed to Jack.
+Routine choices: rolling 24-hour UTC intervals, inclusive boundaries; unknown-date
+successful completions appear only under All time; invalid day input preserves
+the last valid filter. Choices persist per Wave within the current window and
+start hidden in a fresh window. No cancellation timestamps or second history
+control are needed for this slice.
+
+No design question blocks implementation. See the
+[current design](keep-current-tasks-visible-and.md) and
+[implementation handoff](task-history-handoff.md). Final Desktop judgment remains
+at the authored demo review.

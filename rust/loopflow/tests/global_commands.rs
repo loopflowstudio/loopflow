@@ -191,6 +191,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
         home.path(),
         repo.path(),
         &[
+            "home",
             "install",
             "promote",
             "--cli-target",

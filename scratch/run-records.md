@@ -131,13 +131,19 @@ compatibility implementation remains to maintain. Review retained separate
 source-preparation and publication evidence so unknown provider state cannot
 become permission to replace a tag.
 
-`lf sync` merged main at `101a19b8c` without conflicts. Gate found a test
-classifier still filtering the old journal warning text; it now uses the stable
-warning prefix. The original failed gate log remains under
-`.lf/tmp/gate/run-21176/rust/rust.log`; the corrected wave-resolution suite passed.
-Reconciliation on 2026-10-02 changed only these scratch artifacts; production
-code and tests retain the prior gate evidence. No second landing watcher was
-launched. No release publication, installation or fresh provider-state check
-was performed by this reconciliation. No product decision is pending.
+`lf sync` previously merged main at `101a19b8c`; this preparation's refresh
+completed without conflicts or additional source changes. Compression and simulated
+review found no further worthwhile code cuts: exact-source preparation, unknown
+publication state and cached artifact revalidation retain separate responsibilities.
+The Run-to-Exec/Session cleanup and published Session capture layout remain intact.
+Gate's earlier stale-warning failure is repaired; the full affected Rust suite now
+passes. The original failure log remains under `.lf/tmp/gate/run-21176/rust/rust.log`.
 
-Checks (prior code evidence retained; prose-only reconciliation): `uv run python scripts/test.py --reuse-passing` passed architecture, Python (316), website (78; 3 skipped), headless Swift (339 reported) and static checks; Rust had 2,096 passes and one stale-warning failure, repaired and verified with materialized `cargo nextest run -p loopflow --test wave_resolution_matrix` (3 passed); final fmt/Clippy/Ruff checks passed; reconciliation `git diff --check` passed; full hosted matrix and package preflight remain CI-owned, live publication/installation remains delivery work.
+Jack's requested preparation is complete locally. The final edit formats two
+existing long lines in the touched checkout-refresh test; its Python AST is
+unchanged. No second landing watcher, release publication, installation or fresh
+provider-state check ran. The existing delivery owner still owns landing and live
+acceptance, including the concurrent merge through canonicalization and packaged
+installation proof described above.
+
+Checks: `uv run python scripts/test.py --reuse-passing` passed all 5 affected suites in 564s (architecture; Python 316; Rust 2,097, 16 skipped; website 78, 3 skipped; headless Swift 339 reported; fmt/Clippy/Swift boundaries), logs `.lf/tmp/gate/run-88774`; final touched-Python Ruff check/format and AST-equivalence check passed; `git diff --check` passed; hosted matrix/package preflight remain CI-owned, configured concurrent-merge/release/installation proof remains delivery-owned.

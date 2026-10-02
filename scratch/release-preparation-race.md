@@ -102,8 +102,8 @@ proof. Local implementation and tests do not establish live recovery success.
 ## Recovery status and next action
 
 Read-only checks during this investigation found no GitHub Release for v0.12.30.
-At that observation, the minor receipt named patch 0.12.30, has no completed patch commit, and
-reports `completed: false`. The observed `lf --version` was 0.12.29. No tags or
+At that observation, the minor receipt named patch 0.12.30, had no completed
+patch commit, and reported `completed: false`. The observed `lf --version` was 0.12.29. No tags or
 release receipts were changed during this investigation.
 
 Remaining: land the implemented repair through the existing delivery owner,

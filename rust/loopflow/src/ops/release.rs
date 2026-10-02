@@ -788,8 +788,6 @@ fn release_minor(
                 pair.save(&repo, &target)?;
             }
         }
-    }
-    if pair.patch_commit.is_none() {
         let patch_tag = target_tag(&target, &pair.patch_version);
         if let Some(commit) = remote_tag_sha(&repo, &patch_tag)? {
             let complete = if target.publisher.is_empty() {
@@ -860,12 +858,11 @@ fn release_single(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    let default_branch = get_default_branch(&main_repo)?;
     let mut requested_version = version_input.to_string();
     loop {
         let version_input = requested_version.as_str();
-        let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
-
-        let default_branch = get_default_branch(&main_repo)?;
         if !sync_main(&main_repo, &default_branch)? {
             return Err(OpsError::Message(format!(
                 "could not synchronize {default_branch} with origin before release selection"

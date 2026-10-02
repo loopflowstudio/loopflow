@@ -23,7 +23,7 @@ pub(crate) const EXEC_PROCESS_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
-/// Serializes tests that mutate process-global store or run identity variables.
+/// Serializes tests that mutate process-global store or Exec identity variables.
 /// Every test in the crate that touches these variables must hold this lock.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -109,7 +109,7 @@ struct ExecContext {
     ledger_path: PathBuf,
     /// Early observation retains a noninitializing connection through completion.
     ledger: Option<SqliteStore>,
-    /// Serialized argv captured at run start so terminal rows name their work.
+    /// Serialized argv captured at Exec start so terminal rows name their work.
     command: Option<String>,
     /// Optional repository trace journal. Early process observation uses only
     /// SQLite; ordinary dispatch also writes this when Git exclusion succeeds.
@@ -118,7 +118,7 @@ struct ExecContext {
     wave: Option<String>,
     finished: Arc<AtomicBool>,
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
-    /// the export is removed again when the run ends.
+    /// the export is removed again when the Exec ends.
     minted_trace_id: bool,
 }
 
@@ -254,7 +254,7 @@ pub fn observe_process(command: &[String]) {
             worktree: Some(directory.display().to_string()),
             ..LfEventFields::default()
         };
-        create_run_context(&directory, &fields, path, Some(ledger))?;
+        create_exec_context(&directory, &fields, path, Some(ledger))?;
         try_emit(&directory, LfNode::Exec, LfEventType::Started, fields)?;
         Ok(())
     };
@@ -298,7 +298,7 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
             error = failure,
-            "ambient wave identity failed validation; run attributed to no wave \
+            "ambient wave identity failed validation; Exec attributed to no wave \
              — pass --wave <name> to recover"
         );
     }
@@ -371,8 +371,8 @@ fn try_emit(
     event: LfEventType,
     fields: LfEventFields,
 ) -> Result<(), std::io::Error> {
-    let is_run_started = matches!((node, event), (LfNode::Exec, LfEventType::Started));
-    let maybe_context = if is_run_started {
+    let is_exec_started = matches!((node, event), (LfNode::Exec, LfEventType::Started));
+    let maybe_context = if is_exec_started {
         ensure_exec_context(repo_root, &fields)?
     } else {
         current_context()
@@ -394,7 +394,7 @@ fn try_emit(
     let exit_code = fields.exit_code;
     let event = LfEvent {
         trace_id: context.trace_id.clone(),
-        ts: if is_run_started {
+        ts: if is_exec_started {
             OffsetDateTime::from_unix_timestamp(context.started_at)
                 .map_err(std::io::Error::other)?
         } else {
@@ -420,12 +420,7 @@ fn try_emit(
 
     ledger_insert(&context, &event, repo_root, exit_code);
 
-    if matches!(node, LfNode::Exec)
-        && matches!(
-            event.event,
-            LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
-        )
-    {
+    if terminal {
         remove_exec_process_receipt();
         if context.minted_trace_id {
             std::env::remove_var(LF_TRACE_ID_ENV);
@@ -548,7 +543,7 @@ fn ensure_exec_context(
         return Ok(Some(context));
     }
 
-    create_run_context(
+    create_exec_context(
         repo_root,
         fields,
         ledger_db_path().map_err(std::io::Error::other)?,
@@ -556,7 +551,7 @@ fn ensure_exec_context(
     )
 }
 
-fn create_run_context(
+fn create_exec_context(
     repo_root: &Path,
     fields: &LfEventFields,
     ledger_path: PathBuf,
@@ -611,9 +606,9 @@ fn create_run_context(
     let (trace_id, minted_trace_id) = match inherited_trace {
         Some(trace_id) => (trace_id, false),
         None => {
-            // Mint and export the run id so prompt logs and child processes
+            // Mint and export the trace id so prompt logs and child processes
             // carry the same identity as the ledger rows. The export is
-            // removed when the run ends (see try_emit).
+            // removed when the Exec ends (see try_emit).
             let trace_id = TraceId::default();
             std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
             (trace_id, true)
@@ -621,11 +616,11 @@ fn create_run_context(
     };
 
     // A parent process id only means "my parent within this trace, recorded in
-    // this ledger." A fresh run id makes a lingering LF_PROCESS_ID belong to
+    // this ledger." A fresh trace id makes a lingering LF_PROCESS_ID belong to
     // the old trace; and `ledger_insert` is best-effort, so a parent whose
     // write never landed exported its identity anyway. Both spell a parent
     // that resolves to nothing. Drop it so the violation is unspellable at
-    // write time; the run id stays, so the trace still groups. A legitimate
+    // write time; the trace id stays, so the trace still groups. A legitimate
     // parent records its own start row before it can spawn anything.
     let parent_process_id = if agent_caller.is_some() {
         agent_parent.map(|(parent, _)| parent)
@@ -1136,7 +1131,7 @@ mod tests {
 
     const CHILD_APPEND_ENV: &str = "LOOPFLOW_JOURNAL_APPEND_CHILD";
     const CHILD_EVENT_COUNT_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_EVENT_COUNT";
-    const CHILD_RUN_DIR_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_RUN_DIR";
+    const CHILD_TRACE_DIR_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_TRACE_DIR";
     const CHILD_WRITER_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_WRITER";
 
     struct AmbientStorage {
@@ -1308,18 +1303,18 @@ mod tests {
 
     fn only_trace_dir(worktree: &std::path::Path) -> std::path::PathBuf {
         let mut entries = std::fs::read_dir(traces_root(worktree))
-            .expect("read runs")
-            .map(|entry| entry.expect("run dir entry").path())
+            .expect("read traces")
+            .map(|entry| entry.expect("trace dir entry").path())
             .collect::<Vec<_>>();
-        assert_eq!(entries.len(), 1, "expected a single journal run dir");
-        entries.pop().expect("run dir")
+        assert_eq!(entries.len(), 1, "expected a single journal trace dir");
+        entries.pop().expect("trace dir")
     }
 
     #[test]
     fn concurrent_child_process_appends_keep_events_jsonl_parseable() {
         let tmp = tempfile::TempDir::new().expect("temp journal");
-        let trace_dir = tmp.path().join("run");
-        std::fs::create_dir_all(&trace_dir).expect("create run dir");
+        let trace_dir = tmp.path().join("trace");
+        std::fs::create_dir_all(&trace_dir).expect("create trace dir");
 
         let current_exe = std::env::current_exe().expect("current test binary");
         let writers = 8;
@@ -1330,7 +1325,7 @@ mod tests {
                 .arg("journal_child_process_appends_events_for_concurrency_regression")
                 .arg("--nocapture")
                 .env(CHILD_APPEND_ENV, "1")
-                .env(CHILD_RUN_DIR_ENV, &trace_dir)
+                .env(CHILD_TRACE_DIR_ENV, &trace_dir)
                 .env(CHILD_WRITER_ENV, writer.to_string())
                 .env(CHILD_EVENT_COUNT_ENV, events_per_writer.to_string())
                 .stdout(Stdio::null())
@@ -1368,13 +1363,14 @@ mod tests {
             return;
         }
 
-        let trace_dir = PathBuf::from(std::env::var(CHILD_RUN_DIR_ENV).expect("child run dir env"));
+        let trace_dir =
+            PathBuf::from(std::env::var(CHILD_TRACE_DIR_ENV).expect("child trace dir env"));
         let writer = std::env::var(CHILD_WRITER_ENV).expect("child writer env");
         let event_count = std::env::var(CHILD_EVENT_COUNT_ENV)
             .expect("child event count env")
             .parse::<usize>()
             .expect("child event count");
-        let trace_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+        let trace_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("trace id");
 
         for index in 0..event_count {
             let event = LfEvent {
@@ -1440,7 +1436,7 @@ mod tests {
             "main",
         );
 
-        // A real run first, so the ledger exists and holds rows. Without it the
+        // A real Exec first, so the ledger exists and holds rows. Without it the
         // drop proves nothing: an absent database answers "not recorded" for
         // every id, and this passes with the lookup hardwired to `true`.
         super::emit(
@@ -1449,7 +1445,7 @@ mod tests {
             LfEventType::Started,
             fields.clone(),
         );
-        let recorded = super::current_context().expect("recorded run");
+        let recorded = super::current_context().expect("recorded Exec");
         super::clear_context();
 
         // A parent that exported its identity but never reached the ledger.
@@ -1458,7 +1454,7 @@ mod tests {
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
         let context = super::ensure_exec_context(repo.path(), &fields)
-            .expect("run context")
+            .expect("Exec context")
             .expect("context");
 
         assert!(
@@ -1505,7 +1501,7 @@ mod tests {
         );
 
         // The body carries what the launcher handed it, not what the launcher
-        // left behind: a terminal run clears LF_PROCESS_ID from the env.
+        // left behind: a terminal Exec clears LF_PROCESS_ID from the env.
         std::env::set_var(super::LF_TRACE_ID_ENV, launcher.trace_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.process_id.as_str());
         super::clear_context();
@@ -1523,7 +1519,7 @@ mod tests {
     }
 
     #[test]
-    fn minting_a_fresh_run_drops_a_stale_cross_trace_parent() {
+    fn minting_a_fresh_trace_drops_a_stale_cross_trace_parent() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let fields = started_fields(
@@ -1532,13 +1528,13 @@ mod tests {
             "main",
         );
 
-        // A process id lingers in the environment but no run id does — the
+        // A process id lingers in the environment but no trace id does — the
         // `pr land` / `wt switch` / `kickoff` shape that historically stamped a
         // new trace with a parent from the old one.
         std::env::set_var(super::LF_PROCESS_ID_ENV, ExecId::new().as_str());
 
         let context = super::ensure_exec_context(repo.path(), &fields)
-            .expect("run context")
+            .expect("Exec context")
             .expect("context");
 
         assert!(
@@ -1555,7 +1551,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_writes_run_flow_and_skill_events_in_wave_worktree() {
+    fn journal_writes_exec_flow_and_skill_events_in_wave_worktree() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_named_worktree("runtime");
@@ -1644,7 +1640,7 @@ mod tests {
     }
 
     #[test]
-    fn run_lifecycle_publishes_and_removes_exact_process_ownership() {
+    fn exec_lifecycle_publishes_and_removes_exact_process_ownership() {
         let guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_named_worktree("runtime");
@@ -1677,7 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_run_events_clear_context_for_the_next_run() {
+    fn terminal_exec_events_clear_context_for_the_next_exec() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_named_worktree("runtime");
@@ -1709,7 +1705,7 @@ mod tests {
         );
 
         let entries = std::fs::read_dir(traces_root(&worktree))
-            .expect("read runs")
+            .expect("read traces")
             .count();
         assert_eq!(entries, 2);
     }
@@ -1738,7 +1734,7 @@ mod tests {
             let trace_id = trace_dir
                 .file_name()
                 .and_then(|name| name.to_str())
-                .expect("run dir name");
+                .expect("trace dir name");
             assert_eq!(trace_id, "7c22895f-e4c1-49cc-a95d-2267e2356f16");
         });
     }
@@ -1767,10 +1763,10 @@ mod tests {
             let trace_id = trace_dir
                 .file_name()
                 .and_then(|name| name.to_str())
-                .expect("run dir name");
+                .expect("trace dir name");
             assert!(
                 TraceId::parse(trace_id).is_ok(),
-                "expected generated UUID run id"
+                "expected generated UUID trace id"
             );
             assert_ne!(trace_id, "not-a-uuid");
         });

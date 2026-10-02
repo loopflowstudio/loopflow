@@ -126,3 +126,12 @@ installed selection were changed by this implementation. No Flow or worker was
 launched.
 
 Checks: release integration suite 62 passed, final source-fetch change's 18 release-run tests passed; publisher 13 and automation 10 passed; cargo fmt, all-target Clippy, Ruff and diff checks passed. Live publication/installation remains delivery work.
+
+Compression removed duplicate Exec terminal classification and repeated release
+scope resolution, and finished internal trace/Exec naming without moving Session
+captures. The obsolete acceptance paths in the deletion list are gone; no
+compatibility implementation remains to maintain. Review retained separate
+source-preparation and publication evidence so unknown provider state cannot
+become permission to replace a tag.
+
+Checks: `cargo test -p loopflow --lib journal::tests` (16), resource-envelope tests (12), `cargo fmt --all`, all-target Clippy, Ruff and diff checks passed; refreshed-tree gate follows.

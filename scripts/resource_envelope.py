@@ -223,20 +223,20 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         )
 
     authority_home = _authority_home()
-    run_root = authority_home / "runs"
+    capture_root = authority_home / "runs"
     sources.append(
         _measure_source(
             id="session-captures:home",
             kind="session-captures",
             owner="Loopflow Home",
             root=authority_home,
-            paths=(run_root,),
+            paths=(capture_root,),
             budget=policy.maximum_session_capture_bytes,
             disposable=False,
             active=True,
             action=(
-                f"inspect {run_root}; Session captures are durable local evidence and are never "
-                "auto-deleted"
+                f"inspect {capture_root}; Session captures are durable local evidence "
+                "and are never auto-deleted"
             ),
             issues=measurement_issues,
         )

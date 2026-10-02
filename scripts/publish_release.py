@@ -189,7 +189,6 @@ def _write_checksums(paths: tuple[Path, ...], destination: Path) -> None:
 def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
     command = [
         "lf",
-        "repo",
         "release",
         "publish",
         artifacts.tag,
@@ -406,7 +405,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")
     stages.append("latest_dmg_uploaded")
 
-    _run(["lf", "repo", "release", "publish", tag, "--finalize"])
+    _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
     paths = (*archives, dmg, installer, checksums)

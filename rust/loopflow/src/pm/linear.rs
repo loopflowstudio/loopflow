@@ -186,6 +186,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         id
         identifier
         branchName
+        completedAt
         updatedAt
         url
         title
@@ -219,6 +220,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
     id
     identifier
     branchName
+    completedAt
     updatedAt
     url
     title
@@ -1915,6 +1917,8 @@ struct IssueNode<P = ProjectRef> {
 // Nullable fields must be present; omission is not a value to store.
 #[derive(Deserialize)]
 struct IssueFields {
+    #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]
+    completed_at: Option<String>,
     #[serde(rename = "updatedAt")]
     updated_at: String,
     id: String,
@@ -1946,6 +1950,12 @@ impl IssueNode {
 
 impl IssueFields {
     fn into_pm_item(self, rank: u32, project: Option<ProjectRef>) -> PmResult<PmItem> {
+        if let Some(date) = &self.completed_at {
+            time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
+                .map_err(|error| {
+                    PmError::Message(format!("invalid Linear completion time: {error}"))
+                })?;
+        }
         let completed = self
             .state
             .as_ref()
@@ -1977,6 +1987,7 @@ impl IssueFields {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
+            completed_at: self.completed_at,
             state: self.state.map(|state| state.r#type),
             project_id,
             project,
@@ -2489,6 +2500,40 @@ mod tests {
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
 
+    #[test]
+    fn task_history_provider_facts_require_valid_observed_completion_dates() {
+        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        for item in planning.items {
+            let mut wire = json!({
+                "id":item.id, "identifier":item.identifier, "updatedAt":item.revision,
+                "branchName":null,"url":null,"title":item.name,"description":item.description,
+                "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "state":{"type":item.state},"team":{"id":"team"},
+                "completedAt":item.completed_at
+            });
+            let fields: super::IssueFields = serde_json::from_value(wire.clone()).unwrap();
+            let observed = fields.into_pm_item(item.rank, None).unwrap();
+            assert_eq!(observed.completed, item.completed);
+            assert_eq!(observed.state, item.state);
+            assert_eq!(observed.completed_at, item.completed_at);
+            wire["completedAt"] = json!("not a timestamp");
+            assert!(serde_json::from_value::<super::IssueFields>(wire.clone())
+                .unwrap()
+                .into_pm_item(0, None)
+                .is_err());
+            wire.as_object_mut().unwrap().remove("completedAt");
+            assert!(serde_json::from_value::<super::IssueFields>(wire).is_err());
+        }
+        assert_eq!(
+            crate::pm::terminal_reason(Some("duplicate"), false),
+            Some("Linear Task is duplicate")
+        );
+        assert_eq!(crate::pm::terminal_reason(Some("unknown"), false), None);
+    }
+
     #[tokio::test]
     async fn viewer_id_reads_loopflows_own_user() {
         let (base_url, _requests) = test_server::spawn(vec![json_response(
@@ -2655,7 +2700,7 @@ mod tests {
                                     "url": "https://linear.app/loopflow/issue/INF-1/first",
                                     "title": "First",
                                     "description": "one",
-                                    "prioritySortOrder": 10.0,
+                                    "completedAt": null, "prioritySortOrder": 10.0,
                                     "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
@@ -2669,7 +2714,7 @@ mod tests {
                                     "assignee": null,
                                     "title": "Second",
                                     "description": "two",
-                                    "prioritySortOrder": 0.0,
+                                    "completedAt": null, "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
                                     "project": { "id": "project-123", "name": "Scan" },
@@ -3481,7 +3526,7 @@ mod tests {
             json!({ "data": { "issue": {
                 "id": "issue-uuid", "identifier": "LOO-42", "url": null,
                 "title": "Resolve ownership", "description": "",
-                "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                 "assignee": null, "state": { "type": "unstarted" },
                 "team": { "id": "team-loo" },
                 "project": {

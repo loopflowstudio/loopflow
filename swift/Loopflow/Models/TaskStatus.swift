@@ -40,6 +40,7 @@ public struct PlanningItem: Decodable, Sendable {
     public let name: String
     public let description: String
     public let rank: UInt32
+    public let completedAt: String?
     public let completed: Bool
     public let state: String?
     public let projectId: String?
@@ -49,6 +50,7 @@ public struct PlanningItem: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, revision, identifier, url, name, description, rank, completed, state, project, assignee
+        case completedAt = "completed_at"
         case branchName = "branch_name"
         case projectId = "project_id"
         case teamId = "team_id"

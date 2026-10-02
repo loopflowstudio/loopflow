@@ -67,7 +67,9 @@
               "description": "Envelope over the per-wave join.",
               "rank": 4,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -427,7 +429,9 @@
               "description": "Consume the shared roadmap DTO.",
               "rank": 1,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -818,7 +822,9 @@
               "description": "Derive Now/Available from one read.",
               "rank": 6,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": null,
@@ -874,11 +880,13 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views \u2014 research",
+              "name": "Now + Available work views — research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
-              "assignee": null
+              "assignee": null,
+              "state": "completed",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",

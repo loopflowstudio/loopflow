@@ -1289,7 +1289,7 @@ pub(crate) async fn preflight_task_execution(
 }
 
 fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
-    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
+    if item.terminal_reason().is_some() {
         return Err(task_error(format!(
             "Task {} is terminal and cannot start execution",
             item.identifier
@@ -7450,6 +7450,7 @@ time.sleep(30)
             description: String::new(),
             rank: 0,
             completed: false,
+            completed_at: None,
             state: Some("unstarted".into()),
             project_id: Some("project-1".into()),
             project: Some("runtime".into()),

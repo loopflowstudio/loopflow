@@ -108,7 +108,9 @@
           "description": "Surface one focused failure.",
           "rank": 1,
           "completed": false,
-          "assignee": "user-1"
+          "assignee": "user-1",
+          "state": "unstarted",
+          "completed_at": null
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
@@ -509,7 +511,9 @@
           "description": "",
           "rank": 2,
           "completed": false,
-          "assignee": null
+          "assignee": null,
+          "state": "unstarted",
+          "completed_at": null
         },
         "reference": {
           "issue_url": null,

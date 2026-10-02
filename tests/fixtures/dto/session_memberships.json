@@ -50,6 +50,12 @@
         []
       ]
     },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
     "interactive": true,
     "primary_scope": null,
     "attention": "review"
@@ -111,6 +117,12 @@
         ]
       ]
     },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
     "interactive": true,
     "primary_scope": null,
     "attention": null
@@ -164,6 +176,12 @@
     "flow_membership": {
       "kind": "independent"
     },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
     "interactive": true,
     "primary_scope": null,
     "attention": null
@@ -211,6 +229,12 @@
     "flow_membership": {
       "kind": "unknown",
       "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
     },
     "interactive": true,
     "primary_scope": null,
@@ -270,6 +294,12 @@
         ]
       ]
     },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
     "interactive": true,
     "primary_scope": null,
     "attention": null
@@ -322,6 +352,12 @@
       "occurrence": "past",
       "node": null,
       "iterations": null
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
     },
     "interactive": true,
     "primary_scope": null,
@@ -382,6 +418,12 @@
           0
         ]
       ]
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
     },
     "interactive": true,
     "primary_scope": null,

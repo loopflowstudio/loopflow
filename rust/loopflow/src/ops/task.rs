@@ -1,7 +1,9 @@
+mod directory;
 mod lifecycle;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
+pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
 use std::collections::BTreeMap;
@@ -92,6 +94,7 @@ pub struct TaskControlResult {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSnapshot {
+    pub home_id: Option<crate::durable::HomeId>,
     pub issue_id: String,
     pub issue_identifier: String,
     pub task_id: String,
@@ -172,6 +175,7 @@ pub struct TaskFileSnapshot {
     pub content: Option<String>,
     pub state: TaskFileState,
     pub revision: Option<String>,
+    pub read_only_reason: Option<String>,
     pub size_bytes: u64,
 }
 
@@ -180,15 +184,32 @@ struct TaskWorkspace<'a> {
     issue_identifier: &'a str,
     task_id: &'a crate::work::task::TaskId,
     worktree: &'a Path,
+}
+
+impl<'a> From<&'a crate::store::sqlite::TaskCheckout> for TaskWorkspace<'a> {
+    fn from(checkout: &'a crate::store::sqlite::TaskCheckout) -> Self {
+        Self {
+            issue_identifier: &checkout.issue_identifier,
+            task_id: &checkout.task_id,
+            worktree: &checkout.worktree,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskComparison<'a> {
+    checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
 }
 
-impl<'a> TaskWorkspace<'a> {
+impl<'a> TaskComparison<'a> {
     fn new(task: &'a Task, pr: &'a TaskPr) -> Self {
         Self {
-            issue_identifier: &task.plan.identifier,
-            task_id: &task.id,
-            worktree: &task.worktree,
+            checkout: TaskWorkspace {
+                issue_identifier: &task.plan.identifier,
+                task_id: &task.id,
+                worktree: &task.worktree,
+            },
             base_commit: &pr.base_commit,
         }
     }
@@ -207,7 +228,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
 }
 
 // File access reads recorded placement without reconciling PR or execution state.
-fn file_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
+fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
     #[cfg(test)]
     let test_path = super::pm::PM_TEST_CONTEXT
         .try_with(|context| context.path.clone())
@@ -224,8 +245,39 @@ fn file_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
             path
         }
     };
-    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
-        .map_err(|error| task_error(format!("cannot read Task registry: {error}")))?;
+    crate::store::sqlite::SqliteStore::open_read_only(&path)
+        .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
+}
+
+fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
+    let store = file_store()?;
+    let mut checkouts = store
+        .task_checkouts()
+        .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
+        .into_iter()
+        .filter(|row| {
+            row.task_id.as_str() == issue || row.issue_id == issue || row.issue_identifier == issue
+        });
+    let checkout = checkouts
+        .next()
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    if checkouts.next().is_some() {
+        return Err(task_error(format!(
+            "multiple stable Tasks resolve to {issue:?}"
+        )));
+    }
+    if let Some(home) = &checkout.home_id {
+        if *home != store.local_home().map_err(task_error)?.id {
+            return Err(task_error(format!(
+                "Task checkout belongs to Home {home}; read its files on that Home"
+            )));
+        }
+    }
+    Ok(checkout)
+}
+
+fn comparison_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
+    let store = file_store()?;
     let task = store
         .task_by_issue(issue)
         .map_err(|error| task_error(format!("failed to read Task: {error}")))?
@@ -4411,7 +4463,24 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             skill.as_ref().map(|step| &step.skill),
         );
         let (provider, _) = parse_agent(&agent);
+        let home_id = store
+            .task_checkouts()
+            .await
+            .map_err(task_error)?
+            .into_iter()
+            .find(|row| row.task_id == task.id)
+            .and_then(|row| row.home_id);
+        let local_home = store.local_home().await.map_err(task_error)?;
+        let worktree = if home_id.as_ref() == Some(&local_home.id) {
+            crate::engine::git::worktree_root(&task.worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task.worktree.clone())
+        } else {
+            task.worktree.clone()
+        };
         Ok(TaskSnapshot {
+            home_id,
             issue_id: task.plan.id.as_str().to_string(),
             issue_identifier: task.plan.identifier,
             task_id: task.id.to_string(),
@@ -4424,7 +4493,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             status: work_status,
             execution,
             work: work_set,
-            worktree: task.worktree.display().to_string(),
+            worktree: worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             agent: task.agent,
             provider,
@@ -4443,19 +4512,19 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub const MAX_FILE_BYTES: usize = 1_000_000;
 
 pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
-    let (task, pr) = file_context(issue)?;
-    let workspace = TaskWorkspace::new(&task, &pr);
+    let (task, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison::new(&task, &pr);
     let base = resolve_file_base(workspace, base)?;
-    changes_snapshot(TaskWorkspace {
+    changes_snapshot(TaskComparison {
         base_commit: &base,
         ..workspace
     })
 }
 
-fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapshot> {
+fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskChangesSnapshot> {
     let mut files = BTreeMap::<String, TaskChangedFile>::new();
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &[
             "diff",
             "--name-only",
@@ -4466,24 +4535,24 @@ fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapsh
         |file| file.committed = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["diff", "--cached", "--name-only", "-z"],
         &mut files,
         |file| file.staged = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["diff", "--name-only", "-z"],
         &mut files,
         |file| file.unstaged = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["ls-files", "--others", "--exclude-standard", "-z"],
         &mut files,
         |file| file.untracked = true,
     )?;
-    let head_commit = git_output(workspace.worktree, &["rev-parse", "HEAD"])?
+    let head_commit = git_output(workspace.checkout.worktree, &["rev-parse", "HEAD"])?
         .trim()
         .to_string();
     let net = net_changed_paths(workspace)?;
@@ -4491,14 +4560,14 @@ fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapsh
         file.old_path = net.get(path).cloned().flatten();
         net.contains_key(path) || file.untracked
     });
-    let (scratch, scratch_truncated) = scratch_paths(workspace.worktree)?;
-    let recovery = file_save::recovery_directory(workspace)?;
+    let (scratch, scratch_truncated) = scratch_paths(workspace.checkout.worktree)?;
+    let recovery = file_save::recovery_directory(workspace.checkout)?;
     Ok(TaskChangesSnapshot {
         recovery_directory: recovery
             .exists()
             .then(|| recovery.to_string_lossy().into_owned()),
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
+        issue_identifier: workspace.checkout.issue_identifier.to_string(),
+        task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         head_commit,
         files: files.into_values().collect(),
@@ -4513,10 +4582,10 @@ pub fn task_diff(
     base: &str,
     draft: Option<&str>,
 ) -> OpsResult<TaskDiffSnapshot> {
-    let (task, pr) = file_context(issue)?;
-    let workspace = TaskWorkspace::new(&task, &pr);
+    let (task, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison::new(&task, &pr);
     let base = resolve_file_base(workspace, base)?;
-    let workspace = TaskWorkspace {
+    let workspace = TaskComparison {
         base_commit: &base,
         ..workspace
     };
@@ -4530,7 +4599,7 @@ pub fn task_diff(
     }
 }
 
-fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
+fn diff_snapshot(workspace: TaskComparison<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
     let relative = path.map(validate_task_relative_path).transpose()?;
     let old_path = match &relative {
         Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
@@ -4550,14 +4619,14 @@ fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<
     if let Some(path) = &relative {
         args.push(path);
     }
-    let mut patch = git_output_bytes(workspace.worktree, &args)?;
-    let untracked = untracked_paths(workspace.worktree)?;
+    let mut patch = git_output_bytes(workspace.checkout.worktree, &args)?;
+    let untracked = untracked_paths(workspace.checkout.worktree)?;
     let include_untracked = untracked
         .into_iter()
         .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
     for path in include_untracked {
         let output = Command::new("git")
-            .current_dir(workspace.worktree)
+            .current_dir(workspace.checkout.worktree)
             .args(["diff", "--no-index", "--no-color", "--", "/dev/null", &path])
             .output()
             .map_err(|error| {
@@ -4588,7 +4657,7 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
         content_sha256: Option<String>,
     }
 
-    let workspace = TaskWorkspace::new(task, pr);
+    let workspace = TaskComparison::new(task, pr);
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;
     let files = changes
@@ -4626,8 +4695,8 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
 }
 
 pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
-    let (task, pr) = file_context(issue)?;
-    let workspace = TaskWorkspace::new(&task, &pr);
+    let checkout = file_context(issue)?;
+    let workspace = TaskWorkspace::from(&checkout);
     let mut file = file_snapshot(workspace, path)?;
     if inspect_recovery {
         file.recoveries = file_save::recoveries(workspace, &file.path)?;
@@ -4649,6 +4718,7 @@ fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFile
         content: None,
         state: TaskFileState::Missing,
         revision: None,
+        read_only_reason: None,
         size_bytes: 0,
     };
     let absolute = match root.join(&relative).canonicalize() {
@@ -4664,6 +4734,24 @@ fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFile
         return Err(task_error(format!(
             "Task file {relative:?} does not resolve to a file inside the Task worktree"
         )));
+    }
+    let mut component_path = root.clone();
+    for component in Path::new(&relative).components() {
+        component_path.push(component);
+        if std::fs::symlink_metadata(&component_path)?
+            .file_type()
+            .is_symlink()
+        {
+            snapshot.read_only_reason =
+                Some("Files reached through a symlink are read-only.".into());
+            break;
+        }
+    }
+    if Path::new(&relative)
+        .components()
+        .any(|part| part.as_os_str() == ".git")
+    {
+        snapshot.read_only_reason = Some("Git metadata is read-only.".into());
     }
     let file = File::open(&absolute)
         .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
@@ -4685,7 +4773,7 @@ fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFile
     Ok(snapshot)
 }
 
-fn resolve_file_base(workspace: TaskWorkspace<'_>, selection: &str) -> OpsResult<String> {
+fn resolve_file_base(workspace: TaskComparison<'_>, selection: &str) -> OpsResult<String> {
     let reference = match selection {
         "parent" => workspace.base_commit,
         "head" => "HEAD",
@@ -4697,16 +4785,16 @@ fn resolve_file_base(workspace: TaskWorkspace<'_>, selection: &str) -> OpsResult
         }
     };
     Ok(git_output(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
     )?
     .trim()
     .to_string())
 }
 
-fn net_changed_paths(workspace: TaskWorkspace<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
+fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
     let output = git_output_bytes(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &[
             "diff",
             "--name-status",
@@ -4775,7 +4863,7 @@ fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
 }
 
 fn patch_snapshot(
-    workspace: TaskWorkspace<'_>,
+    workspace: TaskComparison<'_>,
     path: Option<String>,
     bytes: &[u8],
 ) -> TaskDiffSnapshot {
@@ -4786,8 +4874,8 @@ fn patch_snapshot(
         .lines()
         .any(|line| line.starts_with("Binary files ") || line == "GIT binary patch");
     TaskDiffSnapshot {
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
+        issue_identifier: workspace.checkout.issue_identifier.to_string(),
+        task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         path,
         patch,
@@ -4797,7 +4885,7 @@ fn patch_snapshot(
 }
 
 fn draft_snapshot(
-    workspace: TaskWorkspace<'_>,
+    workspace: TaskComparison<'_>,
     path: &str,
     draft: &str,
 ) -> OpsResult<TaskDiffSnapshot> {
@@ -4812,12 +4900,12 @@ fn draft_snapshot(
         .unwrap_or(&path);
     let spec = format!("{}:{old_path}", workspace.base_commit);
     let exists = !git_output_bytes(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["ls-tree", "-z", workspace.base_commit, "--", old_path],
     )?
     .is_empty();
     let original = if exists {
-        git_output_bytes(workspace.worktree, &["show", &spec])?
+        git_output_bytes(workspace.checkout.worktree, &["show", &spec])?
     } else {
         Vec::new()
     };
@@ -6504,6 +6592,40 @@ time.sleep(30)
                 .unwrap(),
             pr
         );
+        connection
+            .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM task_prs; DELETE FROM projects;")
+            .unwrap();
+        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+            crate::ops::pm::PmTestContext {
+                path: fixture.database_path.clone(),
+                store: fixture.store.clone(),
+                graphql_url: "http://127.0.0.1:1".into(),
+            },
+            || {
+                let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+                let saved = super::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "no PR needed\n",
+                )
+                .unwrap();
+                assert!(saved.published);
+                assert_eq!(saved.file.content.as_deref(), Some("no PR needed\n"));
+                let directory = super::task_files("FILES-1", "scratch", None, false).unwrap();
+                assert_eq!(directory.entries[0].path, "scratch/note.md");
+                assert!(super::task_changes("FILES-1", "parent").is_err());
+                let conflict = super::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "stale",
+                )
+                .unwrap();
+                assert!(!conflict.published);
+                assert_eq!(conflict.file.content, saved.file.content);
+            },
+        );
     }
 
     #[test]
@@ -6544,10 +6666,12 @@ time.sleep(30)
         )
         .unwrap();
         let id = TaskId::new();
-        let workspace = super::TaskWorkspace {
-            issue_identifier: "TEST-1",
-            task_id: &id,
-            worktree: repo.path(),
+        let workspace = super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
             base_commit: &parent,
         };
         let changes = super::changes_snapshot(workspace).unwrap();
@@ -6565,7 +6689,7 @@ time.sleep(30)
         let patch = super::diff_snapshot(workspace, Some("new.txt")).unwrap();
         assert!(patch.patch.contains("rename from old.txt"));
         let head = super::resolve_file_base(workspace, "head").unwrap();
-        let head_changes = super::changes_snapshot(super::TaskWorkspace {
+        let head_changes = super::changes_snapshot(super::TaskComparison {
             base_commit: &head,
             ..workspace
         })
@@ -6575,7 +6699,7 @@ time.sleep(30)
             .iter()
             .any(|file| file.path == "cancelled.txt"));
         assert!(!head_changes.files.iter().any(|file| file.path == "new.txt"));
-        let file = super::file_snapshot(workspace, "scratch/nested/notes.md").unwrap();
+        let file = super::file_snapshot(workspace.checkout, "scratch/nested/notes.md").unwrap();
         assert_eq!(file.content.as_deref(), Some("\u{feff}notes\r\n"));
         assert_eq!(file.revision.as_ref().unwrap().len(), 64);
         let draft = super::draft_snapshot(workspace, "new.txt", "local draft\n").unwrap();
@@ -6596,7 +6720,9 @@ time.sleep(30)
             "rename me\n"
         );
         assert_eq!(
-            super::file_snapshot(workspace, "gone").unwrap().state,
+            super::file_snapshot(workspace.checkout, "gone")
+                .unwrap()
+                .state,
             super::TaskFileState::Missing
         );
         for (bytes, state) in [
@@ -6605,14 +6731,27 @@ time.sleep(30)
             (vec![b'a'; 1_000_001], super::TaskFileState::Truncated),
         ] {
             std::fs::write(repo.path().join("edge"), bytes).unwrap();
-            let file = super::file_snapshot(workspace, "edge").unwrap();
+            let file = super::file_snapshot(workspace.checkout, "edge").unwrap();
             assert_eq!(file.state, state);
             assert!(file.content.is_none());
             assert!(file.revision.is_none());
         }
-        assert!(super::file_snapshot(workspace, "../outside").is_err());
+        assert!(super::file_snapshot(workspace.checkout, "../outside").is_err());
         #[cfg(unix)]
         {
+            let before = super::file_snapshot(workspace.checkout, "new.txt").unwrap();
+            assert!(before.read_only_reason.is_none());
+            std::fs::rename(repo.path().join("new.txt"), repo.path().join("target.txt")).unwrap();
+            std::os::unix::fs::symlink("target.txt", repo.path().join("new.txt")).unwrap();
+            let after = super::file_snapshot(workspace.checkout, "new.txt").unwrap();
+            assert_eq!(before.revision, after.revision);
+            assert_eq!(before.content, after.content);
+            assert!(after.read_only_reason.is_some());
+            std::os::unix::fs::symlink("nested", repo.path().join("scratch/alias")).unwrap();
+            let nested =
+                super::file_snapshot(workspace.checkout, "scratch/alias/notes.md").unwrap();
+            assert_eq!(nested.content, file.content);
+            assert!(nested.read_only_reason.is_some());
             let outside = tempfile::tempdir().unwrap();
             std::fs::write(outside.path().join("private"), "outside").unwrap();
             std::os::unix::fs::symlink(outside.path(), repo.path().join("scratch/link")).unwrap();
@@ -6620,7 +6759,7 @@ time.sleep(30)
                 super::scratch_paths(repo.path()).unwrap().0,
                 ["scratch/nested/notes.md"]
             );
-            assert!(super::file_snapshot(workspace, "scratch/link/private").is_err());
+            assert!(super::file_snapshot(workspace.checkout, "scratch/link/private").is_err());
         }
     }
 

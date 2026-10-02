@@ -126,7 +126,110 @@
           "sources": [],
           "paths": []
         }
-      ]
+      ],
+      "interactions": {
+        "stages": [],
+        "transitions": [
+          {
+            "from": "@start",
+            "to": "@end",
+            "nodes": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9"
+            ],
+            "routes": [
+              {
+                "from": "@start",
+                "to": "0",
+                "condition": null
+              },
+              {
+                "from": "0",
+                "to": "1",
+                "condition": null
+              },
+              {
+                "from": "1",
+                "to": "2",
+                "condition": "alpha"
+              },
+              {
+                "from": "1",
+                "to": "7",
+                "condition": "zeta"
+              },
+              {
+                "from": "7",
+                "to": "8",
+                "condition": null
+              },
+              {
+                "from": "8",
+                "to": "9",
+                "condition": "advance"
+              },
+              {
+                "from": "8",
+                "to": "7",
+                "condition": "repeat"
+              },
+              {
+                "from": "9",
+                "to": "@end",
+                "condition": "advance"
+              },
+              {
+                "from": "9",
+                "to": "0",
+                "condition": "repeat"
+              },
+              {
+                "from": "2",
+                "to": "3",
+                "condition": null
+              },
+              {
+                "from": "3",
+                "to": "4",
+                "condition": "fix"
+              },
+              {
+                "from": "4",
+                "to": "5",
+                "condition": null
+              },
+              {
+                "from": "5",
+                "to": "6",
+                "condition": "advance"
+              },
+              {
+                "from": "5",
+                "to": "4",
+                "condition": "repeat"
+              },
+              {
+                "from": "6",
+                "to": "9",
+                "condition": "advance"
+              },
+              {
+                "from": "6",
+                "to": "2",
+                "condition": "repeat"
+              }
+            ]
+          }
+        ]
+      }
     },
     "current": 5,
     "completed": [

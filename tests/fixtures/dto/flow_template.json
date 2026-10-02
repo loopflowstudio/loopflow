@@ -111,7 +111,88 @@
           "study"
         ]
       }
-    ]
+    ],
+    "interactions": {
+      "stages": [],
+      "transitions": [
+        {
+          "from": "@start",
+          "to": "@end",
+          "nodes": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7"
+          ],
+          "routes": [
+            {
+              "from": "@start",
+              "to": "0",
+              "condition": null
+            },
+            {
+              "from": "0",
+              "to": "1",
+              "condition": null
+            },
+            {
+              "from": "1",
+              "to": "2",
+              "condition": null
+            },
+            {
+              "from": "2",
+              "to": "3",
+              "condition": "fix"
+            },
+            {
+              "from": "2",
+              "to": "4",
+              "condition": "pass"
+            },
+            {
+              "from": "4",
+              "to": "5",
+              "condition": null
+            },
+            {
+              "from": "5",
+              "to": "6",
+              "condition": "advance"
+            },
+            {
+              "from": "5",
+              "to": "4",
+              "condition": "repeat"
+            },
+            {
+              "from": "6",
+              "to": "7",
+              "condition": null
+            },
+            {
+              "from": "7",
+              "to": "@end",
+              "condition": "advance"
+            },
+            {
+              "from": "7",
+              "to": "4",
+              "condition": "repeat"
+            },
+            {
+              "from": "3",
+              "to": "4",
+              "condition": null
+            }
+          ]
+        }
+      ]
+    }
   },
   "template": {
     "revision": "fixture-study-composition",

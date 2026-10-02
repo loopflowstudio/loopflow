@@ -113,7 +113,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     HStack(alignment: .center, spacing: Spacing.md) {
-                        Text(roadmap.wave.name)
+                        Text(roadmap.wave.displayName)
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")
@@ -266,10 +266,10 @@ struct WorkSurfaceView: View {
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
                     if case .pinned = task.flow.record {
-                        TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                        TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                     }
                 } else {
-                    TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                    TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                 }
                 TaskWorkView(model: model, task: task, wave: found.wave.wave)
                 TaskRunsView(model: model, task: task, wave: found.wave.wave)

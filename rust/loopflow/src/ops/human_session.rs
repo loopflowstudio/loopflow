@@ -1,3 +1,6 @@
+mod workspace;
+pub use workspace::SessionWorkspace;
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -210,6 +213,7 @@ pub struct SessionRecord {
     pub attention: Option<SessionAttention>,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
+    pub workspace: Option<SessionWorkspace>,
     pub kind: SessionKind,
     pub interactive: bool,
     pub work: Option<WorkRef>,
@@ -452,15 +456,63 @@ pub(crate) async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
+    // Checkout resolution must precede Task filtering and pagination: SQL path
+    // prefixes cannot recognize symlink aliases or nested repositories.
+    let association_filter = filter.orphan || filter.task.is_some();
+    let mut selection = filter.clone();
+    if association_filter {
+        selection.task = None;
+        selection.orphan = false;
+        selection.limit = 0;
+        selection.offset = 0;
+    }
     let mut sessions = Vec::new();
-    for session in store.session_summaries(filter).await? {
+    for session in store.session_summaries(&selection).await? {
         sessions.push(summary_surface(&session));
+    }
+    workspace::associate(store, &mut sessions).await?;
+    if association_filter {
+        let task = if let Some(selector) = &filter.task {
+            store
+                .task_checkouts()
+                .await?
+                .into_iter()
+                .find(|task| {
+                    task.task_id.as_str() == selector
+                        || task.issue_id == *selector
+                        || task.issue_identifier == *selector
+                })
+                .map(|task| task.task_id)
+        } else {
+            None
+        };
+        sessions.retain(|session| {
+            (!filter.orphan || session.task_ids.is_empty())
+                && (filter.task.is_none()
+                    || task
+                        .as_ref()
+                        .is_some_and(|task| session.task_ids.contains(task)))
+        });
+        let offset = if filter.after.is_some() {
+            0
+        } else {
+            filter.offset
+        };
+        sessions = sessions
+            .into_iter()
+            .skip(offset)
+            .take(if filter.limit == 0 {
+                usize::MAX
+            } else {
+                filter.limit
+            })
+            .collect();
     }
     Ok(sessions)
 }
 
 /// Filter before applying the caller's page size, using the same attention
-/// projection as Desktop. Scan bounded metadata pages, never provider transcripts.
+/// metadata reading. Scan bounded metadata pages, never provider transcripts.
 pub(crate) async fn list_attention(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
@@ -602,6 +654,12 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         attention: session_attention(session),
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
+        workspace: remote.map(|home| SessionWorkspace {
+            home_id: home.clone(),
+            worktree: session.cwd.clone(),
+            task_id: session.task_id.clone(),
+            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+        }),
         kind,
         interactive: session.interactive,
         work,
@@ -1530,11 +1588,17 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             Err(error) => return Err(error.into()),
         },
     };
-    Ok(SessionRecord {
+    let mut reading = SessionRecord {
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
+        workspace: remote.as_ref().map(|home| SessionWorkspace {
+            home_id: home.clone(),
+            worktree: session.cwd.clone(),
+            task_id: session.task_id.clone(),
+            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+        }),
         kind,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
@@ -1561,7 +1625,9 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             .filter_map(|client| client.terminal_id)
             .collect(),
         open_argv: human_open_argv(remote.as_ref(), Some(&session.cwd), &session.id)?,
-    })
+    };
+    workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    Ok(reading)
 }
 
 /// The `provider[:model]` a Run launched with.

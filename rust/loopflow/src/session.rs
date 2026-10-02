@@ -146,6 +146,7 @@ pub enum WorkSource {
 /// SQL selection for conversation inventory; mode and completion are independent.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
+    pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
     pub search: Option<String>,
@@ -160,6 +161,7 @@ pub struct SessionFilter {
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
+            orphan: false,
             repo: None,
             task: None,
             search: None,

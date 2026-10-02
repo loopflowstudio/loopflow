@@ -52,6 +52,7 @@
         ]
       },
       "interactive": true,
+      "workspace": null,
       "primary_scope": null,
       "attention": "review"
     }

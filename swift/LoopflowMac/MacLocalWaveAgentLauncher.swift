@@ -73,19 +73,18 @@ enum LocalWaveAgentLauncher {
 
     /// Ensure Task Work and its checkout without starting a worker; returns
     /// the authoritative worktree.
-    static func checkoutTask(repoPath: String, issue: String) throws -> String {
+    static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
         let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
-        return try taskCheckoutWorktree(stdout)
+        return try taskCheckoutWorkspace(stdout)
     }
 
     static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskCheckoutWorktree(_ stdout: String) throws -> String {
-        struct Prepared: Decodable { let worktree: String }
+    static func taskCheckoutWorkspace(_ stdout: String) throws -> WorkspaceIdentity {
         do {
-            return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
+            return try JSONDecoder().decode(WorkspaceIdentity.self, from: Data(stdout.utf8))
         } catch {
             throw LocalLfError(
                 errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
@@ -128,9 +127,8 @@ enum LocalWaveAgentLauncher {
 
     /// Return the CLI that owns the Home this Mac client controls.
     ///
-    /// Installed apps use their registered bundled helper. A development app
-    /// carries an explicit pointer to the machine install gate so Finder and
-    /// scripted launches see the same selected Home as terminal `lf`.
+    /// Use an explicitly configured helper when present; otherwise use the
+    /// bundled CLI, which shares the app's protocol and selects its own Home.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         developmentConfig: URL? = Bundle.main.url(

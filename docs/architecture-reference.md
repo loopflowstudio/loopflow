@@ -887,7 +887,7 @@ model.
 <!-- architecture-vocabulary:start -->
 | Retired term | Allowed scopes | Current language |
 | --- | --- | --- |
-| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; FlowSession owns captured progression. |
+| `Project Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; FlowSession owns captured progression. |
 | `session context`, `LF_SESSION` | — | Typed Work ancestry and Exec/AgentSession provenance; transitional launch environment names are listed in cutover status. |
 | `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
 | `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
@@ -971,3 +971,9 @@ CI runs the same command for every proposed merge. The weekly Architecture
 Drift workflow retains the JSON result as time-based evidence. A new owner,
 projection, shim, or API either maps to an existing concept or updates this page
 in the same change.
+
+A Task Session is an AgentSession associated with a Task checkout. A Task can have
+any number; repo and Wave Sessions retain their explicit scopes. This term does
+not restore the retired Task Session controller or a second conversation store.
+`session list --orphan` selects Sessions without Task association; it cannot opt
+a Session out of checkout membership.

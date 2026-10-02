@@ -507,6 +507,9 @@ pub enum SessionCommand {
         after: Option<String>,
         #[arg(long)]
         task: Option<String>,
+        /// Only Sessions without a Task association
+        #[arg(long, conflicts_with = "task")]
+        orphan: bool,
         #[arg(long)]
         search: Option<String>,
     },
@@ -769,7 +772,19 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Read one file from this Task's worktree
+    /// List one directory in this Task's worktree
+    Files {
+        issue: String,
+        #[arg(default_value = ".")]
+        directory: String,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long)]
+        show_ignored: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read one file from the Task checkout
     File {
         issue: String,
         path: String,
@@ -882,6 +897,7 @@ impl TaskCommand {
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
             | Self::Diff { issue, .. }
+            | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
             | Self::Complete { issue, .. }
@@ -1556,6 +1572,22 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
+        let cli = Cli::try_parse_from(["lf", "session", "list", "--orphan", "--json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List { orphan: true, .. }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["lf", "session", "list", "--orphan", "--task", "LOO-353"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "--orphan", ":", "Start a conversation"]).is_err());
+    }
 
     #[test]
     fn consolidated_commands_parse_without_old_namespaces() {

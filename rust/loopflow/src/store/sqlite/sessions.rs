@@ -110,13 +110,22 @@ fn inventory_query(
         );
     }
     if let Some(repo) = &filter.repo {
-        sql.push_str(&format!(" AND s.repo={}", bind(Value::Text(repo.clone()))));
+        sql.push_str(&format!(
+            " AND COALESCE(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id))={}",
+            bind(Value::Text(repo.clone()))
+        ));
     }
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
         sql.push_str(&format!(
             " AND s.id IN ({})",
             super::task_work::session_ids(&task)
+        ));
+    }
+    if filter.orphan {
+        sql.push_str(&format!(
+            " AND NOT EXISTS ({})",
+            super::task_work::session_tasks("s")
         ));
     }
     if let Some(search) = &filter.search {
@@ -1417,6 +1426,42 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn retained_sessions_without_repo_use_their_recorded_wave() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("retained", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'Product','/repo',1)",
+                [wave.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET wave_id=?1,repo=NULL WHERE id='retained'",
+                [wave.as_str()],
+            )
+            .unwrap();
+        }
+        let filter = SessionFilter {
+            repo: Some("/repo".into()),
+            ..SessionFilter::default()
+        };
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "retained");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET repo='/other' WHERE id='retained'",
+                [],
+            )
+            .unwrap();
+        assert!(store.session_summaries(&filter).unwrap().is_empty());
+    }
 
     #[test]
     fn captured_reservation_survives_interruption_and_fences_replacement() {

@@ -66,6 +66,7 @@ It is history, not another live process model: `lf ps` owns current motion.
 
 ```bash
 lf session list --task INF-123 --json
+lf session list --orphan --json          # Sessions without Task association
 lf session list --interactive false --history --task INF-123 --json
 lf session history SESSION --json
 lf session connect SESSION
@@ -73,6 +74,10 @@ lf mon show --task INF-123 --json
 lf mon show run_ab12 --final
 lf replay run_ab12
 ```
+
+Sessions in a Task checkout belong to that Task, including subdirectories and
+symlink aliases. Explicit repo/Wave Sessions remain separate. `--orphan` only
+filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can

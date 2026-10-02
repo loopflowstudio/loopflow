@@ -218,6 +218,7 @@ pub struct TaskReferenceSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWorkspaceSnapshot {
+    pub home_id: Option<crate::durable::HomeId>,
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
     /// Task settles. `None` is explicit for legacy Tasks with no PR record.
@@ -903,7 +904,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
-    let mut ownership = PmPortfolioValidator::default();
+    let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
         let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
@@ -916,7 +917,7 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         };
         let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
-        ownership.validate(
+        ownership.entry(repo).or_default().validate(
             wave.slug(),
             &row.initiative,
             expected_team.as_deref(),
@@ -935,6 +936,8 @@ async fn snapshot_tasks(
     probe_pr_empty: bool,
     include_retained: bool,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
+    let checkouts = store.task_checkouts().await?;
+    let local_home = store.local_home().await?;
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
@@ -943,7 +946,16 @@ async fn snapshot_tasks(
         });
         let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         details.push(
-            snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
+            snapshot_task_detail(
+                store,
+                item,
+                runtime_task,
+                recommended,
+                probe_pr_empty,
+                &checkouts,
+                &local_home.id,
+            )
+            .await?,
         );
     }
 
@@ -994,7 +1006,16 @@ async fn snapshot_tasks(
             .map_or("feature", |plan| plan.flow.as_str())
             .to_string();
         details.push(
-            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
+            snapshot_task_detail(
+                store,
+                item,
+                Some(task),
+                recommended,
+                probe_pr_empty,
+                &checkouts,
+                &local_home.id,
+            )
+            .await?,
         );
     }
     details.sort_by(|left, right| {
@@ -1039,6 +1060,8 @@ async fn snapshot_task_detail(
     task: Option<&Task>,
     recommended: String,
     probe_pr_empty: bool,
+    checkouts: &[crate::store::sqlite::TaskCheckout],
+    local_home: &crate::durable::HomeId,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
         Some(task) => store.task_prs(&task.id).await?,
@@ -1064,7 +1087,10 @@ async fn snapshot_task_detail(
         }
         None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
     };
-    let reference = task_reference(&item, task, active, &prs);
+    let home_id = task
+        .and_then(|task| checkouts.iter().find(|row| row.task_id == task.id))
+        .and_then(|row| row.home_id.clone());
+    let reference = task_reference(&item, task, active, &prs, home_id, local_home);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
@@ -1415,16 +1441,28 @@ fn task_reference(
     task: Option<&Task>,
     active_pr: Option<&TaskPr>,
     prs: &[TaskPr],
+    home_id: Option<crate::durable::HomeId>,
+    local_home: &crate::durable::HomeId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.map(|task| {
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
+        let local = home_id.as_ref() == Some(local_home);
+        let worktree = if local {
+            crate::engine::git::worktree_root(&task.worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task.worktree.clone())
+        } else {
+            task.worktree.clone()
+        };
         TaskWorkspaceSnapshot {
+            home_id,
             slug: task.workspace_slug.clone(),
             branch,
-            worktree: task.worktree.display().to_string(),
-            local_exists: task.worktree.try_exists().ok(),
+            worktree: worktree.display().to_string(),
+            local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
         }
     });
     TaskReferenceSnapshot {
@@ -2155,6 +2193,50 @@ mod tests {
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn portfolio_ownership_is_scoped_to_repository() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let store = Arc::new(store);
+        let mut waves = Vec::new();
+        for (name, repository) in [("ear", "first"), ("ear", "second"), ("duplicate", "first")] {
+            let wave = Wave::new(
+                crate::id::WaveId::new(),
+                name.into(),
+                directory.path().join(repository).display().to_string(),
+            );
+            store.create_wave(&wave).await.unwrap();
+            store
+                .put_pm_snapshot(crate::store::PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 2,
+                    snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+                    "id":format!("{repository}-{name}"), "slug":name, "name":name,
+                    "summary":"", "metric_targets":[], "flow":"feature", "status":"started",
+                    "krs":[{"text":"Retained planning is readable", "holds":false}],
+                    "initiative_ids":["initiative"], "team_ids":["team"]
+                }], "items":[]}))
+                    .unwrap(),
+                })
+                .await
+                .unwrap();
+            waves.push(wave);
+        }
+        super::validate_pm_portfolio(&store, &waves[..2])
+            .await
+            .unwrap();
+        let error = super::validate_pm_portfolio(&store, &waves)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("bound by both"), "{error}");
+    }
 
     #[tokio::test]
     async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {

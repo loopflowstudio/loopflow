@@ -5,6 +5,73 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Current Tasks and completion history (2026-10-02)
+
+Jack Heart requested current work without obsolete duplicates, completed Tasks
+hidden initially, and Show completed with 7 days, positive N days and All time
+(LOO-369). Coordinator guidance limits that control to successful completions;
+it is not attributed as a separate decision from Jack. Canceled/duplicate history
+remains in the shared inventory and Linear. Window-local filters affect displayed
+rows and their count, never Task lifecycle, Flow settlement or Session membership.
+
+The observed Growth snapshot already contained canceled states; the Task summary
+dropped them. Preserve provider state separately from successful completion and
+carry actual completion time. Unknown dates belong only in All time; reopening
+makes planning current despite an old timestamp. Equal-revision storage enrichment
+may fill a genuinely absent completion-date key, but cannot change an observed
+null or date. Snapshot acquisition and unrelated updates cannot establish recency.
+
+Jack relayed the coordinator finding that settled Tasks with removed checkouts
+still carried recovery conditions. That condition alone must not bypass history
+filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
+and observed unsettled files/commits remain visible; open Sessions stay reachable
+independently. This agrees with the Task workspace's checkout association contract.
+
+Jack Heart subsequently approved the inline checkbox/number prototype and
+requested Desktop implementation. Completed enables the remembered range
+(initially seven days); the active label edits N Days, with zero shown as All
+Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
+One native text surface handles display and editing to preserve glyph placement;
+long integers scroll within the compact viewport. Wave identity bounds drafts.
+
+The earlier affected gate and configured app compilation passed. The later inline
+revision and compression have seven focused passing tests and SwiftPM compilation;
+queue gate and native visual/focus review remain separate. Jack's Growth screenshot
+shows six current Tasks without the seven duplicates. The isolated offline capture
+has no successful completions or Sessions, so it cannot prove recency or native
+Session continuation. Live refresh and retained-Session review remain unproven.
+See [the review evidence](../../docs/reviews/task-history.md). These observations
+provide no sustained-use KR or external-progress credit.
+
+## Ask removal decision (2026-10-01)
+
+Jack Heart requested ordinary headless failure without an escalation conversation,
+reporting command, notification queue, or required handoff. The responsible Wave
+operator reads existing status and logs, resolves authorized impediments, and
+uses its ongoing Wave chat for necessary judgment. Taskless failure returns to
+its caller without creating a Wave or conversation. Known failed work stays
+stopped until explicit recovery; retry retains the Flow position and conversation.
+
+Jack clarified “no, Task sessions stay”: Task conversations and authored human
+reviews retain their feedback and completion contract. Persistent versus one-off
+Task conversations remains open. Historical Ask rows become ordinary conversations
+without replacing the Wave chat or granting Flow settlement authority. Older Ask
+identity and caller-release notes below describe the retired model.
+
+The local Ask removal implements this boundary with provider simulations and
+store recovery coverage; full Rust and Desktop acceptance remains with gate.
+A successful provider turn is not reclassified from prose alone. This records
+Product’s shared Session contract, not a Task or Wave placement decision.
+
+Reconciliation with the October 1 Session attention change preserves `--needs-me`
+for current reviews, ready conversations and recorded interactive replies.
+Converted Ask history follows ordinary conversation rules; its former kind alone
+creates no attention obligation. Conversion itself never completes a Session.
+Later confirmed owning-driver exits can retire unassigned, non-primary
+conversations; Task/Wave conversations and Flow reviews remain open. Missing
+process evidence grants neither retirement nor Flow settlement. This is source
+inspection, not full Desktop acceptance.
+
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
 Jack Heart accepted a Task workspace that keeps Sessions, shells and files
@@ -32,8 +99,9 @@ checkpoint final writes after confirmed stop. Crossing repeat intervals and an
 already-claimed decider need explicit resolution, not an invented inner boundary.
 These are required implementation mechanics, not delivered behavior.
 
-Jack accepted automatic Wave wakes for operational blockers and reading existing
-Task/Session output. A repo-associated Session may request repo attention with
+Earlier planning accepted automatic Wave wakes for operational blockers and
+reading existing Task/Session output. The Ask removal decision above supersedes
+this escalation plan and its direct-Ask caller contract. A repo-associated Session may request repo attention with
 original evidence and a reason. These asynchronous requests never release direct
 Asks and do not introduce a messaging UI. Upstream `3dc89bc9a` already removed
 the resident/listener, external chat bridge and turn claims. The outbox survives
@@ -516,8 +584,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   old failures do not diagnose a new runner. Never replay retired mutation probes.
 - LOO-291 retains ten human-selected external-work trials, an authorized directive
   edit, and twenty long-lived-registry trials against published budgets. The external
-  workflow/text remain unprovided. LOO-251 retains promoted-Ask blocked-caller release
-  and D2's fourteen-day/twenty-open readiness obligations. Local PTYs, one cached
+  workflow/text remain unprovided. LOO-251’s promoted-Ask blocked-caller proof
+  was superseded by Jack Heart’s 2026-10-01 Ask removal; retained Task reviews
+  still require completion proof. D2’s fourteen-day/twenty-open readiness
+  obligations remain. Local PTYs, one cached
   population, or AX count timings do not satisfy these. Earlier fallback attempts
   stopped at resource preflight; the September 25 supervised Xcode compile later
   passed. Neither compile supplies the missing verdict or authorizes removing
@@ -596,11 +666,11 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   machine bylines, and the database message bus are deleted.
 - **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
-  is useful. `lf ask` brings a decision that genuinely needs Jack into a direct
-  Session in the caller's checkout; ordinary Runs can ask without an authored
-  review node. Explicit completion releases the exact caller. Authored review
-  Sessions return feedback to their recorded Flow boundary, with navigation
-  owned by the following decider. There is no agent exchange row, answer lane,
+  is useful. Ask was removed by Jack Heart’s 2026-10-01 decision. Failed work
+  retains its normal logs and outcome; necessary judgment belongs in the existing
+  Wave chat. Authored review Sessions return feedback to their recorded Flow
+  boundary, with navigation owned by the following decider. There is no agent
+  exchange row, answer lane,
   or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
   oldest-first. There is no live memory stream, and recent Wave Chat is not
@@ -769,11 +839,12 @@ substitute for another merely because identifiers coincide.
   Sessions alone open or resolve human work. NOW groups the same conditions, and
   usage and Run inspection preserve explicit subject provenance without adding
   another planning hierarchy.
-- **Two configured-path proofs remain release evidence.** One promoted Ask must
-  survive open, provider-native continuation, Ready, Complete, pane clearing, and
-  blocked-caller release. The permissioned macOS UI gate must interact with a
-  Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
-  launch-only screenshot, empty list, or live row without caller release is not
+- **Configured Session and Task review proofs remain release evidence.** After
+  Jack Heart’s 2026-10-01 Ask removal, ordinary Sessions still need open and
+  provider-native continuation proof; retained Task reviews need Ready, Complete,
+  pane clearing, and exact Flow feedback proof. The permissioned macOS UI gate
+  must interact with a Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
+  launch-only screenshot, empty list, or live review without completion is not
   equivalent evidence.
 - **Shared action reduction is implemented in this branch.** Required action
   descriptors and shared Work paths replace Swift's legality/replacement matrix

@@ -226,7 +226,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false,
+          "completed": false, "state": "unstarted", "completed_at": null,
           "assignee": null
         },
         "reference": {
@@ -246,6 +246,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
+        "flow":{"recommended":"feature","record":{"kind":"none"},"controls":[]},
         "next_move": {
           "owner": "task",
           "reason": "ready"

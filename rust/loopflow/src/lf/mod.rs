@@ -446,16 +446,6 @@ pub enum FlowCommand {
     External(Vec<String>),
 }
 
-#[derive(Args, Debug, Default)]
-pub struct AskArgs {
-    /// Named skill for the session
-    #[arg(long)]
-    pub skill: Option<String>,
-    /// What the session should work through
-    #[arg(trailing_var_arg = true, value_name = "QUESTION")]
-    pub question: Vec<String>,
-}
-
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum SessionMode {
     #[value(name = "true")]
@@ -477,11 +467,6 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
-    /// Open a durable session and wait for the user to complete it
-    Ask {
-        #[command(flatten)]
-        ask: AskArgs,
-    },
     /// Read this conversation's native start, usage and completion receipts
     History {
         id: String,
@@ -555,7 +540,7 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Complete a review, blocked Ask, or interactive session
+    /// Complete a review or interactive session
     Complete { id: String },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
@@ -595,9 +580,9 @@ pub enum SessionCommand {
         skill: String,
         iteration: u32,
     },
-    /// Run one prepared Ask or primary conversation in its durable terminal
-    #[command(name = "serve-ask", hide = true)]
-    ServeAsk { input: String },
+    /// Run one prepared conversation in its durable terminal
+    #[command(name = "serve-conversation", hide = true)]
+    ServeConversation { input: String },
     /// Stop one exact native provider client after its review completes
     #[command(name = "stop-client", hide = true)]
     StopClient { input: String },
@@ -1329,7 +1314,7 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
-    /// Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
+    /// Diagnose installation, storage, Exec integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]
@@ -2416,30 +2401,8 @@ mod tests {
     }
 
     #[test]
-    fn cli_separates_ask_completion_from_flow_decisions() {
-        let ask = Cli::try_parse_from(["lf", "session", "ask", "Review", "this", "branch"])
-            .expect("parse human Ask");
-        assert!(matches!(
-            ask.command,
-            Some(Commands::Session { cmd: crate::lf::SessionCommand::Ask { ask } }) if ask.question == ["Review", "this", "branch"] && ask.skill.is_none()
-        ));
-
-        let ask = Cli::try_parse_from([
-            "lf",
-            "session",
-            "ask",
-            "--skill",
-            "unblock",
-            "Resolve",
-            "this blocker",
-        ])
-        .expect("parse skill-selected Ask");
-        assert!(matches!(
-            ask.command,
-            Some(Commands::Session { cmd: crate::lf::SessionCommand::Ask { ask } }) if ask.skill.as_deref() == Some("unblock")
-                && ask.question == ["Resolve", "this blocker"]
-        ));
-
+    fn cli_preserves_review_completion_and_rejects_ask() {
+        assert!(Cli::try_parse_from(["lf", "session", "ask", "Help"]).is_err());
         let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
             .expect("parse session readiness");
         assert!(matches!(

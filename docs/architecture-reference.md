@@ -193,10 +193,10 @@ attempt object. History entries have stable references, not independent lifecycl
 ### Conversation and driver lifetime
 
 Every agent conversation is an AgentSession: skills, inline prompts, helpers,
-Asks, reviews, interactive and headless work. Default views select interactive
-conversations. `lf session list --needs-me` selects current review/reply obligations,
-including headless Asks, using the same projection as Desktop. Explicit filters
-expose headless and completed history; `--all`
+reviews, interactive and headless work. Default views select interactive
+conversations. `lf session list --needs-me` selects current review/reply obligations
+using the same projection as Desktop. Explicit filters expose headless and
+completed history; `--all`
 continues to mean all repositories. Interactive mode grants neither review
 completion nor Flow authority.
 
@@ -275,7 +275,7 @@ settlement and worker delivery authority. The managed Flow panel describes that
 cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
 headless and closed history. Completion waits for independent unfinished Flows;
 recovery preserves idle Flows and waits for unresolved execution, including a
-worker claim before its first step. Pending Asks/reviews and live or unresolved
+worker claim before its first step. Pending reviews and live or unresolved
 Execs preserve the checkout. The completing managed worker may settle itself;
 it cannot settle an independent Flow by completing its Task. Passive membership
 grants no control.
@@ -396,7 +396,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **PM projection** — locally readable planning facts | Linear remains authoritative. Repository/provider-scoped Project and issue facts serve both exact Task lookup and Wave views. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmTaskRecord`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Foreground PM sync and Task lookup | `lf repo`, `lf repo refresh`, `lf task status` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its advancing worker | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task worker refreshes comments and attempts live input; successor workers refresh their seed | `lf task comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
-| **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, `lf ask`, interactive `lf` | — |
+| **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
 | **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
 | **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
@@ -436,7 +436,7 @@ kernel locks                 live local exclusion authority
 | CLI processes | `execs` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Home placement |
-| Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained earlier exchange/publication facts; current Ask conversation state is in `agent_sessions` |
+| Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | PM projection | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Bounded Linear reads |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
@@ -495,7 +495,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | --- | --- | --- |
 | `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Home |
 | `lf wave`, `repo`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
-| `lf ask`, `session` | Sessions and explicit resolution | Current Home AgentSession and FlowSession state |
+| `lf session` | Sessions and explicit resolution | Current Home AgentSession and FlowSession state |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf monitor`, `usage`, `ps`, `top`, `mon prune`, `doctor` | Execution and process observation | Current Home only |
 | `lf home`, `lf wave place` | Home identity and Work placement | Current Home unless routed explicitly |
@@ -511,7 +511,7 @@ detaching.
 
 The heading remains an inbound documentation anchor; Run is historical vocabulary.
 The execution cutover uses one AgentSession admission and capture path for Task,
-Wave, Ask, helper and direct callers.
+Wave, helper and direct callers.
 
 SQLite owns Exec history. Repository trace events live in
 `.lf/journal/traces/<trace-id>/events.jsonl` and name their `trace_id` and `exec`
@@ -587,7 +587,6 @@ lf session list --interactive false --task INF-123 --json
 lf session connect SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123
-lf ask "Review this migration with me"
 lf session ready "Ready for review"
 lf session complete SESSION
 ```
@@ -599,8 +598,7 @@ A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
 the same action and availability reason.
 
 Ready saves feedback and keeps the conversation open. Complete persists its
-closed state and exact feedback before teardown. A keyed Ask retry returns the
-saved result without launching another conversation. A Flow review returns
+closed state and exact feedback before teardown. A Flow review returns
 feedback for the following decision; it never selects that decision's edge.
 Pane close, provider exit and readiness do not complete the review.
 
@@ -637,9 +635,9 @@ there are no intermediate child-pass owners or archives. Configured acceptance
 and the machine's current-state cutover remain separate from schema verification.
 
 A decision returns Advance, Iterate or Blocked from its selected successful
-agent completion. Blocked requires a reason and opens a keyed Ask; answered
-feedback continues the same conversation at that boundary. Only Advance and
-Iterate move the cursor. Failure or interruption cannot submit a verdict.
+agent completion. Blocked records its reason and stops at the current position.
+Only Advance and Iterate move the cursor. Explicit retry retains the pass and
+can supply new direction. Failure or interruption cannot submit a verdict.
 Review definitions and feedback survive source deletion, restart and repeated completion. There is no alternate
 file-backed cursor. Recovery of an uncertain mechanical effect still requires
 inspection; cursor settlement alone cannot establish exactly-once external effects.
@@ -941,7 +939,7 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
   from driver generation. Passive readers acquire neither claim.
 - A Flow consumes its selected successful native completion under version/claim
   fencing. Failed turns cannot donate verdicts or routes to successful retries.
-- Complete releases an Ask or returns review feedback. Readiness and provider
+- Complete closes a conversation or returns review feedback. Readiness and provider
   exit never choose an edge; a following decision owns its own navigation.
 - Bind is write-once, same-target idempotent and valid for done Tasks. CLI states
   the permanent target and writes; Desktop confirms. Historical attribution and

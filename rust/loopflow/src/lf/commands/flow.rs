@@ -231,7 +231,7 @@ impl std::error::Error for StepEnd {}
 
 /// Prepare uncertain native work for an explicit retry. Both Task launch and
 /// taskless resume use this before acquiring a replacement worker claim. Recorded
-/// failures remain with the caller's existing retry/unblock policy.
+/// failures remain with the caller's existing retry policy.
 pub(crate) async fn prepare_native_retry(
     store: &SharedStore,
     flow: FlowSession,
@@ -773,23 +773,6 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 self.observe(&flow);
             }
             match self.store.sqlite.flow_output(&self.id)? {
-                Ok(SkillOutcome::Decided(verdict))
-                    if verdict.decision == crate::engine::transitions::FlowDecision::Blocked =>
-                {
-                    let ask = crate::ops::human_session::flow_unblock(
-                        &self.store,
-                        &flow,
-                        &verdict.summary,
-                    )
-                    .await?;
-                    flow = self.store.sqlite.answer_flow_blocker(
-                        &self.id,
-                        self.version(),
-                        self.claim().as_ref(),
-                        &ask,
-                    )?;
-                    self.observe(&flow);
-                }
                 Ok(outcome) => {
                     if let Some(attempt) = &flow.current_attempt {
                         *self.progress.lock().expect("Flow progress mutex poisoned") = self

@@ -1289,7 +1289,7 @@ pub(crate) async fn preflight_task_execution(
 }
 
 fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
-    if item.completed || matches!(item.state.as_deref(), Some("canceled" | "duplicate")) {
+    if item.terminal_reason().is_some() {
         return Err(task_error(format!(
             "Task {} is terminal and cannot start execution",
             item.identifier
@@ -1467,36 +1467,6 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
         .get_task_by_branch(&branch)
         .await
         .map_err(|error| task_error(format!("failed to resolve Task branch {branch:?}: {error}")))
-}
-
-/// Machine installation is separate from execution in a registered Task checkout.
-pub(crate) fn require_unmanaged_checkout(repo: &Path, database: Option<&Path>) -> OpsResult<()> {
-    block_on_task(async {
-        let managed = if let Some(database) = database {
-            if !database.try_exists().map_err(task_error)?
-                && std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none()
-            {
-                return Ok(());
-            }
-            let store: SharedStore = Arc::new(Store {
-                sqlite: crate::store::sqlite::SqliteStore::open_read_only(database)
-                    .map_err(task_error)?,
-            });
-            matches!(
-                crate::ops::resolve_execution_binding(&store, repo).await?,
-                Some(binding) if matches!(binding.work, crate::durable::WorkRef::Task(_))
-            )
-        } else {
-            matches!(
-                resolve_managed_task(repo).await?,
-                ManagedTask::Managed { .. }
-            )
-        };
-        if managed {
-            return Err(task_error("Task Work cannot change the machine installation. Run installation outside the Task checkout without a --task selector."));
-        }
-        Ok(())
-    })
 }
 
 /// A managed Task worktree, or an explicit decision
@@ -5246,11 +5216,11 @@ pub(crate) async fn continue_task_async(
         crate::controller::task::ensure_flow_position(&store, &task.id, selected_flow.as_deref())
             .await
             .map_err(task_error)?;
-    if retry
-        || reason
-            .as_deref()
-            .is_some_and(|reason| !reason.trim().is_empty())
-    {
+    let reason = reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    if retry || reason.is_some() {
         position = crate::lf::commands::flow::prepare_native_retry(&store, position)
             .await
             .map_err(task_error)?;
@@ -5267,33 +5237,16 @@ pub(crate) async fn continue_task_async(
                 failure.reason, task.plan.identifier
             )));
         }
-        let feedback = if failure.captured.is_some() && position.is_decision() {
-            let (session, summary) = super::human_session::task_unblock(&store, &task, &position)
-                .await
-                .map_err(task_error)?;
-            Some(summary.ok_or_else(|| {
-                task_error(format!(
-                    "{}\nComplete unblock Session {session}, then resume {} for reassessment.",
-                    failure.reason, task.plan.identifier
-                ))
-            })?)
-        } else {
-            None
-        };
-        let reason = reason
-            .as_deref()
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty());
         if let Some(reason) = reason {
             super::linear_observe::publish_task_steer(&store, &task, reason).await?;
-        } else if feedback.is_none() {
+        } else if !retry {
             return Err(task_error(format!(
                 "{}\nResolve the failure, then use `lf --task {} flow start --reason \"<what changed>\"`.",
                 failure.reason, task.plan.identifier
             )));
         }
         store
-            .retry_flow(&position.invocation.id, feedback.as_deref())
+            .retry_flow(&position.invocation.id, reason)
             .await
             .map_err(|error| task_error(format!("failed to retry Task advancement: {error}")))?;
     }
@@ -7491,6 +7444,7 @@ time.sleep(30)
             description: String::new(),
             rank: 0,
             completed: false,
+            completed_at: None,
             state: Some("unstarted".into()),
             project_id: Some("project-1".into()),
             project: Some("runtime".into()),

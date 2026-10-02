@@ -313,9 +313,15 @@ async fn reconcile_task(
     if let Some(reason) = admission_blocker(&store.sqlite, &task.id, true, None)? {
         return Ok(reason);
     }
-    let Some(mut flow) = store.task_flow(&task.id).await.map_err(error)? else {
+    let Some(flow) = store.task_flow(&task.id).await.map_err(error)? else {
         return Ok("no unfinished captured Flow; select a Flow with lf task run".into());
     };
+    if let Some(failure) = &flow.failure {
+        return Ok(format!(
+            "Flow failed: {}; inspect and explicitly retry",
+            failure.reason
+        ));
+    }
     if flow.finished {
         return Ok("Flow finished".into());
     }
@@ -353,22 +359,12 @@ async fn reconcile_task(
             .flow_operation_completed(flow.id())
             .map_err(error)?;
     let retry = !completed
-        && (state.exec_id.is_some()
-            || flow.failure.is_some()
-            || flow.current_attempt.is_some()
-            || flow.claim.is_some());
+        && (state.exec_id.is_some() || flow.current_attempt.is_some() || flow.claim.is_some());
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     if retry && state.retries >= config.automation.retries {
         return Ok(
             "unchanged failure exhausted automatic retries; inspect and explicitly retry".into(),
         );
-    }
-    if flow
-        .failure
-        .as_ref()
-        .is_some_and(|failure| failure.restart_required)
-    {
-        return Ok("Flow requires an explicit restart".into());
     }
     state.exec_id = crate::journal::current_exec_id().map(|id| id.to_string());
     if state.exec_id.is_none() {
@@ -380,12 +376,9 @@ async fn reconcile_task(
     store.sqlite.record_automation(state).map_err(error)?;
     drop(lock);
     if retry {
-        flow = crate::lf::commands::flow::prepare_native_retry(store, flow)
+        crate::lf::commands::flow::prepare_native_retry(store, flow)
             .await
             .map_err(error)?;
-        if flow.failure.is_some() {
-            store.retry_flow(flow.id(), None).await.map_err(error)?;
-        }
     }
     super::task::exec_task_process(store, task, None).await?;
     Ok("Flow admitted through its saved claim".into())

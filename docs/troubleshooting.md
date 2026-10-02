@@ -3,6 +3,38 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
+## Doctor reports a failure
+
+```bash
+lf doctor
+lf cron list
+lf cron history --wave infrastructure --flow telemetry-daily --days 2
+lf cron sync --wave infrastructure
+```
+
+Doctor checks installation selection, store compatibility, Exec integrity and
+scheduled receipts separately. Machine commands can have no repository; a
+recorded repository must be an absolute path. Missing scheduled receipts remain
+failures even when ordinary commands work. A receipt proves invocation, not
+successful completion of its Flow or Skill.
+
+For a missing receipt, inspect the executable and log path Doctor prints. Jobs
+installed before the stable entry gate may pin an inactive retained binary and
+fail before recording a receipt. After installing a release with this repair,
+run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
+use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+follow the selected machine installation across promotions. Existing Sessions
+retain their runtime ownership.
+
+Doctor reads storage without initializing it or applying migrations. An incompatible
+store still reports readable Exec evidence, scheduler obligations and installation
+selection.
+
+Binary freshness compares against locally cached `origin/main`, without fetching.
+That reference may be stale, and merged source may be newer than the latest
+published release. `lf install` installs that published release; Doctor
+itself installs nothing.
+
 ## A Wave has no active conversation
 
 Wave operations are finite. Read its plan and invoke the next pass explicitly,
@@ -50,7 +82,7 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session connect <session-id>
-lf session complete <session-id>       # return saved review or Ask feedback
+lf session complete <session-id>       # return saved review feedback
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
 lf --task INF-123 flow start

@@ -94,6 +94,11 @@ or shell, and the document icon for Files. The sidebar icon hides or restores th
 Sessions pane without changing its terminals or drafts. Click the Task title for
 details and the full Flow; the toolbar's current stage opens its available review.
 
+Exiting a disposable CLI conversation retires it from navigation while keeping
+its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
+Task conversations and repository/Wave primaries remain reachable.
+Stopping a response alone never closes the conversation or completes a review.
+
 Each Session or shell's **…** menu holds its pane actions. **Collapse** hides a pane while its process
 continues; **Expand** returns to it. **Focus** gives one conversation the content
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
@@ -177,6 +182,7 @@ the Session name. Both open the same picker: review the named Task, then choose
 ```sh
 open 'loopflow://task/LOO-303'
 open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow&session=SESSION_ID'
 ```
 
 Task links and palette Task entries open retained workspaces, including Tasks
@@ -184,9 +190,17 @@ outside the current chapter, without starting a Task Flow. A repository-qualifie
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
+Add `session` to open an existing Task conversation in its terminal pane. A
+missing or unrelated Session leaves the current workspace intact and offers Retry.
+Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
-Flow template, all Tasks and chapter history. Templates fold composed Flows;
+Flow template, current Tasks and chapter history. Completed Tasks start hidden.
+**Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
+Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
+(successful completions of any age); click that label to edit again. The checkbox
+hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
+execution and retained Session access remain available. Templates fold composed Flows;
 click a group or its disclosure control to expand it. Repeated uses disclose
 independently, and both return edges remain visible at folded boundaries. Tab to
 a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
@@ -206,7 +220,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Sessions, Task human FlowSteps, and ad-hoc Asks.
+include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session until Complete.
 
@@ -221,21 +235,17 @@ is rejected, its error stays visible in the toolbar through refresh and the term
 retry Complete after addressing the error. Undo does
 not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
-and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until you complete
-the conversation. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
+and reopen exactly as left. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
 Rejected completion preserves the terminal and keeps its error visible through refresh.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
 Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
-Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
-files before the caller resumes. The app lists, opens, and acts on the shared
+The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
-Every record carries a required `runId` for Run lookup, including unopened Ask
-and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
-Run. A prepared Run alone does not establish live provider activity.
+The Session ID targets conversation actions and history lookup. A prepared
+input alone does not establish live provider activity.
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New shell** opens

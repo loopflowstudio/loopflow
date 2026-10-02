@@ -226,3 +226,91 @@ fn failed_starts_exhaust_one_retry_without_changing_the_saved_flow() {
         .unwrap();
     assert_eq!(advances, 0);
 }
+
+#[test]
+fn failure_without_ask_reconciliation_keeps_managed_failure_stopped() {
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::new(&[("tmux", "#!/bin/sh\nexit 91\n")]);
+    let path = repo.create_named_worktree("failed-decision");
+    let registered =
+        support::register_task(home.path(), &path, "failed-decision", &repo.head_sha());
+    let id = flow(&registered.store, &registered.task, false);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let saved = runtime
+        .block_on(registered.store.flow(&id))
+        .unwrap()
+        .unwrap();
+    let failed = runtime
+        .block_on(registered.store.fail_flow(
+            &id,
+            saved.version,
+            None,
+            &loopflow::durable::TaskFlowBlocker::now("Release target is missing"),
+        ))
+        .unwrap();
+    assert!(command(
+        repo.path(),
+        home.path(),
+        &["task", "automate", "INF-123", "on"]
+    )
+    .output()
+    .unwrap()
+    .status
+    .success());
+    for _ in 0..2 {
+        let output = command(repo.path(), home.path(), &["task", "reconcile", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            report["tasks"][0]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("Release target is missing"),
+            "{report}"
+        );
+        assert_eq!(report["tasks"][0]["retries"], 0);
+        assert_eq!(
+            runtime
+                .block_on(registered.store.task_flow(&registered.task.id))
+                .unwrap()
+                .unwrap(),
+            failed
+        );
+        let status = command(
+            repo.path(),
+            home.path(),
+            &["task", "status", "INF-123", "--json"],
+        )
+        .output()
+        .unwrap();
+        assert!(status.status.success(), "{status:?}");
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(status["execution"]["execution"]["state"], "blocked");
+        assert!(status["execution"]["execution"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Release target is missing"));
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+    let retried = runtime
+        .block_on(registered.store.retry_flow(&id, Some("Use staging")))
+        .unwrap();
+    assert_eq!(retried.id(), failed.id());
+    assert_eq!(retried.cursor.index, failed.cursor.index);
+    assert_eq!(retried.cursor.iteration, failed.cursor.iteration);
+    assert_eq!(
+        retried.cursor.leaf().progress.direction.as_deref(),
+        Some("Use staging")
+    );
+    assert!(retried.failure.is_none());
+}

@@ -68,6 +68,13 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                            # fix it
 ```
 
+### Open a conversation
+
+```bash
+lf                         # ask a question or start work
+lf operate                 # review and operate the repository’s open work
+```
+
 ### Inline prompts
 
 ```bash
@@ -194,7 +201,7 @@ Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
-`lf session list` finds conversations, Asks and Flow reviews; open one with
+`lf session list` finds conversations and Flow reviews; open one with
 `lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)

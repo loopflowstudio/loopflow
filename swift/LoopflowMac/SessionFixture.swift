@@ -2,7 +2,6 @@ import Foundation
 import Loopflow
 
 private enum SessionFixtureKind: String {
-    case ask
     case flow
     case interactive
 
@@ -20,8 +19,7 @@ private enum SessionFixtureKind: String {
         let actions: String
         switch self {
         case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Stop the provider and remove this Session; native history remains resumable","unavailable_reason":null}]"#
-        case .ask: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the conversation and resume its blocked caller","unavailable_reason":null}]"#
-        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the conversation and resume its blocked caller","unavailable_reason":null}]"#
+        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the review and return feedback to the next Flow step","unavailable_reason":null}]"#
         }
         return """
         {

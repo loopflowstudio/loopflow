@@ -2071,7 +2071,14 @@ mod tests {
     #[test]
     fn assembled_prompts_deliver_procedures_to_the_owning_skill() {
         let repo = init_repo();
-        for name in ["implement", "debug", "unbreak", "loopflow", "wave/operate"] {
+        for name in [
+            "implement",
+            "debug",
+            "unbreak",
+            "default",
+            "repo/operate",
+            "wave/operate",
+        ] {
             let components = gather_context(&GatherContextOpts {
                 repo_root: repo.path().to_path_buf(),
                 skill: Some(name.to_string()),
@@ -2089,12 +2096,12 @@ mod tests {
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
-            let orchestrates = matches!(name, "loopflow" | "wave/operate");
+            let orchestrates = matches!(name, "repo/operate" | "wave/operate");
             assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
             for procedure in ["lf restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
-                    name == "loopflow",
+                    name == "repo/operate",
                     "{name}: {procedure}"
                 );
             }
@@ -2363,8 +2370,8 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("launch an ordinary contribution explicitly"));
-        assert!(prompt.contains("opens a durable session"));
-        assert!(prompt.contains("If no user authorization is required"));
+        assert!(prompt.contains("explain the failure in ordinary output and stop"));
+        assert!(prompt.contains("For reversible ambiguity within existing authorization"));
     }
 
     #[test]

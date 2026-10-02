@@ -10,23 +10,23 @@ Doctor/install work is in https://github.com/loopflowstudio/loopflow/pull/1402. 
 
 The release reached a notarized 0.12.30 candidate. Its publisher requires a newer command tree than the installed CLI; prepending the verified candidate to PATH did not change the publisher’s selected CLI. The publisher change here uses the common `lf release publish` spelling.
 
-Publication remains incomplete. Candidate `8cbd0c5b1c99a12151908c59f923b0128706a34f` is tagged `v0.12.30`, but its merged tree contains `drafts/remove_ask.sql`; promotion correctly refuses it. No GitHub Release exists for that tag. The previously recorded candidate receipt incorrectly accepted published build identity without requiring an installable schema. The new publisher check reproduces the refusal in a fresh disposable Home, and package CI now runs the same preflight before artifacts can be tagged. The installed version remains 0.12.29.
+The 2026-10-02 incident observation found publication incomplete. Candidate `8cbd0c5b1c99a12151908c59f923b0128706a34f` is tagged `v0.12.30`, but its merged tree contains `drafts/remove_ask.sql`; promotion correctly refuses it. No GitHub Release was found for that tag during the investigation. The previously recorded candidate receipt incorrectly accepted published build identity without requiring an installable schema. The new publisher check reproduces the refusal in a fresh disposable Home, and package CI now runs the same preflight before artifacts can be tagged. The installed version observed then was 0.12.29.
 
-The release runner currently resumes that incomplete tag before considering a newer closing patch. It needs a supported recovery path for an already-tagged, unpublished, un-installable candidate. Do not delete release intermediates or rewrite the tag manually. PR #1402 merged while this investigation was in progress.
+The incident runner resumed that incomplete tag before considering a newer closing patch. The local implementation now selects a successor when exact-source and provider facts prove replacement safe, preserving the invalid tag. PR #1402 merged while this investigation was in progress.
 
 The actual v0.12.30 executable was rejected by the repaired fresh-Home preflight for its pending remove_ask migration.
 
 ## Selected execution: finish releases despite concurrent migration merges
 
 Jack requested launch planning from the [release race investigation](release-preparation-race.md).
-Keep the release repair single-threaded in this checkout, alongside the existing
-implementation. The core outcome is that `lf release run minor` can recover from
+The accepted allocation is one contribution in this checkout alongside the
+existing implementation. The core outcome is that `lf release run minor` can recover from
 the invalid unpublished 0.12.30 candidate, produce an installable closing patch,
 and publish the minor from that patch's exact product snapshot. A concurrent
 migration merge must lead to a newly prepared candidate rather than a falsely
 verified release. This is the selected implementation scope.
 
-### Contract and implementation boundary
+### Accepted contract — 2026-10-02
 
 Jack accepted narrow script contracts with explicit inputs and safe retries.
 Preparation owns one source snapshot; validation owns exact artifacts in an
@@ -77,12 +77,14 @@ immutable migration history, tags, and valid interrupted publication retries.
    and `lf doctor` output are inspected. Any remaining cron failures retain their
    real diagnosis rather than being hidden to declare release success.
 
-Implementation starts with the release operation's candidate selection and minor
-pair transition, then closes preparation and cached-validation gaps against that
-contract. Focused tests cover the race, rejection, retry, and partial-publication
-boundaries. Run required formatting/Clippy and affected tests before checkpointing;
-delivery verification owns broader checks. Preserve the incident's useful
-contract and evidence in release documentation/PR notes before scratch is cleared.
+The implementation covers candidate selection, minor-pair transition,
+post-integration inspection and cached validation. Controller fixtures supply an
+unprepared source and an already corrected successor; publisher tests separately
+prove exact-commit draft detection. These establish the component boundaries,
+not an end-to-end concurrent merge, canonicalization and packaged installation.
+That proof remains part of acceptance items 1 and 5. The durable release contract
+is recorded in `release/README.md`; Session capture ownership is documented in
+`docs/architecture-reference.md`.
 
 ### Allocation and deferred work
 
@@ -115,7 +117,8 @@ errors; same-cycle successor tags recover the interrupted pair. Existing canonic
 migrations and valid publication retries retain their owners.
 
 Remaining: publication and the already authorized landing of this branch through
-the existing owner, then the real closing-patch/minor release and installation. Live replacement must first prove
+the existing owner, then the real closing-patch/minor release, installation and
+inspection of installed revision and `lf doctor`. Live replacement must first prove
 absence across GitHub, crates.io and versioned R2 downloads; the earlier “no GitHub
 Release” observation alone is insufficient. No release tags, provider records, or
 installed selection were changed by this implementation. No Flow or worker was
@@ -132,7 +135,9 @@ become permission to replace a tag.
 classifier still filtering the old journal warning text; it now uses the stable
 warning prefix. The original failed gate log remains under
 `.lf/tmp/gate/run-21176/rust/rust.log`; the corrected wave-resolution suite passed.
-No second landing watcher was launched. No release was published or installed
-by this preparation run.
+Reconciliation on 2026-10-02 changed only these scratch artifacts; production
+code and tests retain the prior gate evidence. No second landing watcher was
+launched. No release publication, installation or fresh provider-state check
+was performed by this reconciliation. No product decision is pending.
 
-Checks: `uv run python scripts/test.py --reuse-passing` passed architecture, Python (316), website (78; 3 skipped), headless Swift (339 reported) and static checks; Rust had 2,096 passes and one stale-warning failure, repaired and verified with materialized `cargo nextest run -p loopflow --test wave_resolution_matrix` (3 passed); final fmt/Clippy/Ruff/diff checks passed; full hosted matrix and package preflight remain CI-owned, live publication/installation remains delivery work.
+Checks (prior code evidence retained; prose-only reconciliation): `uv run python scripts/test.py --reuse-passing` passed architecture, Python (316), website (78; 3 skipped), headless Swift (339 reported) and static checks; Rust had 2,096 passes and one stale-warning failure, repaired and verified with materialized `cargo nextest run -p loopflow --test wave_resolution_matrix` (3 passed); final fmt/Clippy/Ruff checks passed; reconciliation `git diff --check` passed; full hosted matrix and package preflight remain CI-owned, live publication/installation remains delivery work.

@@ -6,7 +6,9 @@ contains the unconsumed `remove_ask.sql` migration draft. The installer refused
 promotion. Jack's selected CLI remains 0.12.29; the 0.13.0 minor release is unfinished.
 Analysis has not repaired the release.
 
-## Evidence and causal chain
+## Incident evidence and causal chain
+
+These findings describe the incident source, before this branch’s repair.
 
 1. **Why was the candidate uninstallable?** Its exact source commit,
    `8cbd0c5b1c99a12151908c59f923b0128706a34f`, contains both the prepared
@@ -54,9 +56,12 @@ merged successor. Two downstream assumptions compound it: publication authority
 stands in for installer success, and hosted build success stands in for a
 recoverable publication candidate.
 
-## Prevention and proof
+## Accepted prevention and proof
 
-| Layer | Proposed change | Evidence that it works |
+Jack accepted this repair scope on 2026-10-02. Implementation status and remaining
+delivery work are reconciled in [run-records.md](run-records.md).
+
+| Layer | Accepted change | Required proof |
 | --- | --- | --- |
 | Preparation | Make release preparation converge after integration; any newly incorporated draft requires preparation and a new candidate. Do not rely on an earlier branch's preparation result. | Inject a migration between preparation and merge; the eventual candidate includes it canonically and installs. |
 | Exact candidate | Require a complete schema on the actual release source and successful preflight on its packaged binary. Ordinary development draft checks remain useful separately. | Build the incident source unchanged and observe rejection before tagging; a corrected candidate passes. |
@@ -64,12 +69,18 @@ recoverable publication candidate.
 | Recovery | Provide an explicit path to supersede a tagged but unpublished invalid candidate while preserving tag history. Distinguish invalid artifacts from temporary publishing failures and partial external publication. | Retry this state and reach a corrected patch, then its minor snapshot, without repeatedly selecting the invalid candidate or rewriting the tag. |
 | Tests | Extend release coverage through integration, packaged validation and retry. The existing canonicalization test stops before PR integration. | A test that introduces a concurrent draft fails if preparation is only run before integration. |
 
-Already implemented locally on this branch: publisher preflight uses an isolated
-Home and checks the verdict and exit status; package CI invokes preflight for
-release binaries. Six publisher tests passed, and the downloaded incident
-candidate was rejected by the updated validator. These changes are not yet
-published. They contain the failure; they do not make preparation converge or
-recover the existing tag. Other rows above are proposals, not completed fixes.
+Implemented locally: exact-source inspection after integration, successor patch
+selection for pending migrations, same-cycle minor-pair recovery, fresh-Home
+packaged preflight on initial validation and cached reuse, and package-CI
+preflight. Controller fixtures cover unprepared integrated sources, immutable
+invalid tags, successor selection and partial-publication refusal. Publisher
+tests cover exact-commit inspection and rejection despite published authority.
+The downloaded incident executable was rejected by the repaired validator.
+
+The controller recovery fixture supplies an already corrected successor; it does
+not exercise a real concurrent PR merge through migration canonicalization and
+installation. The configured release path remains the outstanding end-to-end
+proof. Local implementation and tests do not establish live recovery success.
 
 ## Limits and independent failures
 
@@ -82,20 +93,23 @@ recover the existing tag. Other rows above are proposals, not completed fixes.
 - The test name suggests publisher Home incompatibility motivated ignoring
   preflight rejection. The original design rationale has not been established;
   the code proves the broad acceptance, not the author's reasoning.
-- The inspected preparation test proves hook execution, not concurrent merge
-  safety. This analysis does not claim every release test was exhaustively audited.
+- The original preparation test proved hook execution. Added recovery fixtures
+  exercise controller selection; actual concurrent integration and packaged
+  installation remain a separate proof boundary.
 - Fresh-Home preflight is necessary but does not by itself prove every supported
   existing database can upgrade. Upgrade coverage remains a separate requirement.
 
 ## Recovery status and next action
 
 Read-only checks during this investigation found no GitHub Release for v0.12.30.
-The minor receipt still names patch 0.12.30, has no completed patch commit, and
-reports `completed: false`. Installed `lf --version` reports 0.12.29. No tags or
+At that observation, the minor receipt named patch 0.12.30, has no completed patch commit, and
+reports `completed: false`. The observed `lf --version` was 0.12.29. No tags or
 release receipts were changed during this investigation.
 
-Next: implement and test recovery for this unpublished invalid candidate together
-with preparation after integration. Ship the existing preflight containment, then
-use the supported recovery path to produce an installable closing patch and 0.13.0.
+Remaining: land the implemented repair through the existing delivery owner,
+then exercise the supported recovery path to produce an installable closing patch
+and 0.13.0. Replacement requires fresh absence evidence from GitHub, crates.io
+and versioned R2 downloads; the earlier GitHub observation alone is insufficient.
+No live release or installation success is established by this reconciliation.
 Deleting the tag or manually claiming a completed receipt would erase evidence
 without repairing either cause.

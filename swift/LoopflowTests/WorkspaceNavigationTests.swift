@@ -11,17 +11,17 @@ struct WorkspaceNavigationTests {
     @Test("A collapsed Wave exposes every Task Session, including idle conversations")
     func collapsedWaveParticipation() throws {
         let snapshot = try roadmap()
-        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("ask", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
-        value["kind"] = "ask"
+        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("review", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
+        value["kind"] = "flow"
         value["state"] = "waiting"
-        let ask = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+        let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [idle, ask])
+        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [idle, review])
         let wave = try #require(projection.waves.first)
         let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
         let waveRow = try #require(rows.first { $0.workKey == wave.id })
-        #expect(waveRow.inlineSessions.map(\.id) == ["idle", "ask"])
-        #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "ask" }) })
+        #expect(waveRow.inlineSessions.map(\.id) == ["idle", "review"])
+        #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "review" }) })
     }
 
     @Test("Checkout association groups independent Sessions despite different attribution")

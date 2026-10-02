@@ -1237,6 +1237,77 @@ mod tests {
         rusqlite::Connection::open_in_memory().unwrap()
     }
 
+    #[test]
+    fn remove_ask_preserves_conversations_and_history() {
+        let conn = open();
+        apply_before_current_draft(&conn, "remove_ask");
+        if !_draft_is_canonical("remove_ask") {
+            conn.execute_batch(&current_draft_sql("primary_session_scope"))
+                .unwrap();
+        }
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-preserved','proof','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project-preserved','wave-preserved','external-project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES('task-preserved','project-preserved','external-issue','PROOF-1','/repo',1);").unwrap();
+        for (id, completed, native, published) in [
+            ("completed", Some(30), Some("native-completed"), true),
+            ("open", None, Some("native-open"), true),
+            ("reserved", None, None, false),
+        ] {
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,ready_summary,completed_at,created_at,request,kind,interactive,cwd,skill,provider,provider_thread,input_published)
+                VALUES(?1,?1,'human',?2,?3,10,'Retained request','ask',1,'/repo','unblock','codex',?4,?5)",
+                rusqlite::params![id, completed.map(|_| "Retained answer"), completed, native, published]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,10,'{}')",
+                rusqlite::params![id, format!("run_{id}")]).unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=?1",
+                [id],
+            )
+            .unwrap();
+        }
+        conn.execute("UPDATE agent_sessions SET task_id='task-preserved',wave_id='wave-preserved',work_source='inherited'", []).unwrap();
+        let before: Vec<(i64, String, String)> = conn
+            .prepare("SELECT seq,session_id,payload FROM session_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("remove_ask"))
+            .unwrap();
+        for (id, completed, native, published) in [
+            ("completed", Some(30), Some("native-completed"), true),
+            ("open", None, Some("native-open"), true),
+            ("reserved", None, None, false),
+        ] {
+            let row = conn.query_row("SELECT kind,skill,primary_scope,request,completed_at,provider_thread,input_published,ready_summary FROM agent_sessions WHERE id=?1", [id], |row| Ok((
+                row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,
+                row.get::<_,Option<i64>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,bool>(6)?,row.get::<_,Option<String>>(7)?
+            ))).unwrap();
+            assert_eq!(
+                row,
+                (
+                    "conversation".into(),
+                    None,
+                    None,
+                    "Retained request".into(),
+                    completed,
+                    native.map(str::to_string),
+                    published,
+                    completed.map(|_| "Retained answer".into())
+                )
+            );
+        }
+        let after: Vec<(i64, String, String)> = conn
+            .prepare("SELECT seq,session_id,payload FROM session_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE task_id='task-preserved' AND wave_id='wave-preserved' AND work_source='inherited'", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
+    }
+
     fn development_draft(
         name: &'static str,
         sql: &'static str,

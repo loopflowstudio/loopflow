@@ -28,8 +28,7 @@ pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
 }
 
 /// Drive the Task's Flow through the shared executor with this process's
-/// claim. A step that ends without a result releases the position; a
-/// decision Run that failed without a verdict opens its one unblock Session.
+/// claim. A step that ends without a result records failure and releases the position.
 async fn drive_task(
     store: SharedStore,
     task_id: TaskId,
@@ -48,30 +47,9 @@ async fn drive_task(
             .transpose()?
             .unwrap_or_default();
     let cli = crate::lf::Cli::try_parse_from(std::iter::once("lf".to_string()).chain(options))?;
-    let result =
-        crate::lf::commands::flow::drive(store.clone(), flow, Some(launch_claim), &cli).await;
-    if result.as_ref().err().is_some_and(|error| {
-        matches!(
-            error.downcast_ref::<crate::lf::commands::flow::StepEnd>(),
-            Some(crate::lf::commands::flow::StepEnd::StoreChanged(_))
-        )
-    }) {
-        return result.map(|_| ());
-    }
-    if result.is_err() {
-        if let Some(blocked) = store.task_flow(&task_id).await? {
-            if blocked
-                .failure
-                .as_ref()
-                .is_some_and(|failure| failure.captured.is_some())
-                && blocked.is_decision()
-            {
-                let task = load_task(&store, &task_id).await?;
-                crate::ops::human_session::task_unblock(&store, &task, &blocked).await?;
-            }
-        }
-    }
-    result.map(|_| ())
+    crate::lf::commands::flow::drive(store, flow, Some(launch_claim), &cli)
+        .await
+        .map(|_| ())
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {
@@ -131,8 +109,7 @@ pub(crate) async fn complete_human_flow_step(
 
 /// The Task's Flow to launch: the one it points at, or `selected_flow` when
 /// the Task has none or points at a different Flow. Selecting a different
-/// Flow replaces the current one in one transaction. A blocked decision opens
-/// its unblock Session; a review without its Session parks.
+/// Flow replaces the current one in one transaction. A review without its Session parks.
 pub(crate) async fn ensure_flow_position(
     store: &SharedStore,
     task_id: &TaskId,
@@ -157,15 +134,6 @@ pub(crate) async fn ensure_flow_position(
             task.plan.identifier
         ),
     };
-    if current
-        .failure
-        .as_ref()
-        .is_some_and(|failure| failure.captured.is_some())
-        && current.is_decision()
-    {
-        crate::ops::human_session::task_unblock(store, &task, &current).await?;
-        return Ok(current);
-    }
     if current.is_human() && current.pending_session_id.is_none() {
         return park_at_review(store, &task, &current).await;
     }
@@ -455,182 +423,6 @@ mod planning_tests {
         assert!(!interrupt(&mut position));
         assert_eq!(position.cursor.index, decision_index);
         assert!(position.cursor.progress.verdict.is_none());
-    }
-
-    fn pursue_decision(task: &Task) -> FlowSession {
-        let mut flow = super::start_task_flow(task, "pursue").unwrap();
-        while !flow.is_decision() {
-            assert!(!finish(&mut flow).unwrap());
-        }
-        assert_eq!(flow.current().step, "loop-decide");
-        flow
-    }
-
-    #[test]
-    fn task_decision_live_unblock_returns_feedback_without_navigation() {
-        let _guard = super::TestLfBinGuard::pin();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let (store, task, _) = runtime.block_on(human_task_fixture_at(
-            &_guard.ledger.home().join("loopflow.db"),
-        ));
-        crate::journal::with_runtime(&task.worktree, &["live-unblock-proof".into()], || {
-            runtime.block_on(async {
-                let flow = pursue_decision(&task);
-                let flow = store.start_task_flow(&task.id, flow).await.unwrap();
-                let owner = crate::journal::current_process_identity().unwrap();
-                let TaskWorkerClaimOutcome::Claimed(claim) = store
-                    .claim_task_worker(
-                        &task.id,
-                        &flow.invocation.id,
-                        flow.version,
-                        &owner,
-                        time::OffsetDateTime::now_utc(),
-                    )
-                    .await
-                    .unwrap()
-                else {
-                    panic!("decision claim")
-                };
-                let run = reserved_capture(&store, &task).await;
-                let publish = {
-                    let (store, id, version, claim) = (
-                        store.clone(),
-                        flow.id().to_owned(),
-                        flow.version,
-                        claim.clone(),
-                    );
-                    move |run: &String| {
-                        store.sqlite.publish_attempt(
-                            &id,
-                            version,
-                            store.sqlite.captured_sequence(run).unwrap().unwrap(),
-                            Some(&claim),
-                            "proof",
-                            None,
-                        )
-                    }
-                };
-                let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
-                    crate::session_record::SessionCaptureSpec {
-                        harness: "proof".into(),
-                        model: None,
-                        surface: "headless".into(),
-                        cwd: task.worktree.clone(),
-                        repo: None,
-                        worktree: None,
-                        skill: Some("loop-decide".into()),
-                        subjects: vec![],
-                        flow: crate::session_record::SessionFlowMembership::Step(
-                            crate::session_record::SessionFlowStep::of(&flow).unwrap(),
-                        ),
-                        work: None,
-                    },
-                    run.clone(),
-                    None,
-                    &crate::trace::PreparedTurnContext::from_prompts("system", "decide"),
-                    publish,
-                )
-                .unwrap();
-                capture.record_input("initial", "Fixture decision is active");
-                std::env::set_var(crate::durable::RUN_ID_ENV, run.as_str());
-                std::env::set_var(crate::session_record::RUN_DIR_ENV, capture.artifact_dir());
-                let before = store.task_flow(&task.id).await.unwrap().unwrap();
-                let key = crate::ops::human_session::task_unblock_key(&before).unwrap();
-                let ask = async {
-                    crate::ops::human_session::ask_once(
-                        &store,
-                        &key,
-                        "Choose the consumer to replace",
-                        Some("unblock"),
-                    )
-                    .await
-                    .unwrap_or_else(|error| panic!("live decision Ask failed: {error:#}"))
-                };
-                let human = async {
-                    let session = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                        loop {
-                            let sessions = crate::ops::human_session::list(
-                                &store,
-                                &crate::session::SessionFilter::default(),
-                            )
-                            .await
-                            .unwrap();
-                            if let Some(session) = sessions
-                                .into_iter()
-                                .find(|s| s.kind == crate::ops::human_session::SessionKind::Ask)
-                            {
-                                break session;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                        }
-                    })
-                    .await
-                    .unwrap();
-                    let (execution, graph) =
-                        crate::ops::task_execution::task_execution_and_flow(&store, &task.id)
-                            .await
-                            .unwrap();
-                    assert_eq!(
-                        execution.state,
-                        crate::ops::task_execution::TaskExecutionState::Blocked
-                    );
-                    assert_eq!(
-                        execution.captured,
-                        store.sqlite.captured_sequence(&run).unwrap()
-                    );
-                    assert!(execution.reason.contains(&session.id));
-                    assert!(execution.reason.contains("without Task resume"));
-                    let crate::ops::task_flow::TaskFlowRecord::Pinned(graph) = graph else {
-                        panic!("pinned")
-                    };
-                    assert_eq!(graph.reason, execution.reason);
-                    assert_eq!(graph.execution, execution.state);
-                    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), before);
-                    std::env::set_var(
-                        crate::durable::RUN_ID_ENV,
-                        store
-                            .session(&session.id)
-                            .await
-                            .unwrap()
-                            .unwrap()
-                            .artifact_key
-                            .as_str(),
-                    );
-                    std::env::set_var(
-                        crate::ops::human_session::HUMAN_SESSION_ENV,
-                        serde_json::to_string(&crate::ops::human_session::HumanSessionToken::Ask {
-                            id: session.id.clone(),
-                        })
-                        .unwrap(),
-                    );
-                    crate::ops::human_session::mark_ready(&store, "Switch the existing reader")
-                        .await
-                        .unwrap();
-                    crate::ops::human_session::complete(&store, &session.id)
-                        .await
-                        .unwrap();
-                };
-                let (feedback, ()) = tokio::join!(ask, human);
-                assert_eq!(feedback, "Switch the existing reader");
-                assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), before);
-                assert_eq!(
-                    crate::ops::task_execution::task_execution(&store, &task.id)
-                        .await
-                        .unwrap()
-                        .state,
-                    crate::ops::task_execution::TaskExecutionState::Running
-                );
-                assert!(before.cursor.leaf().progress.verdict.is_none());
-                std::env::remove_var(crate::durable::RUN_ID_ENV);
-                std::env::remove_var(crate::session_record::RUN_DIR_ENV);
-                std::env::remove_var(crate::ops::human_session::HUMAN_SESSION_ENV);
-                Ok(())
-            })
-        })
-        .unwrap();
     }
 
     async fn human_task_fixture() -> (SharedStore, Task, FlowSession) {

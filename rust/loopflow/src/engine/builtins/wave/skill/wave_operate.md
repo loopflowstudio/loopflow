@@ -76,9 +76,12 @@ worktrees, placement and execution history.
 - Start selected authorized work with `lf --task <issue-id> flow start`; use the
   current Project's Flow unless an explicit choice is warranted. Existing
   execution is reconciled through Task operations, never a duplicate driver.
-- Inspect `lf task status` before recovery. Active work continues; unresolved
-  human Sessions remain waiting. Resume interrupted work through `lf flow start`
-  only when current evidence supports it. Unknown liveness is not idle.
+- Inspect `lf task status` and existing logs before recovery. Resolve authorized
+  impediments; discuss missing judgment in the ongoing Wave chat when present.
+  Headless operation stops with the reason when it cannot proceed. Retry failed
+  work with `lf --task <issue> flow start --reason "<what changed>"` only when new
+  evidence warrants it. Unknown liveness is not idle. Authored Task review
+  Sessions retain their own feedback and completion contract.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
 - Update an authorized plan through `lf update-plan --wave <wave> --plan

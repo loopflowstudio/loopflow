@@ -8,13 +8,10 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
-    if let SessionCommand::Ask { ask } = command {
-        return super::ask::run(ask);
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
-        | SessionCommand::ServeAsk { .. }
+        | SessionCommand::ServeConversation { .. }
         | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
         SessionCommand::Complete { id } => {
             let store = runtime.block_on(open_shared_store())?;
@@ -31,7 +28,6 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Ask { .. } => unreachable!("Ask dispatch precedes the Session runtime"),
         SessionCommand::History {
             id,
             json,
@@ -191,9 +187,9 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::ServeAsk { input } => {
+        SessionCommand::ServeConversation { input } => {
             let store = open_shared_store().await?;
-            crate::ops::human_session::serve_ask(&store, input).await
+            crate::ops::human_session::serve_conversation(&store, input).await
         }
         SessionCommand::StopClient { input } => {
             crate::ops::human_session::stop_session_client(input)
@@ -307,12 +303,6 @@ async fn complete(id: &str) -> anyhow::Result<()> {
         SessionKind::Conversation => println!(
             "Session {} completed; its provider history remains resumable.",
             session.id
-        ),
-        SessionKind::Ask => println!(
-            "Ask session completed: {}",
-            session
-                .ready_summary
-                .expect("completed Ask Session has a ready summary")
         ),
         SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
     }

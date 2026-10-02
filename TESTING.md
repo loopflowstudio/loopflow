@@ -277,6 +277,9 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
 Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+After integrating Session kind changes, run `scripts/test_desktop.sh --filter
+'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
+participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
 
@@ -894,8 +897,8 @@ cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | t
 
 Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
 fixture, restore it afterward, and serialize environment changes with
-`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
-in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
+in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
 Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
 the Session driver references share the same database. Simulated finite-provider

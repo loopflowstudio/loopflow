@@ -322,15 +322,15 @@ mod tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/missing/task%_',1)", params![task.as_str(), project.as_str()]).unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
-                ("ask", "/missing/task%_", false, false),
+                ("conversation", "/missing/task%_", false, false),
                 ("history", "/elsewhere", true, true),
                 ("sibling", "/missing/task%_-other", false, false),
                 ("wildcard", "/missing/taskAB", false, false),
             ] {
                 conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,kind,completed_at)
-                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),if id=="ask" {"ask"} else {"conversation"},complete.then_some(2)]).unwrap();
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),"conversation",complete.then_some(2)]).unwrap();
             }
-            for id in ["manual", "ask", "history", "sibling", "wildcard"] {
+            for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
@@ -372,7 +372,7 @@ mod tests {
                 .iter()
                 .map(|s| s.id.as_str())
                 .collect::<Vec<_>>(),
-            ["ask", "history", "manual"]
+            ["conversation", "history", "manual"]
         );
         assert_eq!(
             work.flows

@@ -60,7 +60,7 @@ re-derive what these already record.
      snapshots. Do not require manual clicks or permission dialogs.
    - If this environment cannot run a check, use a headless equivalent or defer
      it to capable CI and continue the Flow. Never mark a deferred check passed;
-     CI still owns its result. Do not turn missing display access into an Ask.
+     CI still owns its result. Leave display-dependent judgment to demo/review.
    - Record the command and result in one line; include any CI deferral.
    Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 

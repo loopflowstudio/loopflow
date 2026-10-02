@@ -5,6 +5,33 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Current Tasks and completion history (2026-10-02)
+
+Jack Heart requested current work without obsolete duplicates, completed Tasks
+hidden initially, and Show completed with 7 days, positive N days and All time
+(LOO-369). Coordinator guidance limits that control to successful completions;
+it is not attributed as a separate decision from Jack. Canceled/duplicate history
+remains in the shared inventory and Linear. Window-local filters affect displayed
+rows and their count, never Task lifecycle, Flow settlement or Session membership.
+
+The observed Growth snapshot already contained canceled states; the Task summary
+dropped them. Preserve provider state separately from successful completion and
+carry actual completion time. Unknown dates belong only in All time; reopening
+makes planning current despite an old timestamp. Equal-revision storage enrichment
+may fill a genuinely absent completion-date key, but cannot change an observed
+null or date. Snapshot acquisition and unrelated updates cannot establish recency.
+
+Jack relayed the coordinator finding that settled Tasks with removed checkouts
+still carried recovery conditions. That condition alone must not bypass history
+filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
+and observed unsettled files/commits remain visible; open Sessions stay reachable
+independently. This agrees with the Task workspace's checkout association contract.
+
+Source inspection and recorded focused Rust/Swift checks support the local
+implementation, including the removed-checkout regression. Affected gate suites,
+configured app compilation and the Growth/retained-Session demo remain pending;
+this is not live deployment, visual acceptance or evidence for sustained-use KRs.
+
 ## Ask removal decision (2026-10-01)
 
 Jack Heart requested ordinary headless failure without an escalation conversation,

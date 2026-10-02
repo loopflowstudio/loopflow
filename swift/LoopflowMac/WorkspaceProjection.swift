@@ -19,7 +19,13 @@ struct WorkspaceTask: Identifiable {
 
     /// The started working set. A Task with open Sessions stays reachable even
     /// when its start predates recorded evidence.
-    var inWorkingSet: Bool { !sessions.isEmpty || (started && (!task.task.isTerminal || TaskHistoryFilter.hasUnresolvedExecution(runtime: task.runtime, condition: task.condition, flow: task.flow))) }
+    var inWorkingSet: Bool {
+        if !sessions.isEmpty { return true }
+        guard started else { return false }
+        return !task.task.isTerminal || TaskHistoryFilter.hasUnresolvedExecution(
+            runtime: task.runtime, condition: task.condition, flow: task.flow
+        )
+    }
 }
 
 enum WorkspacePresentation: String, CaseIterable {

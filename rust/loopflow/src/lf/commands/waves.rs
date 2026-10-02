@@ -1199,11 +1199,13 @@ async fn snapshot_task_detail(
         action_evidence.as_ref(),
         observed_at,
     );
-    let actions = action_evidence
-        .as_ref()
-        .map_or_else(TaskActionModel::no_task, |evidence| {
-            derive_task_actions(evidence)
-        });
+    let actions = action_evidence.as_ref().map_or_else(
+        || TaskActionModel {
+            recommended: None,
+            reason: next_move.reason.clone(),
+        },
+        derive_task_actions,
+    );
     let direction = match task {
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
@@ -2255,6 +2257,7 @@ mod tests {
             assert_eq!(detail.flow.controls[0].unavailable.as_deref(), terminal);
             if let Some(reason) = terminal {
                 assert_eq!(detail.next_move.reason, reason);
+                assert_eq!(detail.actions.reason, reason);
             }
         }
         let mut rows = details

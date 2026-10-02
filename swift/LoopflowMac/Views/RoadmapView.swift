@@ -23,7 +23,7 @@ enum RoadmapTaskAction: Equatable {
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     guard task.runtime != nil else {
-        guard let start = task.flow.controls.first(where: { $0.kind == .start }), start.unavailable == nil else { return nil }
+        guard let start = task.flow.control(.start), start.unavailable == nil else { return nil }
         return .run
     }
     switch task.actions.recommended {

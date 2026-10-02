@@ -1,6 +1,6 @@
 # Keep current Tasks visible and completed history out of the way
 
-2026-10-02 · LOO-369 · reviewed design, implemented locally; gate and demo pending.
+2026-10-02 · LOO-369 · reviewed design, reconciled with local implementation; gate and demo pending.
 Jack Heart requested getting LOO-369 running and ready to demo, as relayed by
 his existing control conversation. Coordinator guidance limits Show completed
 to successful completions; this refinement is not attributed as a direct new
@@ -183,30 +183,27 @@ Remaining: run the affected gate suites and configured app-build check below;
 then demonstrate Growth and retained Session navigation at the authored review.
 No provider edits, installation, publication, merge or visual approval is claimed.
 
-## Original implementation sequence
+## Reconciliation and remaining work
 
-**This slice:** repair the shared lifecycle projection and timestamp pipeline,
-then connect the Wave history control before claiming the outcome. The first
-focused proof is an unplaced canceled issue through PM ingestion, storage and
-`snapshot_tasks`/roadmap: terminal reason, Later, no start action; an unstarted
-retained target remains current.
+October 2 source review confirms the implementation and compression agree with
+the reviewed behavior. Unplaced actions reuse the projected next-move reason;
+the unconditional ready-to-start fallback is deleted. Swift lifecycle predicates
+read facts independently of display labels. No schema migration or cancellation
+timestamp was needed. The existing Task workspace association and Session
+membership remain independent of Wave history visibility.
 
-1. Extend provider selections, PM facts and summary DTOs; implement shared
-   terminal classification. Repair next-move, section and Flow-control inputs.
-   Prove old stored JSON enrichment and unchanged revision conflict safety.
-2. Cut over all affected Swift DTO readers, labels and action predicates.
-   Add history filtering in `WorkSurfaceView` and `WaveDetailPane`, with filter
-   state at the existing presentation owner. Preserve `WorkspaceProjection`
-   Session membership and retained pane identity. Update the relevant Desktop
-   README with the visible control and its default.
-3. Extend shared fixtures and production view interaction tests; carry the real
-   Wave demo to the authored review boundary.
+The shared fixture proves provider/storage/projection facts. The production-view
+test exercises hidden, 7-day, 30-day, invalid and All-time controls and counts;
+runtime and Session variants are synthetic. It checks all seven duplicate IDs
+initially and at All time, but does not yet explicitly check each intermediate
+window or enabled actions in the production view. Retained Session coverage
+proves working-set membership, not reopening the native Session. Gate retains
+those acceptance obligations below; source review does not promote them to passed.
 
-Delete the completed-only branches that claim canceled issues are available,
-startable or unstarted; replace the unfiltered Wave row/count expressions.
-Do not keep parallel old/new projections, add an archive database, or remove
-`completed`'s legitimate success meaning. Exclusive tests asserting the wrong
-canceled behavior must be replaced, while lifecycle/recovery proofs survive.
+Remaining work is affected gate acceptance and configured app compilation,
+followed by the Growth refresh and retained-workspace/Session demo. The existing
+Product memory now retains the lifecycle, recency and stale-recovery lessons.
+No additional product decision is required by this reconciliation.
 
 ## Done when and gate
 
@@ -253,4 +250,4 @@ repository progress, a new performance target, or successful live deployment.
 Excluded: another cancellation sweep, edits to retained targets, Project
 rotation, automatic lifecycle recovery, Session retirement, and primary runtime.
 
-Check: implementation sanity results recorded in task-history-handoff.md; affected gate and configured Desktop demo remain pending.
+Check: `git diff --check` — passed for reconciliation; recorded focused implementation/compression results reused from task-history-handoff.md; affected suites, final Clippy and configured build remain with gate, native judgment with demo/review.

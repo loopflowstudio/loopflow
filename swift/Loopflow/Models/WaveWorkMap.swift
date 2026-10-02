@@ -89,9 +89,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         switch state {
         case "canceled": "Canceled"
         case "duplicate": "Duplicate"
-        case "completed": "Completed"
-        case nil where completed: "Completed"
-        default: nil
+        default: isSuccessful ? "Completed" : nil
         }
     }
 
@@ -99,8 +97,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
     }
 
-    public var isTerminal: Bool { terminalLabel != nil }
-    public var isSuccessful: Bool { terminalLabel == "Completed" }
+    public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
+    public var isSuccessful: Bool { state == "completed" || (state == nil && completed) }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {

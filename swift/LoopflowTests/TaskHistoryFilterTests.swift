@@ -15,11 +15,17 @@ struct TaskHistoryFilterTests {
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
     }
 
+    private func historyRows() throws -> [[String: Any]] {
+        try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("task_history_rows.json"))
+        ) as? [[String: Any]])
+    }
+
     private func roadmapWire() throws -> [String: Any] {
         var root = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
         var waves = try #require(root["waves"] as? [[String: Any]])
         var evidence = try #require(waves[0]["tasks"] as? [String: Any])
-        var rows = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("task_history_rows.json"))) as? [[String: Any]])
+        var rows = try historyRows()
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
             rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
         }
@@ -30,10 +36,7 @@ struct TaskHistoryFilterTests {
     }
 
     private func task(_ state: String, date: String?, runtime: String? = nil, missing: Bool = false) throws -> RoadmapTask {
-        let wire = try roadmapWire()
-        let waves = try #require(wire["waves"] as? [[String: Any]])
-        let evidence = try #require(waves[0]["tasks"] as? [String: Any])
-        var row = try #require((evidence["items"] as? [[String: Any]])?.first)
+        var row = try #require(historyRows().first)
         var plan = try #require(row["task"] as? [String: Any])
         plan["state"] = state
         plan["completed"] = state == "completed"
@@ -153,7 +156,6 @@ struct TaskHistoryFilterTests {
         for id in [318, 315, 314, 313, 310, 308, 307] {
             #expect(try !rows().contains("LOO-\(id)"))
         }
-        #expect(try !rows().contains("LOO-318"))
         #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
     }
 }

@@ -30,4 +30,10 @@ Remaining: affected gate suites, configured app build, then the authored Desktop
 demo/review. The existing design retains that command plan and demo scenario.
 Publication, landing and Task completion remain outside this implementation step.
 
-Check: `cargo test -p loopflow --lib task_history` — 3 passed; `swift test --package-path swift --filter TaskHistoryFilterTests` — 5 passed, SwiftPM app compiled; `cargo fmt --check` and `git diff --check` — passed; affected suites/Clippy/configured build to gate, visible judgment to demo/review.
+Compression removed the unconditional ready-to-start action fallback. Unplaced
+Tasks now reuse their projected next-move reason, including cancellation and
+completion. Swift history predicates no longer depend on display labels; tests
+load individual rows without assembling a roadmap except for the view scenario.
+The implementation checkpoint is `e2a9277b0`; compression remains in the diff.
+
+Check: `cargo test -p loopflow --lib task_history` — 3 passed; `swift test --package-path swift --filter 'TaskHistoryFilterTests|RoadmapViewTests'` — 7 passed, SwiftPM app compiled; `cargo fmt --check` and `git diff --check` — passed; `cargo clippy --all-targets -- -D warnings` passed on the implementation checkpoint, final affected suites/Clippy/configured build to gate, visible judgment to demo/review.

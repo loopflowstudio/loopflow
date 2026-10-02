@@ -3,12 +3,18 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 #[test]
-fn terminal_control_accepts_a_model_option() {
+fn bare_lf_launches_a_conversational_prompt_with_a_model_option() {
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let claude = bin.join("claude");
-    fs::write(&claude, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::write(
+        &claude,
+        r#"#!/bin/sh
+printf '%s\n' "$@"
+"#,
+    )
+    .unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
 
     let repo = temp.path().join("repo");
@@ -40,6 +46,10 @@ fn terminal_control_accepts_a_model_option() {
         .output()
         .unwrap();
 
+    let prompt = String::from_utf8_lossy(&output.stdout);
+    assert!(prompt.contains("<lf:skill:default>"), "{prompt}");
+    assert!(!prompt.contains("<lf:skill:repo/operate>"), "{prompt}");
+    assert!(!prompt.contains("lf session list --json"), "{prompt}");
     assert!(
         output.status.success(),
         "{}",

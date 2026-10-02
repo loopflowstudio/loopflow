@@ -40,20 +40,6 @@ use crate::store::migrations;
 mod published;
 pub use published::{latest, schedule};
 
-pub(crate) fn guard_task_checkout() -> Result<()> {
-    let cwd = std::env::current_dir()?;
-    if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_some()
-        || crate::repo::discover_repo_root(&cwd)?.is_some()
-    {
-        crate::ops::task::require_unmanaged_checkout(&cwd, None)?;
-        crate::ops::task::require_unmanaged_checkout(
-            &cwd,
-            Some(&crate::store::production_database_path()),
-        )?;
-    }
-    Ok(())
-}
-
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -2114,19 +2100,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
     expected.verify()?;
 
-    // Recovery is a new caller of the saved operation. Check its Task ownership
-    // in the receipt's store without selecting or migrating an ordinary runtime.
-    let database = if receipt.target_store_advanced {
-        &receipt.target.store
-    } else {
-        receipt
-            .prior
-            .as_ref()
-            .map(|prior| &prior.store)
-            .unwrap_or(&receipt.target.store)
-    };
-    crate::ops::task::require_unmanaged_checkout(&std::env::current_dir()?, Some(database))?;
-
     if receipt.phase == crate::machine_install::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
@@ -2393,7 +2366,6 @@ pub fn promote(
     sync_skills: bool,
     preview_only: bool,
 ) -> Result<()> {
-    guard_task_checkout()?;
     if let crate::machine_install::MachineInstallState::Switching(receipt) =
         crate::machine_install::read_state(&crate::machine_install::root()?)?
     {
@@ -2407,7 +2379,6 @@ pub fn promote(
 /// recognizes the current store exactly. The exclusive lock keeps artifact and
 /// store selection serialized through the symlink commit.
 pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
-    guard_task_checkout()?;
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     match crate::machine_install::read_state(&crate::machine_install::root()?)? {

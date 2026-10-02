@@ -1720,6 +1720,11 @@ fn finish_release_pr(
                         // rebuilding version metadata; the finite reconciler owns CI repair.
                         let view =
                             crate::ops::pr::observe_pr_merge(main_repo, prepared.pr_number)?.pr;
+                        // Repair can finish after reconciliation read failing checks.
+                        // Re-enter merge settlement when fresh evidence has overtaken them.
+                        if view.state == "merged" {
+                            continue;
+                        }
                         if matches!(view.merge_state.as_deref(), Some("behind" | "dirty")) {
                             if let Some(pr) = current_pr(&wt.path)? {
                                 if let Some(head) = pr.head_sha {

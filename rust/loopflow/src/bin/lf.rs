@@ -418,11 +418,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+                loopflow::lf::commands::run::run(Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+            loopflow::lf::commands::run::run(Some("default"), None, cli)
         }),
     }
 }
@@ -1340,6 +1340,10 @@ fn run() -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Install { .. }
+                | loopflow::lf::HomeCommand::Doctor {
+                    planning: false,
+                    ..
+                }
         })
     );
     if !bypasses_machine_startup_gate
@@ -1362,6 +1366,10 @@ fn run() -> anyhow::Result<()> {
         Some(
             Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Install { .. }
+                    | loopflow::lf::HomeCommand::Doctor {
+                        planning: false,
+                        ..
+                    }
             } | Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Screenshot { .. }
             } | Commands::ScreenshotSupervisor { .. }
@@ -1383,6 +1391,19 @@ fn run() -> anyhow::Result<()> {
             return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
         }
         _ => {}
+    }
+
+    // Machine diagnosis must reach incompatible or uninitialized Homes without
+    // ordinary admission creating or migrating the database first.
+    if let Some(Commands::Home {
+        cmd:
+            loopflow::lf::HomeCommand::Doctor {
+                json,
+                planning: false,
+            },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::doctor::run(*json);
     }
 
     // Global-promotion commands dispatch before home routing, journal emission,
@@ -2060,17 +2081,6 @@ mod tests {
                 cmd: loopflow::lf::HomeCommand::Desktop
             })
         ));
-    }
-
-    #[test]
-    fn bare_lf_has_a_terminal_control_skill() {
-        let cli = Cli::try_parse_from(["lf"]).unwrap();
-        assert!(cli.command.is_none());
-        let skill = loopflow::engine::builtins::get_builtin_skill("loopflow")
-            .expect("builtin terminal control skill");
-        assert!(skill.contains("lf session list --json"));
-        assert!(skill.contains("lf session connect <session-id> --json"));
-        assert!(skill.contains("Keep this conversation open"));
     }
 
     #[test]

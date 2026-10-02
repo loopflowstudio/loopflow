@@ -738,7 +738,7 @@ Internal command; invoked by the owning operation.
 
 ## lf home doctor
 
-Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
+Diagnose installation, storage, Exec integrity and scheduled receipts
 
 | Argument | What it does |
 |---|---|

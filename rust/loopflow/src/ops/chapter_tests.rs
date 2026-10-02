@@ -149,6 +149,7 @@ fn task(state: &str) -> PmItem {
         description: String::new(),
         rank: 0,
         completed: state == "completed",
+        completed_at: None,
         state: Some(state.into()),
         project_id: Some("old".into()),
         project: Some("old".into()),
@@ -405,7 +406,7 @@ fn provider_fixture() -> Provider {
         ] {
             let issue = format!("{wave}-{suffix}");
             provider.issues.insert(issue.clone(), json!({"id":issue,"identifier":format!("FIX-{issue}"),"url":null,
-                "title":issue,"description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "title":issue,"description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
                 "state":{"type":state},"project":{"id":id,"name":name},"team":{"id":"team-1"}}));
         }
     }

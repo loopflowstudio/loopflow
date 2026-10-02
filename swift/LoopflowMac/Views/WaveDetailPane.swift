@@ -105,6 +105,8 @@ private struct WavePlanView: View {
 
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
+    @State private var historyFilters: [String: TaskHistoryFilter] = [:]
+    @State private var historyNow = Date()
     // True until the first live read resolves. It gates the loading affordance,
     // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
@@ -202,17 +204,34 @@ private struct WavePlanView: View {
     private var chapterAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let chapter = displayedPlan.currentProject { WaveChapterView(chapter: chapter) }
-            Text("Tasks").font(Typography.sectionTitle(17))
             if isAwaitingDetail {
+                WorkspaceSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
             } else if let workMap {
                 switch workMap.tasks {
-                case .unavailable(let reason): Text(reason).foregroundStyle(Color.statusWarning)
-                case .available(let tasks, _):
-                    if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                case .unavailable(let reason):
+                    WorkspaceSectionHeading("Tasks")
+                    Text(reason).foregroundStyle(Color.statusWarning)
+                case .available(let inventory, let truncated):
+                    let filter = historyFilters[identity] ?? TaskHistoryFilter()
+                    let tasks = inventory.filter {
+                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: historyNow)
+                    }
+                    WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                        TaskHistoryControls(filter: Binding(
+                            get: { historyFilters[identity] ?? TaskHistoryFilter() },
+                            set: { historyFilters[identity] = $0; historyNow = Date() }
+                        ))
+                        .id(identity)
+                    }
+                    if truncated { Text("Planning is partial; more Tasks exist.") }
+                    if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
                     ForEach(tasks) { task in WaveTaskWorkView(task: task, selection: $selection) }
                 }
-            } else { Text("Task status unavailable.").foregroundStyle(palette.textSecondary) }
+            } else {
+                WorkspaceSectionHeading("Tasks")
+                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
+            }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
                     .foregroundStyle(Color.statusWarning)
@@ -260,6 +279,7 @@ private struct WavePlanView: View {
                 cwd: repoPath
             )
             guard !Task.isCancelled else { return }
+            historyNow = Date()
             reading.update(snapshot)
         } catch {
             guard !Task.isCancelled else { return }
@@ -704,7 +724,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -758,7 +778,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.status.label ?? "unstarted",
+                    status: task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted",
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,

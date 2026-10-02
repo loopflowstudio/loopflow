@@ -47,6 +47,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
+    public let flow: TaskFlowSnapshot
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -55,7 +56,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs
+        case task, reference, runtime, directive, condition, actions, prs, flow
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -74,8 +75,32 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let name: String
     public let description: String
     public let rank: UInt32
+    public let state: String?
+    public let completedAt: String?
     public let completed: Bool
     public let assignee: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, identifier, name, description, rank, completed, state, assignee
+        case completedAt = "completed_at"
+    }
+
+    public var terminalLabel: String? {
+        switch state {
+        case "canceled": "Canceled"
+        case "duplicate": "Duplicate"
+        case "completed": "Completed"
+        case nil where completed: "Completed"
+        default: nil
+        }
+    }
+
+    public var historyLabel: String? {
+        isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
+    }
+
+    public var isTerminal: Bool { terminalLabel != nil }
+    public var isSuccessful: Bool { terminalLabel == "Completed" }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {

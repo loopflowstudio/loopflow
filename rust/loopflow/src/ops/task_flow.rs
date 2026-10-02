@@ -90,7 +90,7 @@ pub struct TaskFlowControl {
 pub(crate) struct TaskFlowGate<'a> {
     /// `None` when no durable Task Work exists yet.
     pub status: Option<&'a WorkStatus>,
-    pub plan_completed: bool,
+    pub plan_terminal_reason: Option<&'a str>,
     pub worktree_blocker: Option<&'a str>,
     pub launch_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
@@ -103,7 +103,7 @@ pub(crate) fn task_flow_controls(
     let terminal = match gate.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
         Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
-        None if gate.plan_completed => Some("Linear Task is complete"),
+        None => gate.plan_terminal_reason,
         _ => None,
     };
     let control = |kind, unavailable: Option<String>| TaskFlowControl {
@@ -184,7 +184,7 @@ mod tests {
             record,
             &TaskFlowGate {
                 status,
-                plan_completed: false,
+                plan_terminal_reason: None,
                 worktree_blocker: None,
                 launch_refusal: None,
                 resume_refusal: None,

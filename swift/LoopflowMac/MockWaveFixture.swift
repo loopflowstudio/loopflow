@@ -317,7 +317,7 @@ enum MockWaveFixture {
                   "name": "Surface nightly failures",
                   "description": "Surface one focused failure.",
                   "rank": 1,
-                  "completed": false,
+                  "completed": false, "state": "unstarted", "completed_at": null,
                   "assignee": "user-1"
                 },
                 "reference": {
@@ -336,6 +336,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "started": true
                 },
+                "flow": {"recommended":"feature","record":{"kind":"none"},"controls":[]},
                 "directive": {
                   "version": 2,
                   "kind": "replacement",
@@ -407,7 +408,7 @@ enum MockWaveFixture {
                   "name": "Classify publish failures",
                   "description": "",
                   "rank": 2,
-                  "completed": false,
+                  "completed": false, "state": "unstarted", "completed_at": null,
                   "assignee": null
                 },
                 "reference": {
@@ -415,6 +416,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
+                "flow": {"recommended":"feature","record":{"kind":"none"},"controls":[]},
                 "directive": null,
                 "next_move": {
                   "owner": "wave",

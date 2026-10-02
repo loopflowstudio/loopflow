@@ -1,11 +1,12 @@
 # Keep current Tasks visible and completed history out of the way
 
-2026-10-02 · LOO-369 · reviewed design, ready for implementation handoff.
+2026-10-02 · LOO-369 · reviewed design, implemented locally; gate and demo pending.
 Jack Heart requested getting LOO-369 running and ready to demo, as relayed by
 his existing control conversation. Coordinator guidance limits Show completed
 to successful completions; this refinement is not attributed as a direct new
 statement from Jack. Routine filter details below are implementation choices.
-Implementation, headless acceptance and the final Desktop demo remain pending.
+The shared projection and Desktop filter are implemented. Affected gate acceptance
+and the final Desktop demo remain pending.
 
 ## Problem and demo
 
@@ -153,7 +154,36 @@ an old canceled issue looks successful, a reopened Task vanishes, or adding date
 breaks refresh at the same revision. The acceptance scenarios below target those
 failures directly.
 
-## Implementation sequence — one coherent delivery
+## Implementation state — one coherent delivery
+
+The provider and stored PM facts now carry completed_at; Task summaries retain
+state. One Rust terminal classifier supplies admission, section and next-move
+reason without changing successful-completion semantics. Equal-revision enrichment
+inspects raw stored key presence and rejects changing an observed nullable value.
+
+Desktop uses the same history filter for Wave rows and counts. Per-Wave window
+state retains the chosen window. The alternate detail consumes the existing Flow
+projection to preserve unresolved reviews. Open Session membership remains outside
+history visibility. Missing planning no longer infers successful completion from
+local abandonment.
+
+Jack Heart relayed a coordinator review finding on October 2: settled completed
+Tasks with removed checkouts had stale recovery conditions. The filter now ignores
+that historical missing-checkout condition for terminal runtime. A nonterminal
+runtime, unresolved pinned Flow, or observed unsettled files/commits preserves
+current work. A removed checkout alone does not. Regression coverage includes
+completed + done + missing checkout + recovery_required, as requested.
+
+Simulated code review found and repaired two related gaps: the alternate Wave
+reader had discarded Flow evidence needed to retain reviews, and the missing-plan
+fallback called local abandonment successful completion. Neither now supplies a
+false history or success signal.
+
+Remaining: run the affected gate suites and configured app-build check below;
+then demonstrate Growth and retained Session navigation at the authored review.
+No provider edits, installation, publication, merge or visual approval is claimed.
+
+## Original implementation sequence
 
 **This slice:** repair the shared lifecycle projection and timestamp pipeline,
 then connect the Wave history control before claiming the outcome. The first
@@ -206,8 +236,9 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-Acceptance requires affected tests and app compilation to pass; no such pass is
-claimed yet. The new filter suite name is planned.
+Acceptance requires affected suites and configured app compilation at gate.
+The focused TaskHistoryFilterTests suite and SwiftPM app compilation are covered
+by implementation sanity checks; they do not replace gate or visual review.
 Time tests use a fixed clock: exactly 7 days, one subsecond before, now, future,
 timezone offsets, DST crossing, missing dates, another positive day count and
 All time. Provider tests cover completed/canceled/duplicate/open/unknown states,
@@ -222,4 +253,4 @@ repository progress, a new performance target, or successful live deployment.
 Excluded: another cancellation sweep, edits to retained targets, Project
 rotation, automatic lifecycle recovery, Session retirement, and primary runtime.
 
-Check: `lf roadmap --wave growth --json` plus read-only `pm_snapshots` state query — reproduced all seven canceled items projected as available; source/schema review complete; implementation and headless acceptance remain pending.
+Check: implementation sanity results recorded in task-history-handoff.md; affected gate and configured Desktop demo remain pending.

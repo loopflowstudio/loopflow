@@ -166,11 +166,20 @@ struct WorkSurfaceView: View {
                         WorkspaceSectionHeading("Tasks")
                         Text(reason).font(Typography.body(13)).foregroundStyle(Color.statusWarning)
                     }
-                case .available(let tasks, let truncated):
+                case .available(let inventory, let truncated):
+                    let filter = model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter()
+                    let tasks = inventory.filter {
+                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: model.taskHistoryNow)
+                    }
                     section {
+                        TaskHistoryControls(filter: Binding(
+                            get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
+                            set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
+                        ))
                         WorkspaceSectionHeading("Tasks", count: tasks.count)
+                            .accessibilityIdentifier("wave-task-count")
                         if tasks.isEmpty {
-                            Text("No Tasks in this chapter.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                            Text("No current Tasks").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                         } else {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(tasks.sorted { $0.task.rank < $1.task.rank }.enumerated()), id: \.element.id) { index, task in
@@ -429,7 +438,9 @@ struct WorkSurfaceView: View {
     /// The plan row's state, read from the shared Task projection. Only running,
     /// done, human, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
     private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
-        if task.task.completed { return ("Completed", .done) }
+        if let label = task.task.historyLabel {
+            return (label, task.task.isSuccessful ? .done : .neutral)
+        }
         if case .pinned(let pinned) = task.flow.record {
             return pinned.execution.presentation
         }

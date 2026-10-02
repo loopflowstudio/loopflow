@@ -11,7 +11,12 @@ the last valid filter. Choices persist per Wave within the current window and
 start hidden in a fresh window. No cancellation timestamps or second history
 control are needed for this slice.
 
-No design question blocks implementation. See the
+No design question blocks gate. See the
 [current design](keep-current-tasks-visible-and.md) and
 [implementation handoff](task-history-handoff.md). Final Desktop judgment remains
 at the authored demo review.
+
+Jack Heart relayed the October 2 coordinator finding about obsolete missing-checkout
+recovery. Terminal runtime plus a removed checkout does not count as unresolved
+execution for history visibility. Observed unsettled files/commits and pinned Flow
+execution remain current; active Session access remains independent.

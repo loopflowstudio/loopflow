@@ -544,7 +544,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     }
     let captures = fixture.count("agent_sessions");
     {
-        let command = vec!["usage", "--days", "0", "--json"];
+        let command = vec!["monitor", "usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -609,7 +609,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["usage", "--days", "0", "--task", issue, "--json"])
+            .json(&["monitor", "usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -889,7 +889,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: task sync --plan\n",
+        "- cmd: sync --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -1376,7 +1376,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
     {
-        let rows = fixture.json(&["usage", "--wave", "task-pr-tests", "--json"]);
+        let rows = fixture.json(&["monitor", "usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
@@ -1623,9 +1623,9 @@ raise SystemExit(1 if failed else 0)
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }
     let review = runs[2].0.clone();
-    let listed: Vec<Value> = serde_json::from_value(
-        fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
-    )
+    let listed: Vec<Value> = serde_json::from_value(fixture.json(&[
+        "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+    ]))
     .unwrap();
     let mut listed: Vec<&str> = listed
         .iter()
@@ -1977,7 +1977,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
            (SELECT count(*) FROM flow_events WHERE kind='consumed') FROM session_events WHERE kind!='observed'", [],
         |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
     assert_eq!((threads, starts, done, consumed), (2, 3, 3, 2));
-    let usage = fixture.json(&["usage", "--json"]);
+    let usage = fixture.json(&["monitor", "usage", "--json"]);
     assert_eq!(usage.as_array().unwrap().len(), 2);
     let launches = fixture.launches();
     assert_eq!(launches.len(), 3);

@@ -1,4 +1,4 @@
-//! Command ownership, shorthand, and read-only inspection share Clap metadata.
+//! Command ownership and read-only inspection share Clap metadata.
 use std::path::Path;
 
 use anyhow::Result;
@@ -13,69 +13,15 @@ pub fn command_tree() -> Command {
     command
 }
 
-fn descendants(
-    command: &Command,
-    name: &str,
-    prefix: &[String],
-    matches: &mut Vec<Vec<String>>,
-    abbreviated: bool,
-) {
-    for child in command
-        .get_subcommands()
-        .filter(|child| !child.is_hide_set())
-    {
-        let mut path = prefix.to_vec();
-        path.push(child.get_name().to_string());
-        if child.get_name() == name || (abbreviated && child.get_name().starts_with(name)) {
-            matches.push(path.clone());
-        }
-        descendants(child, name, &path, matches, abbreviated);
-    }
-}
-
 pub fn resolve_child(
     command: &Command,
     name: &str,
-    prefix: &[String],
+    _prefix: &[String],
 ) -> Result<Option<Vec<String>>, clap::Error> {
-    // Hidden callbacks are still exact commands; they never become shortcuts.
-    if let Some(child) = command
+    Ok(command
         .get_subcommands()
         .find(|child| child.get_name() == name)
-    {
-        return Ok(Some(vec![child.get_name().to_string()]));
-    }
-    let mut matches = Vec::new();
-    descendants(command, name, &[], &mut matches, false);
-    // Exact descendant names win over abbreviations, just as exact owners do.
-    if matches.is_empty() {
-        descendants(command, name, &[], &mut matches, true);
-    }
-    match matches.len() {
-        0 => Ok(None),
-        1 => Ok(matches.pop()),
-        _ => {
-            let choices = matches
-                .iter()
-                .map(|path| {
-                    format!(
-                        "  lf {}",
-                        prefix
-                            .iter()
-                            .chain(path)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            Err(clap::Error::raw(
-                clap::error::ErrorKind::InvalidSubcommand,
-                format!("ambiguous command '{name}'; use its owner:\n{choices}\n"),
-            ))
-        }
-    }
+        .map(|child| vec![child.get_name().to_string()]))
 }
 
 fn flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Arg> {
@@ -99,7 +45,7 @@ fn descendant_flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Ar
     })
 }
 
-/// Expand command owners and route help before execution or account selection.
+/// Route literal command paths and help before execution or account selection.
 pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     if args.len() < 2 {
         return Ok(args);
@@ -295,7 +241,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nOmit owners when a command is unique: lf land → lf task pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nUse literal command paths: lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
     let definition = match path {

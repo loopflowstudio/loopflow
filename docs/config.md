@@ -1,8 +1,8 @@
 # Configuration
 
 ```bash
-lf user                                # show the resolved display name
-lf user --json                         # name as a JSON string, or null when unavailable
+lf home user                                # show the resolved display name
+lf home user --json                         # name as a JSON string, or null when unavailable
 ```
 
 Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
@@ -18,7 +18,7 @@ user:
 
 Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
-preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
+preference. Direct interactive and batch launches use the resolved name, and `lf home ssh`
 carries the caller's name rather than reading the destination owner's name.
 A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
 empty or whitespace-only value falls through to personal configuration and Git.
@@ -34,7 +34,7 @@ submitting a prompt or resetting its participant. Agents can use a name they
 already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
-`lf user --json` resolves the name without provider or PM access.
+`lf home user --json` resolves the name without provider or PM access.
 Session prompts carry the selected participant name. Stored transcripts retain
 their original wording; unnamed historical messages remain anonymous.
 
@@ -230,15 +230,15 @@ release:
       completion: github-release
 ```
 
-`lf repo run patch --target cli` selects changes from the exact
+`lf repo release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf repo run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf check`
+`verify` runs during `lf repo release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf repo release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The

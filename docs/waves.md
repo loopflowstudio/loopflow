@@ -178,7 +178,7 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Work placement records the owning Home. Use `lf cron`
+Work placement records the owning Home. Use `lf wave cron`
 for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
@@ -264,7 +264,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf mon show --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf monitor show --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -295,8 +295,8 @@ to bring relevant findings into the parent's memory.
 lf home id
 lf home observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
-lf ssh <home-id> --wave shipper wave/operate
-lf ssh <home-id> wave status shipper --json
+lf home ssh <home-id> --wave shipper wave/operate
+lf home ssh <home-id> wave status shipper --json
 ```
 
 A Home is a stable machine identity with a replaceable route. Placement records
@@ -322,7 +322,7 @@ See [Homes and processes](architecture/homes.md) and
 
 ```bash
 lf wave status infra --json
-lf update-plan --wave infra --plan plan.json
+lf wave update-plan --wave infra --plan plan.json
 ```
 
 `plan.json` contains the complete current plan:
@@ -366,7 +366,7 @@ durable Task Work in its own stable sibling worktree:
 ```bash
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
-lf checkout INF-123
+lf task checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf --task INF-123 flow start
 lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent merges
@@ -402,8 +402,8 @@ steering, resume and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf land --next parser-proof   # after verified merge, rotate to the next
-lf land -c                    # after verified merge, complete the Task
+lf pr land --next parser-proof   # after verified merge, rotate to the next
+lf pr land -c                    # after verified merge, complete the Task
 lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
 

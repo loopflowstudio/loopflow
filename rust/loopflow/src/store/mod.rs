@@ -178,7 +178,7 @@ fn guard_development_database(
 /// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must
 /// never be a side effect of an ordinary command: on 2026-07-17 a published
 /// candidate at `target/release/lf` did exactly that and stranded the installed
-/// binary. Only `lf install promote`, under the exclusive promotion lock, opens
+/// binary. Only `lf home install promote`, under the exclusive promotion lock, opens
 /// the store as `Authorized`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FrontierAdvance {
@@ -1157,7 +1157,7 @@ pub async fn open_existing_store() -> Option<Store> {
     match open_store(&cfg).await {
         Ok(store) => Some(store),
         Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
+            tracing::warn!(?path, %err, "local store is incompatible; run lf home doctor");
             None
         }
     }
@@ -1178,7 +1178,7 @@ pub enum RegistryUnavailable {
     /// development guard, or an IO failure before the file is even opened.
     Unresolved { error: String },
     /// The registry file exists but could not be opened: inaccessible, locked,
-    /// or schema-incompatible. Actionable via `lf doctor`.
+    /// or schema-incompatible. Actionable via `lf home doctor`.
     Incompatible { path: PathBuf, error: String },
 }
 

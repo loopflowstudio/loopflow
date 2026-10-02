@@ -103,11 +103,117 @@ fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
     Ok(())
 }
 
+/// Commit an explicit document selection using an independent index. The real
+/// index retains unrelated staged work, and scratch remains on disk.
+pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
+    let message =
+        message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    let directory = tempfile::tempdir()?;
+    let index = directory.path().join("index");
+    let run = |args: &[String]| -> OpsResult<()> {
+        let output = std::process::Command::new("git")
+            .current_dir(repo)
+            .env("GIT_INDEX_FILE", &index)
+            .args(args)
+            .output()?;
+        if !output.status.success() {
+            return Err(OpsError::Message(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
+        }
+        Ok(())
+    };
+    run(&["read-tree".into(), "HEAD".into()])?;
+    let selected = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect::<Vec<_>>();
+    let mut args = vec!["add".into(), "-A".into(), "--".into()];
+    args.extend(selected.clone());
+    args.push(":(top,exclude)scratch".into());
+    if !paths.is_empty() {
+        run(&args)?;
+    }
+    if crate::engine::worktrees::is_resident_worktree(repo)? {
+        run(&[
+            "rm".into(),
+            "-r".into(),
+            "--cached".into(),
+            "--ignore-unmatch".into(),
+            "-f".into(),
+            "--".into(),
+            ":(top)scratch".into(),
+        ])?;
+    }
+    run(&["commit".into(), "-m".into(), message.into()])?;
+    let mut reset = vec!["reset".to_string(), "-q".into(), "HEAD".into(), "--".into()];
+    reset.extend(selected);
+    if crate::engine::worktrees::is_resident_worktree(repo)? {
+        reset.push(":(top)scratch".into());
+    }
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args(reset)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::Message(format!(
+            "commit saved; index refresh failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_resident_publication(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_resident_worktree(repo)? {
+        return Ok(());
+    }
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args(["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"])
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::Message(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    if !output.stdout.is_empty() {
+        commit_selected(repo, &[], Some("Keep resident scratch local"))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn untrack_resident_scratch(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_resident_worktree(repo)? {
+        return Ok(());
+    }
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args([
+            "rm",
+            "-r",
+            "--cached",
+            "--ignore-unmatch",
+            "-f",
+            "--",
+            ":(top)scratch",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::Message(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn commit_workflow(
     repo: &Path,
     options: &CommitOptions,
     progress: &impl Progress,
 ) -> OpsResult<bool> {
+    untrack_resident_scratch(repo)?;
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
@@ -121,7 +227,19 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        stage_all(repo)?;
+        if crate::engine::worktrees::is_resident_worktree(repo)? {
+            let output = std::process::Command::new("git")
+                .current_dir(repo)
+                .args(["add", "-A", "--", ".", ":(top,exclude)scratch"])
+                .output()?;
+            if !output.status.success() {
+                return Err(OpsError::Message(
+                    String::from_utf8_lossy(&output.stderr).into_owned(),
+                ));
+            }
+        } else {
+            stage_all(repo)?;
+        }
     }
 
     if !has_staged_changes(repo)? {

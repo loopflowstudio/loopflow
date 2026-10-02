@@ -19,7 +19,7 @@ fn resolve_review_surface() -> ReviewSurface {
     ReviewSurface::default()
 }
 
-/// Present an existing draft or ready PR. Only `lf task pr open` calls this boundary;
+/// Present an existing draft or ready PR. Only `lf pr open` calls this boundary;
 /// presentation does not change readiness. A failed browser launch leaves the
 /// PR available at its URL.
 pub fn present_pr_review(url: &str) -> OpsResult<()> {

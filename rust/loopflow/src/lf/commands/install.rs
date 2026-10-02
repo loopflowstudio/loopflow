@@ -1,4 +1,4 @@
-//! `lf install` — authorize global `lf` promotion against the shared migration
+//! `lf home install` — authorize global `lf` promotion against the shared migration
 //! frontier.
 //!
 //! A branch-local build must never silently become the Home-global command:
@@ -54,7 +54,7 @@ pub(crate) fn guard_task_checkout() -> Result<()> {
     Ok(())
 }
 
-/// The candidate binary's identity. The process running `lf install` *is* the
+/// The candidate binary's identity. The process running `lf home install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CandidateIdentity {
@@ -463,7 +463,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     }
     if absent > 0 {
         // Never silent: a large count is a signal the registry has drifted from
-        // the filesystem and wants a `lf mon prune`/reconcile sweep.
+        // the filesystem and wants a `lf monitor prune`/reconcile sweep.
         eprintln!(
             "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
              (dead worktrees); they cannot run and do not gate promotion"
@@ -1172,7 +1172,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["install", "preflight", "--json"])
+        .args(["home", "install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1200,7 +1200,7 @@ fn read_binary_preview(binary: &Path) -> Result<PromotionPreview> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["install", "preflight", "--json"])
+        .args(["home", "install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1626,7 +1626,7 @@ fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
 ) -> Result<crate::machine_install::ActiveInstall> {
-    let repair = "run `lf install`";
+    let repair = "run `lf home install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
         return Err(anyhow!(
@@ -1875,7 +1875,7 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
         return recover_switch(&receipt.id);
     }
     let status = Command::new(&recovery.path)
-        .args(["install", "recover-switch", "--switch", &receipt.id])
+        .args(["home", "install", "recover-switch", "--switch", &receipt.id])
         .status()
         .with_context(|| {
             format!(
@@ -1949,7 +1949,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
     }
     match receipt.target.source {
         crate::machine_install::InstallSource::Development => {
-            return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
+            return Err(anyhow!("development installations are retired; install a published release with `lf home install`"));
         }
         crate::machine_install::InstallSource::Published => {
             if candidate.authority != MigrationAuthority::Published {
@@ -1969,7 +1969,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
 fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
     receipt.candidate.verify()?;
     let status = Command::new(&receipt.candidate.path)
-        .args(["install", "advance-switch", "--switch", &receipt.id])
+        .args(["home", "install", "advance-switch", "--switch", &receipt.id])
         .env(
             crate::machine_install::INSTALL_SWITCH_ENV,
             receipt.id.as_str(),

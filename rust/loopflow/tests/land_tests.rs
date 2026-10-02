@@ -1758,7 +1758,6 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "task",
             "pr",
             "arm",
             "--strict",
@@ -1869,7 +1868,7 @@ fi"#;
             fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
             fs::write(
                 worktree.join(".lf/flows/repair-proof.yaml"),
-                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+                "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
         }
@@ -2193,4 +2192,53 @@ fi"#;
             assert_eq!(repaired_head.trim(), merged_head);
         }
     }
+}
+
+#[test]
+fn resident_submit_keeps_scratch_and_post_commit_edits() {
+    let gh = gh_no_pr_script();
+    let _env = EnvGuard::new(&[("gh", &gh)]);
+    let repo = TestRepo::new();
+    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
+    fs::create_dir_all(resident.path.join("scratch/nested")).unwrap();
+    fs::write(resident.path.join("scratch/nested/plan.md"), "private\n").unwrap();
+    fs::write(resident.path.join("memory.md"), "next decision\n").unwrap();
+    submit(
+        &resident.path,
+        &LandOptions {
+            strict: false,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("Document memory".into()),
+            pr_body: Some("Accepted decisions".into()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert!(resident.path.is_dir());
+    assert_eq!(
+        fs::read_to_string(resident.path.join("scratch/nested/plan.md")).unwrap(),
+        "private\n"
+    );
+    assert_eq!(
+        fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+        "next decision\n"
+    );
+    let committed = Command::new("git")
+        .current_dir(&resident.path)
+        .args(["show", "HEAD:memory.md"])
+        .output()
+        .unwrap();
+    assert_eq!(committed.stdout, b"accepted\n");
 }

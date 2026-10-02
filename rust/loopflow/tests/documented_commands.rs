@@ -1,4 +1,4 @@
-//! Command ambiguity is checked against the live Clap tree, never a copied catalog.
+//! Literal command ownership is checked against the live Clap tree, never a copied catalog.
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -72,93 +72,76 @@ fn examples(text: &str) -> Vec<(usize, &str)> {
         .collect()
 }
 
+fn literal_path_error(args: &[String], repo: &Path) -> Option<String> {
+    let tree = loopflow::lf::navigation::command_tree();
+    let mut command = &tree;
+    for name in args.iter().skip(1) {
+        if name.starts_with('-') || name.contains('<') || name.contains('$') {
+            break;
+        }
+        if let Some(child) = command.find_subcommand(name) {
+            command = child;
+        } else if command.get_name() == "lf" {
+            // Authored names and illustrative placeholders are valid at root;
+            // an actual descendant command needs its literal owner.
+            fn descendant(command: &clap::Command, name: &str) -> bool {
+                command
+                    .get_subcommands()
+                    .any(|child| child.get_name() == name || descendant(child, name))
+            }
+            if descendant(&tree, name)
+                && loopflow::engine::target::resolve_definition(repo, name, None).is_err()
+            {
+                return Some(format!("{name} requires its command owner"));
+            }
+            break;
+        } else if command.get_subcommands().next().is_some()
+            && command.get_positionals().next().is_none()
+            && !command.is_allow_external_subcommands_set()
+        {
+            return Some(format!(
+                "{} has no immediate child {name}",
+                command.get_name()
+            ));
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 #[test]
-fn documented_invocations_have_no_ambiguous_command_shorthand() {
+fn documented_commands_use_literal_paths() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = vec![repo.join("README.md"), repo.join("AGENTS.md")];
     for directory in ["docs", "rust/loopflow/src/engine/builtins", "skills"] {
         markdown_files(&repo.join(directory), &mut files);
     }
-    files.sort();
     let mut failures = Vec::new();
     let mut checked = 0;
     for path in files {
-        let text = fs::read_to_string(&path).unwrap();
-        for (line_number, example) in examples(&text) {
+        for (line, example) in examples(&fs::read_to_string(&path).unwrap()) {
             let mut args = words(example);
-            // Help resolves its path in the inspection layer after normalization.
             if args.get(1).is_some_and(|word| word == "help") {
                 args.remove(1);
             }
-            let result = normalize_args(args);
-            // The reference deliberately demonstrates ambiguity and its error.
-            let expect_ambiguous = example.contains("# lf-doc: ambiguous");
-            if result.is_err() != expect_ambiguous {
-                failures.push(format!(
-                    "{}:{}: {example}\n{}",
-                    path.strip_prefix(&repo).unwrap().display(),
-                    line_number,
-                    result
-                        .err()
-                        .map(|error| error.to_string())
-                        .unwrap_or_else(|| {
-                            "expected the documented ambiguity, but command now resolves".into()
-                        })
-                ));
+            if let Some(error) = literal_path_error(&args, &repo) {
+                failures.push(format!("{}:{line}: {example}: {error}", path.display()));
             }
             checked += 1;
         }
     }
-    assert!(
-        checked > 200,
-        "documentation scanner found only {checked} examples"
-    );
-    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+    assert!(checked > 200);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
-fn another_owner_makes_a_documented_shortcut_fail() {
-    use loopflow::lf::navigation::resolve_child;
-    let tree = clap::Command::new("lf").subcommand(
-        clap::Command::new("task")
-            .subcommand(clap::Command::new("pr").subcommand(clap::Command::new("land"))),
-    );
-    assert_eq!(
-        resolve_child(&tree, "land", &[]).unwrap().unwrap(),
-        ["task", "pr", "land"]
-    );
-    let changed =
-        tree.subcommand(clap::Command::new("another").subcommand(clap::Command::new("land")));
-    assert!(resolve_child(&changed, "land", &[]).is_err());
-    assert_eq!(
-        resolve_child(
-            changed.find_subcommand("task").unwrap(),
-            "land",
-            &["task".into()]
-        )
-        .unwrap()
-        .unwrap(),
-        ["pr", "land"]
-    );
-}
-
-#[test]
-fn wrapped_inline_commands_are_checked_for_ambiguity() {
-    let text = "Read `lf\nstatus` or `lf help\nstatus`.\n\n```sh\nlf land --help\n```\n";
+fn wrapped_inline_commands_retain_literal_paths() {
+    let text = "Read `lf\npr land` or `lf help\npr land`.\n";
     let extracted = examples(text);
-    assert_eq!(
-        extracted,
-        [
-            (1, "lf\nstatus"),
-            (2, "lf help\nstatus"),
-            (6, "lf land --help")
-        ]
-    );
-    for (_, example) in &extracted[..2] {
-        let mut args = words(example);
-        if args[1] == "help" {
-            args.remove(1);
-        }
-        assert!(normalize_args(args).is_err(), "{example}");
+    assert_eq!(extracted, [(1, "lf\npr land"), (2, "lf help\npr land")]);
+    for (_, example) in extracted {
+        let args = words(example);
+        assert_eq!(normalize_args(args.clone()).unwrap(), args);
     }
 }

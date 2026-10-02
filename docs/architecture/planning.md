@@ -3,7 +3,7 @@
 ```bash
 lf --wave product wave/operate
 lf task status INF-124 --json
-lf checkout INF-124
+lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf --task INF-124 flow start
 lf repo new-chapter 2026-10 --dry-run

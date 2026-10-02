@@ -111,7 +111,7 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf checkout <issue> --json
+lf task checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf --task <issue> flow start <chosen-flow>
 ```

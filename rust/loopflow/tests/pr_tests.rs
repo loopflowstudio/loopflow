@@ -102,7 +102,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         String::from_utf8(run(&["pr"])).unwrap().trim(),
         "No open PR for the current branch."
     );
-    run(&["task", "commit", "-m", "Record local work"]);
+    run(&["commit", "-m", "Record local work"]);
     let committed = repo.head_sha();
     assert_ne!(before, committed);
     assert!(!state.exists(), "commit published a PR");
@@ -113,14 +113,13 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         .unwrap();
     assert!(remote.status.success());
     assert!(remote.stdout.is_empty(), "commit pushed the branch");
-    run(&["task", "sync", "--plan"]);
+    run(&["sync", "--plan"]);
     assert_eq!(repo.head_sha(), committed);
     let worktrees: serde_json::Value =
-        serde_json::from_slice(&run(&["task", "wt", "list", "--json"])).unwrap();
+        serde_json::from_slice(&run(&["wt", "list", "--json"])).unwrap();
     assert_eq!(worktrees.as_array().unwrap().len(), 1);
     for (verb, expected) in [("open", "draft"), ("publish", "open")] {
         run(&[
-            "task",
             "pr",
             verb,
             "--title",
@@ -129,7 +128,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
             "No Task required.",
         ]);
         assert_eq!(fs::read_to_string(&state).unwrap(), expected);
-        let status = String::from_utf8(run(&["task", "pr"])).unwrap();
+        let status = String::from_utf8(run(&["pr"])).unwrap();
         assert!(status.contains("#1") && status.contains("https://example.com/pr/1"));
     }
     let remote = Command::new("git")
@@ -196,7 +195,7 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 .unwrap();
             } else {
                 let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-                    .args(["task", "pr"])
+                    .args(["pr"])
                     .args(args)
                     .current_dir(repo.path())
                     .output()
@@ -1927,4 +1926,61 @@ Body:
         panic!("expected labeled codex output to succeed");
     };
     assert!(result.created);
+}
+
+#[test]
+fn resident_publication_pushes_committed_docs_and_preserves_local_files() {
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join("pr-state");
+    let gh = draft_pr_script(&state);
+    let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
+    let repo = TestRepo::new();
+    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(resident.path.join("scratch")).unwrap();
+    fs::write(resident.path.join("scratch/design.md"), "private\n").unwrap();
+    fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Save memory"))
+        .unwrap();
+    fs::write(resident.path.join("memory.md"), "next decision\n").unwrap();
+    fs::write(resident.path.join("unrelated.md"), "unpublished\n").unwrap();
+    let options = PrOptions {
+        draft: false,
+        title: Some("Document accepted decisions".into()),
+        body: Some("Durable repository memory.".into()),
+        agent: None,
+    };
+    let first = create_or_update_pr(&resident.path, &options, &NullProgress).unwrap();
+    let second = create_or_update_pr(&resident.path, &options, &NullProgress).unwrap();
+    assert_eq!(first.url, second.url);
+    let published = Command::new("git")
+        .current_dir(&resident.path)
+        .args(["show", &format!("origin/{}:memory.md", resident.branch)])
+        .output()
+        .unwrap();
+    assert!(published.status.success());
+    assert_eq!(published.stdout, b"accepted\n");
+    let scratch = Command::new("git")
+        .current_dir(&resident.path)
+        .args([
+            "ls-tree",
+            "-r",
+            "--name-only",
+            &format!("origin/{}", resident.branch),
+            "--",
+            "scratch",
+            "unrelated.md",
+        ])
+        .output()
+        .unwrap();
+    assert!(scratch.stdout.is_empty());
+    assert_eq!(
+        fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+        "next decision\n"
+    );
+    assert!(resident.path.join("scratch/design.md").exists());
+    assert!(resident.path.join("unrelated.md").exists());
 }

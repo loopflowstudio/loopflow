@@ -84,7 +84,7 @@ worktrees, placement and execution history.
   Sessions retain their own feedback and completion contract.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
-- Update an authorized plan through `lf update-plan --wave <wave> --plan
+- Update an authorized plan through `lf wave update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `flow` and `krs`; for example
@@ -178,3 +178,46 @@ Give follow-up Tasks independently useful outcomes, rather than implementation l
 Link related work where you explain its relationship: builds on, supersedes,
 or verified by. Use the link forms above for Tasks and PRs, and preserve cited
 decisions and evidence somewhere that survives shipping.
+
+## Resident workspace and document publication
+
+This scope has a persistent checkout, reused when its conversation is replaced.
+Keep proposals and working plans in `scratch/`. Put accepted Wave decisions in
+`wave/<wave>/MEMORY.md`; repository decisions belong in the existing repository
+guide or the documentation that owns the subject. Use names and dates. Do not
+invent a Wave, Task, or duplicate memory file merely to publish documents.
+
+At the start of a deliberate maintenance or publication pass, inspect
+`git status --short` and `lf sync --plan`, then run `lf sync`. This is an explicit
+maintenance boundary, not a per-message action. Coordinate with any active
+writer in this checkout first. Fetch failures leave local work usable. Conflicts
+remain in place: inspect them, resolve the files, and use `lf sync --continue`;
+`lf sync --abort` returns to the saved operation's starting point. Commit any
+local changes that block integration deliberately, without including unrelated work.
+
+Publish only after existing authorization covers publication:
+
+```bash
+git diff -- wave/<wave>/MEMORY.md
+lf commit -m "Record accepted Wave decisions" wave/<wave>/MEMORY.md
+git diff origin/main...HEAD --stat
+lf pr publish
+```
+
+For repository documents, substitute their actual paths. Selected-path commits
+preserve unrelated staged and unstaged changes. Resident commit and publication
+remove tracked scratch from the index without deleting its local files. The PR
+contains the branch's committed range, so inspect the whole range before pushing.
+Publication does not include subsequent local edits. It needs no export checkout
+or Task. Scratch, including prepared PR copy, survives publication and landing.
+
+After merge, run `lf sync` in the same checkout before the next document commit.
+The resident branch stays reusable; scratch and follow-up edits stay local.
+Pruning retains resident checkouts. Missing worktrees recover committed branch
+state only; missing uncommitted files cannot be recovered by Git. A moved worktree
+is reused at its actual path. Existing live conversations stay in place until an
+idle driver boundary allows their workspace to be updated.
+
+For an independent persistent document workspace, `lf wt create <name> --resident`
+creates or reuses it. Ordinary Task delivery keeps its own lifecycle and authority.
+PR publication is optional for memory updates; no distribution schedule is implied.

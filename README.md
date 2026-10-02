@@ -16,12 +16,12 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 ## More install options
 
 ```bash
-lf install                  # update to the latest published release, from any directory
-lf schedule         # check at login and weekly (macOS)
-lf schedule daily   # also accepts weekly, hourly, 5min
+lf home install                  # update to the latest published release, from any directory
+lf home install schedule         # check at login and weekly (macOS)
+lf home install schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf task sync` inside a repository to update its checkout.
+Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -35,7 +35,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
+It bundles `lf`; open it explicitly with `lf home desktop`. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -63,18 +63,18 @@ lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
 lf run feature             # select a flow, otherwise a skill
 lf skill release-run       # explicitly select the skill
-lf land --help             # explain the uniquely owned pr land command
+lf pr land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
 ```
 
-Commands take precedence over definitions. Omit owners when the command is
-unique; ambiguous names show the canonical choices. Help and list stay local.
+Use literal command paths. Commands take precedence over definitions; help
+and list stay local.
 A same-named flow takes precedence in untyped execution; invalid flows report
 an error. Use `lf skill NAME` to select the skill explicitly.
 External skills honor the same frontmatter as local skills, on first fetch and
 when read from cache. Malformed definitions report their parse error.
 
-Flows invoke builtin commands with `cmd:`, for example `- cmd: task pr land`.
+Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
 ## Keep work moving
@@ -102,17 +102,17 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf checkout INF-123                               # durable Task Work + worktree, no controller
+lf task checkout INF-123                               # durable Task Work + worktree, no controller
 lf --task INF-123 flow start                                   # start end-to-end Task automation
 lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf pr arm -c                                          # request exact-head auto-merge and return
+lf pr land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
-lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
+lf repo ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
@@ -129,19 +129,19 @@ Watch this repository and the current Home:
 
 ```bash
 lf wave list                  # every durable Wave and its Home/runtime evidence
-lf user           # display name from Git or a personal Loopflow override
+lf home user           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
-lf activity            # durable work, delivery and steering history
+lf monitor activity            # durable work, delivery and steering history
 lf session list --json # conversations on this Home
 lf context             # context budgets, configuration sources and current usage
-lf usage --days 30      # recorded provider usage
-lf usage --task LOO-265 # usage attributed to one Task
-lf usage --task LOO-265 --context # each step's input by source, flagged over budget
-lf ps                  # one OS-live Loopflow process snapshot
-lf top                 # refresh elapsed time, process state, and call trees
-lf mon prune --dry-run     # inspect dead receipts and registered orphan providers
+lf monitor usage --days 30      # recorded provider usage
+lf monitor usage --task LOO-265 # usage attributed to one Task
+lf monitor usage --task LOO-265 --context # each step's input by source, flagged over budget
+lf monitor ps                  # one OS-live Loopflow process snapshot
+lf monitor top                 # refresh elapsed time, process state, and call trees
+lf monitor prune --dry-run     # inspect dead receipts and registered orphan providers
 ```
 
 ## Sessions
@@ -213,9 +213,9 @@ each `.md` URL, use the curated
 ## Developing loopflow
 
 ```bash
-lf install                                   # install the latest published Loopflow from anywhere
-lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf task sync                                      # refresh main and integrate it into this worktree
+lf home install                                   # install the latest published Loopflow from anywhere
+lf home install schedule                          # update Loopflow at login and weekly (macOS)
+lf sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # run a disposable experiment
 ```

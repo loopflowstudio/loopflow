@@ -85,7 +85,7 @@ its expanded Flow so the conversation can be reopened:
 ```
 
 The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf ready "feedback and remaining work"`; the human ends
+feedback with `lf session ready "feedback and remaining work"`; the human ends
 the review with `lf session complete <session-id>`. The Flow carries that
 feedback to its next step. Provider exit or readiness alone leaves it waiting.
 Human steps have no navigation verdict or backward edge. Put a deciding step
@@ -96,7 +96,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```yaml
 - implement
 - gate
-- cmd: task pr land
+- cmd: pr land
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
@@ -121,7 +121,7 @@ available across steps, regardless of which skill wrote them or runs next.
 A review's ready summary points to that material:
 
 ```sh
-lf ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
+lf session ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
 ```
 
 Loop-decide starts at those paths, then reconciles the current design and other
@@ -265,7 +265,7 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 | Field | What it does |
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
-| `crons` | Flow schedules installed through `lf cron sync` |
+| `crons` | Flow schedules installed through `lf wave cron sync` |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:

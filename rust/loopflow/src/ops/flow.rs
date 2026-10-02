@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 
 use crate::engine::flow::Command as FlowCommand;
 use crate::engine::process::ProcessGroupGuard;
-use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, RepoCommand, SyncArgs, TaskCommand};
+use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, RepoCommand, SyncArgs};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
@@ -27,20 +27,15 @@ pub fn execute_flow_command(
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
     let result = match cli.command {
-        Some(Commands::Task {
-            cmd: TaskCommand::Pr { cmd: Some(pr) },
-        }) => return execute_pr(repo, pr, progress),
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Sync(SyncArgs {
-                    plan,
-                    manual,
-                    continue_sync,
-                    abort,
-                    adopt,
-                    onto,
-                }),
-        }) => {
+        Some(Commands::Pr { cmd: Some(pr) }) => return execute_pr(repo, pr, progress),
+        Some(Commands::Sync(SyncArgs {
+            plan,
+            manual,
+            continue_sync,
+            abort,
+            adopt,
+            onto,
+        })) => {
             if manual || continue_sync || abort || adopt {
                 return Err(OpsError::Message(
                     "manual sync recovery is only available from the CLI".to_string(),
@@ -58,10 +53,16 @@ pub fn execute_flow_command(
             .map_err(|error| OpsError::Message(error.to_string()))
         }
 
-        Some(Commands::Task {
-            cmd: TaskCommand::Commit { message, no_add },
+        Some(Commands::Commit {
+            message,
+            no_add,
+            paths,
         }) => {
             crate::ops::task::guard_task_mutation(repo)?;
+            if !paths.is_empty() {
+                crate::ops::commit::commit_selected(repo, &paths, message.as_deref())?;
+                return Ok(None);
+            }
             commit_workflow(
                 repo,
                 &CommitOptions {

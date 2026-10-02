@@ -240,6 +240,29 @@ pub struct ScreenshotArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Pull request lifecycle
+    Pr {
+        #[command(subcommand)]
+        cmd: Option<PrCommand>,
+    },
+    /// Worktree operations
+    Wt {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Merge upstream into the current branch (default: main or stack parent)
+    Sync(SyncArgs),
+    /// Commit changes
+    Commit {
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "no-add")]
+        no_add: bool,
+        /// Commit only these paths, preserving other staged and unstaged edits
+        #[arg(value_name = "PATH", conflicts_with = "no_add")]
+        paths: Vec<String>,
+    },
+
     /// Show waiting, blocked, active, and finished work with next actions
     #[command(args_conflicts_with_subcommands = true)]
     Monitor {
@@ -307,7 +330,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Concrete work, worktrees, commits, and pull requests
+    /// Concrete work and Task lifecycle
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
@@ -690,25 +713,6 @@ pub enum TaskCommand {
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
-    /// Pull request lifecycle
-    Pr {
-        #[command(subcommand)]
-        cmd: Option<PrCommand>,
-    },
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Merge upstream into the current branch (default: main or stack parent)
-    Sync(SyncArgs),
-    /// Commit changes
-    Commit {
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        #[arg(long = "no-add")]
-        no_add: bool,
-    },
     /// Internal: drive a Task Flow from its claimed boundary
     #[command(name = "__worker", hide = true)]
     Worker { task_id: crate::work::task::TaskId },
@@ -888,11 +892,7 @@ impl TaskCommand {
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
             | Self::Repair { .. }
-            | Self::Automation { .. }
-            | Self::Pr { .. }
-            | Self::Wt { .. }
-            | Self::Sync(_)
-            | Self::Commit { .. } => None,
+            | Self::Automation { .. } => None,
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
@@ -1328,7 +1328,7 @@ pub enum HomeCommand {
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh <home-id> pr open`.
+    /// to resolve them locally. Example: `lf home ssh <home-id> pr open`.
     Ssh {
         /// Prefer this origin account when the remote lf chooses a provider.
         #[arg(
@@ -1538,6 +1538,9 @@ pub enum WtCommand {
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
+        /// Keep this workspace after delivery and keep scratch local
+        #[arg(long)]
+        resident: bool,
     },
     /// Switch to a worktree by name, identity leaf, or full branch
     Switch {
@@ -1603,19 +1606,14 @@ mod tests {
                 "removed root command {verb}"
             );
         }
-        for name in ["pr", "wt", "commit", "sync", "op"] {
-            assert!(
-                command.find_subcommand(name).is_none(),
-                "removed root {name}"
-            );
-        }
+        assert!(command.find_subcommand("op").is_none());
         let shorthand = crate::lf::navigation::normalize_args(
             ["lf", "wt", "create", "csv-export"]
                 .map(String::from)
                 .to_vec(),
         )
         .unwrap();
-        assert_eq!(shorthand, ["lf", "task", "wt", "create", "csv-export"]);
+        assert_eq!(shorthand, ["lf", "wt", "create", "csv-export"]);
         assert!(Cli::try_parse_from(shorthand).is_ok());
         assert!(command
             .find_subcommand("task")
@@ -1641,7 +1639,7 @@ mod tests {
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
-            vec!["lf", "task", "pr", "checks"],
+            vec!["lf", "pr", "checks"],
             vec!["lf", "repo", "refresh", "product"],
             vec!["lf", "repo", "refresh", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
@@ -1664,7 +1662,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "list", "--full"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "list", "--full"]).is_err());
     }
 
     #[test]
@@ -1746,9 +1744,9 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "pr", "checks", "--logs"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "ci"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
     }
 
     #[test]
@@ -2187,39 +2185,30 @@ mod tests {
             }) if issue == "INF-123" && summary == "Root cause recorded"
         ));
 
-        let land =
-            Cli::try_parse_from(["lf", "task", "pr", "land", "-c"]).expect("parse completing land");
+        let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
         assert!(matches!(
             land.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Pr {
-                    cmd: Some(PrCommand::Land {
-                        complete: true,
-                        next: None,
-                        ..
-                    })
-                }
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Land {
+                    complete: true,
+                    next: None,
+                    ..
+                })
             })
         ));
 
-        let submit = Cli::try_parse_from([
-            "lf",
-            "task",
-            "pr",
-            "submit",
-            "--next",
-            "released-upgrade-proof",
-        ])
-        .expect("parse continuation submit");
+        let submit =
+            Cli::try_parse_from(["lf", "pr", "submit", "--next", "released-upgrade-proof"])
+                .expect("parse continuation submit");
         assert!(matches!(
             submit.command,
-            Some(Commands::Task { cmd: TaskCommand::Pr{
+            Some(Commands::Pr{
                 cmd: Some(PrCommand::Submit {
                     complete: false,
                     next: Some(next),
                     ..
                 })
-            } }) if next == "released-upgrade-proof"
+            }) if next == "released-upgrade-proof"
         ));
     }
 
@@ -2471,30 +2460,30 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "create", "child", "--stack"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "create", "child", "--child"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "up"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "wt", "down"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "pr", "stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "stack"]).is_err());
     }
 
     #[test]
     fn sync_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "task", "sync", "--manual", "origin/main"])
+        let manual = Cli::try_parse_from(["lf", "sync", "--manual", "origin/main"])
             .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Task { cmd: TaskCommand::Sync(SyncArgs {
+            Some(Commands::Sync(SyncArgs {
                 manual: true,
                 continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            }) }) if onto == "origin/main"
+            })) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "task", "sync", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "sync", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--plan", "--manual"]).is_err());
     }
 
     #[test]
@@ -2590,12 +2579,9 @@ mod tests {
 
     #[test]
     fn pr_open_accepts_model_override() {
-        let cli = Cli::try_parse_from(["lf", "task", "pr", "open", "-m", "codex"]).expect("parse");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Pr {
-                    cmd: Some(PrCommand::Open { model, title, body }),
-                },
+        let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
+        let Some(Commands::Pr {
+            cmd: Some(PrCommand::Open { model, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");
@@ -2608,12 +2594,9 @@ mod tests {
 
     #[test]
     fn top_level_model_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-m", "codex", "task", "pr", "open"]).expect("parse");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Pr {
-                    cmd: Some(PrCommand::Open { model, title, body }),
-                },
+        let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
+        let Some(Commands::Pr {
+            cmd: Some(PrCommand::Open { model, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");

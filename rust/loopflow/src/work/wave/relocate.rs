@@ -353,7 +353,7 @@ fn prepare_source_for_relocation(planned: &PlannedWaveMove) -> Result<()> {
         default_branch.clone()
     };
 
-    let segment = wave_agent_segment(planned.wave.slug())?;
+    let segment = wave_agent_segment(planned.wave.id().as_str())?;
     if let Some(resident) = existing_agent_worktree(source_repo, segment)? {
         if !is_clean(&resident.path)? {
             return Err(anyhow!(
@@ -875,7 +875,7 @@ mod tests {
         let (root, repo, planned) = relocation_repo();
         let resident = crate::engine::worktrees::ensure_agent_worktree(
             &repo,
-            crate::engine::worktrees::wave_agent_segment("infrastructure").unwrap(),
+            crate::engine::worktrees::wave_agent_segment(planned.wave.id().as_str()).unwrap(),
         )
         .unwrap();
         std::fs::write(

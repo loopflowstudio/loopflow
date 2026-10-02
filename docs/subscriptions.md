@@ -37,7 +37,7 @@ lf account connect claude personal@example.com --chrome-profile personal@example
 lf account connect codex work@example.com --chrome-profile work@example.com
 
 lf account connect claude personal@example.com --import # adopt the ambient Claude login
-lf disconnect claude personal@
+lf account disconnect claude personal@
 ```
 
 Connect creates a **local managed identity**, not a new Claude or Codex account:
@@ -144,7 +144,7 @@ printing percentages, reset times and plan. Each window keeps its own observatio
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
-check `resets_at` before treating a recorded percentage as current. `lf usage`
+check `resets_at` before treating a recorded percentage as current. `lf monitor usage`
 reports recorded provider token/cost usage separately. By default, status
 reads forwarded identity metadata from the origin broker, without acquiring a remote credential or
 verifying remote accounts. An unavailable broker leaves local evidence visible.
@@ -318,22 +318,22 @@ owns these outcomes and retry semantics.
 
 ## Use subscriptions over SSH
 
-`lf ssh` runs the target machine's `lf`. The target name is the argument
+`lf home ssh` runs the target machine's `lf`. The target name is the argument
 boundary: selectors before it are resolved on the origin; everything after it
 is ordinary syntax for the target `lf`.
 
 ```bash
 # Offer all origin accounts and let the target lf choose.
-lf ssh my-company implement
+lf home ssh my-company implement
 
 # Prefer this exact identity from the origin.
-lf ssh --account personal@ my-company implement
+lf home ssh --account personal@ my-company implement
 
 # Resolve this preference from the target's combined catalog.
-lf ssh my-company --account work@ implement
+lf home ssh my-company --account work@ implement
 ```
 
-There is no explicit `-- lf`. `lf ssh` does not run arbitrary remote programs;
+There is no explicit `-- lf`. `lf home ssh` does not run arbitrary remote programs;
 use ordinary `ssh` for those. The target can be an SSH hostname or a Loopflow
 Home ID. A Home ID resolves its current SSH address and makes the reached
 machine prove its identity.
@@ -365,8 +365,8 @@ on its own machine. Configure the target repository route for durable account
 choice:
 
 ```bash
-lf ssh my-company route set codex work@
-lf ssh my-company --wave shipper wave/operate
+lf home ssh my-company route set codex work@
+lf home ssh my-company --wave shipper wave/operate
 ```
 
 The origin does not copy account homes or refresh credentials. It advertises

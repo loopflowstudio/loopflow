@@ -21,7 +21,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// `lf cron sync` installs these schedules on the placed Home.
+/// `lf wave cron sync` installs these schedules on the placed Home.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,

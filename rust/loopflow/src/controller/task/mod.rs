@@ -893,7 +893,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: task sync --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(

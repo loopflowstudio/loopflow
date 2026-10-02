@@ -53,7 +53,7 @@ lf list wave                       # authored goals, including unconnected Waves
 lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
-lf checkout EXP-12                  # prepare its checkout without execution
+lf task checkout EXP-12                  # prepare its checkout without execution
 lf --task EXP-12 flow start
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
@@ -66,14 +66,14 @@ before connection. Planning setup is separate from direct local execution.
 ## Inspect and continue
 
 ```bash
-lf ps                              # one live process snapshot
-lf top                             # refresh on a terminal
-lf mon list --json                 # bounded Exec history with a next cursor
-lf mon active --watch --json        # NDJSON until stdin closes
-lf mon show SESSION --final         # provider conclusion
-lf usage --days 30                  # measured consumption and missing evidence
-lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
-lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
+lf monitor ps                              # one live process snapshot
+lf monitor top                             # refresh on a terminal
+lf monitor list --json                 # bounded Exec history with a next cursor
+lf monitor active --watch --json        # NDJSON until stdin closes
+lf monitor show SESSION --final         # provider conclusion
+lf monitor usage --days 30                  # measured consumption and missing evidence
+lf monitor usage --task LOO-265 --context   # each step's input by source, flagged over budget
+lf monitor show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session connect SESSION         # continue a conversation
@@ -99,31 +99,31 @@ in existing personal, repository or Wave settings.
 
 ```bash
 lf pr publish                         # push a ready PR
-lf submit                          # prepare for a reviewer's merge click
-lf arm                             # prepare and request auto-merge; return
-lf land                            # record delivery and return
+lf pr submit                          # prepare for a reviewer's merge click
+lf pr arm                             # prepare and request auto-merge; return
+lf pr land                            # record delivery and return
 lf --task EXP-12 land -c            # also request completion after merge
-lf task sync --plan                     # preview integration with main or stack parent
+lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
-lf release check                   # inspect release eligibility
+lf repo release check                   # inspect release eligibility
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
 own preparation and integration; publish does not sync. PR operations work
 on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges; `lf ci watch`
+`lf pr reconcile` checks it once and settles verified merges; `lf repo ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ## Keep Tasks progressing in the background
 
 ```bash
-lf cron sync --repo                 # install this Home's minute check
+lf wave cron sync --repo                 # install this Home's minute check
 lf --task EXP-12 flow start                  # new launches enroll automatically
 lf task automate EXP-12 off         # hold future automatic work
 lf task automate EXP-12 on          # enroll or clear its retry hold
 lf task automation --json           # schedule coverage and Task blockers
 lf task reconcile --json            # run one check now
-lf cron sync --repo --disable       # remove the schedule
+lf wave cron sync --repo --disable       # remove the schedule
 ```
 
 Checks continue with Desktop closed while the placed Home's user is logged in.
@@ -133,15 +133,15 @@ settle verified merges. They do not repair CI.
 ## Repair failed CI
 
 ```bash
-lf ci watch               # watch this repository's PR checks until you stop it
-lf ci watch --once        # check every open PR once and exit
-lf ci watch --install     # keep it running as a launchd service
-lf ci watch --uninstall
-lf ci watch --status      # live or not, last poll, what it started and why
+lf repo ci watch               # watch this repository's PR checks until you stop it
+lf repo ci watch --once        # check every open PR once and exit
+lf repo ci watch --install     # keep it running as a launchd service
+lf repo ci watch --uninstall
+lf repo ci watch --status      # live or not, last poll, what it started and why
 ```
 
 The watcher polls GitHub about once a minute and starts one ci-fix when a PR
-with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
+with a recorded landing (`lf pr arm`, `lf pr land`) fails its required checks. A
 failing PR nobody armed is reported, not repaired; so is a PR with no Task.
 Loopflow Desktop runs the same command for each open repository and stops it
 on quit. A second copy stands by behind a live one. Nothing depends on the
@@ -184,9 +184,8 @@ lf help feature
 lf list skill
 ```
 
-Omit owners when the remaining command resolves uniquely: `lf land`, `lf ps`,
-`lf top`, and `lf mon list`. `mon` is a unique prefix, not an alias. Ambiguity
-lists canonical choices and performs no action. Exact commands take precedence
+Use literal paths: `lf pr land`, `lf monitor ps`, and `lf monitor list`.
+Owners and command names cannot be abbreviated. Exact commands take precedence
 over authored definitions; `lf skill NAME` and `lf flow NAME` select a kind.
 
 Help and catalog reads launch no agent. The [command reference](lf-reference.md)
@@ -216,3 +215,35 @@ Task status lists Sessions, Flows and Execs from the checkout and explicit binds
 including headless and completed work. Managed marks the Flow advanced by
 `lf --task … flow start`; the managed execution line describes only that worker. Independent
 work remains visible and preserves the checkout while unfinished or unresolved.
+
+## Keep a document workspace
+
+```bash
+lf session ensure                    # persistent repository conversation
+lf session ensure --wave product     # separate persistent Wave conversation
+```
+
+Inside the conversation's resident checkout:
+
+```bash
+lf commit -m "Record accepted decisions" wave/product/MEMORY.md
+lf pr publish
+```
+
+`lf wt create planning --resident` also creates or reuses an independent document
+workspace; enter its printed path before editing.
+
+Primary conversations reuse their respective worktrees, including after replacement.
+They display a workspace without gaining Task membership. Moved checkouts are
+rediscovered; missing checkouts recover committed branch state. Live conversations
+keep their placement until an idle driver boundary.
+
+Resident workspaces retain scratch locally through commit, sync, publication and
+landing. Selected-path commits preserve unrelated staged edits. Publication pushes
+the committed range, leaving later local edits alone. Inspect the complete range
+before publishing. Ordinary Task delivery retains its existing cleanup policy.
+
+Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and after a
+merged document PR. Network failures leave local work usable; conflicts stay visible
+and use `lf sync --continue` or `lf sync --abort`. Resident branches remain reusable
+and survive automatic pruning. Memory updates do not require PRs or a schedule.

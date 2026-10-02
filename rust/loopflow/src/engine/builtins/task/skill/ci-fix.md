@@ -15,7 +15,7 @@ GitHub and complete the Task only after an authoritative merge.
 ## Workflow
 
 1. **Sync first**
-   - Preserve existing work with `lf commit` when needed, then run `lf task sync`.
+   - Preserve existing work with `lf commit` when needed, then run `lf sync`.
    - Resolve conflicts and continue the sync before investigating CI. Keep
      the recorded failed SHA as evidence even when the local head changes.
 
@@ -52,11 +52,11 @@ GitHub and complete the Task only after an authoritative merge.
 4. **Publish and enable auto-merge**
    - Inspect the complete diff and keep unrelated work out of the repair.
    - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
-     `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
+     `lf pr arm`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
-   - Use the reconciler's supplied arm command verbatim: `lf arm -c`
-     preserves Task completion, and `lf arm --next <slug>` preserves rotation.
-     Outside a recorded landing, use bare `lf arm` unless the user requested
+   - Use the reconciler's supplied arm command verbatim: `lf pr arm -c`
+     preserves Task completion, and `lf pr arm --next <slug>` preserves rotation.
+     Outside a recorded landing, use bare `lf pr arm` unless the user requested
      a Task disposition.
    - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
      auto-merge enabled (or already merged). Local edits or a local commit
@@ -77,6 +77,6 @@ GitHub and complete the Task only after an authoritative merge.
 - Invoking this skill authorizes sync, commit, push, and auto-merge for the
   recorded PR. Route mutations through `lf`.
 - Stay scoped to the CI failures and their prevention; prefer targeted fixes.
-- Do not call `lf land`, spawn another watcher, or wait for merge. Return
+- Do not call `lf pr land`, spawn another watcher, or wait for merge. Return
   after the repaired head is published and armed; a later check observes delivery.
 - If the repair cannot be verified or published, report the blocker and stop.

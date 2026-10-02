@@ -247,7 +247,7 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf checkout <issue> --json
+lf task checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf --task <issue> flow start <chosen-flow>
 ```
@@ -282,7 +282,7 @@ Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
 Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
-`lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
+`lf home ssh <home-id> --wave <wave> wave/operate` at its placement. `lf home ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
@@ -304,7 +304,7 @@ work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, update the Task and wait for required
-contributions, then `lf restart <issue> "<changed direction>"`. Restart
+contributions, then `lf task restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
 Task worker; other attributed Flows and conversations remain independent. Reconcile prior
@@ -313,10 +313,10 @@ An explicitly selected Flow governs even when it differs from that default.
 
 ## Diagnose execution and auth
 
-When work seems stuck, run `lf top` before guessing; redirected output gives one
-frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
+When work seems stuck, run `lf monitor top` before guessing; redirected output gives one
+frame. `lf monitor ps --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
-Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
+Time alone never means dead. `lf monitor prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
@@ -328,3 +328,46 @@ a repository using Doppler, give `doppler run -- lf account connect <provider>` 
 credentials are missing. Otherwise name the missing credential variables and
 follow the customer's secret manager. Never print values or run a secret getter
 bare. Do not change accounts or placement merely to make an inspection pass.
+
+## Resident workspace and document publication
+
+This scope has a persistent checkout, reused when its conversation is replaced.
+Keep proposals and working plans in `scratch/`. Put accepted Wave decisions in
+`wave/<wave>/MEMORY.md`; repository decisions belong in the existing repository
+guide or the documentation that owns the subject. Use names and dates. Do not
+invent a Wave, Task, or duplicate memory file merely to publish documents.
+
+At the start of a deliberate maintenance or publication pass, inspect
+`git status --short` and `lf sync --plan`, then run `lf sync`. This is an explicit
+maintenance boundary, not a per-message action. Coordinate with any active
+writer in this checkout first. Fetch failures leave local work usable. Conflicts
+remain in place: inspect them, resolve the files, and use `lf sync --continue`;
+`lf sync --abort` returns to the saved operation's starting point. Commit any
+local changes that block integration deliberately, without including unrelated work.
+
+Publish only after existing authorization covers publication:
+
+```bash
+git diff -- wave/<wave>/MEMORY.md
+lf commit -m "Record accepted Wave decisions" wave/<wave>/MEMORY.md
+git diff origin/main...HEAD --stat
+lf pr publish
+```
+
+For repository documents, substitute their actual paths. Selected-path commits
+preserve unrelated staged and unstaged changes. Resident commit and publication
+remove tracked scratch from the index without deleting its local files. The PR
+contains the branch's committed range, so inspect the whole range before pushing.
+Publication does not include subsequent local edits. It needs no export checkout
+or Task. Scratch, including prepared PR copy, survives publication and landing.
+
+After merge, run `lf sync` in the same checkout before the next document commit.
+The resident branch stays reusable; scratch and follow-up edits stay local.
+Pruning retains resident checkouts. Missing worktrees recover committed branch
+state only; missing uncommitted files cannot be recovered by Git. A moved worktree
+is reused at its actual path. Existing live conversations stay in place until an
+idle driver boundary allows their workspace to be updated.
+
+For an independent persistent document workspace, `lf wt create <name> --resident`
+creates or reuses it. Ordinary Task delivery keeps its own lifecycle and authority.
+PR publication is optional for memory updates; no distribution schedule is implied.

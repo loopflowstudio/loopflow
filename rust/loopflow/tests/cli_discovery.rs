@@ -69,21 +69,18 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
         vec![
-            vec!["task", "wt", "create", "--help"],
+            vec!["wt", "create", "--help"],
             vec!["wt", "create", "--help"],
         ],
+        vec![vec!["sync", "--help"], vec!["help", "sync"]],
         vec![
-            vec!["task", "sync", "--help"],
-            vec!["task", "syn", "--help"],
-        ],
-        vec![
-            vec!["help", "land"],
-            vec!["land", "--help"],
-            vec!["task", "pr", "land", "--help"],
+            vec!["help", "pr", "land"],
+            vec!["pr", "land", "--help"],
+            vec!["pr", "land", "--help"],
             vec!["pr", "land", "--help"],
         ],
         vec![
-            vec!["help", "account", "rou"],
+            vec!["help", "account", "route"],
             vec!["account", "route", "--help"],
         ],
         vec![
@@ -248,10 +245,10 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["task", "changes", "INF-123", "--json"][..],
         &["task", "diff", "INF-123", "src.rs", "--files"],
         &["task", "diff", "INF-123", "--files", "--draft"],
-        &["task", "wt", "list", "--full"],
+        &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
-        &["task", "wt", "list", "--format", "json"],
-        &["task", "commit", "--push"],
+        &["wt", "list", "--format", "json"],
+        &["commit", "--push"],
         &["account", "status"],
         &["account", "--verify"],
         &["account", "route", "show"],
@@ -274,7 +271,7 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
             "work@example.com",
         ],
         &["account", "route", "--json", "set", "codex", "work@"],
-        &["task", "wt", "rm", "unused"],
+        &["wt", "rm", "unused"],
         &["-M", "unused", "run", "solo"],
         &["-C", "run", "solo"],
     ] {
@@ -353,26 +350,13 @@ fn skill_catalog_preserves_namespace_discovery() {
 }
 
 #[test]
-fn ambiguous_commands_never_fall_back_to_installed_definitions() {
+fn descendant_names_remain_available_for_definitions() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for args in [
-        &["complete"][..],
-        &["complete", "--help"],
-        &["help", "complete"],
-    ] {
-        let result = run(repo.path(), home.path(), args);
-        assert_eq!(result.status.code(), Some(2));
-        let message = String::from_utf8_lossy(&result.stderr);
-        assert!(message.contains("lf session complete"), "{message}");
-        assert!(message.contains("lf task complete"), "{message}");
+    for args in [["complete", "--help"], ["help", "complete"]] {
+        let help = success(run(repo.path(), home.path(), &args));
+        assert!(String::from_utf8_lossy(&help).contains("Skill complete body."));
     }
-    let selected = success(run(
-        repo.path(),
-        home.path(),
-        &["run", "complete", "--help"],
-    ));
-    assert!(String::from_utf8_lossy(&selected).contains("Skill complete body."));
     assert!(!home.path().join(".lf").exists());
 }
 
@@ -425,7 +409,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let repo = fixture();
     fs::write(
         repo.path().join(".lf/flows/commands.yaml"),
-        "- cmd: task pr land --local\n",
+        "- cmd: pr land --local\n",
     )
     .unwrap();
     let flow = load_flow("commands", repo.path()).unwrap();
@@ -433,7 +417,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let ConcreteStep::Command(step) = &steps[0] else {
         panic!("expected command")
     };
-    assert_eq!(step.item.argv(), ["lf", "task", "pr", "land", "--local"]);
+    assert_eq!(step.item.argv(), ["lf", "pr", "land", "--local"]);
     let adapted = Target::Command(step.item.clone()).into_flow();
     assert_eq!(adapted.items, flow.items);
 
@@ -449,6 +433,13 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     assert_eq!(canonical, step.item.argv());
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
+    let legacy = serde_json::json!({"Command": {
+        "item": {"command": "task", "args": ["pr", "land", "--local"]},
+        "sources": ["commands"]
+    }});
+    let restored: ConcreteStep = serde_json::from_value(legacy).unwrap();
+    assert_eq!(serde_json::to_value(restored).unwrap(), saved);
+
     fs::write(
         repo.path().join(".lf/flows/commands.yaml"),
         "- op: pr land\n",
@@ -461,23 +452,23 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
 }
 
 #[test]
-fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
+fn literal_paths_preserve_leaf_and_passthrough_arguments() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
         normalized(&["lf", "account", "rou"]),
-        ["lf", "account", "route"]
+        ["lf", "account", "rou"]
     );
     assert_eq!(
-        normalized(&["lf", "land", "--next", "show"]),
-        ["lf", "task", "pr", "land", "--next", "show"]
+        normalized(&["lf", "pr", "land", "--next", "show"]),
+        ["lf", "pr", "land", "--next", "show"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
+        normalized(&["lf", "home", "ssh", "somewhere", "show", "--help"]),
         ["lf", "home", "ssh", "somewhere", "show", "--help"]
     );
     assert_eq!(
@@ -512,27 +503,21 @@ fn help_preserves_location_without_promoting_query_filters() {
 }
 
 #[test]
-fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
-    let tree = clap::Command::new("lf")
-        .subcommand(
-            clap::Command::new("task")
-                .subcommand(clap::Command::new("pr").subcommand(clap::Command::new("land"))),
-        )
-        .subcommand(clap::Command::new("repo").subcommand(clap::Command::new("pr")))
-        .subcommand(clap::Command::new("monitor"))
-        .subcommand(clap::Command::new("landing"))
-        .subcommand(clap::Command::new("__internal").hide(true))
-        .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
-    let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
-    assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
-    assert!(resolve("pr").is_err());
-    assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
-    assert_eq!(resolve("__internal").unwrap().unwrap(), ["__internal"]);
-    assert!(resolve("__int").unwrap().is_none());
-    assert!(resolve("p").is_err());
-    let collision = tree.clone().subcommand(clap::Command::new("money"));
-    assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
-    assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+fn command_lookup_requires_literal_immediate_children() {
+    let tree = loopflow::lf::navigation::command_tree();
+    for name in ["land", "mon", "syn", "rou", "id"] {
+        assert!(loopflow::lf::navigation::resolve_child(&tree, name, &[])
+            .unwrap()
+            .is_none());
+    }
+    for name in ["pr", "wt", "sync", "commit"] {
+        assert!(tree.find_subcommand(name).is_some());
+        assert!(tree
+            .find_subcommand("task")
+            .unwrap()
+            .find_subcommand(name)
+            .is_none());
+    }
 }
 
 #[test]
@@ -556,7 +541,7 @@ fn account_has_one_owner_without_predecessor_aliases() {
 }
 
 #[test]
-fn repository_commands_have_one_owner_and_derived_shorthand() {
+fn repository_commands_require_their_literal_owner() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
@@ -569,10 +554,9 @@ fn repository_commands_have_one_owner_and_derived_shorthand() {
         let mut canonical = path.clone();
         canonical.push("--help");
         let help = success(run(repo.path(), home.path(), &canonical));
-        assert_eq!(
-            success(run(repo.path(), home.path(), &[leaf, "--help"])),
-            help
-        );
+        assert!(!run(repo.path(), home.path(), &[leaf, "--help"])
+            .status
+            .success());
         assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
         let command = tree
             .find_subcommand("repo")
@@ -638,7 +622,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(expected), "{error}");
     }
-    for args in [vec!["home", "user", "name"], vec!["task", "pr", "status"]] {
+    for args in [vec!["home", "user", "name"], vec!["pr", "status"]] {
         let output = run(repo.path(), home.path(), &args);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());

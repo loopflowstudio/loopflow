@@ -142,7 +142,7 @@ fn check_binary_freshness() -> Check {
             FRESHNESS,
             format!(
                 "cannot compare build revision {}: no git checkout at this binary's source root \
-                 or working directory. Run `lf doctor` from a loopflow checkout to learn whether \
+                 or working directory. Run `lf home doctor` from a loopflow checkout to learn whether \
                  the running binary is current",
                 crate::build_info::short_revision(revision)
             ),
@@ -418,7 +418,7 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             continue;
         }
         missing.push(format!(
-            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; inspect `lf cron history --wave {} --flow {} --days 2`",
+            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; inspect `lf wave cron history --wave {} --flow {} --days 2`",
             obligation.wave,
             obligation.flow,
             obligation.home_id,
@@ -854,7 +854,7 @@ mod tests {
             "expected interval [",
             "0 0 9 * * *",
             "has no scheduled receipt",
-            "lf cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "lf wave cron history --wave infrastructure --flow telemetry-daily --days 2",
         ] {
             assert!(
                 check.detail.contains(expected),

@@ -36,7 +36,7 @@ lf --version
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf id --json
+lf home id --json
 lf wave list --json
 command -v claude
 command -v codex
@@ -48,7 +48,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
-If `lf id` says the local store is not initialized, record that plainly
+If `lf home id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
 Present one compact topology:
@@ -69,7 +69,7 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
-Read `lf user --json`: a personal Loopflow `user.name` override wins,
+Read `lf home user --json`: a personal Loopflow `user.name` override wins,
 otherwise Git's configured `user.name` supplies the baseline. An available name
 needs no additional setup. Agents may also use a name already known in the session.
 In an interactive session, if neither source supplies a name, ask what name to
@@ -249,17 +249,17 @@ If the user wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
-lf ssh <host> home id --json
-lf observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> account --cached
-lf ssh <home-id> account route
+lf home ssh <host> home id --json
+lf home observe <home-id> ssh://<user>@<host>
+lf home ssh <home-id> account --cached
+lf home ssh <home-id> account route
 lf wave list --json
 lf wave place <wave-id> <home-id>
 lf wave status <wave> --json
-lf ssh <home-id> --wave <wave> wave/operate
+lf home ssh <home-id> --wave <wave> wave/operate
 ```
 
-`lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
+`lf home ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. The remote process can select from subscription accounts forwarded
 for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
@@ -267,7 +267,7 @@ placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf home observe` records the
 mutable SSH route for the stable HomeId. Placement is allowed only while no execution
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
-`lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
+`lf home ssh <home-id>` to run on the remote Home. Ask before observing a route,
 changing placement, or starting a Wave; each changes durable execution state.
 
 ## 6. Prove the result
@@ -278,7 +278,7 @@ Run the smallest checks that prove the selected path:
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf id --json
+lf home id --json
 lf wave list --json
 ```
 
@@ -309,7 +309,7 @@ If something remains unavailable, say exactly which authority is missing and
 the command that would establish it. Never hide a missing account, Home,
 Wave/PM binding, or agent behind "setup complete."
 
-On macOS, offer `lf desktop` as an optional interactive control surface after the
+On macOS, offer `lf home desktop` as an optional interactive control surface after the
 selected path is proved. Do not launch it automatically.
 
 ## Conversation style

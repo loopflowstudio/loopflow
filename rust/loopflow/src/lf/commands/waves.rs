@@ -1565,8 +1565,7 @@ fn next_move_for_task(
         }
         return NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "PR is published but settlement is not armed with `lf task pr land -c`"
-                .to_string(),
+            reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
         };
     }
     let owner = NextMoveOwner::Wave;

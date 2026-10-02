@@ -135,7 +135,7 @@ fn install_current_telemetry_obligation(home: &Path) {
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
     let home = TestRepo::new();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(
         output.status.success(),
         "lf doctor failed: {}",
@@ -211,7 +211,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         ))
         .unwrap();
 
-    let doctor = run_lf(home.path(), &["doctor", "--json"]);
+    let doctor = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(
         doctor.status.success(),
         "lf doctor failed: {}{}",

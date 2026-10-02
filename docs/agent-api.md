@@ -34,9 +34,9 @@ A Wave directing a task is the internal case:
 lf task checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf --task INF-123 flow start                                  # start built-in Task automation
-lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
+lf task comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
-lf wait INF-123 --until terminal                # block until it settles
+lf task wait INF-123 --until terminal                # block until it settles
 ```
 
 ## The owners
@@ -61,7 +61,7 @@ for the remaining reader, wire and lifecycle conversion.
 ## Delegate
 
 ```bash
-lf checkout INF-123                    # ensure Work and worktree only
+lf task checkout INF-123                    # ensure Work and worktree only
 lf --task INF-123 flow start                    # run an existing Linear issue
 lf task create --run --wave <wave> --title "add passkeys" # create the issue, then run it
 pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
@@ -78,7 +78,7 @@ default execution surface.
 the fork commit, and adds a `Clear inherited scratch` commit before execution.
 Parent syncs keep the child's scratch, including its deletions. The parent retains
 its own notes. The child's PR targets the parent's branch until
-merge, then `lf task sync` merges main using the recorded fork as the comparison base.
+merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
 
 ## Steer
@@ -156,8 +156,8 @@ lands it:
 
 ```bash
 lf pr publish                          # make work visible mid-stream; the agent's default verb
-lf submit                              # done, a person clicks merge
-lf land                                 # watch CI, repair failures, and finish merged
+lf pr submit                              # done, a person clicks merge
+lf pr land                                 # watch CI, repair failures, and finish merged
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for
@@ -171,24 +171,24 @@ Every read the conducting surfaces offer is `--json`:
 lf wave list --json                    # every durable Wave and its Home/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json                      # every Wave repeats that required portfolio envelope
-lf activity --task INF-123 --json
-lf mon show --project parser --json
-lf mon show --task INF-123 --json
-lf usage --days 30 --json   # recorded provider usage, newest first
-lf usage --task INF-123 --json # the same evidence drilled to one Task
-lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
-lf usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf ps --json                # one OS-live process frame
+lf monitor activity --task INF-123 --json
+lf monitor show --project parser --json
+lf monitor show --task INF-123 --json
+lf monitor usage --days 30 --json   # recorded provider usage, newest first
+lf monitor usage --task INF-123 --json # the same evidence drilled to one Task
+lf monitor usage --weekly --json   # context cost and turn time by week since 2026-09-30
+lf monitor usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
+lf monitor ps --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
 and `lf roadmap` joins the current Linear plan to that runtime truth.
-`lf activity` is the ordered durable history; each item reuses `WorkRef` and
+`lf monitor activity` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
-All of these reads are local to the executing Home. Use `lf ssh <home-id> ...`
-to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Home's evidence;
+All of these reads are local to the executing Home. Use `lf home ssh <home-id> ...`
+to execute the same read remotely. The historical `lf monitor show` interface and `lf monitor usage` read that Home's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

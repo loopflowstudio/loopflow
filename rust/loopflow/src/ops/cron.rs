@@ -449,7 +449,7 @@ pub fn run_cron(
 
     let placement_error = if spec.host.home_id != *placed_home {
         Some(format!(
-            "installed for Home {}, but Wave {wave} is placed on {placed_home}; run `lf cron sync --wave {wave}` on the placed Home",
+            "installed for Home {}, but Wave {wave} is placed on {placed_home}; run `lf wave cron sync --wave {wave}` on the placed Home",
             spec.host.home_id
         ))
     } else if *current_home != *placed_home {
@@ -615,7 +615,7 @@ pub fn wait_for_cron_receipt(
         }
         if Instant::now() >= deadline {
             return Err(OpsError::Message(format!(
-                "timed out after {}s waiting for cron {wave}/{flow}; inspect `lf cron history --wave {wave} --flow {flow}`",
+                "timed out after {}s waiting for cron {wave}/{flow}; inspect `lf wave cron history --wave {wave} --flow {flow}`",
                 timeout.as_secs()
             )));
         }
@@ -694,7 +694,7 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
     let required = |key: &str| {
         plist_string(&content, key).ok_or_else(|| {
             OpsError::Parse(format!(
-                "{} is missing required {key} metadata; run `lf cron sync --wave <wave>`",
+                "{} is missing required {key} metadata; run `lf wave cron sync --wave <wave>`",
                 path.display()
             ))
         })
@@ -726,7 +726,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
     let activated_at = match plist_string(&content, "LoopflowActivatedAt") {
         Some(value) => value.parse::<i64>().map_err(|error| {
             OpsError::Parse(format!(
-                "{} has invalid LoopflowActivatedAt {value:?}: {error}; run `lf cron sync --wave {}`",
+                "{} has invalid LoopflowActivatedAt {value:?}: {error}; run `lf wave cron sync --wave {}`",
                 path.display(),
                 spec.wave
             ))
@@ -746,7 +746,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
             .or_else(|| file_timestamp(path))
             .ok_or_else(|| {
                 OpsError::Message(format!(
-                    "cannot recover activation time for legacy cron {}; run `lf cron sync --wave {}`",
+                    "cannot recover activation time for legacy cron {}; run `lf wave cron sync --wave {}`",
                     path.display(),
                     spec.wave
                 ))
@@ -1014,6 +1014,7 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
     };
     let args = [
         spec.lf_path.to_string_lossy().to_string(),
+        "wave".to_string(),
         "cron".to_string(),
         "run".to_string(),
         "--scheduled".to_string(),
@@ -1352,7 +1353,7 @@ mod tests {
 
         let error = list_crons(temp.path(), &FakeLaunchctl::default()).unwrap_err();
         assert!(error.to_string().contains("missing required LoopflowWave"));
-        assert!(error.to_string().contains("lf cron sync"));
+        assert!(error.to_string().contains("lf wave cron sync"));
     }
 
     #[test]
@@ -1706,7 +1707,7 @@ mod tests {
             &cron.wave,
             &cron.flow,
             CronSource::Scheduled,
-            "registry schema is incompatible; run `lf doctor`",
+            "registry schema is incompatible; run `lf home doctor`",
         )
         .unwrap();
         assert_eq!(receipt.outcome, CronOutcome::Failed);

@@ -19,3 +19,9 @@ correct its copy through the same operation when necessary.
 Keep publication separate from merge. This skill neither arms auto-merge nor
 completes the Task. Open the review page with `lf pr open` only when requested.
 Preserve unrelated active contributions rather than staging them as this change.
+
+For a resident document workspace, inspect the entire committed range and use
+`lf commit -m "<accepted change>" <selected-path>...` before publication. Resident
+publication pushes committed documents, preserves other staged and unstaged work,
+and keeps `scratch/` local. Do not delete scratch or create an export worktree.
+After merge, refresh the same resident branch with `lf sync` before another PR.

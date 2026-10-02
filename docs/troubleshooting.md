@@ -11,7 +11,7 @@ or inspect its cron schedule:
 ```bash
 lf wave status <wave> --json
 lf --wave <wave> wave/operate
-lf cron list
+lf wave cron list
 ```
 
 A quiet Wave needs no service restart.
@@ -25,7 +25,7 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf usage --days 0 --task INF-123 --json
+lf monitor usage --days 0 --task INF-123 --json
 lf session list
 ```
 
@@ -51,8 +51,8 @@ Steer, or resume a stopped process through the same Task Work:
 ```bash
 lf session connect <session-id>
 lf session complete <session-id>       # return saved review feedback
-lf comment INF-123 "address the latest feedback"
-lf interrupt INF-123
+lf task comment INF-123 "address the latest feedback"
+lf task interrupt INF-123
 lf --task INF-123 flow start
 lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
@@ -113,7 +113,7 @@ or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf task sync
+lf sync
 ```
 
 Refreshes the local default branch, preserving its unpublished commits and edits,

@@ -731,6 +731,25 @@ impl SqliteStore {
         Ok(session)
     }
 
+    /// Called under the Session launch lock after proving there is no live client.
+    pub(crate) fn move_primary_workspace(
+        &self,
+        session: &AgentSession,
+        cwd: &std::path::Path,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND primary_scope IS NOT NULL AND completed_at IS NULL AND task_id IS NULL",
+            params![session.id, session.captured, cwd.to_string_lossy()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "primary Session changed before workspace admission".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// The scope a Session is or was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

@@ -77,11 +77,11 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
-| `lf mon show`, `usage`, `activity` | durable execution/history projections |
-| `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf home`, `lf ssh` | Home identity, placement, command routing |
+| `lf monitor show`, `usage`, `activity` | durable execution/history projections |
+| `lf monitor ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
+| `lf home`, `lf home ssh` | Home identity, placement, command routing |
 | `lf account` | provider credential and account authority |
-| `lf install`, `release` | artifact selection and release workflow |
+| `lf home install`, `release` | artifact selection and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
@@ -114,7 +114,7 @@ not resolve either from the planning store.
 
 The CLI talks to planning and model providers. The independent Discord bridge
 uses outbound REST requests. Remote execution reaches the target Home through
-`lf ssh`; see [Homes and processes](homes.md).
+`lf home ssh`; see [Homes and processes](homes.md).
 
 ## Add a provider
 

@@ -170,7 +170,7 @@ user / agent --> lf CLI --------+----------+-----------+
                               v
                   status / roadmap / usage / app
 
-another machine is another Home; cross it explicitly with `lf ssh`
+another machine is another Home; cross it explicitly with `lf home ssh`
 ```
 
 There is no central Loopflow server. A Home owns its processes, credentials,
@@ -271,12 +271,12 @@ record, return.
 ### Direct Task work
 
 ```bash
-lf checkout INF-123
+lf task checkout INF-123
 lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
-lf submit
+lf pr submit
 lf task status INF-123 --json
 ```
 
@@ -305,8 +305,8 @@ and parks until the exact saved feedback is completed and consumed.
 ### Another machine
 
 ```bash
-lf ssh build-home session list --json
-lf ssh build-home --wave product wave/operate
+lf home ssh build-home session list --json
+lf home ssh build-home --wave product wave/operate
 ```
 
 The origin transports one command. The target resolves its own Home state and

@@ -5,7 +5,7 @@
 //! token when it has expired), Codex through a one-shot `codex app-server`
 //! JSON-RPC exchange against the account's home. Results are persisted to
 //! `provider_account_limits` by live auth status. Cached auth reads
-//! never poll; `lf usage` separately reports Run token/cost evidence.
+//! never poll; `lf monitor usage` separately reports Run token/cost evidence.
 
 use std::path::Path;
 use std::time::Duration;

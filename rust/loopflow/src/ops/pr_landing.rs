@@ -608,7 +608,7 @@ fn exec_ci_fix(
         .unwrap_or_default();
     let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf task sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -1263,6 +1263,12 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
     {
         eprintln!("PR merged; retained its checkout for the saved Flow.");
+        return Ok(());
+    }
+    if crate::engine::worktrees::is_resident_worktree(&landing.worktree)? {
+        eprintln!(
+            "PR merged; retained resident checkout. Run lf sync before the next publication."
+        );
         return Ok(());
     }
     let _admission = store

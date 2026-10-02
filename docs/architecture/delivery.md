@@ -7,11 +7,11 @@ Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
 ```bash
-lf checkout INF-123
+lf task checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
-lf land -c
+lf pr land -c
 ```
 
 ## Delivery flow
@@ -45,7 +45,7 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf checkout` resolves one existing Linear Issue inside one Project and
+`lf task checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
 execution. `lf flow start` uses the same substrate and additionally advances the
 declared Task flow. The repository identity—not the caller's
@@ -66,7 +66,7 @@ Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
 updates keep the child's entire `scratch/` tree, including deleted files; the
 parent's notes remain on the parent branch. Even a child with only this cleanup
 commit merges updates instead of resetting onto the parent's scratch.
-After the parent merges, `lf task sync` merges current main using the recorded fork
+After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
 The parent Task does not hold two simultaneously open PRs.
@@ -77,10 +77,10 @@ The parent Task does not hold two simultaneously open PRs.
 lf commit -m "parser: accept nested groups" # local checkpoint
 lf pr open                             # prepare a draft and open its page
 lf pr publish                          # ready for review
-lf arm                                 # request auto-merge and return
-lf land                                # hand off delivery and return
+lf pr arm                                 # request auto-merge and return
+lf pr land                                # hand off delivery and return
 lf pr reconcile                        # check recorded landings once
-lf ci watch                            # repair failed landings while it runs
+lf repo ci watch                            # repair failed landings while it runs
 ```
 
 `publish` creates or refreshes the current PR without integration. A completed
@@ -93,8 +93,8 @@ and push the exact head. Branch commits and merge resolutions retain their ident
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks enrolled Tasks and recorded repository landings once;
-`lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
+`lf pr reconcile` uses its delivery-only path. `lf wave cron sync --repo` installs the
+finite minute check on this Home. Neither repairs CI; `lf repo ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a live
 Task worker or certify that a particular Flow ran.
@@ -154,7 +154,7 @@ not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
 
 A supervisor-started merge can be handed to an agent in the same checkout.
-`lf task sync --continue --adopt` claims a raw merge after resolution. For a stopped
+`lf sync --continue --adopt` claims a raw merge after resolution. For a stopped
 Loopflow sync, ordinary `--continue` retains the saved branch and pinned target.
 Launching the agent neither adopts the operation nor publishes the result.
 
@@ -198,13 +198,13 @@ read required checks on H1 once
 ```
 
 The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
-Those checks record a failure and return. Only `lf ci watch` and a release's own
+Those checks record a failure and return. Only `lf repo ci watch` and a release's own
 landing start a repair, through this same check.
 
 ### CI watcher
 
 ```text
-lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
+lf repo ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
       |                         pulls?state=open
       |                         commits/{head}/check-runs, commits/{head}/status
       |                         rules/branches/{base} (required checks, hourly)
@@ -216,14 +216,14 @@ lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
  (lock, generation, confirm, reserve)
 ```
 
-`lf ci watch` is one repository-wide program with one job. It reads the gate
+`lf repo ci watch` is one repository-wide program with one job. It reads the gate
 with the same required-check projection as the landing check, then hands a
 failing landing to that check, which confirms the failure against GitHub, stays
 silent for a queued PR, and reserves the incident's one repair. The landing
 lock, landing generation and incident reservation are the claim, so a watcher,
 a scheduled check and a release cannot repeat a fix. The watcher fills the
 incident's `provider_completed_at` from the check's `completed_at`, which makes
-detection latency measurable in `lf ci`.
+detection latency measurable in `lf repo ci`.
 
 It backs off to five minutes after a degraded pass and waits for the reset when
 fewer than 500 core requests remain. Every recorded landing is also checked
@@ -231,11 +231,11 @@ every five minutes, so a conflicting or stale head and a CI timeout are repaired
 without any check failing.
 
 The command runs three ways: in a terminal, as a launchd service
-(`lf ci watch --install`), and from Loopflow Desktop, which starts it for each
+(`lf repo ci watch --install`), and from Loopflow Desktop, which starts it for each
 open repository and stops it on quit. `<git-dir>/lf-ci-watch.lock` admits one
 live watcher per repository; a second copy stands by and takes over when the
 first exits. `<git-dir>/loopflow/ci-watch.json` carries its last poll, the PRs
-it saw and the repairs it started, read by `lf ci watch --status`. Correctness
+it saw and the repairs it started, read by `lf repo ci watch --status`. Correctness
 never depends on it: with no watcher, failures are recorded and wait.
 
 A check never transfers green checks from one head to another. A failure is
@@ -273,9 +273,9 @@ partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
 A blocked landing stays observable: later checks still settle its merge, and
-checks that stop failing clear the block. Rerun `lf arm` or `lf land`
+checks that stop failing clear the block. Rerun `lf pr arm` or `lf pr land`
 after resolving a blocker to resume under a fresh generation, including when
-the SHA has not changed. Use `lf mon show SESSION --final` to inspect a repair's
+the SHA has not changed. Use `lf monitor show SESSION --final` to inspect a repair's
 conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.
@@ -286,8 +286,8 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge, bare `lf land` settles that PR and leaves the Task open.
-`lf land -c` completes the Task. `lf land --next <slug>` rotates the
+After verified merge, bare `lf pr land` settles that PR and leaves the Task open.
+`lf pr land -c` completes the Task. `lf pr land --next <slug>` rotates the
 serial chain to a new branch from fetched main.
 
 ## Failure and recovery

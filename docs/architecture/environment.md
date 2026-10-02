@@ -40,7 +40,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | `lf runs` | Records which account a provider child used. |
 | `LF_INSTALL_SWITCH` | Published install | `machine_install` | One-shot capability; must equal the id of the switch receipt in progress. |
-| `LF_EXPECTED_HOME_ID` | `lf ssh` | `lf home`, the remote preamble | Refuses a Home-addressed command that reached a different Home. |
+| `LF_EXPECTED_HOME_ID` | `lf home ssh` | `lf home`, the remote preamble | Refuses a Home-addressed command that reached a different Home. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
 | `LF_USER_NAME` | lf launch paths | `engine::config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
@@ -53,8 +53,8 @@ shells unset them and tmux never receives them.
 
 | Variable | Policy |
 |---|---|
-| `LF_ACCOUNT_LEASE`, `LF_ACCOUNT_SELECTION`, `LF_ACCOUNT_LEASE_SOCKET` | Account route for one provider launch or one `lf ssh` command. |
-| `LF_FORWARDED_PM_TOKEN`, `LF_FORWARDED_PM_PROVIDER`, `LF_FORWARDED_SECRET_NAMES` | Planning credential and named secrets carried over `lf ssh`. |
+| `LF_ACCOUNT_LEASE`, `LF_ACCOUNT_SELECTION`, `LF_ACCOUNT_LEASE_SOCKET` | Account route for one provider launch or one `lf home ssh` command. |
+| `LF_FORWARDED_PM_TOKEN`, `LF_FORWARDED_PM_PROVIDER`, `LF_FORWARDED_SECRET_NAMES` | Planning credential and named secrets carried over `lf home ssh`. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |
 | `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. |
@@ -64,13 +64,13 @@ shells unset them and tmux never receives them.
 
 | Variable | Read by | Policy |
 |---|---|---|
-| `LF_INSTALL_DIR`, `LF_INSTALL_CLI_ONLY`, `LF_APPLICATIONS_DIR` | `release/install.sh`, `lf install` | Installer destinations. |
+| `LF_INSTALL_DIR`, `LF_INSTALL_CLI_ONLY`, `LF_APPLICATIONS_DIR` | `release/install.sh`, `lf home install` | Installer destinations. |
 | `LF_PROVIDER_TOKEN_KEY_PATH` | `store::token_crypto` | Location of the token encryption key. |
 | `LF_NPX_BIN` | Skill discovery | Substitute `npx`. |
 | `LF_TRACE` | `ops::trace` | Emit operation traces instead of executing. |
 | `LOOPFLOW_DEV_WAVE_REPO` | Metrics, Desktop portfolio discovery | Repository a development app opens. |
 | `LOOPFLOW_BUILD_*`, `LOOPFLOW_MIGRATION_AUTHORITY`, `LOOPFLOW_RELEASE_TAG` | `build.rs`, release scripts | Build provenance, compiled in. |
-| `LF_RELEASE_*` | Release scripts | Inputs from `lf release` to its scripts. |
+| `LF_RELEASE_*` | Release scripts | Inputs from `lf repo release` to its scripts. |
 
 `LF_TEST_*`, `LF_PROBE_*`, `LF_SCREENSHOT_*`, `LOOPFLOW_UI_TEST_*` and
 `LOOPFLOW_TEST_*` exist only in tests and their fixtures. The three

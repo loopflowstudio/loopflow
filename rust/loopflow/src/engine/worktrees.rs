@@ -830,6 +830,7 @@ pub fn prune_worktrees(
         if state.path == current_path
             || state.branch.as_deref() == Some(&default_branch)
             || path_is_protected(&state.path, protected_paths)
+            || is_resident_worktree(&state.path)?
         {
             continue;
         }
@@ -886,6 +887,7 @@ fn targeted_prune(
     if path == current_path
         || branch.as_deref() == Some(&default_branch)
         || path_is_protected(path, protected_paths)
+        || is_resident_worktree(path)?
     {
         return Ok(TargetedPruneOutcome::Protected);
     }
@@ -1117,6 +1119,14 @@ pub fn create_from_placement_plan(
     repo: &Path,
     plan: &PlacementPlan,
 ) -> Result<CreateWorktreeResult, GitError> {
+    apply_placement_plan(repo, plan, true)
+}
+
+fn apply_placement_plan(
+    repo: &Path,
+    plan: &PlacementPlan,
+    publish_upstream: bool,
+) -> Result<CreateWorktreeResult, GitError> {
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -1151,7 +1161,9 @@ pub fn create_from_placement_plan(
                     start_point: &plan.base_ref,
                 },
             )?;
-            schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
+            if publish_upstream {
+                schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
+            }
         }
     }
     Ok(CreateWorktreeResult {
@@ -1171,12 +1183,60 @@ pub fn ensure_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
 ) -> Result<AgentWorktree, GitError> {
-    let main_repo = canonical_default_checkout(main_repo)?;
+    let main_repo = main_repo_root(main_repo)?;
+    let lock_path = git_common_dir(&main_repo)?.join(format!("resident-{}.lock", segment.as_str()));
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)?;
+    fs2::FileExt::lock_exclusive(&lock)?;
     let mut plan = deterministic_agent_plan(&main_repo, segment)?;
     if plan.strategy == PlacementStrategy::Create {
-        plan.base_ref = agent_base_ref(&main_repo, true)?;
+        plan.base_ref = agent_base_ref(&main_repo)?;
     }
-    create_agent_worktree(&main_repo, &plan)
+    let worktree = create_agent_worktree(&main_repo, &plan)?;
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&main_repo)
+        .args([
+            "config",
+            &format!("branch.{}.loopflow-resident", worktree.branch),
+            "true",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "mark resident worktree".into(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(worktree)
+}
+
+/// Resident branches keep their checkout and local plans after delivery.
+pub fn is_resident_worktree(repo: &Path) -> Result<bool, GitError> {
+    let Some(branch) = current_branch(repo)? else {
+        return Ok(false);
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "config",
+            "--bool",
+            "--get",
+            &format!("branch.{branch}.loopflow-resident"),
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => Ok(output.stdout == b"true\n"),
+        Some(1) => Ok(false),
+        _ => Err(GitError::CommandFailed {
+            command: "read resident worktree configuration".into(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+    }
 }
 
 pub(crate) fn existing_agent_worktree(
@@ -1209,7 +1269,7 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
         return Ok(None);
     }
 
-    let base_ref = agent_base_ref(&main_repo, false)?;
+    let base_ref = agent_base_ref(&main_repo)?;
     let head = rev_parse(&main_repo, "HEAD")?;
     let dirty = !is_clean(&main_repo)?;
     let carries_state = dirty || has_commits_beyond(&main_repo, &default_branch, &base_ref)?;
@@ -1268,19 +1328,10 @@ fn deterministic_agent_plan(
     segment: WorktreeSegment,
 ) -> Result<PlacementPlan, GitError> {
     let expected_path = worktree_path(main_repo, segment.as_str());
-    let plan = plan_placement(main_repo, segment)?;
-    if plan.strategy == PlacementStrategy::UseExistingWorktree
-        && normalized_path(&plan.worktree_path) != normalized_path(&expected_path)
-    {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "branch {} is checked out at {}, expected {}",
-                plan.branch,
-                plan.worktree_path.display(),
-                expected_path.display()
-            ),
-        });
+    let mut plan = plan_placement(main_repo, segment)?;
+    if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
+        worktree_remove(main_repo, &plan.worktree_path)?;
+        plan.strategy = PlacementStrategy::CheckoutExisting;
     }
     if plan.strategy != PlacementStrategy::UseExistingWorktree && expected_path.exists() {
         return Err(GitError::CommandFailed {
@@ -1298,38 +1349,20 @@ fn create_agent_worktree(
     main_repo: &Path,
     plan: &PlacementPlan,
 ) -> Result<AgentWorktree, GitError> {
-    let created = create_from_placement_plan(main_repo, plan)?;
+    let created = apply_placement_plan(main_repo, plan, false)?;
     Ok(AgentWorktree {
         path: created.path,
         branch: created.branch,
     })
 }
 
-fn canonical_default_checkout(main_repo: &Path) -> Result<PathBuf, GitError> {
-    let main = main_repo_root(main_repo)?;
-    let main = std::fs::canonicalize(&main).unwrap_or(main);
-    let default_branch = get_default_branch(&main)?;
-    let branch = current_branch(&main)?;
-    if branch.as_deref() != Some(default_branch.as_str()) {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "canonical checkout is on {}, expected {default_branch}",
-                branch.as_deref().unwrap_or("detached HEAD")
-            ),
-        });
-    }
-    Ok(main)
-}
-
-fn agent_base_ref(main_repo: &Path, require_fetch: bool) -> Result<String, GitError> {
+fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {
     let default_branch = get_default_branch(main_repo)?;
     if !has_origin(main_repo)? {
         return Ok(default_branch);
     }
     match fetch(main_repo, "origin", &default_branch) {
         Ok(()) => Ok(format!("origin/{default_branch}")),
-        Err(error) if require_fetch => Err(error),
         Err(_) if rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok() => {
             Ok(format!("origin/{default_branch}"))
         }
@@ -1806,7 +1839,7 @@ mod tests {
     }
 
     #[test]
-    fn wave_agent_worktree_refuses_a_branch_checked_out_elsewhere() {
+    fn wave_agent_worktree_reuses_a_moved_branch() {
         let (root, repo) = repo_with_origin();
         let segment = wave_agent_segment("ship").unwrap();
         let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
@@ -1821,12 +1854,41 @@ mod tests {
             ],
         );
 
-        let error =
-            ensure_agent_worktree(&repo, segment).expect_err("resident placement is deterministic");
-
-        assert!(error.to_string().contains(displaced.to_str().unwrap()));
-        assert!(error.to_string().contains("expected"));
+        let recovered = ensure_agent_worktree(&repo, segment).unwrap();
+        assert_eq!(
+            recovered.path.canonicalize().unwrap(),
+            displaced.canonicalize().unwrap()
+        );
+        assert_eq!(recovered.branch, resident.branch);
         assert!(super::is_clean(&repo).unwrap());
+    }
+
+    #[test]
+    fn missing_resident_checkout_recovers_commits_and_pruning_retains_it() {
+        let (_root, repo) = repo_with_origin();
+        let segment = wave_agent_segment("ship").unwrap();
+        let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        fs::write(resident.path.join("memory.md"), "unpublished").unwrap();
+        git(&resident.path, &["add", "memory.md"]);
+        git(&resident.path, &["commit", "-m", "memory"]);
+        fs::remove_dir_all(&resident.path).unwrap();
+        let recovered = ensure_agent_worktree(&repo, segment).unwrap();
+        assert_eq!(
+            fs::read_to_string(recovered.path.join("memory.md")).unwrap(),
+            "unpublished"
+        );
+        assert_eq!(
+            prune_branch_worktree(
+                &repo,
+                &repo,
+                &recovered.branch,
+                WorktreePruneReason::Merged,
+                &HashSet::new()
+            )
+            .unwrap(),
+            TargetedPruneOutcome::Protected
+        );
+        assert!(recovered.path.exists());
     }
 
     #[test]

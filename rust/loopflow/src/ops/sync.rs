@@ -127,7 +127,7 @@ pub fn plan_sync(
     };
     // A stacked child's scratch deletion is intentional history. Resetting to
     // the parent would discard it and copy the parent's notes back into the child.
-    let strategy = if fork_base.is_some() {
+    let strategy = if fork_base.is_some() || crate::engine::worktrees::is_resident_worktree(repo)? {
         if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
         } else {

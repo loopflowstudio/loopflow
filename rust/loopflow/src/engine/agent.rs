@@ -1878,7 +1878,7 @@ fn _exec_agent_once(
     cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
-    // can request parent-shell actions (for example auto-cd after `lf task wt switch`).
+    // can request parent-shell actions (for example auto-cd after `lf wt switch`).
     // Agent sessions run arbitrary nested commands; those must not mutate the
     // invoking shell state via the top-level directive file.
     cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");

@@ -19,12 +19,12 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf task sync --plan                  # inspect integration strategy
-lf task sync                         # apply it
+lf sync --plan                  # inspect integration strategy
+lf sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf submit                         # prepare for the user's merge click
-lf arm                            # prepare and request auto-merge; return
-lf land                           # record delivery and return
+lf pr submit                         # prepare for the user's merge click
+lf pr arm                            # prepare and request auto-merge; return
+lf pr land                           # record delivery and return
 lf pr reconcile                      # check delivery once; settle a verified merge
 ```
 
@@ -82,7 +82,7 @@ or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
 `repo/operate` and `wave/operate` skills.
 
-Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
+Use `lf home screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
 never launch a GUI browser executable for capture. Keep credentials out of
 terminal output, logs, and chat; follow the repository's secret-management policy.
 

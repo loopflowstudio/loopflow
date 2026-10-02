@@ -50,7 +50,7 @@ Do not create a per-slice review or repeat implementation evidence; realign
 reconciles the plan and code using what the work has taught us. Do not rewrite implementation or
 restart execution unless requested.
 
-Use this skill on request or inside the interactive unblock Session when a
+Use this skill on request or in the ongoing Wave conversation when a
 Flow needs a product decision. It is not a routine headless loop step. If no
 person is present, state the exact product choice requiring conversation and
 return through the caller's existing blocked protocol. Do not invent approval,

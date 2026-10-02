@@ -17,7 +17,7 @@ The mandate and memory endure; new KRs, targets and backlog need their own
 justification. Use the parent's accepted direction when supplied. Return a
 material challenge to that parent instead of opening another session. In an
 interactive session, ask in the conversation. Standalone headless work without
-accepted direction uses `lf ask` for judgment before settling the proposal.
+accepted direction explains the missing judgment and stops before settling the proposal.
 Existing acceptance remains valid; do not ask again.
 
 Name the beneficiary and what improves in their experience. Keep the objective

@@ -3,7 +3,6 @@ pub use workspace::SessionWorkspace;
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -15,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::{FlowSession, WorkRef};
 use crate::engine::Skill;
 use crate::session::{AgentSession, WorkSource};
-use crate::session_record::{SessionCaptureManifest, SessionTitleSource, RUN_DIR_ENV};
+use crate::session_record::{SessionCaptureManifest, SessionTitleSource};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
 
@@ -88,13 +87,10 @@ pub(crate) enum HumanSessionToken {
     Flow {
         token: Box<FlowSessionToken>,
     },
-    Ask {
-        id: String,
-    },
     StandaloneFlow {
         id: String,
     },
-    /// A scope's ongoing conversation; no caller or Flow waits on it.
+    /// A conversation; no caller or Flow waits on it.
     Primary {
         id: String,
     },
@@ -122,7 +118,6 @@ pub enum SessionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
-    Ask,
     Flow,
     Conversation,
 }
@@ -172,12 +167,6 @@ pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<Ses
                 None,
             ));
         }
-        SessionKind::Ask => actions.push((
-            Complete,
-            "Complete",
-            "Complete the conversation and resume its blocked caller",
-            not_ready,
-        )),
         SessionKind::Flow => actions.push((
             Complete,
             "Complete",
@@ -280,7 +269,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
         });
     let ready_conversation = session.kind == crate::session::SessionKind::Conversation
         && session.ready_summary.is_some();
-    if session.kind == crate::session::SessionKind::Ask || current_review || ready_conversation {
+    if current_review || ready_conversation {
         Some(SessionAttention::Review)
     } else if session.interactive
         && session.latest_turn.as_deref() == Some("completed")
@@ -331,7 +320,7 @@ pub enum SessionFlowOccurrence {
 /// its linked Run id, through `find_session`.
 #[derive(Debug)]
 enum SessionTarget {
-    /// An interactive Session, an Ask, or a saved Flow's review.
+    /// An interactive Session or a saved Flow's review.
     Row { session: Box<AgentSession> },
     /// A Task's review also settles its Task's invocation.
     Flow {
@@ -341,331 +330,6 @@ enum SessionTarget {
     },
 }
 
-pub(crate) async fn ask(
-    store: &SharedStore,
-    question: &str,
-    skill: Option<&str>,
-) -> Result<String> {
-    let id = format!("ask_{}", uuid::Uuid::new_v4().simple());
-    let session = reserve_ask(store, id, question, skill).await?;
-    exec_ask(&session).await?;
-    report_ask_wait(&session.id);
-    wait_for_ask(store, &session.id).await
-}
-
-/// Reuse one Ask for an exact Flow boundary, including its completed result.
-/// The key names the Session, so a retry finds the first request's row.
-#[cfg(test)]
-pub(crate) async fn ask_once(
-    store: &SharedStore,
-    key: &str,
-    question: &str,
-    skill: Option<&str>,
-) -> Result<String> {
-    active_run_manifest()?;
-    let id = keyed_ask_id(key)?;
-    let session = launch_keyed_ask(store, id.clone(), |id| {
-        reserve_ask(store, id, question, skill)
-    })
-    .await?;
-    if session.completed_at.is_none() {
-        report_ask_wait(&id);
-    }
-    wait_for_ask(store, &id).await
-}
-
-fn flow_unblock_key(flow: &FlowSession) -> Result<String> {
-    let capture = flow
-        .current_attempt
-        .as_ref()
-        .context("blocked turn has no captured input")?
-        .captured;
-    // Captured-event identity survives folding legacy child passes into their root.
-    Ok(format!("flow-blocked:captured:{capture}"))
-}
-
-/// A successful blocked result ends its turn before the driver asks for feedback.
-/// Reopening the same result reuses the question and its completed answer.
-pub(crate) async fn flow_unblock(
-    store: &SharedStore,
-    flow: &FlowSession,
-    reason: &str,
-) -> Result<String> {
-    anyhow::ensure!(
-        store.flow(flow.id()).await?.as_ref() == Some(flow),
-        "Flow changed before opening its question"
-    );
-    let attempt = flow
-        .current_attempt
-        .as_ref()
-        .context("blocked turn has no selected completion")?;
-    let caller = store
-        .session_for_artifact(&attempt.run_id)
-        .await?
-        .context("blocked conversation is missing")?;
-    let id = keyed_ask_id(&flow_unblock_key(flow)?)?;
-    let ask = launch_keyed_ask(store, id.clone(), |id| async move {
-        let binding = crate::ops::resolve_execution_binding(store, &flow.cwd).await?;
-        let mut session = caller;
-        session.captured = None;
-        session.id = id;
-        session.artifact_key = crate::session_record::new_artifact_key();
-        session.caller_artifact_key = Some(attempt.run_id.clone());
-        session.input_published = false;
-        session.cwd = flow.cwd.clone();
-        session.skill = Some("unblock".into());
-        session.node = None;
-        session.iterations = None;
-        session.task_id = binding.as_ref().and_then(|binding| match &binding.work {
-            WorkRef::Task(id) => Some(id.clone()),
-            _ => None,
-        });
-        session.wave_id = binding.as_ref().map(|binding| binding.wave_id.clone());
-        session.work_source = binding.as_ref().map(|binding| binding.source);
-        session.flow_session_id = None;
-        session.bound_at = None;
-        session.kind = crate::session::SessionKind::Ask;
-        session.interactive = true;
-        session.title = question_title(reason);
-        session.title_source = crate::session::TitleSource::Generated;
-        session.request = Some(reason.to_owned());
-        session.ready_summary = None;
-        session.completed_at = None;
-        session.created_at = crate::store::rows::now_unix();
-        let session = store.create_session(session, None).await?;
-        publish_prepared_input(
-            store,
-            &session,
-            crate::session_record::SessionFlowMembership::Independent,
-        )
-    })
-    .await?;
-    if ask.completed_at.is_none() {
-        report_ask_wait(&id);
-    }
-    wait_for_ask(store, &id).await?;
-    Ok(id)
-}
-
-/// Open the keyed Session once: the first caller stores it, every caller
-/// launches it if no launcher holds it, and a completed one is returned as is.
-async fn launch_keyed_ask<F: Future<Output = Result<AgentSession>>>(
-    store: &SharedStore,
-    id: String,
-    reserve: impl FnOnce(String) -> F,
-) -> Result<AgentSession> {
-    // The server holds this lock through provider publication. Wait off the
-    // async runtime so concurrent callers can still finish their launches.
-    let lock_id = id.clone();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-    let session = match store.session(&id).await? {
-        Some(found) if !found.input_published && found.completed_at.is_none() => {
-            publish_prepared_input(
-                store,
-                &found,
-                crate::session_record::SessionFlowMembership::Independent,
-            )?
-        }
-        Some(found) => found,
-        None => reserve(id.clone()).await?,
-    };
-    if session.completed_at.is_none()
-        && capture_is_prepared(&session.artifact_key)?
-        && !ask_exec_is_running(&id).await?
-    {
-        // Keep the Session on failure. A retry can start the same Session;
-        // a published native Run is reopened only through `lf session connect`.
-        exec_ask(&session).await.with_context(|| {
-            format!("launch human Ask {id}; retry the same boundary to recover")
-        })?;
-    }
-    drop(launch_lock);
-    Ok(session)
-}
-
-fn keyed_ask_id(key: &str) -> Result<String> {
-    anyhow::ensure!(
-        !key.trim().is_empty(),
-        "Ask continuation key cannot be empty"
-    );
-    Ok(format!(
-        "ask_once_{}",
-        hex::encode(Sha256::digest(key.as_bytes()))
-    ))
-}
-
-/// The unblock Session of a Task decision that failed: the same Session the
-/// failed decision recovery uses, keyed by the position. Returns
-/// its id and, once the human completed it, the feedback.
-pub(crate) async fn task_unblock(
-    store: &SharedStore,
-    task: &Task,
-    position: &FlowSession,
-) -> Result<(String, Option<String>)> {
-    let failure = position
-        .failure
-        .as_ref()
-        .ok_or_else(|| anyhow!("Task is not blocked"))?;
-    let failed = failure
-        .captured
-        .ok_or_else(|| anyhow!("Task blocker has no captured event"))?;
-    let parent_artifact = store.sqlite.captured_artifact(failed)?;
-    // A replacement invocation must not acquire an obsolete unblock Session.
-    anyhow::ensure!(
-        store.task_flow(&task.id).await?.as_ref() == Some(position),
-        "Task failure changed before opening unblock"
-    );
-    let id = keyed_ask_id(&task_unblock_key(position)?)?;
-    let session = launch_keyed_ask(store, id, |id| async move {
-        let agent = crate::ops::task::resolve_task_agent(&task.worktree, task.agent.as_deref(), None);
-        let (provider, model) = crate::engine::config::parse_agent(&agent);
-        let request = format!("{}\n\nFailed Session event: {failed}. Resolve the blocker and leave feedback for reassessment. Completion does not choose Advance or Iterate.", failure.reason);
-        let session = AgentSession {
-            captured: None,
-            caller_artifact_key: None,
-            id, artifact_key: crate::session_record::new_artifact_key(), input_published: true,
-            cwd: task.worktree.clone(), skill: Some("unblock".into()), provider: Some(provider), model,
-            node: None, iterations: None, task_id: Some(task.id.clone()), wave_id: Some(task.wave_id.clone()),
-            flow_session_id: None, work_source: Some(WorkSource::Inherited), bound_at: None,
-            kind: crate::session::SessionKind::Ask, interactive: true, repo: None,
-            title: question_title(&failure.reason), title_source: crate::session::TitleSource::Generated,
-            request: Some(request), ready_summary: None, completed_at: None, created_at: crate::store::rows::now_unix(),
-        };
-        let mut session = session;
-        session.caller_artifact_key = parent_artifact;
-        session.input_published = false;
-        let session = store.create_session(session, None).await?;
-        publish_prepared_input(store, &session, crate::session_record::SessionFlowMembership::Independent)
-    })
-    .await?;
-    let feedback = session
-        .completed_at
-        .is_some()
-        .then_some(session.ready_summary)
-        .flatten();
-    Ok((session.id, feedback))
-}
-
-pub(crate) fn task_unblock_key(position: &FlowSession) -> Result<String> {
-    position.blocker_key()
-}
-
-/// The unblock Session the selected decision waits on, if one is open.
-pub(crate) async fn task_waiting_unblock(
-    store: &SharedStore,
-    position: &FlowSession,
-) -> Result<Option<String>> {
-    if !position.is_decision() {
-        return Ok(None);
-    }
-    let Some(run) = position
-        .claim
-        .as_ref()
-        .and_then(|_| position.review_artifact_key())
-    else {
-        return Ok(None);
-    };
-    let key = if matches!(store.sqlite.flow_output(position.id()), Ok(Ok(crate::engine::SkillOutcome::Decided(verdict))) if verdict.decision == crate::engine::transitions::FlowDecision::Blocked)
-    {
-        flow_unblock_key(position)?
-    } else {
-        task_unblock_key(position)?
-    };
-    let Some(session) = store.session(&keyed_ask_id(&key)?).await? else {
-        return Ok(None);
-    };
-    Ok((session.caller_artifact_key.as_ref() == Some(run) && session.completed_at.is_none()).then(|| {
-        format!(
-            "Decision is waiting for unblock Session {}: {}. Complete the Session; the same conversation receives feedback and reassesses without Task resume.",
-            session.id, session.title
-        )
-    }))
-}
-
-fn report_ask_wait(id: &str) {
-    eprintln!(
-        "Waiting for human session {id}. Open it in Loopflow or with `lf session connect {id}`."
-    );
-}
-
-/// Store an Ask's Session with its first Run prepared. Work and the caller
-/// come from its checkout and asking input respectively; its invocation never does.
-async fn reserve_ask(
-    store: &SharedStore,
-    id: String,
-    question: &str,
-    skill: Option<&str>,
-) -> Result<AgentSession> {
-    let question = question.trim();
-    if question.is_empty() {
-        bail!("question cannot be empty");
-    }
-    let caller = active_run_manifest()?;
-    let cwd = std::env::current_dir().context("resolve Ask working directory")?;
-    if let Some(skill) = skill {
-        crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
-    }
-    let binding = crate::ops::resolve_execution_binding(store, &cwd).await?;
-    let task_id = binding.as_ref().and_then(|binding| match &binding.work {
-        crate::durable::WorkRef::Task(id) => Some(id.clone()),
-        _ => None,
-    });
-    let wave_id = binding.as_ref().map(|binding| binding.wave_id.clone());
-    if let Some(task_id) = &task_id {
-        let task = store
-            .get_task(task_id)
-            .await?
-            .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
-        if store
-            .task_deletion(&task.wave_id, task.plan.id.as_str())
-            .await?
-            .is_some()
-        {
-            bail!(
-                "Task {} was deleted and cannot ask for new execution",
-                task.plan.identifier
-            );
-        }
-    }
-    let session = AgentSession {
-        captured: None,
-        caller_artifact_key: None,
-        id,
-        artifact_key: crate::session_record::new_artifact_key(),
-        input_published: true,
-        cwd,
-        skill: skill.map(str::to_string),
-        provider: Some(caller.harness),
-        model: caller.model,
-        node: None,
-        iterations: None,
-        work_source: binding.as_ref().map(|binding| binding.source),
-        task_id,
-        wave_id,
-        flow_session_id: None,
-        bound_at: None,
-        kind: crate::session::SessionKind::Ask,
-        interactive: true,
-        repo: None,
-        title: question_title(question),
-        title_source: crate::session::TitleSource::Generated,
-        request: Some(question.to_owned()),
-        ready_summary: None,
-        completed_at: None,
-        created_at: crate::store::rows::now_unix(),
-    };
-    let mut session = session;
-    session.caller_artifact_key = Some(caller.artifact_key);
-    session.input_published = false;
-    let session = store.create_session(session, None).await?;
-    publish_prepared_input(
-        store,
-        &session,
-        crate::session_record::SessionFlowMembership::Independent,
-    )
-}
-
-/// Capture immutable prompt input. Retries preserve earlier artifact references.
 pub(crate) fn publish_prepared_input(
     store: &SharedStore,
     session: &AgentSession,
@@ -885,7 +549,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     use crate::session::FlowSummaryState;
     let kind = match session.kind {
         crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::Ask => SessionKind::Ask,
         crate::session::SessionKind::FlowReview => SessionKind::Flow,
     };
     let work = match (&session.task_id, &session.wave_id) {
@@ -1029,7 +692,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
 }
 
-/// Resolve a Session id, or the Run id linked to it. An Ask or Flow Run
+/// Resolve a Session id, or the Run id linked to it. A conversation or Flow Run
 /// names its waiting boundary, so `$LF_RUN_ID` inside a review targets it.
 async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
     // Membership outlives a pending boundary. Never reinterpret a retained
@@ -1152,7 +815,7 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let run_id = active_run_id()?;
     let id = match active_session_token()? {
         HumanSessionToken::Flow { token } => flow_token_id(&token),
-        HumanSessionToken::StandaloneFlow { id } | HumanSessionToken::Ask { id } => id,
+        HumanSessionToken::StandaloneFlow { id } => id,
         HumanSessionToken::Primary { .. } => {
             bail!("a primary Session has no caller waiting on readiness")
         }
@@ -1358,16 +1021,16 @@ async fn serve_flow_locked(
     }
 }
 
-pub(crate) async fn serve_ask(store: &SharedStore, run_id: &String) -> Result<()> {
+pub(crate) async fn serve_conversation(store: &SharedStore, run_id: &String) -> Result<()> {
     let session = store
         .session_for_artifact(run_id)
         .await?
-        .ok_or_else(|| anyhow!("Ask Run {run_id} no longer exists"))?;
+        .ok_or_else(|| anyhow!("Conversation Run {run_id} no longer exists"))?;
     let launch_lock = lock_session_exec(&session.id)?;
     let session = store
         .session(&session.id)
         .await?
-        .ok_or_else(|| anyhow!("Ask Run {run_id} no longer exists"))?;
+        .ok_or_else(|| anyhow!("Conversation Run {run_id} no longer exists"))?;
     if session.completed_at.is_some() {
         bail!("session {:?} is already resolved", session.id);
     }
@@ -1380,22 +1043,19 @@ pub(crate) async fn serve_ask(store: &SharedStore, run_id: &String) -> Result<()
 }
 
 /// What a waiting Session's agent carries to act on its own Session.
-fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
-    Ok(match session.kind {
+fn session_token(session: &AgentSession) -> HumanSessionToken {
+    match session.kind {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
             id: session.id.clone(),
         },
-        // Only a primary conversation launches from a prepared input.
+        // Prepared conversations have no Flow settlement authority.
         crate::session::SessionKind::Conversation => HumanSessionToken::Primary {
             id: session.id.clone(),
         },
-        crate::session::SessionKind::Ask => HumanSessionToken::Ask {
-            id: session.id.clone(),
-        },
-    })
+    }
 }
 
-/// Launch the prepared Run of an Ask or of a saved Flow's review.
+/// Launch the prepared Run of a conversation or of a saved Flow's review.
 async fn serve_locked(
     store: &SharedStore,
     session: &AgentSession,
@@ -1403,7 +1063,7 @@ async fn serve_locked(
 ) -> Result<()> {
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
-    let token = session_token(session)?;
+    let token = session_token(session);
     command
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
@@ -1412,7 +1072,7 @@ async fn serve_locked(
             crate::ops::flow_session::prepare_exec(store, &mut command, id).await?
         }
         _ => {
-            command.args(ask_launch_args(store, session).await);
+            command.args(conversation_launch_args(store, session).await);
         }
     }
     let mut child = spawn_session_exec(&mut command, &session.artifact_key).await?;
@@ -1426,7 +1086,7 @@ async fn serve_locked(
     }
 }
 
-async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
+async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
         "--mode".to_string(),
         "tui".to_string(),
@@ -1450,10 +1110,12 @@ async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<Str
         Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
-    args.push(match session.kind {
-        crate::session::SessionKind::Conversation => PRIMARY_MESSAGE.to_string(),
-        _ => ask_message(session.request.as_deref().unwrap_or_default()),
-    });
+    args.push(
+        session
+            .request
+            .clone()
+            .unwrap_or_else(|| PRIMARY_MESSAGE.to_string()),
+    );
     args
 }
 
@@ -1518,12 +1180,6 @@ pub(crate) async fn open(
             let Some(provider_session) =
                 store.sqlite.input_provider_session(&session.artifact_key)?
             else {
-                // A primary conversation's first launch has no history to resume.
-                anyhow::ensure!(
-                    store.sqlite.primary_scope(&session.id)?.is_some(),
-                    "Session {} has no provider history yet",
-                    session.id
-                );
                 let surface = surface(store, session).await?;
                 if resume {
                     open_waiting(store, &session.id).await?;
@@ -1721,20 +1377,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
         SessionTarget::Row { session } => {
             let lock_id = session.id.clone();
             let _lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-            if session.kind == crate::session::SessionKind::FlowReview {
-                crate::ops::flow_session::complete(store, session).await?;
-            } else {
-                store
-                    .complete_session(&session.id, session.captured)
-                    .await?;
-                // The answer is durable before teardown can interrupt this caller
-                // or fail. A cleanup failure must not strand the waiting caller.
-                if let Err(error) = stop_session_client(&session.artifact_key) {
-                    tracing::warn!(session_id = %session.id, run_id = %session.artifact_key,
-                        error = %format!("{error:#}"),
-                        "Ask completion saved, but its native Session could not be stopped");
-                }
-            }
+            crate::ops::flow_session::complete(store, session).await?;
         }
         SessionTarget::Flow { task, position, .. } => {
             complete_flow(store, task, position).await?;
@@ -1743,61 +1386,51 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     Ok(session)
 }
 
-/// Open an Ask or a saved Flow's review: resume its native history, else
+/// Open a conversation or a saved Flow's review: resume its native history, else
 /// launch its prepared Run, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<String> {
-    loop {
-        let observed = store
-            .session(id)
-            .await?
-            .ok_or_else(|| session_not_found(id))?;
-        let lock_id = id.to_string();
-        let launch_lock =
-            tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-        let session = store
-            .session(id)
-            .await?
-            .ok_or_else(|| session_not_found(id))?;
-        if session.completed_at.is_some() {
-            bail!("session {id:?} is already complete");
-        }
-        if session.artifact_key != observed.artifact_key {
-            drop(launch_lock);
-            continue;
-        }
-        let mut launch_lock = Some(launch_lock);
-        let token = session_token(&session)?;
-        if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
-            return Ok(session.artifact_key);
-        }
-        // A consumed launch without native history gets another attempt under
-        // the same Session; its title and feedback never leave the row.
-        let session = if capture_is_prepared(&session.artifact_key)? {
-            session
-        } else {
-            let flow = match &token {
-                HumanSessionToken::StandaloneFlow { id } => {
-                    crate::ops::flow_session::membership(store, id).await?
-                }
-                _ => crate::session_record::SessionFlowMembership::Independent,
-            };
-            let replaced = session.captured;
-            let mut next = session;
-            if next.input_published {
-                next.artifact_key = crate::session_record::new_artifact_key();
-                next.input_published = false;
-                next = store.replace_session_input(replaced, next).await?;
-            }
-            publish_prepared_input(store, &next, flow)?
-        };
-        serve_locked(
-            store,
-            &session,
-            launch_lock.expect("an unresumed Session retains its launch lock"),
-        )
-        .await?;
-        return Ok(session.artifact_key);
+async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+    let lock_id = id.to_string();
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
+    // Resolve the current input under the launch lock, including completion
+    // or replacement that happened while this opener waited.
+    let session = store
+        .session(id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    if session.completed_at.is_some() {
+        bail!("session {id:?} is already complete");
     }
+    let mut launch_lock = Some(launch_lock);
+    let token = session_token(&session);
+    if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
+        return Ok(());
+    }
+    // A consumed launch without native history gets another attempt under
+    // the same Session; its title and feedback never leave the row.
+    let session = if capture_is_prepared(&session.artifact_key)? {
+        session
+    } else {
+        let flow = match &token {
+            HumanSessionToken::StandaloneFlow { id } => {
+                crate::ops::flow_session::membership(store, id).await?
+            }
+            _ => crate::session_record::SessionFlowMembership::Independent,
+        };
+        let replaced = session.captured;
+        let mut next = session;
+        if next.input_published {
+            next.artifact_key = crate::session_record::new_artifact_key();
+            next.input_published = false;
+            next = store.replace_session_input(replaced, next).await?;
+        }
+        publish_prepared_input(store, &next, flow)?
+    };
+    serve_locked(
+        store,
+        &session,
+        launch_lock.expect("an unresumed Session retains its launch lock"),
+    )
+    .await
 }
 
 async fn open_flow_locked(
@@ -1858,7 +1491,6 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionRecord> {
     let kind = match session.kind {
         crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::Ask => SessionKind::Ask,
         crate::session::SessionKind::FlowReview => SessionKind::Flow,
     };
     let work = match (&session.task_id, &session.wave_id) {
@@ -2030,7 +1662,7 @@ fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
 
 /// Rename a Session through its Run and return the authoritative record.
 /// `Generated` is an agent suggestion; it never replaces a human-assigned name.
-/// The id may be the Session's own `$LF_RUN_ID`: an Ask or Flow Run names its
+/// The id may be the Session's own `$LF_RUN_ID`: a conversation or Flow Run names its
 /// boundary, and naming needs no provider history.
 pub(crate) async fn rename(
     store: &SharedStore,
@@ -2375,12 +2007,6 @@ fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
     )
 }
 
-fn ask_message(request: &str) -> String {
-    format!(
-        "{request}\n\n<lf:human-session>\nThe originating Loopflow Run is blocked while you work with the user in this terminal. You are in the caller's checkout and may inspect or edit it. Save useful findings and user decisions in self-contained topic notes under scratch/; include their exact paths and a short takeaway in the ready summary. When the work is ready, run `lf session ready \"<concise summary>\"`. Ready keeps this session visible and does not resume the caller; the user completes it when the conversation is finished.\n</lf:human-session>"
-    )
-}
-
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
@@ -2401,85 +2027,55 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         step.step,
         position.cursor.iteration.to_string(),
     ];
-    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv, &[]).await
-}
-
-/// Hand the conversation to a durable terminal, as a child of the asking Run.
-async fn exec_ask(session: &AgentSession) -> Result<()> {
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let argv = vec![
-        lf.to_string_lossy().to_string(),
-        "session".to_string(),
-        "serve-ask".to_string(),
-        session.artifact_key.to_string(),
-    ];
-    let caller = session
-        .caller_artifact_key
-        .as_ref()
-        .ok_or_else(|| anyhow!("Ask {} has no caller input", session.id))?
-        .to_string();
-    let caller_dir = crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), &caller)
-        .ok()
-        .map(|(directory, _)| directory.to_string_lossy().to_string());
-    let mut env = vec![(crate::durable::RUN_ID_ENV, caller.as_str())];
-    if let Some(directory) = &caller_dir {
-        env.push((RUN_DIR_ENV, directory.as_str()));
-    }
-    start_durable_session(&ask_background_name(&session.id), &session.cwd, &argv, &env).await
+    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv).await
 }
 
 #[cfg(not(test))]
-async fn ask_exec_is_running(id: &str) -> Result<bool> {
+async fn conversation_exec_is_running(id: &str) -> Result<bool> {
     let status = tokio::process::Command::new("tmux")
         .args([
             "has-session",
             "-t",
-            &format!("={}", ask_background_name(id)),
+            &format!("={}", conversation_background_name(id)),
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .await
-        .context("inspect human Ask launcher")?;
+        .context("inspect conversation launcher")?;
     match status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
-        _ => bail!("inspect human Ask launcher: tmux exited with {status}"),
+        _ => bail!("inspect conversation launcher: tmux exited with {status}"),
     }
 }
 
 #[cfg(test)]
-async fn ask_exec_is_running(id: &str) -> Result<bool> {
-    Ok(tests::ASK_LAUNCHERS
+async fn conversation_exec_is_running(id: &str) -> Result<bool> {
+    Ok(tests::CONVERSATION_LAUNCHERS
         .lock()
         .unwrap()
-        .contains(&ask_background_name(id)))
+        .contains(&conversation_background_name(id)))
 }
 
 #[cfg(not(test))]
-async fn start_durable_session(
-    name: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    crate::engine::process::start_home_session_with_env(name, cwd, argv, env).await
+async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    crate::engine::process::start_home_session(name, cwd, argv).await
 }
 
 #[cfg(test)]
-async fn start_durable_session(
-    name: &str,
-    _cwd: &Path,
-    argv: &[String],
-    _env: &[(&str, &str)],
-) -> Result<()> {
-    if !argv.iter().any(|arg| arg == "serve-ask") {
+async fn start_durable_session(name: &str, _cwd: &Path, argv: &[String]) -> Result<()> {
+    if !argv.iter().any(|arg| arg == "serve-conversation") {
         return Ok(());
     }
-    if tests::FAILED_ASK_LAUNCHERS.lock().unwrap().contains(name) {
+    if tests::FAILED_CONVERSATION_LAUNCHERS
+        .lock()
+        .unwrap()
+        .contains(name)
+    {
         bail!("simulated Session launch failure");
     }
-    if !tests::ASK_LAUNCHERS
+    if !tests::CONVERSATION_LAUNCHERS
         .lock()
         .unwrap()
         .insert(name.to_string())
@@ -2564,62 +2160,8 @@ fn flow_token_background_name(token: &FlowSessionToken) -> String {
     format!("lf-human-{task}-{node}-{invocation}-{}", token.iteration)
 }
 
-fn ask_background_name(id: &str) -> String {
-    if let Some(key) = id.strip_prefix("ask_once_") {
-        return format!("lf-human-once-{key}");
-    }
-    format!(
-        "lf-human-{}",
-        id.trim_start_matches("ask_")
-            .chars()
-            .take(12)
-            .collect::<String>()
-    )
-}
-
-fn active_run_manifest() -> Result<SessionCaptureManifest> {
-    let run_id = std::env::var(crate::durable::RUN_ID_ENV)
-        .context("lf ask can only be called from a Loopflow Run")?;
-    let run_dir = PathBuf::from(
-        std::env::var_os(RUN_DIR_ENV).context("active Loopflow Run has no LF_RUN_DIR")?,
-    );
-    let bytes =
-        fs::read(run_dir.join("manifest.json")).context("read active Session capture manifest")?;
-    let manifest: SessionCaptureManifest =
-        serde_json::from_slice(&bytes).context("parse active Session capture manifest")?;
-    if manifest.artifact_key.as_str() != run_id {
-        bail!("active Run identity does not match its manifest");
-    }
-    Ok(manifest)
-}
-
-fn question_title(question: &str) -> String {
-    let first = question
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("Request for input");
-    let mut chars = first.trim().chars();
-    let title = chars.by_ref().take(80).collect::<String>();
-    if chars.next().is_some() {
-        format!("{title}…")
-    } else {
-        title
-    }
-}
-
-async fn wait_for_ask(store: &SharedStore, id: &str) -> Result<String> {
-    loop {
-        let session = store
-            .session(id)
-            .await?
-            .ok_or_else(|| anyhow!("session {id:?} disappeared before resolution"))?;
-        if session.completed_at.is_some() {
-            return session
-                .ready_summary
-                .ok_or_else(|| anyhow!("Ask {id} completed without an answer"));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
+fn conversation_background_name(id: &str) -> String {
+    format!("lf-human-{}", id.chars().take(12).collect::<String>())
 }
 
 fn active_session_token() -> Result<HumanSessionToken> {
@@ -2648,7 +2190,7 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
             }
             Ok(Some(token.skill))
         }
-        HumanSessionToken::Ask { .. } | HumanSessionToken::Primary { .. } => Ok(None),
+        HumanSessionToken::Primary { .. } => Ok(None),
     }
 }
 
@@ -2794,11 +2336,7 @@ mod tests {
         );
         summary.task_terminal = true;
         assert_eq!(super::summary_surface(&summary).attention, None);
-        summary.kind = crate::session::SessionKind::Ask;
-        assert_eq!(
-            super::summary_surface(&summary).attention,
-            Some(super::SessionAttention::Review)
-        );
+        summary.task_terminal = false;
         summary.completed_at = Some(1);
         assert_eq!(super::summary_surface(&summary).attention, None);
     }
@@ -2806,40 +2344,31 @@ mod tests {
     use std::collections::HashSet;
     use std::ffi::OsString;
     use std::sync::{LazyLock, Mutex};
-    use std::time::Duration;
-
-    use clap::Parser;
-    use sha2::Digest;
 
     use super::{
-        ask, ask_background_name, ask_launch_args, ask_once, flow_background_name, flow_id,
-        flow_token_id, human_open_argv, question_title, reserve_ask, serve_ask,
-        session_is_resumable, token_matches, wait_for_ask, FlowSessionToken, HumanSessionToken,
-        HUMAN_SESSION_ENV,
+        flow_background_name, flow_id, flow_token_id, human_open_argv, session_is_resumable,
+        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
     use crate::durable::FlowSession;
-    use crate::engine::{prepare_exec_prompt, Config, ExecPromptInput, Surface};
-    use crate::lf::{Cli, Commands};
-    use crate::session::{AgentSession, SessionKind};
-    use crate::session_record::SessionCaptureManifest;
+    use crate::session::AgentSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
 
-    pub(super) static ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
+    pub(super) static CONVERSATION_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
         LazyLock::new(|| Mutex::new(HashSet::new()));
-    pub(super) static FAILED_ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
+    pub(super) static FAILED_CONVERSATION_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
         LazyLock::new(|| Mutex::new(HashSet::new()));
 
-    pub(super) struct AskHome {
+    pub(super) struct SessionHome {
         home: tempfile::TempDir,
         previous: Vec<(&'static str, Option<OsString>)>,
         _ambient: crate::test_ambient::EnvGuard,
     }
 
-    impl AskHome {
+    impl SessionHome {
         pub(super) fn new() -> Self {
-            ASK_LAUNCHERS.lock().unwrap().clear();
-            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+            CONVERSATION_LAUNCHERS.lock().unwrap().clear();
+            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
             let ambient = crate::test_ambient::EnvGuard::new();
             let home = tempfile::tempdir().unwrap();
             let previous = ["LF_HOME", "LF_BIN"]
@@ -2852,34 +2381,6 @@ mod tests {
                 .collect();
             std::env::set_var("LF_HOME", home.path());
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let manifest = SessionCaptureManifest {
-                schema_version: 1,
-                artifact_key: crate::session_record::new_artifact_key(),
-                caller_artifact_key: None,
-                created_at: time::OffsetDateTime::now_utc(),
-                harness: "codex".to_string(),
-                model: Some("test".to_string()),
-                surface: "headless".to_string(),
-                cwd: std::env::current_dir().unwrap(),
-                repo: None,
-                worktree: None,
-                skill: Some("loop-decide".to_string()),
-                subjects: Vec::new(),
-                flow: None,
-                exec: None,
-                context: None,
-                runtime_path: None,
-                runtime_digest: None,
-                host: "test".to_string(),
-                boot_id: None,
-            };
-            std::fs::write(
-                home.path().join("manifest.json"),
-                serde_json::to_vec(&manifest).unwrap(),
-            )
-            .unwrap();
-            std::env::set_var("LF_RUN_DIR", home.path());
-            std::env::set_var("LF_RUN_ID", manifest.artifact_key.as_str());
             Self {
                 home,
                 previous,
@@ -2896,7 +2397,7 @@ mod tests {
         }
     }
 
-    impl Drop for AskHome {
+    impl Drop for SessionHome {
         fn drop(&mut self) {
             for (key, value) in self.previous.drain(..) {
                 match value {
@@ -2904,276 +2405,15 @@ mod tests {
                     None => std::env::remove_var(key),
                 }
             }
-            ASK_LAUNCHERS.lock().unwrap().clear();
-            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+            CONVERSATION_LAUNCHERS.lock().unwrap().clear();
+            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
         }
-    }
-
-    async fn open_asks(store: &SharedStore) -> Vec<AgentSession> {
-        let mut open = store
-            .sessions(&crate::session::SessionFilter::default())
-            .await
-            .unwrap();
-        open.retain(|session| session.kind == SessionKind::Ask);
-        open
-    }
-
-    async fn wait_until_asks(store: &SharedStore, count: usize) -> Vec<AgentSession> {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let sessions = open_asks(store).await;
-                if sessions.len() == count && ASK_LAUNCHERS.lock().unwrap().len() == count {
-                    return sessions;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn answer(store: &SharedStore, session: &AgentSession, summary: &str) {
-        store
-            .ready_session(&session.id, session.captured, summary)
-            .await
-            .unwrap();
-        super::complete(store, &session.id).await.unwrap();
-    }
-
-    fn keyed_id(key: &str) -> String {
-        format!(
-            "ask_once_{}",
-            hex::encode(super::Sha256::digest(key.as_bytes()))
-        )
-    }
-
-    /// A stored Ask whose launch was consumed without provider history.
-    async fn consumed_ask(store: &SharedStore, id: String, question: &str) -> AgentSession {
-        let stored = reserve_ask(store, id, question, None).await.unwrap();
-        std::fs::remove_file(run_dir(&stored).join("prepared")).unwrap();
-        stored
-    }
-
-    fn run_dir(run: &AgentSession) -> std::path::PathBuf {
-        super::local_session_run_dir(&run.artifact_key).unwrap()
-    }
-
-    #[test]
-    fn keyed_asks_join_recover_completion_and_keep_boundaries_independent() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let caller = std::env::var("LF_RUN_ID").unwrap();
-            let key = "/private/checkout/invocation/decision/visit-1";
-            let first = ask_once(&store, key, "Choose a policy", Some("unblock"));
-            // Concurrent callers race for the launch lock, so the retry
-            // starts once the first request's Session is stored.
-            let duplicate = async {
-                while store.session(&keyed_id(key)).await.unwrap().is_none() {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                ask_once(&store, key, "Changed retry text", Some("unblock")).await
-            };
-            let independent =
-                ask_once(&store, "invocation/decision/visit-2", "Second choice", None);
-            let human = async {
-                for session in wait_until_asks(&store, 2).await {
-                    assert!(session.id.starts_with("ask_once_"));
-                    assert!(!session.id.contains("checkout"));
-                    let manifest: SessionCaptureManifest = serde_json::from_slice(
-                        &std::fs::read(run_dir(&session).join("manifest.json")).unwrap(),
-                    )
-                    .unwrap();
-                    assert_eq!(
-                        manifest.caller_artifact_key.as_ref().unwrap().as_str(),
-                        caller
-                    );
-                    assert_eq!(session.flow_session_id, None);
-                    assert_eq!(
-                        (session.provider.as_deref(), session.model.as_deref()),
-                        (Some("codex"), Some("test"))
-                    );
-                    let summary = if session.request.as_deref() == Some("Second choice") {
-                        "second"
-                    } else {
-                        assert_eq!(session.request.as_deref(), Some("Choose a policy"));
-                        assert_eq!(session.skill.as_deref(), Some("unblock"));
-                        "first"
-                    };
-                    answer(&store, &session, summary).await;
-                }
-            };
-            let (first, duplicate, independent, ()) =
-                tokio::join!(first, duplicate, independent, human);
-            assert_eq!(first.unwrap(), "first");
-            assert_eq!(duplicate.unwrap(), "first");
-            assert_eq!(independent.unwrap(), "second");
-            assert!(open_asks(&store).await.is_empty());
-            // Completed recovery must not reload a now-missing selected skill.
-            assert_eq!(
-                ask_once(&store, key, "", Some("missing-skill"))
-                    .await
-                    .unwrap(),
-                "first"
-            );
-            assert_eq!(ASK_LAUNCHERS.lock().unwrap().len(), 2);
-            assert_eq!(store.session_inputs(&keyed_id(key)).await.unwrap().len(), 1);
-        });
-    }
-
-    #[test]
-    fn keyed_ask_failed_launch_can_retry_the_same_session() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let key = "failed-launch-boundary";
-            let id = keyed_id(key);
-            FAILED_ASK_LAUNCHERS
-                .lock()
-                .unwrap()
-                .insert(ask_background_name(&id));
-            let error = ask_once(&store, key, "Preserved question", None)
-                .await
-                .unwrap_err();
-            assert!(error.to_string().contains(&id));
-            let preserved = store.session(&id).await.unwrap().unwrap();
-            let first_input = preserved.artifact_key.clone();
-            assert_eq!(preserved.request.as_deref(), Some("Preserved question"));
-            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
-            let human = async {
-                let sessions = wait_until_asks(&store, 1).await;
-                assert_eq!(sessions[0].id, id);
-                assert_eq!(sessions[0].artifact_key, first_input);
-                answer(&store, &sessions[0], "Recovered").await;
-            };
-            let (result, ()) = tokio::join!(ask_once(&store, key, "replacement", None), human);
-            assert_eq!(result.unwrap(), "Recovered");
-            assert_eq!(wait_for_ask(&store, &id).await.unwrap(), "Recovered");
-        });
-    }
-
-    #[test]
-    fn keyed_ask_recovers_the_reserved_event_after_artifact_publication_failure() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let key = "unpublished-ask";
-            let id = keyed_id(key);
-            let blocked = home.home.path().join("runs");
-            std::fs::write(&blocked, b"fixture blocks artifact publication").unwrap();
-            assert!(ask_once(&store, key, "Retain this question", None)
-                .await
-                .is_err());
-            let reserved = store.session(&id).await.unwrap().unwrap();
-            assert!(!reserved.input_published);
-            let history = store.sqlite.session_history(&id, 0, 0).unwrap();
-            assert_eq!(history.len(), 1);
-            assert_eq!(history[0].seq, reserved.captured.unwrap());
-            assert_eq!(history[0].kind, crate::session::SessionEventKind::Captured);
-            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
-            std::fs::remove_file(blocked).unwrap();
-            let human = async {
-                let sessions = wait_until_asks(&store, 1).await;
-                assert_eq!(sessions[0].captured, reserved.captured);
-                assert_eq!(sessions[0].request, reserved.request);
-                answer(&store, &sessions[0], "Recovered publication").await;
-            };
-            let (result, ()) = tokio::join!(ask_once(&store, key, "replacement", None), human);
-            assert_eq!(result.unwrap(), "Recovered publication");
-            assert_eq!(store.session_inputs(&id).await.unwrap().len(), 1);
-        });
-    }
-
-    #[test]
-    fn keyed_ask_does_not_replace_a_published_native_run() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let key = "published-run-boundary";
-            let session = consumed_ask(&store, keyed_id(key), "Keep native ownership").await;
-            // No tmux launcher and no native history do not grant replacement
-            // authority. Even a delayed serve command must join.
-            serve_ask(&store, &session.artifact_key).await.unwrap();
-            assert!(tokio::time::timeout(
-                Duration::from_millis(100),
-                ask_once(&store, key, "retry", None)
-            )
-            .await
-            .is_err());
-            let current = store.session(&session.id).await.unwrap().unwrap();
-            assert_eq!(current.artifact_key, session.artifact_key);
-            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
-            std::env::set_var("LF_RUN_ID", session.artifact_key.as_str());
-            std::env::set_var(
-                HUMAN_SESSION_ENV,
-                serde_json::to_string(&HumanSessionToken::Ask {
-                    id: session.id.clone(),
-                })
-                .unwrap(),
-            );
-            super::mark_ready(&store, "Resolved").await.unwrap();
-            super::complete(&store, &session.id).await.unwrap();
-            assert!(super::mark_ready(&store, "Late readiness").await.is_err());
-            assert_eq!(wait_for_ask(&store, &session.id).await.unwrap(), "Resolved");
-            assert!(open_asks(&store).await.is_empty());
-        });
-    }
-
-    #[test]
-    fn reopening_ask_cannot_overwrite_a_concurrent_completion() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let session =
-                consumed_ask(&store, "ask_reopening".to_string(), "Keep the answer").await;
-            store
-                .ready_session(&session.id, session.captured, "Accepted direction")
-                .await
-                .unwrap();
-            let lock = super::lock_session_exec(&session.id).unwrap();
-            let mut reopening = Box::pin(super::open_waiting(&store, &session.id));
-            assert!(
-                tokio::time::timeout(Duration::from_millis(200), reopening.as_mut())
-                    .await
-                    .is_err()
-            );
-            let untouched = store.session(&session.id).await.unwrap().unwrap();
-            let current = untouched.clone();
-            assert_eq!(current.artifact_key, session.artifact_key);
-            assert_eq!(
-                untouched.ready_summary.as_deref(),
-                Some("Accepted direction")
-            );
-
-            store
-                .complete_session(&session.id, session.captured)
-                .await
-                .unwrap();
-            drop(lock);
-
-            assert!(reopening
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("already complete"));
-            assert_eq!(
-                wait_for_ask(&store, &session.id).await.unwrap(),
-                "Accepted direction"
-            );
-            assert_eq!(store.session_inputs(&session.id).await.unwrap().len(), 1);
-            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
-        });
     }
 
     #[test]
     fn session_stop_requires_retained_input_identity() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         let run_id = crate::session_record::new_artifact_key();
         assert!(super::stop_session_client(&run_id)
             .unwrap_err()
@@ -3190,57 +2430,6 @@ mod tests {
             std::fs::read(dir.join("manifest.json")).unwrap(),
             b"invalid manifest"
         );
-    }
-
-    #[test]
-    fn ask_completion_survives_native_cleanup_failure() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let session = consumed_ask(
-                &store,
-                "ask_cleanup".to_string(),
-                "Resolve stalled progress",
-            )
-            .await;
-            let manifest = run_dir(&session).join("manifest.json");
-            std::fs::write(&manifest, b"invalid manifest").unwrap();
-
-            answer(&store, &session, "Try the narrower proof").await;
-
-            assert_eq!(
-                wait_for_ask(&store, &session.id).await.unwrap(),
-                "Try the narrower proof"
-            );
-            assert!(open_asks(&store).await.is_empty());
-            assert_eq!(std::fs::read(manifest).unwrap(), b"invalid manifest");
-        });
-    }
-
-    #[test]
-    fn ordinary_ask_returns_its_answer_and_stays_a_closed_session() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let human = async {
-                let session = wait_until_asks(&store, 1).await.remove(0);
-                answer(&store, &session, "Ordinary answer").await;
-                session.id
-            };
-            let (result, id) = tokio::join!(ask(&store, "Plain question", None), human);
-            assert_eq!(result.unwrap(), "Ordinary answer");
-            let closed = store.session(&id).await.unwrap().unwrap();
-            assert!(closed.completed_at.is_some());
-            assert_eq!(closed.ready_summary.as_deref(), Some("Ordinary answer"));
-            assert!(!home
-                .home
-                .path()
-                .join("human-sessions")
-                .join(format!("{id}.json"))
-                .exists());
-        });
     }
 
     #[test]
@@ -3357,7 +2546,7 @@ mod tests {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../../../tests/fixtures/dto/session.json"))
                 .unwrap();
-        for kind in ["conversation", "ask", "flow"] {
+        for kind in ["conversation", "flow"] {
             let mut value = fixture.clone();
             value["kind"] = kind.into();
             let session: super::SessionRecord = serde_json::from_value(value.clone()).unwrap();
@@ -3553,7 +2742,7 @@ mod tests {
     #[test]
     fn stored_session_membership_resolves_nested_and_post_xor_graph_nodes() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -3713,112 +2902,15 @@ mod tests {
     }
 
     #[test]
-    fn ask_titles_are_meaningful_and_bounded() {
-        assert_eq!(
-            question_title("\nReview this branch\nmore"),
-            "Review this branch"
-        );
-        assert!(question_title(&"x".repeat(100)).ends_with('…'));
-    }
-
-    #[test]
-    fn ask_skill_and_question_reach_the_launch_prompt() {
-        let _lock = crate::journal::test_env_lock();
-        let checkout = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(checkout.path().join(".lf/skills")).unwrap();
-        std::fs::write(
-            checkout.path().join(".lf/skills/list.md"),
-            "Resolve the blocker with the human using the preserved evidence.",
-        )
-        .unwrap();
-        let session = AgentSession {
-            captured: None,
-            caller_artifact_key: None,
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
-            bound_at: None,
-            id: "ask_skill_proof".to_string(),
-            artifact_key: crate::session_record::new_artifact_key(),
-            input_published: true,
-            cwd: checkout.path().into(),
-            skill: Some("list".into()),
-            provider: Some("claude".into()),
-            model: Some("opus".into()),
-            node: None,
-            iterations: None,
-            kind: SessionKind::Ask,
-            interactive: true,
-            repo: None,
-            title: "Choose the delivery policy".to_string(),
-            title_source: crate::session::TitleSource::Generated,
-            request: Some("Choose the delivery policy".to_string()),
-            ready_summary: Some("Discussed the policy".to_string()),
-            completed_at: None,
-            created_at: 1,
-        };
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let store: SharedStore = std::sync::Arc::new(
-            runtime
-                .block_on(open_ephemeral_store(&StorageConfig::sqlite(
-                    checkout.path().join("registry.db"),
-                )))
-                .unwrap(),
-        );
-
-        let args = runtime.block_on(ask_launch_args(&store, &session));
-        let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
-        let Some(Commands::Skill {
-            cmd: crate::lf::SkillCommand::External(mut args),
-        }) = cli.command
-        else {
-            panic!("selected Ask must use the ordinary skill command")
-        };
-        let name = args.remove(0);
-        let prepared = prepare_exec_prompt(
-            &Config {
-                diff: false,
-                diff_files: false,
-                paste: false,
-                ..Config::default()
-            },
-            ExecPromptInput {
-                repo_root: session.cwd.clone(),
-                cwd: Some(session.cwd.clone()),
-                skill: Some(name),
-                message: Some(args.join(" ")),
-                agent: Some(super::launch_model(&session)),
-                surface: Surface::Cli,
-                ..ExecPromptInput::default()
-            },
-        )
-        .unwrap();
-        assert!(prepared
-            .prompt
-            .contains("Resolve the blocker with the human using the preserved evidence."));
-        assert!(prepared.prompt.contains("Choose the delivery policy"));
-        assert!(prepared
-            .prompt
-            .contains("Ready keeps this session visible and does not resume the caller"));
-        assert_eq!(prepared.config.cwd.as_deref(), Some(checkout.path()));
-
-        let inline = AgentSession {
-            skill: None,
-            ..session
-        };
-        let args = runtime.block_on(ask_launch_args(&store, &inline));
-        let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Inline { .. })));
-    }
-
-    #[test]
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        let argv = human_open_argv(None, None, "ask_123").unwrap();
+        let home = SessionHome::new();
+        let argv = human_open_argv(None, None, "session_123").unwrap();
 
-        assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
+        assert_eq!(
+            &argv[argv.len() - 3..],
+            ["session", "connect", "session_123"]
+        );
         assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }

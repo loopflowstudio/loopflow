@@ -85,7 +85,7 @@ pub struct AgentSession {
     pub repo: Option<String>,
     pub title: String,
     pub title_source: TitleSource,
-    /// What an Ask's caller asked; absent for other kinds.
+    /// Retained request context from historical conversations.
     pub request: Option<String>,
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
@@ -107,7 +107,6 @@ pub struct SessionBind {
 pub enum SessionKind {
     Conversation,
     FlowReview,
-    Ask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

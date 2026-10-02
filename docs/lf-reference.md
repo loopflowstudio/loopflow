@@ -219,16 +219,6 @@ Inspect and continue Sessions
 |---|---|
 | `--help / -h` | Print help |
 
-## lf session ask
-
-Open a durable session and wait for the user to complete it
-
-| Argument | What it does |
-|---|---|
-| `--skill` | Named skill for the session |
-| `<question>` | What the session should work through |
-| `--help / -h` | Print help |
-
 ## lf session history
 
 Read this conversation's native start, usage and completion receipts
@@ -294,7 +284,7 @@ Give a primary Session's scope a fresh conversation
 
 ## lf session complete
 
-Complete a review, blocked Ask, or interactive session
+Complete a review or interactive session
 
 | Argument | What it does |
 |---|---|
@@ -350,9 +340,9 @@ Internal command; invoked by the owning operation.
 | `<iteration>` | iteration |
 | `--help / -h` | Print help |
 
-## lf session serve-ask
+## lf session serve-conversation
 
-Run one prepared Ask or primary conversation in its durable terminal
+Run one prepared conversation in its durable terminal
 
 Internal command; invoked by the owning operation.
 

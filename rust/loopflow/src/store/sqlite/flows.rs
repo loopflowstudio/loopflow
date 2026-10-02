@@ -200,9 +200,7 @@ fn project_output(conn: &Connection, mut flow: FlowSession) -> StoreResult<FlowS
             .is_some_and(FlowAttempt::completed)
     {
         match selected_output_in(conn, &flow)? {
-            Ok(crate::engine::SkillOutcome::Decided(verdict))
-                if verdict.decision != crate::engine::transitions::FlowDecision::Blocked =>
-            {
+            Ok(crate::engine::SkillOutcome::Decided(verdict)) => {
                 flow.cursor.leaf_mut().progress.verdict = Some(verdict)
             }
             Ok(crate::engine::SkillOutcome::Routed(path)) => {
@@ -588,8 +586,7 @@ fn consume_selected_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<
     }
     match selected_output_in(tx, flow)?.map_err(invalid)? {
         crate::engine::SkillOutcome::Decided(verdict)
-            if verdict.decision != crate::engine::transitions::FlowDecision::Blocked
-                && flow.cursor.leaf().progress.verdict.as_ref() != Some(&verdict) =>
+            if flow.cursor.leaf().progress.verdict.as_ref() != Some(&verdict) =>
         {
             return Err(stale(flow.id()))
         }
@@ -1152,50 +1149,6 @@ impl SqliteStore {
     ) -> StoreResult<Result<crate::engine::SkillOutcome, String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         selected_output_in(&conn, &current_flow_in(&conn, id)?)
-    }
-
-    /// Consume a blocked turn and its exact Ask feedback without moving the pass.
-    pub(crate) fn answer_flow_blocker(
-        &self,
-        id: &str,
-        version: u64,
-        claim: Option<&TaskWorkerClaim>,
-        ask_id: &str,
-    ) -> StoreResult<FlowSession> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let flow = current_flow_in(&tx, id)?;
-        if flow.version != version || flow.claim.as_ref() != claim {
-            return Err(stale(id));
-        }
-        let Ok(crate::engine::SkillOutcome::Decided(verdict)) = selected_output_in(&tx, &flow)?
-        else {
-            return Err(stale(id));
-        };
-        if verdict.decision != crate::engine::transitions::FlowDecision::Blocked {
-            return Err(stale(id));
-        }
-        let attempt = flow.current_attempt.as_ref().ok_or_else(|| stale(id))?;
-        let ask = super::sessions::session_in(&tx, ask_id)?.ok_or(StoreError::NotFound)?;
-        if ask.kind != crate::session::SessionKind::Ask
-            || ask.caller_artifact_key.as_ref() != Some(&attempt.run_id)
-            || ask.completed_at.is_none()
-        {
-            return Err(stale(id));
-        }
-        let feedback = ask
-            .ready_summary
-            .ok_or_else(|| invalid("the selected blocker has no completed Ask feedback"))?;
-        consume_selected_in(&tx, &flow)?;
-        let mut cursor = flow.cursor.clone();
-        clear_candidate(&mut cursor);
-        cursor.leaf_mut().progress.direction = Some(format!(
-            "Question from the previous turn: {}\n\nReturned feedback: {feedback}\n\nReassess and return a new decision; this feedback does not choose navigation.", verdict.summary
-        ));
-        write_cursor_in(&tx, (id, version), &cursor, None, true, claim, false)?;
-        let flow = current_flow_in(&tx, id)?;
-        tx.commit()?;
-        Ok(flow)
     }
 
     /// Correct invalid output in the same conversation, with two corrective turns
@@ -2415,109 +2368,6 @@ mod tests {
     }
 
     #[test]
-    fn blocked_feedback_retains_conversation_and_pass_and_consumes_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let flow = launched(
-            &store,
-            vec![
-                step("work", None),
-                step("decide", Some("work")),
-                step("after", None),
-            ],
-            1,
-        );
-        let original = attempt(&store, flow.id(), None, "proof");
-        let actor = store.test_flow_turn(&original.artifact_key);
-        store
-            .test_output(
-                &actor,
-                &serde_json::json!({"decision":"blocked","reason":"Which policy?"}),
-            )
-            .unwrap();
-        assert!(
-            store.flow_output(flow.id()).is_err(),
-            "output before completion is not authority"
-        );
-        store.test_finish_flow_turn(&actor, "completed");
-        let saved = store.flow(flow.id()).unwrap().unwrap();
-        let mut ask = original.clone();
-        ask.id = "ask-policy".into();
-        ask.captured = None;
-        ask.artifact_key = crate::session_record::new_artifact_key();
-        ask.caller_artifact_key = Some(original.artifact_key.clone());
-        ask.flow_session_id = None;
-        ask.node = None;
-        ask.iterations = None;
-        ask.kind = crate::session::SessionKind::Ask;
-        ask.interactive = true;
-        ask.request = Some("Which policy?".into());
-        ask.ready_summary = None;
-        ask.completed_at = None;
-        let ask = store.create_session(ask, None, None).unwrap();
-        assert!(store
-            .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
-            .is_err());
-        store
-            .ready_session(&ask.id, ask.captured, "Retain the existing policy")
-            .unwrap();
-        store.complete_session(&ask.id, ask.captured).unwrap();
-        drop(store);
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let answered = store
-            .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
-            .unwrap();
-        assert_eq!(answered.cursor.index, saved.cursor.index);
-        assert_eq!(answered.cursor.iteration, saved.cursor.iteration);
-        assert_eq!(
-            answered.cursor.progress.repeats,
-            saved.cursor.progress.repeats
-        );
-        assert!(answered.cursor.progress.verdict.is_none());
-        assert!(answered
-            .cursor
-            .progress
-            .direction
-            .as_deref()
-            .unwrap()
-            .contains("Retain the existing policy"));
-        assert!(
-            store
-                .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
-                .is_err(),
-            "stale driver cannot consume twice"
-        );
-        let next = attempt(&store, flow.id(), None, "proof");
-        assert_eq!(
-            next.id, original.id,
-            "feedback starts another turn in the same conversation"
-        );
-        assert_ne!(next.artifact_key, original.artifact_key);
-        let actor = store.test_flow_turn(&next.artifact_key);
-        store
-            .test_decision_output(&actor, &verdict(FlowDecision::Advance))
-            .unwrap();
-        store.test_finish_flow_turn(&actor, "completed");
-        let saved = store.flow(flow.id()).unwrap().unwrap();
-        let mut cursor = saved.cursor.clone();
-        cursor.finish(&saved.invocation.steps).unwrap();
-        let advanced = store
-            .checkpoint_flow(flow.id(), saved.version, &cursor, None, None)
-            .unwrap();
-        assert_eq!(advanced.cursor.index, 2);
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        let consumed: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_events WHERE kind='consumed'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(consumed, 2);
-    }
-
-    #[test]
     fn invalid_output_retries_the_same_conversation_and_exhausts_durably() {
         for valid_retry in [false, true] {
             let dir = tempfile::tempdir().unwrap();
@@ -2609,6 +2459,63 @@ mod tests {
                 assert_eq!(store.session_inputs(&original.id).unwrap().len(), 3);
             }
         }
+    }
+
+    #[test]
+    fn recovered_blocked_verdict_retains_failure_and_retries_the_same_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let flow = launched(
+            &store,
+            vec![step("work", None), step("decide", Some("work"))],
+            1,
+        );
+        let original = attempt(&store, flow.id(), None, "proof");
+        let actor = store.test_flow_turn(&original.artifact_key);
+        store
+            .test_output(
+                &actor,
+                &serde_json::json!({"decision":"blocked","reason":"Which policy?"}),
+            )
+            .unwrap();
+        store.test_finish_flow_turn(&actor, "completed");
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let recovered = store.recover_flow(flow.id(), None).unwrap();
+        let mut cursor = recovered.cursor.clone();
+        assert_eq!(
+            cursor
+                .finish(&recovered.invocation.steps)
+                .unwrap_err()
+                .to_string(),
+            "Which policy?"
+        );
+        assert_eq!(cursor, recovered.cursor);
+        let failed = store
+            .fail_flow(
+                flow.id(),
+                recovered.version,
+                None,
+                &crate::durable::TaskFlowBlocker::now("Which policy?"),
+            )
+            .unwrap();
+        assert_eq!(store.recover_flow(flow.id(), None).unwrap(), failed);
+        let retry = store
+            .retry_flow(flow.id(), Some("Retain the existing policy"))
+            .unwrap();
+        assert_eq!(retry.cursor.index, recovered.cursor.index);
+        assert_eq!(retry.cursor.iteration, recovered.cursor.iteration);
+        assert_eq!(
+            retry.cursor.progress.repeats,
+            recovered.cursor.progress.repeats
+        );
+        assert!(retry.cursor.progress.verdict.is_none());
+        assert_eq!(
+            retry.cursor.progress.direction.as_deref(),
+            Some("Retain the existing policy")
+        );
+        assert_eq!(attempt(&store, flow.id(), None, "proof").id, original.id);
     }
 
     #[test]

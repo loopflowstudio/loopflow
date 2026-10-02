@@ -194,7 +194,7 @@ Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
-`lf session list` finds conversations, Asks and Flow reviews; open one with
+`lf session list` finds conversations and Flow reviews; open one with
 `lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)

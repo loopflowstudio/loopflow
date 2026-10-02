@@ -41,8 +41,8 @@ installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --task <task> : "<prompt>"` contribution. `lf ask` creates a new session,
-so do not use it merely to reach the User already here.
+ordinary `lf --task <task> : "<prompt>"` contribution. Headless work that lacks
+required input explains its failure and stops; the Wave operator reads its logs.
 
 ## Launching and advancing work
 

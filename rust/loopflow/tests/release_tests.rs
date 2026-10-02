@@ -1600,11 +1600,16 @@ fn prove_release_merge_wait(queued: bool) {
 #[test]
 fn release_run_repairs_failed_checks_before_tagging() {
     for awaiting_queue in [false, true] {
-        prove_release_repairs_failed_checks(awaiting_queue);
+        prove_release_repairs_failed_checks(awaiting_queue, false);
     }
 }
 
-fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
+#[test]
+fn release_run_reconciles_a_merge_observed_after_repair_blocks() {
+    prove_release_repairs_failed_checks(false, true);
+}
+
+fn prove_release_repairs_failed_checks(awaiting_queue: bool, stale_after_repair: bool) {
     let merge_state = if awaiting_queue { "BEHIND" } else { "BLOCKED" };
     let state = tempfile::tempdir().unwrap();
     let repaired = state.path().join("repaired");
@@ -1627,6 +1632,9 @@ fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
         }),
     );
     let merged = support::github_merge_response(1309, "$head", "MERGED", "UNKNOWN", None);
+    // Keep the release poll and both repair observations stale. The error-path
+    // refresh is the first authoritative merge observation.
+    let stale_views = if stale_after_repair { 3 } else { 0 };
     let gh = format!(
         r#"#!/bin/sh
 repaired='{}'
@@ -1649,6 +1657,16 @@ JSON
         ;;
       *)
         if [ -f "$repaired" ]; then
+          count=0
+          [ ! -f "$repaired.views" ] || count=$(cat "$repaired.views")
+          count=$((count + 1))
+          printf '%s' "$count" > "$repaired.views"
+          if [ "$count" -le {stale_views} ]; then
+            cat <<JSON
+{open}
+JSON
+            exit 0
+          fi
           cat <<JSON
 {merged}
 JSON
@@ -1669,12 +1687,14 @@ esac
         &format!("touch '{}'", repaired.display()),
     );
     let repair_log = state.path().join("repair.log");
+    let finish_repair = if stale_after_repair { "wait $!" } else { "" };
     let tmux = format!(
         r#"#!/bin/sh
 if [ "$1" = new-session ]; then
   cd "$6" || exit 1
   for arg do command=$arg; done
   /bin/sh -c "$command" </dev/null >'{}' 2>&1 &
+  {finish_repair}
 fi
 "#,
         repair_log.display()

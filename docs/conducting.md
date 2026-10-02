@@ -106,7 +106,7 @@ lf usage --json    # current usage wire, newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf ci watch --status # the CI watcher: live or not, last poll, what it started
-lf doctor          # audit the ledger: continuity, attribution, lineage
+lf doctor          # check installation, Exec integrity and scheduled receipts
 ```
 
 `lf top` is the first move when work feels slow — live machine-health evidence.

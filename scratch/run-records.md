@@ -10,4 +10,10 @@ Doctor/install work is in https://github.com/loopflowstudio/loopflow/pull/1402. 
 
 The release reached a notarized 0.12.30 candidate. Its publisher requires a newer command tree than the installed CLI; using the verified candidate on PATH resumes it. The publisher change here uses the common `lf release publish` spelling.
 
+Publication remains incomplete. Candidate `8cbd0c5b1c99a12151908c59f923b0128706a34f` is tagged `v0.12.30`, but its merged tree contains `drafts/remove_ask.sql`; promotion correctly refuses it. No GitHub Release exists for that tag. The previously recorded candidate receipt incorrectly accepted published build identity without requiring an installable schema. The new publisher check reproduces the refusal in a fresh disposable Home, and package CI now runs the same preflight before artifacts can be tagged. The installed version remains 0.12.29.
+
+The release runner currently resumes that incomplete tag before considering a newer closing patch. It needs a supported recovery path for an already-tagged, unpublished, un-installable candidate. Do not delete release intermediates or rewrite the tag manually. PR #1402 merged while this investigation was in progress.
+
 Checks: journal tests (16), resource-envelope tests (12), checkout CLI proof (1), cargo build, formatting, and all-target Clippy passed; doctor identity tests passed before duplicate edits were removed in favor of PR #1402.
+
+Publisher tests (6) passed; the actual v0.12.30 executable was rejected by the repaired fresh-Home preflight for its pending remove_ask migration.

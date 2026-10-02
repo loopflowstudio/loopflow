@@ -1,5 +1,18 @@
 # Install recovery
 
+## Execution decision — 2026-10-02
+
+Keep this change focused on machine installation working from the requesting checkout without resolving Task PR authority. The implementation in `b89725f58` covers download, promotion, rollback and recovery; no further production change is selected. Continue this branch through its existing review and delivery path. This planning step does not publish, install, or start another worker.
+
+The recorded focused checks establish the early authority boundary, not successful recovery of the affected installation. Retain the candidate-identity uncertainty and outstanding published replay as acceptance limits during review.
+
+Deferred outcomes:
+
+- **Prove upgrades and interrupted recovery from a checkout.** Repair the disposable release fixture and exercise an initialized older installation against a published candidate containing this fix, using the acceptance conditions below. This remains proposed scope; no Wave or Task owner was supplied. File or reuse work once ownership and scope are selected, with the design and evidence transferred before launch. The affected Mac replay additionally depends on a released fix.
+- **Explain missing scheduled receipts.** Investigate the two exact Doctor cron-history results separately. The supplied evidence does not establish a scheduler defect or select a repair; preserve that uncertainty rather than expanding this installation change.
+
+No Tasks or workers were launched. Review decision: do not turn the unverified replay fixture findings into an implicit implementation commitment or claim that the incident is resolved.
+
 Jack Heart reported `lf install` failing after download with “Task PR authority refused” and an installation/store mismatch. The subsequent `lf doctor` ran the old release, reporting missing scheduled receipts and a stale binary.
 
 The candidate reaches `install promote` in the original Git checkout. Its checkout guard resolves Task PR authority through an ordinary store open before installation compatibility checks. That store open can reject the candidate precisely because the installed runtime/schema is different. The same dependency exists in switch recovery.

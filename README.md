@@ -36,9 +36,16 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
 It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
-terminal control conversation. On canonical main, it first carries local
+general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
+
+```bash
+lf                         # follow the conversation wherever it goes
+lf operate                 # review and operate this repository’s work
+lf repo/operate            # canonical name for the same skill
+lf --wave designer wave/operate  # operate one Wave
+```
 
 Give an external agent harness the Loopflow operating skill:
 

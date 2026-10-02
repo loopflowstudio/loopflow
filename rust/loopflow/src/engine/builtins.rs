@@ -111,12 +111,17 @@ pub fn get_builtin_flow(name: &str) -> Option<&'static str> {
     BUILTIN_FLOWS.get(name).copied()
 }
 
-/// Resolve a bare name to its builtin skill key. Returns the exact match if one
-/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
-/// that key. Returns `None` for no match or ambiguous matches.
+/// Resolve a builtin skill key: exact name, `operate` for `repo/operate`, then
+/// a unique namespace suffix. Returns `None` for absent or ambiguous names.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
     if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(name) {
         return Some(key);
+    }
+    // Repository operation owns the short name; Wave operation stays explicit.
+    if name == "operate" {
+        return BUILTIN_SKILLS
+            .get_key_value("repo/operate")
+            .map(|(key, _)| *key);
     }
     resolve_bare_in_map(name, &BUILTIN_SKILLS)
 }
@@ -247,7 +252,7 @@ mod tests {
             );
         }
 
-        for name in ["refine", "review-open-work", "init"] {
+        for name in ["refine", "repo/operate", "init"] {
             let skill = get_builtin_skill(name).expect("builtin skill");
             assert!(
                 skill.contains("## Reviewer mode"),

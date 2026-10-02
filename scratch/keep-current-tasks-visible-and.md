@@ -271,3 +271,5 @@ integration into the Tasks header. The header now places its count on the left a
 compact history toggle buttons on the right, with the selected time window inline.
 Filtering behavior and validation remain unchanged. Visual acceptance of this
 revision remains pending; no landing approval was given.
+
+Check: `swift test --package-path swift --filter TaskHistoryFilterTests` — 5 passed; configured Dev app install/build and `git diff --check` — passed; header visual review pending.

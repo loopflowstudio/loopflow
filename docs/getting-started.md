@@ -68,6 +68,13 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                            # fix it
 ```
 
+### Open a conversation
+
+```bash
+lf                         # ask a question or start work
+lf operate                 # review and operate the repository’s open work
+```
+
 ### Inline prompts
 
 ```bash

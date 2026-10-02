@@ -278,7 +278,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
     assert!(identity["detail"]
         .as_str()
         .unwrap()
-        .contains("1 Exec(s) without repository scope"));
+        .contains("2 Exec(s) without repository scope"));
 }
 
 #[test]

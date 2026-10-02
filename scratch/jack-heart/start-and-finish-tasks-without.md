@@ -8,6 +8,15 @@ purpose, context and continuity; execution and delivery are optional. There is
 no Task workflow to introduce. The mechanisms below are proposed implementation
 choices, not additional product approval.
 
+## Review decision · 2026-10-02
+
+Jack Heart confirmed that the conversation doing the work can complete its Task.
+It need not finish its own Session or provider turn before requesting completion.
+Task completion preserves that conversation and its history. Implementation details
+remain proposed; this review does not claim implementation or acceptance proof.
+The recovery implications and remaining work are recorded in
+[completion from the working conversation](../task-completion-conversation.md).
+
 ## Outcome and demo
 
 Jack can file a research Task, associate an existing conversation, record its
@@ -20,6 +29,9 @@ then `lf task status <issue> --json` and
 The Task is complete, the original summary is readable, and there are zero new
 worktrees, PRs and FlowSessions. Repeat with an existing Session bound before
 completion: its history remains associated without allocating delivery placement.
+Issue completion from that same running conversation and let it report the result
+afterward. With an allocated checkout, keep the checkout available while the
+conversation still uses it; completion and safe cleanup have separate conditions.
 
 Then run the same explicit template through `lf flow start <flow>` and
 `lf --task <issue> flow start <flow>` on an unfinished Task. Both use the same
@@ -126,6 +138,15 @@ Remove placement assumptions at their current owners.
    only for recorded PRs. No placement means no files to clean, not permission to
    ignore explicitly associated work. A missing previously allocated checkout
    remains missing evidence and retains existing recovery protections.
+   The requesting conversation's current turn and its exact completion invocation
+   must not block the Task transition. Resolve that relationship from existing
+   authoritative Session/Exec evidence; cwd, membership and causal ancestry alone
+   grant no exemption or control. Other unfinished work, pending review boundaries,
+   unknown execution and unresolved delivery still block through their existing
+   owners. Do not broaden a shared idle check: cleanup and abandonment retain their
+   own protections. Completion must not terminate the requesting conversation,
+   settle its Flow or delete a checkout it still uses. Retained cleanup is reported
+   separately and remains retryable without changing the original outcome.
 7. Confirm planning mutations by the affected issue's fresh authoritative facts
    through existing normalized ingestion. Keep revision ordering, ownership checks,
    cancellation/duplicate conflict handling and idempotent creation/summary markers.
@@ -202,6 +223,10 @@ stages to ship independently.
    confirmation, issue-confirmation failure, canceled outcomes, lost completion or
    summary responses and safe retry. A registered no-placement Task completes with
    evidence through the existing writer, once its associated work is settled.
+   Apply Jack Heart's requesting-conversation decision: its own active turn may
+   remain open, while other associated work and delivery obligations must settle.
+   Separate completion eligibility from destructive cleanup eligibility at their
+   existing owners; preserve the current Session and checkout across completion.
 4. Cut over Desktop controls, Session launch placement, CLI/help and agent guidance.
    Update `docs/lf.md`, architecture reference and relevant builtin skills. Keep
    stored historical skill wording historical. Complete migration and consumer
@@ -214,6 +239,12 @@ Gate runs once on the finished tree:
   bind → finish → complete, no provider agent available, unrelated coordination
   failure, lost response and retry. Assert zero invented delivery objects,
   readable original outcome, stable identities and no duplicate terminal event.
+  Invoke completion inside the bound running conversation, then prove that the
+  same conversation can report success. Repeat with an allocated checkout and
+  settled delivery: retain its files while in use, then safely retry cleanup after
+  execution settles. A lost completion response preserves the original summary
+  and terminal event. Unrelated live or unknown execution remains a blocker;
+  Task completion supplies no Flow settlement or process-control authority.
 - `cargo test -p loopflow task_completion`: retain existing planning-only and
   delivery regression tests, plus open/publishing PR refusal, dirty/follow-up work,
   pending Ask, independent unfinished Flow and unknown/live Exec. Resolve each
@@ -256,3 +287,10 @@ and placement and preserves the gate's evidence obligations. No implementation
 or configured acceptance is claimed by this draft.
 
 Check: source trace and `git diff --check` — pass; prose-only kickoff, no build or behavioral tests run.
+
+Review source finding: `ops/task/lifecycle.rs::execution_blockers` exempts the
+current Exec but still checks the non-managed conversation's pending turn and
+other live Execs. `cleanup_completed_task` reuses `associated_work_blockers`.
+Simply expanding that shared exemption could remove a checkout still in use.
+The implementation must distinguish completion eligibility from cleanup safety
+and prove the real nested command path, not only a direct gate call.

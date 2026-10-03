@@ -911,6 +911,14 @@ pub(crate) fn task_worker_owner_evidence(
     }
 }
 
+pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
+    match process_started_at(pid) {
+        Ok(Some(observed)) if observed.abs_diff(started_at) <= 3 => ProcessIdentityEvidence::Live,
+        Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+        Err(_) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
 pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> ProcessIdentityEvidence {
     let Ok(receipts) = read_exec_process_receipts_at(&crate::store::lf_home_dir()) else {
         return ProcessIdentityEvidence::Unknown;

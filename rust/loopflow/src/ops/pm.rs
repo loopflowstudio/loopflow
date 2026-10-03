@@ -1007,6 +1007,7 @@ async fn pm_init_async(
                 ..crate::ops::CommitOptions::for_task("pm")
             },
             progress,
+            &|_| {},
         )?;
     }
 
@@ -2274,6 +2275,7 @@ async fn apply_or_plan_repository_reteam(
                     ..crate::ops::CommitOptions::for_task("pm")
                 },
                 progress,
+                &|_| {},
             )?;
         }
     }

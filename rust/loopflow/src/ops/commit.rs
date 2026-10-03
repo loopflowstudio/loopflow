@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::json;
@@ -57,7 +58,7 @@ pub(crate) async fn checkpoint_task_worktree(
             message: Some(message),
             agent: None,
         };
-        commit_workflow(&worktree, &options, &NullProgress).map(|_| ())
+        commit_workflow(&worktree, &options, &NullProgress, &|_| {}).map(|_| ())
     })
     .await
     .map_err(|join_error| anyhow::anyhow!("Task worktree checkpoint panicked: {join_error}"))?;
@@ -67,7 +68,7 @@ pub(crate) async fn checkpoint_task_worktree(
 pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) -> OpsResult<String> {
     let _mutation = crate::ops::task::lock_task_pr_mutation(worktree)?;
     if !is_clean(worktree)? {
-        stage_all(worktree)?;
+        stage_all(worktree, &|_| {})?;
         verify_restart_preimage(worktree)?;
     }
     let options = CommitOptions {
@@ -79,9 +80,9 @@ pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) ->
         message: Some(format!("checkpoint: restart {task_identifier}")),
         agent: None,
     };
-    commit_workflow(worktree, &options, &NullProgress)?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false)?;
-    push_with_upstream_if_needed_locked(worktree)?;
+    commit_workflow(worktree, &options, &NullProgress, &|_| {})?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false, &|_| {})?;
+    push_with_upstream_if_needed_locked(worktree, &|_| {})?;
     rev_parse(worktree, "HEAD").map_err(OpsError::Git)
 }
 
@@ -103,15 +104,18 @@ fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
     Ok(())
 }
 
+/// Run the ordinary commit path, carrying caller-owned capabilities into Git mutations.
+/// Agent generation, draft PR creation and Task merge revocation have separate launch owners.
 pub fn commit_workflow(
     repo: &Path,
     options: &CommitOptions,
     progress: &impl Progress,
+    inherit_git: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
-            push_with_upstream_if_needed(repo)?;
+            push_with_upstream_if_needed(repo, inherit_git)?;
             if options.create_draft_pr {
                 ensure_draft_pr(repo, progress)?;
             }
@@ -121,7 +125,7 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        stage_all(repo)?;
+        stage_all(repo, inherit_git)?;
     }
 
     if !has_staged_changes(repo)? {
@@ -147,10 +151,10 @@ pub fn commit_workflow(
     };
 
     progress.status("Committing...");
-    commit(repo, &message)?;
+    commit(repo, &message, inherit_git)?;
 
     if options.push {
-        push_with_upstream_if_needed(repo)?;
+        push_with_upstream_if_needed(repo, inherit_git)?;
         if options.create_draft_pr {
             ensure_draft_pr(repo, progress)?;
         }
@@ -283,9 +287,9 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}\n\n[diff truncated]", &text[..end])
 }
 
-fn push_with_fallback(repo: &Path) -> OpsResult<()> {
-    if let Err(_err) = push(repo, false) {
-        if let Err(force_err) = push(repo, true) {
+fn push_with_fallback(repo: &Path, inherit_git: &impl Fn(&mut Command)) -> OpsResult<()> {
+    if let Err(_err) = push(repo, false, inherit_git) {
+        if let Err(force_err) = push(repo, true, inherit_git) {
             return Err(OpsError::Git(force_err));
         }
     }
@@ -320,17 +324,23 @@ fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     Ok(())
 }
 
-pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
+pub(crate) fn push_with_upstream_if_needed(
+    repo: &Path,
+    inherit_git: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     // Every ordinary Loopflow branch push shares the Task settlement fence.
     // After a commit, a changed HEAD clears a head-pinned merge request (and
     // revokes Auto remotely) before Git can expose the new head. Same-head
     // publication remains a no-op and preserves the request.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
-    push_with_upstream_if_needed_locked(repo)
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, inherit_git)?;
+    push_with_upstream_if_needed_locked(repo, inherit_git)
 }
 
-fn push_with_upstream_if_needed_locked(repo: &Path) -> OpsResult<()> {
+fn push_with_upstream_if_needed_locked(
+    repo: &Path,
+    inherit_git: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
@@ -340,13 +350,13 @@ fn push_with_upstream_if_needed_locked(repo: &Path) -> OpsResult<()> {
         .output()?;
 
     if output.status.success() {
-        push_with_fallback(repo)?;
+        push_with_fallback(repo, inherit_git)?;
         return Ok(());
     }
 
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    push_with_upstream(repo, "origin", &branch)?;
+    push_with_upstream(repo, "origin", &branch, inherit_git)?;
     Ok(())
 }
 

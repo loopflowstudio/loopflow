@@ -25,6 +25,16 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+/// Entry emitted by `lf list --json`.
+public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let kind: String
+    public let source: String
+    public let description: String
+    public let invocation: String
+    public var id: String { name }
+}
+
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
@@ -149,6 +159,13 @@ public struct RegistryQuery: Sendable {
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
         let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {
+        let stdout = try await run(["list", "--json"], cwd)
+        return try Self.decode([DiscoveryEntry].self, from: stdout)
+            .filter { $0.kind == "skill" }
+            .sorted { $0.name < $1.name }
     }
 
     /// Every selectable Flow with the topology it would pin, via the shared loader.

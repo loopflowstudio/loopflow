@@ -246,6 +246,18 @@ The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared
 input alone does not establish live provider activity.
+
+Choose a skill beside **New Session** below the repository name. Search by name
+or description, use ↑/↓ and Return to select, or Escape to close. Selection is
+remembered per repository and does not launch anything. Click **New Session**
+to launch the selected skill in an interactive conversation.
+
+The default **capture-tasks** skill explores an idea and captures
+Tasks for their owning Waves, including in other repositories. From a Task, capture
+starts with its parent Wave in the repository checkout. The conversation remains
+available for more ideas; filing does not start workers or move existing panes.
+Wave rows also offer **New Session** with the selected skill in their context menu.
+
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New shell** opens

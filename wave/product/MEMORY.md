@@ -5,6 +5,33 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Capture and configurable New Session (2026-10-03 UTC)
+
+Jack Heart accepted capture on October 1, then selected New Session and the
+Linear-style compose row on October 2. Jack approved the searchable skill-picker
+prototype and requested pursue through its human demo boundary, preserving the
+existing opening prompt. New Session launches; choosing a skill only updates the
+next launch and persists per repository. The default is `capture-tasks`.
+
+Tasks express intention. Favor cohesive behavioral promises; several Tasks across
+Waves/repositories are supported, never a quota. Launch scope is a revisable clue,
+not a filing boundary. Capture stays in its repository/Wave conversation, files
+self-contained briefs without workers, and leaves operation to owners. Wave
+conversations read the same skill without changing their existing authority.
+Keep design and general/Task conversations. After an uncertain write, reconcile
+in its destination and retry identical input there; preserve each successful filing.
+
+The branch uses lf-owned discovery and explicit `skill <name>` launch syntax to
+avoid Flow-name collisions. Repository presentation retains `(Home, checkout)`
+identity and both layouts without changing Task selection. A successful app build
+proved insufficient when its configured CLI lacked the skill: configured runtime
+and shipped packaging need their own evidence. Six focused post-sync tests cover
+selection, scope and production-control layout/error behavior; native picker
+interaction, provider/draft continuity and real cross-repository capture remain
+unproven. Prototype approval supplies no native acceptance or sustained-use KR.
+The accepted design and dated demo evidence are retained at
+[the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
+
 ## Current Tasks and completion history (2026-10-02)
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
@@ -1023,55 +1050,16 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Historical Wave controls & truthful failures (`wave-controls`)
+## Historical Wave controls and retained lessons
 
-The resident/listener Stop lifecycle and chat rendering below are historical:
-upstream `3dc89bc9a` removed those runtime and UI surfaces. Do not restore them
-as dependencies of primary Sessions. The failure-evidence, native UI proof and
-dictation lessons remain useful independently.
-
-The 2026-07-10 dogfood exposed four independent surface failures; all repaired
-here on top of PR #849's signed-test/release hardening.
-
-- **Stop is a wave lifecycle verb: `lf stop <name>`.** Top-level command (not
-  `lf loop stop`), closing the old "no single-wave stop" gap. It discovers the
-  live loopback listener via the same `.wave-endpoint` `lf serve` writes, posts
-  `POST /stop`, and waits briefly for graceful shutdown. Missing/stale endpoint
-  = idempotent success ("already stopped"). **The listener is the sole cleanup
-  owner** (`run_listener`): stop supervisor → terminate resident → deregister
-  runtime registration → remove only this boot's endpoint + resident-token
-  files. Detached
-  worker loops stay independent; the listener never owned their tmux. The Mac
-  Stop button shells through the same CLI verb via `LocalWaveAgentLauncher`
-  (launcher tests pin the exact `lf stop <wave>` argv) — one implementation, CLI
-  and GUI. **The agent exec door denies `stop`** (`ExecVerdict::Deny`) so a
-  worker can't tear down its steward wave.
-- **Empty `Thought` records never become cards.** Whitespace-only thoughts are
-  dropped at the listener's shared turn-item boundary (clean new journals) AND
-  filtered in the shared Swift model (existing journals replay clean). Non-empty
-  thoughts and every other item type survive.
-- **Transcript follows only while the reader is at the bottom.** A near-bottom
-  flag derived from scroll geometry gates auto-follow; scrolling back disables
-  it, returning to the bottom re-enables. Initial replay starts in follow mode.
-  No timer, no buffered-copy model — it tracks reader intent only.
-- **Failed bodies are attempts, not failed waves** (`AttemptFailurePresentation`).
-  A surface-only projection over existing provenance; runtime/journal/wire
-  unchanged. Key: `StepKey = (invocation_id, step_index, iteration)`. A
-  body-backed failed turn retains its exact `termination_reason`; a later
-  different body with the same key ⇒ `retrying` (running) / `recovered on retry`
-  (complete); same step still selected, no active body, loop not failed ⇒
-  `retry pending`; else `Attempt failed`. Bodyless failed turns keep the neutral
-  `Turn failed` fallback. **Never infer terminal step or wave failure from an
-  attempt** — the capacity-error receipt now reads `Attempt failed · recovered
-  on retry` with the reason visible, and the successful retry is its own turn.
-- **Dictation is Wispr Flow (Mac + iOS), not a built-in.** The product owner
-  chose Wispr Flow, so the unused `VoiceInputService` (~1276 lines), WhisperKit
-  package, its tests (~554 lines), and microphone permission declarations left
-  the product rather than being carried into the signed build.
-- **Signed UI-test gate reconciled with CI:** PR #849's signed macOS
-  `xcodebuild build-for-testing` compiles the visible controls without requiring
-  hosted Automation permission; executing UI tests stays an explicit
-  host-permissioned action (macOS Automation can stop the runner pre-bootstrap).
+The retired listener/Stop implementation and July 10 dogfood details are preserved
+at [the prior memory](https://github.com/loopflowstudio/loopflow/blob/25f183992969f59b42f9765d7594638cc91652dc/wave/product/MEMORY.md#historical-wave-controls--truthful-failures-wave-controls).
+Upstream `3dc89bc9a` removed those runtime/UI surfaces; they are not primary-Session
+dependencies. Retained lessons: ignore empty thoughts; follow output only while
+its reader stays at the bottom; distinguish a failed attempt and its recovery
+from terminal Work failure using exact occurrence evidence. Dictation remains
+Wispr Flow, not built-in. Signed build-for-testing does not prove native UI
+interaction; Automation can stop a runner before bootstrap.
 
 ## Learnings
 
@@ -1081,10 +1069,6 @@ here on top of PR #849's signed-test/release hardening.
   fresh `RepoSidebarWindow` re-derived the burgundy sidebar / create sheet /
   terminal panes and got each subtly wrong; the proven components already encode
   the right style + behavior — adapt them.
-- **Historical palette implementation, not a canvas requirement:** a custom `VStack{…}.background(Color.loopflowBurgundy)`
-  with white text (`WaveSidebar.swift`), NOT a `NavigationSplitView` column (its
-  gray vibrant material can't be overridden). Fields = `.textFieldStyle(.plain)` +
-  `palette.surfaceMuted` (`CatchWaveView`), NOT `.roundedBorder` (renders black).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
@@ -1098,18 +1082,9 @@ here on top of PR #849's signed-test/release hardening.
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
-- Kickoff line numbers drift fast — re-verify before citing in a design.
-- **Migration numbers collide across branches — shared `lfd.db` is the blast
-  radius.** Product and intelligence both minted `061` (`061_pm_snapshots` vs
-  `061_trace_capture`); distinct version strings apply but inter-order is
-  undefined. Worse, editing a historical migration CREATE in place (product added
-  `run_events.context` to `057`) means DBs created before the edit never get the
-  column, and `057` won't re-run — so `validate_run_events_schema` selecting
-  `context` takes down *every* command sharing `lfd.db` (that was the `pm show`
-  break; worked around by hand-adding the column). Fix is intelligence's, one
-  line: `061_trace_capture`'s unguarded `ALTER TABLE run_events DROP COLUMN
-  context` fails `no such column` on pre-context DBs and isn't in the convergence
-  path — tolerate it (or rebuild). Product must NOT add a forward `ADD COLUMN
-  context`; it would fight the drop. Wants a real convention: per-wave migration
-  ranges, or Jack's idea — a separate dev lfdb via `LF_HOME=~/.lf-dev` (honored at
-  `lfd/mod.rs:66`) so in-flight schema can't corrupt the real ledger.
+- **Historical migrations demonstrated the shared-store blast radius.** Product
+  and Intelligence collided on `061`; editing an already-applied migration left
+  existing databases without a required column. Preserve released migrations and
+  test upgrades from the released frontier. The specific 057/061 incident and
+  proposed remedies are retained in the prior memory linked above; they are not
+  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.

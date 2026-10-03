@@ -875,11 +875,7 @@ pub(crate) enum PrReadFreshness {
     Fresh,
 }
 
-/// One `TaskPr.publication.github` PR read via a single bounded REST call — no
-/// enumeration. Task reconcile always holds a persisted PR number, so it never
-/// needs `gh pr list`; an unpublished working PR has no number and is not read
-/// remotely at all. A transport/quota/network failure returns `Degraded` rather
-/// than erroring, so local Task control survives a GitHub outage.
+/// Read a known PR through one REST call, preserving remote-read uncertainty.
 pub(crate) fn observe_pr_by_number(
     repo: &Path,
     number: u32,
@@ -929,6 +925,52 @@ pub(crate) fn observe_pr_by_number(
         Ok(pr) => PrObservation::Fresh(pr.into_info(branch)),
         Err(error) => PrObservation::Degraded {
             reason: format!("failed to parse gh api response for PR #{number}: {error}"),
+        },
+    }
+}
+
+pub(crate) fn observe_pr_by_branch(repo: &Path, branch: &str) -> PrObservation {
+    let output = match Command::new("gh")
+        .current_dir(repo)
+        .args([
+            "pr", "list", "--head", branch, "--state", "all", "--limit", "2", "--json", "number",
+        ])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            return PrObservation::Degraded {
+                reason: format!(
+                    "could not discover PR for {branch}: {}",
+                    stderr_from_output(&output)
+                ),
+            };
+        }
+        Err(error) => {
+            return PrObservation::Degraded {
+                reason: format!("could not discover PR for {branch}: {error}"),
+            };
+        }
+    };
+    #[derive(Deserialize)]
+    struct Number {
+        number: u32,
+    }
+    let candidates = match serde_json::from_slice::<Vec<Number>>(&output.stdout) {
+        Ok(candidates) => candidates,
+        Err(error) => {
+            return PrObservation::Degraded {
+                reason: format!("could not parse PR discovery for {branch}: {error}"),
+            };
+        }
+    };
+    match candidates.as_slice() {
+        [] => PrObservation::NotFound,
+        [candidate] => observe_pr_by_number(repo, candidate.number, branch, PrReadFreshness::Fresh),
+        _ => PrObservation::Degraded {
+            reason: format!(
+                "multiple pull requests use branch {branch}; delivery remains unresolved"
+            ),
         },
     }
 }

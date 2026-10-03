@@ -7,6 +7,8 @@ from fasthtml.common import to_xml
 import main
 
 SHOWCASE = {
+    "heading": "The product.",
+    "introduction": "Real captures.",
     "pointer": {"left": 36, "top": 63},
     "highlight": {"left": 21, "top": 61, "width": 76, "height": 4},
     "note": "Actual captures.",

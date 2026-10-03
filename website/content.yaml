@@ -46,7 +46,37 @@ homepage:
       - title: "Your company’s practice"
         text: "A Flow is a file, so a team can review how it works with agents the way it reviews code."
 
+  levels:
+    heading: "What we’re building."
+    introduction: >-
+      One shared language, built in three parts, in order. Each part stays
+      good at its job as the next one arrives.
+    items:
+      - label: "01 · Available"
+        title: "A command line for software process."
+        text: >-
+          lf runs your loopflows and manages what they rely on: working
+          copies, checks, plans, credentials, and memory.
+        href: "#features"
+        link_label: "See the parts"
+      - label: "02 · In progress"
+        title: "A Mac app that organizes your sessions."
+        text: >-
+          Every conversation lands with the task it belongs to, beside its
+          working copy and pull request, from the plan down to the terminal.
+          Free for macOS.
+        href: "#product"
+        link_label: "See it"
+      - label: "03 · Later"
+        title: "A shared room for people working with agents."
+        text: "We’ll have more to say about this later."
+
   showcase:
+    label: "On the desktop"
+    heading: "Your sessions, organized around the work."
+    introduction: >-
+      Loopflow for Mac files each conversation with the task it belongs to.
+      Go from the plan to a task’s terminal to what it shipped.
     # The pointer and highlight locate the task row in the first frame, as
     # percentages of the image.
     pointer: {left: 36, top: 62.8}
@@ -129,6 +159,7 @@ homepage:
           - {name: "gate", you: false}
 
   features:
+    label: "In the terminal"
     heading: "Parts that play together in harmony."
     introduction: >-
       Many people have built these parts on their own. Loopflow does all of

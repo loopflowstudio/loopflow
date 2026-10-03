@@ -137,6 +137,7 @@ def _require_content_path(path: str) -> object:
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
 OWNERSHIP_CONTENT = _require_content_path("homepage.ownership")
+LEVELS_CONTENT = _require_content_path("homepage.levels")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
 WHY_CONTENT = _require_content_path("homepage.why")
 AUTONOMY_CONTENT = _require_content_path("homepage.autonomy")
@@ -149,6 +150,7 @@ for required_key in (
     "homepage.hero.loopflow_download_url",
     "homepage.hero.example.steps",
     "homepage.ownership.items",
+    "homepage.levels.items",
     "homepage.showcase.items",
     "homepage.showcase.pointer",
     "homepage.showcase.highlight",
@@ -860,6 +862,43 @@ def _loopflow_diagram(example) -> FT:
     )
 
 
+def _section_head(content, heading_id: str) -> FT:
+    return Div(
+        Div(
+            P(content["label"], cls="home-label") if "label" in content else None,
+            H2(content["heading"], id=heading_id),
+        ),
+        P(content["introduction"]),
+        cls="home-section-head",
+    )
+
+
+def _levels_section() -> FT:
+    return Section(
+        Div(
+            _section_head(LEVELS_CONTENT, "levels-heading"),
+            Ol(
+                *[
+                    Li(
+                        P(item["label"], cls="home-label"),
+                        H3(item["title"]),
+                        P(item["text"]),
+                        A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"])
+                        if "href" in item
+                        else None,
+                        cls="home-way",
+                    )
+                    for item in LEVELS_CONTENT["items"]
+                ],
+                cls="home-ways",
+            ),
+            cls="home-wrap",
+        ),
+        cls="home-levels-section",
+        aria_labelledby="levels-heading",
+    )
+
+
 def _showcase_frames() -> list[dict]:
     """A frame renders only when its image exists; a missing capture never ships as a 404."""
     return [
@@ -887,6 +926,7 @@ def _showcase_section():
             provenance.append(line)
     return Section(
         Div(
+            _section_head(SHOWCASE_CONTENT, "product-heading"),
             Div(
                 *[
                     Img(
@@ -944,18 +984,16 @@ def _showcase_section():
             ),
             cls="home-wrap",
         ),
+        id="product",
         cls="home-showcase",
+        aria_labelledby="product-heading",
     )
 
 
 def FeaturesSection() -> FT:
     return Section(
         Div(
-            Div(
-                H2(FEATURES_CONTENT["heading"], id="features-heading"),
-                P(FEATURES_CONTENT["introduction"]),
-                cls="home-section-head",
-            ),
+            _section_head(FEATURES_CONTENT, "features-heading"),
             Div(
                 *[
                     Article(
@@ -1066,6 +1104,7 @@ def build_homepage():
                 cls="home-owned",
                 aria_label="Ownership",
             ),
+            _levels_section(),
             _showcase_section(),
             Section(
                 Div(

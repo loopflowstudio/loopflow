@@ -36,7 +36,7 @@ lf --version
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf home id --json
+lf id --json
 lf wave list --json
 command -v claude
 command -v codex
@@ -48,7 +48,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
-If `lf home id` says the local store is not initialized, record that plainly
+If `lf id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
 Present one compact topology:
@@ -278,7 +278,7 @@ Run the smallest checks that prove the selected path:
 lf account --cached          # cached; no provider request
 lf account --json            # inspect accepted managed evidence
 lf account route
-lf home id --json
+lf id --json
 lf wave list --json
 ```
 

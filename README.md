@@ -109,7 +109,7 @@ lf --task INF-123 flow start                                   # start end-to-en
 lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
+lf restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf arm -c                                          # request exact-head auto-merge and return

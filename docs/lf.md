@@ -105,7 +105,7 @@ lf land                            # record delivery and return
 lf --task EXP-12 land -c            # also request completion after merge
 lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
-lf release check                   # inspect release eligibility
+lf check                   # inspect release eligibility
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land

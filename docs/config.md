@@ -238,7 +238,7 @@ and waits for the configured completion evidence. `area` scopes the range.
 auto-detect supported manifests.
 
 `verify` runs during `lf release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf release check`
+exact change range but before it prepares release changes. `lf check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The

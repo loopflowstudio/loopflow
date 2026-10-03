@@ -281,7 +281,7 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
+Use `lf id`, then `lf --wave <wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
@@ -304,7 +304,7 @@ work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, update the Task and wait for required
-contributions, then `lf task restart <issue> "<changed direction>"`. Restart
+contributions, then `lf restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
 Task worker; other attributed Flows and conversations remain independent. Reconcile prior

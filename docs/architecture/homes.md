@@ -5,7 +5,7 @@ credentials, planning storage, command and conversation records, and OS locks.
 Its SSH route may change without changing its identity.
 
 ```bash
-lf home id
+lf id
 lf wave place product <home-id>
 lf ssh <home-id> --wave product wave/operate
 ```

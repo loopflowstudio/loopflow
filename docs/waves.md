@@ -292,7 +292,7 @@ to bring relevant findings into the parent's memory.
 ### Home
 
 ```bash
-lf home id
+lf id
 lf observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
 lf ssh <home-id> --wave shipper wave/operate

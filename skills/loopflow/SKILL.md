@@ -101,7 +101,7 @@ Execution placement is durable state, not authored goal text. A Work names one
 stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
-lf home id                                      # this machine's HomeId
+lf id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home

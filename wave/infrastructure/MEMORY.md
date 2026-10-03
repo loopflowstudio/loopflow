@@ -30,20 +30,20 @@ are not a full affected gate, configured publication or Task completion.
 
 Separate durable facts: physical cron exit, product settlement, publisher stages,
 public artifact proof and dated repair ownership. Assigning a closed opportunity
-an owner does not resume it. Same-Home closed continuation remains unfinished;
+an owner does not resume it. Same-Home continuation is implemented locally;
 old-Home authority is never transferred by attribution. Child-held mutation locks
 and exact checkout leases protect different scopes; cleanup must independently
 reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-At `a60ac0281`, telemetry failure/deferral computes continuation after recovery
-returns; original `next_due_at` remains adjacency evidence. Closed continuation
-still needs one atomic coverage owner across same-Home predecessor segments.
-The current per-segment joins cannot represent the full frozen due set after
-replacement. Dropping closed checks or covering only old dues would violate the
-accepted outcome. The working plan retains the draft persistence revision and
-its interruption proof; no representation approval or implementation is implied.
+At `a60ac0281`, telemetry retry timing moved to the observation after recovery;
+original `next_due_at` remains adjacency evidence. The local October 2 revision
+commits frozen same-Home coverage once. Shared readers derive owners; original
+candidate, failure and intervention provenance survives. The firing segment owns
+current telemetry/retry. Every Home change breaks continuation. Dues materialize
+before the atomic owner write; the existing lock keeps reads consistent. Local proof is
+synthetic; gate, Jack Heart's review and configured settlement remain outstanding.
 
 The full child Release memory and goal were read in this reconciliation; it is
 the only immediate child scope in this checkout. Its September 28 incident shows

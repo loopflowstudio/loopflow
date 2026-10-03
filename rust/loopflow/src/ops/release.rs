@@ -1664,6 +1664,9 @@ fn verify_scheduled_telemetry(
         .flat_map(|o| &o.attempts)
         .find(|a| a.receipt_id.as_str() == receipt_id)
         .ok_or_else(|| OpsError::Message("scheduled attempt missing".into()))?;
+    let now = chrono::Utc::now().timestamp();
+    let segments = accounting::history(home, &context.repo, &context.wave, now)?;
+    let execution_context = accounting::execution_context(&segments, receipt_id)?;
     let launch_agents = crate::ops::default_launch_agents_dir()?;
     let jobs = crate::ops::list_crons(&launch_agents, &crate::ops::SystemLaunchctl)?;
     let telemetry = jobs
@@ -1685,11 +1688,10 @@ fn verify_scheduled_telemetry(
         ));
     }
     let (hour, minute) = crate::ops::daily_time_of(&telemetry.schedule)?;
-    let zone: chrono_tz::Tz = context
+    let zone: chrono_tz::Tz = execution_context
         .timezone
         .parse()
         .map_err(|e| OpsError::Parse(format!("timezone: {e}")))?;
-    let now = chrono::Utc::now().timestamp();
     let due = calendar::at_or_before(&zone, now, hour, minute)
         .ok_or_else(|| OpsError::Message("cannot identify required telemetry due time".into()))?;
     let root = crate::ops::receipt_root(home);
@@ -1699,7 +1701,6 @@ fn verify_scheduled_telemetry(
         .filter(|r| r.started_at <= now)
         .cloned()
         .collect();
-    let segments = accounting::history(home, &context.repo, &context.wave, now)?;
     receipts.retain(|r| {
         r.home_id == context.home_id
             && r.repo == context.repo
@@ -1733,21 +1734,21 @@ fn verify_scheduled_telemetry(
     } else {
         let mut original = Vec::new();
         for key in &attempt.covered {
-            let opportunity = context
-                .opportunities
+            let (original_context, opportunity) = segments
                 .iter()
-                .find(|o| &o.id == key)
+                .flat_map(|segment| segment.opportunities.iter().map(move |due| (segment, due)))
+                .find(|(_, o)| &o.id == key)
                 .ok_or_else(|| OpsError::Message("covered release opportunity missing".into()))?;
             original.push(accounting::telemetry_due(
                 &segments,
-                context,
+                original_context,
                 opportunity,
                 &original_receipts,
             )?);
         }
         accounting::TelemetryPrerequisite {
             schedule: telemetry.schedule.clone(),
-            timezone: context.timezone.clone(),
+            timezone: execution_context.timezone.clone(),
             activated_at: telemetry.activated_at,
             observed_at: now,
             original,

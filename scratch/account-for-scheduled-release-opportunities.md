@@ -1,6 +1,6 @@
 # Account for scheduled release opportunities and settle product outcomes
 
-LOO-285 · accepted outcome; persistence revision remains draft.
+LOO-285 · accepted outcome; same-Home persistence revision implemented locally.
 Reconciled against `328c7a065` (main integration) and `a60ac0281` (retry timing).
 The source integration is present; the complete Task outcome remains unproved.
 
@@ -51,7 +51,7 @@ passing. Source history places the merge at `5e10e9cd1`, CI-repair ownership at
 
 | Owner | Existing implementation | Evidence limit |
 | --- | --- | --- |
-| `ops/cron/accounting.rs` | One atomically replaced private-Home obligation document holds calendar/Home segments, original dues, frozen coverage and attempts. Telemetry segments have no release opportunities. | Historical unobserved coverage remains unknown; closed execution continuation is absent. |
+| `ops/cron/accounting.rs` | Private-Home segment documents retain original dues; one atomic owner-attempt write freezes coverage across same-Home predecessors. Telemetry segments have no release opportunities. | Historical unobserved coverage remains unknown; configured continuation is not yet observed. |
 | `ops/cron.rs` | Physical receipts retain process outcome, source and optional runner birth identity. One executor handles ordinary firing and one reserved Recovery prerequisite per wake. Trigger requests retain operator provenance; ordinary kickstart does not force-replace a job. | Shell/seeded-date tests do not prove live launchd timing or trigger races. |
 | Flow command executor | `.lf/flows/release-run.yaml` contains `cmd: repo release run patch`. Explicit receipt and descriptor attribution reaches the release operation through current Flow/Exec dispatch. | Old `op:` and Run-era integration plans are superseded; installed propagation remains acceptance work. |
 | `ops/release.rs` | One manual/scheduled controller owns target exclusion, exact selection, checks, recovery and settlement. Fetched origin and owned exact-source checkouts preserve caller bytes. | Local preservation cases do not cover every interruption boundary. |
@@ -69,9 +69,9 @@ History materializes missing dues read-only, preserving an absent-wake denominat
 The shared calendar uses the first ambiguous occurrence and skips nonexistent
 local times. Today's timezone cannot reconstruct unobserved historical changes.
 
-The implemented segment-local document replacement commits frozen coverage and
-collapse links together, replacing the kickoff proposal for separate opportunity files and reciprocal
-writes. Accounting uses a short lock, released before target acquisition/network
+The owner document commits frozen coverage once. Shared reads derive collapse links
+across segment documents; new writes omit the redundant persisted links. Existing
+documents remain readable, including attempts without execution-segment provenance. Accounting uses a short lock, released before target acquisition/network
 work. The target lock covers selection and mutations; the existing job descriptor
 authenticates scheduled attribution; checkout leases protect exact source removal.
 None grants another owner's authority. Keep schema-1 physical receipt decoding
@@ -165,9 +165,10 @@ without reproducing a remaining failure against the integrated path.
 reason, and appends dated ownership. It neither claims remote acceptance nor
 rewrites the receipt/opportunity. First-assignment lateness survives reassignment.
 Closed unsettled owners expose original Home/candidate/closure and dated repair
-outside the window. Closed saved waits are labeled historical. An already
-executing exact attempt may settle after closure; that does not authorize a new
-execution on the closed segment or transfer its Home.
+outside the window. Closed saved waits are labeled historical. A replacement wake may continue its
+uninterrupted same-Home predecessor chain. The candidate retains its original
+owner; execution provenance identifies the successor that fired. An already
+executing exact attempt may settle after closure; attribution never transfers a Home.
 
 Published requires exact tag/commit, applicable verification, prepared hashes,
 all publisher stages and public read-back/smoke. No-change requires a captured
@@ -191,14 +192,13 @@ missing capability never silently waives required acceptance.
 
 ## Remaining implementation and proof
 
-1. **Closed same-context continuation.** `begin` still selects inside one
-   obligation; `receipt_context` rejects closed segments and `record_telemetry`
-   skips them. Preserve the old opportunity/candidate/failed attempts and original
-   due/Home identity when a same-Home replacement schedule wakes. Reuse existing
-   recovery under the target lock; no manual publication bypass, synthetic
-   settlement or cross-Home transfer. A removed schedule has no future firing;
-   unresolved old-Home authority remains a named repair blocker. This is a
-   substantial remaining controller/accounting change, not supplied by disposition.
+1. **Closed same-context continuation implemented locally.** One owner write
+   covers all outstanding dues materialized across the uninterrupted same-Home
+   predecessor chain. Saved candidates and failed attempts remain on the original
+   opportunity. Shared ownership resolution fences late writers and supplies
+   telemetry, history, disposition and CLI projections. Current telemetry, future
+   retry and newly due waits use the successor that fired. Removed schedules and
+   changed Homes still require repair. Configured acceptance remains outstanding.
 2. **Wait continuation accuracy implemented in `a60ac0281`.** Telemetry
    failure/deferral reads the retained calendar at the observation after recovery returns. It no longer
    uses entry `next_due_at`; removed schedules report closure rather than a past
@@ -208,8 +208,9 @@ missing capability never silently waives required acceptance.
    missing-natural-receipt path against current SessionHistory analytics without
    relabeling Recovery or weakening doctor. Retain truthful blockers and dated
    disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
-   Task compensation beyond pre-push, materialization and post-publication-before-
-   settlement boundaries as justified by the final call graph. Review command
+   Task compensation beyond pre-push and release materialization boundaries as
+   justified by the final call graph. Closed continuation now has the synthetic
+   post-publication/pre-settlement recovery proof described below. Review command
    dispatch/descriptor retention through merged Session/Exec/Home/Flow paths.
 4. **Affected-suite gate and configured acceptance.** Focused passes are not the
    final affected-suite gate or hosted matrix. After code proof and authorized
@@ -225,50 +226,57 @@ observations; historical startup errors do not prove a current blocker. The old
 0.12.29 foreign-Team restart and pre-merge missing-Daemon fixture failures remain
 historical after Jack's reported 0.12.31 recovery and main integration.
 
-## Persistence counterexample (October 2 implementation review)
+## Same-Home persistence revision (October 2 implementation)
 
-Closed continuation needs a revised persistence cut before implementation.
-`begin`, `validate`, `receipt_context`, telemetry coverage lookup and history's
-owner/qualification joins all assume that an attempt's covered opportunities
-live in one segment document. A wake after replacement has outstanding dues in
-both the closed predecessor and open successor. Recovering only the predecessor
-would violate Jack Heart's accepted frozen-all-outstanding coverage; writing
-cross-segment collapse links separately would lose atomicity on interruption.
-Simply dropping the closed checks therefore cannot implement the accepted model.
-No continuation code or narrower coverage policy was introduced.
+The earlier review correctly rejected segment-local continuation: replacement
+wakes span predecessor and successor documents. Dropping closed checks or recovering
+only old dues would violate Jack Heart's frozen-all-outstanding decision.
 
-Proposed revision for review: keep the attempt on its original opportunity, make
-its one atomic `covered` write authoritative across same-Home predecessor segments,
-and derive collapse links in the shared reader. Materialize original due identities
-before that write; interruption before it leaves unclaimed dues, after it leaves
-one complete frozen set. Move validation, telemetry lookup, history settlement
-and late-writer fencing to that shared cross-segment view. Preserve original
-segment/Home and candidate ownership; do not infer authority across a Home change.
-This is a draft implementation approach within the accepted outcome, not a new
-product policy or Jack Heart's approval of the representation. The local change
-remains substantial and belongs to implementation; the realign pass does not
-claim it complete or remove Jack's review boundary. Gate and configured proof
-remain outstanding.
+The implementation materializes original dues first, then atomically appends the
+new attempt on its candidate's original opportunity. That attempt's `covered` set
+is authoritative. The shared reader derives collapse ownership across retained
+coverage, rejecting conflicting owners, cycles and cross-Home claims. Resolved
+owners are cached within the read so repeated failed catch-up does not cause
+exponential traversal. New documents omit persisted `coalesced_into`; history
+still exposes the derived field. Retained documents and earlier attempts lacking
+`execution_obligation` remain readable as original-segment executions.
 
-The persistence proof must cover interruption after each due-materialization
-write, immediately before/after the owner write, and after external publication
-before settlement. Retry must recover the same complete frozen set, reject a
-late predecessor attempt, retain intervention/failed evidence and count at most
-one settlement. Resolve original telemetry from each due's own segment; resolve
-current execution and future retry from the successor that fired. A replacement
-on another Home stays outside this authority. History, disposition eligibility,
-CLI owner display and qualification must use the same coverage reader, including
-closed owners outside the display window. Existing retained accounting documents
-remain readable; changing the derived relationship cannot discard their history.
+A wake follows only its uninterrupted same-Home predecessor chain. Home changes
+break the chain even if later placement returns to the original Home. Existing
+candidate identity remains on its original due. Multiple retained candidates
+remain a named repair failure instead of silently discarding one. Re-entry with
+the same receipt does not expand its frozen coverage. Historical interventions
+remain on their original dues; qualification reads the complete ownership set
+instead of copying intervention records onto each new owner.
+
+`execution_obligation` records the segment that fired. Current telemetry and retry
+use that segment; each original telemetry association resolves through its own
+original segment. Process completion records newly due waits on the firing segment.
+Settlement, selection and telemetry writers use the same derived owner and exact
+latest-attempt fence. History resolves owners outside its display window.
+Snapshot readers hold the existing short accounting lock while reading documents,
+preventing a mixed view of materialization and the owner commit.
+
+Local tests reconstruct every durable materialization prefix and both sides of
+the owner write, exercise interrupted-before-settlement candidate retention,
+reject late writers, retain legacy documents without rewriting them, and exclude
+cross-Home continuation. A real CLI/Flow regression with simulated external services
+exercises closed-candidate recovery, successor coverage and CLI display. Restoring
+the pre-settlement record while retaining the simulated publication proves the
+next wake reconciles it without another publication or settlement. Manual
+intervention on a predecessor still disqualifies a later pair. These are synthetic
+proofs, not production publication or the two automatic configured settlements.
+Final check results appear once below.
 
 ### Delete — do not maintain
 
-- Deleted telemetry's entry-snapshot `next_due` calculation; the existing calendar
-  continuation reader owns retry timing, including closure and DST.
-- Pending the persistence revision: remove same-document-only coverage joins in
-  `begin`, `validate`, `receipt_context`, telemetry and release history together;
-  retain original dues, failed attempts, candidate identity, intervention evidence,
-  exact-attempt fencing and qualifying-pair rules on the surviving shared reader.
+- Removed segment-local validation and owner/telemetry/history joins.
+- Removed persisted collapse-link writes and copied intervention provenance;
+  shared coverage projection owns both relationships.
+- Removed the cron unit fixture's obsolete command-argument assertion; durable
+  receipt/outcome assertions remain, and scheduled integration exercises dispatch.
+- Preserve original dues, candidate/failed proof, exact-attempt fencing, independent
+  physical outcomes and the two-distinct-automatic-execution qualification rule.
 
 ### Compression review (October 2, `a60ac0281`)
 
@@ -281,7 +289,7 @@ scheduled-release tests, publisher receipts/tests and release documentation.
 `covered` and `coalesced_into` duplicate the coverage relationship, but deleting
 the latter alone would break owner lookup and late-writer fencing. Take that cut
 with the proposed cross-segment persistence revision above, including CLI owner
-display; do not refactor the segment-local joins that revision removes.
+display. The later revision above completes that deletion.
 `next_due_at` remains original adjacency evidence for qualifying pairs, even
 though retry timing now uses the calendar at observation. Removing it as a stale
 retry snapshot would conflate those contracts.
@@ -292,9 +300,9 @@ and publisher stages distinct from fresh public read-back/smoke evidence;
 Rust's private `PublicReleaseProof` reads the identity/hash/stage subset, while
 the full JSON is retained as verification evidence. `ReleaseHistory` joins
 multiple independent facts and a derived summary; it is not a redundant wrapper
-around one object. No API, DTO or field was removed. Existing focused results
-are unchanged; this prose-only review warrants no behavioral rerun. Closed
-continuation, final gate and configured acceptance remain outstanding.
+around one object. That dated compression pass made no production change. The later persistence
+revision above removes the duplicate storage relationship and updates its readers;
+final gate and configured acceptance remain outstanding.
 
 ## Acceptance counterexamples
 
@@ -382,9 +390,7 @@ proof used seeded dues and simulated external services with real Git/CLI/locks.
 The earlier simulated review identified stale completion claims: assignment
 had been conflated with continuation, dated telemetry diagnosis with current
 source, and repetitive completed slices with remaining work. The reconciled plan
-separates these boundaries and retains the full acceptance criteria. Production
-code is unchanged; no behavioral rerun is warranted for these prose edits.
+separates these boundaries and retains the full acceptance criteria. That earlier reconciliation changed prose only; the current implementation and
+its focused checks are described above.
 
-Recorded implementation checks (`a60ac0281`): `cargo test -p loopflow --lib overlap_continuation_uses_current_calendar_and_preserves_closed_ownership` and `cargo test -p loopflow --test scheduled_release_tests scheduled_release_flow_settles_product_results_and_preserves_failures -- --test-threads=1` passed with isolated Home/executable and inherited authority removed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate/configured proof deferred.
-
-Check: `git diff --check` passed; `lf context --skill realign` within limits after curation; prose-only changes, behavioral checks reused within their recorded scope.
+Check: isolated `cargo test -p loopflow --lib ops::cron::` passed 45 tests (changed intervention regression rechecked); `cargo test -p loopflow --test scheduled_release_tests` passed eight cases and the repaired/extended replacement regression passed separately; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed. Full affected gate, hosted/UI/public proof and configured two-execution acceptance remain outstanding.

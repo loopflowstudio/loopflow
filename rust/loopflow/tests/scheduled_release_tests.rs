@@ -272,10 +272,16 @@ fn saved_candidate_recovers_only_with_affirmative_unpublished_source_evidence() 
     ]);
 }
 
+#[test]
+fn replacement_schedule_resumes_candidate_with_predecessor_and_successor_dues() {
+    run_scenarios(&["candidate-valid-closed"]);
+}
+
 fn run_scenarios(scenarios: &[&str]) {
     for &scenario in scenarios {
         let recovering = scenario.starts_with("candidate-");
-        let expected_tag = if recovering && scenario != "candidate-valid" {
+        let valid_candidate = scenario.starts_with("candidate-valid");
+        let expected_tag = if recovering && !valid_candidate {
             "v0.9.2"
         } else {
             "v0.9.1"
@@ -331,7 +337,7 @@ set -eu
 case "$1" in
   check) exit 0 ;;
   inspect)
-    if [ '{recovering}' = true ] && [ "$5" = v0.9.1 ] && [ '{scenario}' != candidate-valid ]; then
+    if [ '{recovering}' = true ] && [ "$5" = v0.9.1 ] && [ '{valid_candidate}' != true ]; then
       [ '{scenario}' != candidate-unknown ] || {{ echo 'cannot establish publication state' >&2; exit 74; }}
       publications='[]'
       [ '{scenario}' != candidate-partial ] || publications='["versioned DMG"]'
@@ -349,7 +355,7 @@ case "$1" in
       shift
     done
     exit 92 ;;
-  publish) printf 'published\n' > '{}' ;;
+  publish) printf 'published\n' >> '{}' ;;
   reconcile)
     [ '{scenario}' != smoke-failure ] || {{ echo 'exact-tag smoke failed' >&2; exit 73; }}
     mkdir -p "$LF_RELEASE_MAIN_REPO/.lf/logs"
@@ -404,8 +410,8 @@ esac
             &public_proof,
             serde_json::to_vec(&serde_json::json!({
                 "tag": expected_tag,
-                "source_commit": if scenario == "candidate-valid" { &rejected_commit } else { &successor_commit },
-                "workflow_run_id": if recovering && scenario != "candidate-valid" { "43" } else { "42" },
+                "source_commit": if valid_candidate { &rejected_commit } else { &successor_commit },
+                "workflow_run_id": if recovering && !valid_candidate { "43" } else { "42" },
                 "artifact_sha256": {"simulated-artifact": "simulated-hash"},
                 "completed_stages": stages,
             }))
@@ -835,9 +841,29 @@ exit 0
                     continue;
                 }
                 for opportunity in record["opportunities"].as_array_mut().unwrap() {
+                    if scenario == "candidate-valid-closed" {
+                        for key in ["due_at", "next_due_at"] {
+                            opportunity[key] = (opportunity[key].as_i64().unwrap() - 86400).into();
+                        }
+                        opportunity["due_local"] = chrono::DateTime::from_timestamp(
+                            opportunity["due_at"].as_i64().unwrap(),
+                            0,
+                        )
+                        .unwrap()
+                        .with_timezone(&Local)
+                        .to_rfc3339()
+                        .into();
+                    }
                     if let Some(attempt) =
                         opportunity["attempts"].as_array_mut().unwrap().last_mut()
                     {
+                        if scenario == "candidate-valid-closed" {
+                            attempt["started_at"] =
+                                (attempt["started_at"].as_i64().unwrap() - 86400).into();
+                            if let Some(finished) = attempt["finished_at"].as_i64() {
+                                attempt["finished_at"] = (finished - 86400).into();
+                            }
+                        }
                         attempt["selection"] = serde_json::json!({"tag":"v0.9.1", "commit": rejected_commit, "workflow_run_id":42});
                         attempt["outcome"] = serde_json::json!({"status":"failed", "cause":"packaged install preflight rejected"});
                         attempt["target"] = "default".into();
@@ -850,6 +876,30 @@ exit 0
                         }]);
                         seeded_attempt = Some(attempt.clone());
                     }
+                }
+                if scenario == "candidate-valid-closed" {
+                    // Synthetic historical replacement; real execution below must resume
+                    // the old candidate and materialize today's due in the new segment.
+                    let boundary = scheduled
+                        .with_second(0)
+                        .unwrap()
+                        .with_nanosecond(0)
+                        .unwrap()
+                        .timestamp()
+                        - 1;
+                    let mut successor = record.clone();
+                    let id = format!("{}-successor", record["id"].as_str().unwrap());
+                    successor["id"] = id.clone().into();
+                    successor["replaces"] = record["id"].clone();
+                    successor["activated_at"] = boundary.into();
+                    successor["observed_at"] = boundary.into();
+                    successor["opportunities"] = serde_json::json!([]);
+                    record["closed_at"] = boundary.into();
+                    fs::write(
+                        path.with_file_name(format!("{id}.json")),
+                        serde_json::to_vec_pretty(&successor).unwrap(),
+                    )
+                    .unwrap();
                 }
                 fs::write(path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
             }
@@ -907,7 +957,52 @@ exit 0
                 *seed,
                 "historical attempt changed"
             );
-            assert_eq!(attempt.covered, attempts[0].covered);
+            if scenario == "candidate-valid-closed" {
+                assert!(attempt.covered.len() > attempts[0].covered.len());
+                assert!(attempts[0]
+                    .covered
+                    .iter()
+                    .all(|id| attempt.covered.contains(id)));
+                let owner = history
+                    .obligations
+                    .iter()
+                    .find(|r| {
+                        r.opportunities.iter().any(|o| {
+                            o.attempts
+                                .iter()
+                                .any(|a| a.receipt_id == attempt.receipt_id)
+                        })
+                    })
+                    .unwrap();
+                assert!(owner.closed_at.is_some());
+                assert_ne!(attempt.execution_obligation.as_ref(), Some(&owner.id));
+                assert!(history.summary.closed_unsettled.is_empty());
+                assert_eq!(history.summary.unresolved, 0);
+                let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+                    .args([
+                        "release",
+                        "history",
+                        "--wave",
+                        "infrastructure",
+                        "--days",
+                        "5",
+                    ])
+                    .current_dir(&repo_path)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{output:?}");
+                let text = String::from_utf8(output.stdout).unwrap();
+                for id in &attempt.covered {
+                    let line = text.lines().find(|line| line.starts_with(id)).unwrap();
+                    assert!(line.contains("Published"), "{line}");
+                }
+                assert_eq!(
+                    attempt.telemetry.as_ref().unwrap().original.len(),
+                    attempt.covered.len()
+                );
+            } else {
+                assert_eq!(attempt.covered, attempts[0].covered);
+            }
             assert_eq!(git(&repo_path, &["rev-parse", "v0.9.1"]), rejected_commit);
         }
         match scenario {
@@ -970,6 +1065,7 @@ exit 0
             }
             "candidate-successor"
             | "candidate-valid"
+            | "candidate-valid-closed"
             | "published"
             | "no-change"
             | "telemetry-recovered"
@@ -1153,6 +1249,87 @@ exit 0
                     .unwrap();
                 assert_eq!(proof.subject, id.as_str());
             }
+        }
+        if scenario == "candidate-valid-closed" {
+            // Reconstruct the crash boundary after the simulated external publication
+            // but before the atomic settlement write. The next wake uses real dispatch.
+            let owner = history
+                .obligations
+                .iter()
+                .find(|record| {
+                    record.opportunities.iter().any(|o| {
+                        o.attempts
+                            .iter()
+                            .any(|a| a.receipt_id == attempt.receipt_id)
+                    })
+                })
+                .unwrap();
+            let mut interrupted = owner.clone();
+            let pending = interrupted
+                .opportunities
+                .iter_mut()
+                .flat_map(|o| &mut o.attempts)
+                .find(|a| a.receipt_id == attempt.receipt_id)
+                .unwrap();
+            pending.outcome = ScheduledReleaseOutcome::Running;
+            pending.verification.clear();
+            pending.finished_at = None;
+            fs::write(
+                lf_home
+                    .join("cron/obligations")
+                    .join(format!("{}.json", owner.id)),
+                serde_json::to_vec_pretty(&interrupted).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(fs::read_to_string(&published).unwrap().lines().count(), 1);
+            let result = run_cron(
+                &agents,
+                &release.wave,
+                &release.flow,
+                &host.home_id,
+                &host.home_id,
+                CronSource::Scheduled,
+            );
+            assert!(result.is_ok(), "{result:?}");
+            let recovered = release_history(
+                &lf_home,
+                &repo_path,
+                &release.wave,
+                5,
+                Utc::now().timestamp(),
+            )
+            .unwrap();
+            let owner = recovered
+                .obligations
+                .iter()
+                .find(|r| r.id == owner.id)
+                .unwrap();
+            let attempts: Vec<_> = owner
+                .opportunities
+                .iter()
+                .flat_map(|o| &o.attempts)
+                .collect();
+            let resumed = attempts.last().unwrap();
+            assert_eq!(attempts.len(), 3);
+            assert_eq!(resumed.selection, attempt.selection);
+            assert_eq!(resumed.covered, attempt.covered);
+            assert!(matches!(
+                resumed.outcome,
+                ScheduledReleaseOutcome::Published { .. }
+            ));
+            assert_eq!(recovered.summary.published, 1);
+            assert_eq!(recovered.summary.unresolved, 0);
+            assert!(recovered.summary.qualifying_pairs.is_empty());
+            assert_eq!(
+                fs::read_to_string(&published).unwrap().lines().count(),
+                1,
+                "recovery must reconcile the existing external publication"
+            );
+            assert_eq!(
+                caller_state(),
+                before,
+                "publication recovery changed caller work"
+            );
         }
         if scenario == "telemetry-recovered" {
             assert_eq!(history.summary.failed_verifications, 1);

@@ -17,11 +17,11 @@ SessionHistory source must be exercised before assigning another analytics repai
 The existing plan owns remaining implementation and proof; archived discussions
 are preserved at `fe36937faf75151a2f5d7195b32ff708ce335e86:scratch/questions.md`.
 
-October 2 implementation found a persistence conflict: replacement wakes span
-segment documents, while frozen coverage and all owner joins are segment-local.
-The plan retains a draft cross-segment reader/atomic-owner-write approach with
-interruption and retained-document proof requirements. This is implementation
-work within the accepted outcome, not a request to narrow coverage or a claim
-of Jack Heart's representation approval.
-Recovering only old dues is rejected because it narrows Jack Heart's accepted
-frozen-all-outstanding set. Closed continuation remains unimplemented.
+October 2 implementation resolves the segment-local persistence conflict with
+one atomic owner-attempt write and a shared cross-segment coverage projection.
+This is a reversible representation choice within Jack Heart's accepted outcome,
+not a claim of review approval. Dues materialize before the owner write; retries
+retain the candidate and reject late writers. Same-Home authority stops at any
+Home-change boundary, including a later return to the original Home. Multiple
+outstanding saved candidates produce an explicit repair failure rather than an
+arbitrary selection. Gate, Jack's review and configured acceptance remain open.

@@ -185,7 +185,12 @@ blocker. Disposition leaves the blocker, attempts and candidate intact: it neith
 settles a release nor moves execution to a replacement Home. An already running
 operation can still record its exact settlement; closure does not prove its exit.
 Saved waits show their previously expected firing as history after closure.
-Automatic continuation across closed segments is not yet implemented.
+A replacement schedule on the same Home resumes the original candidate owner
+and freezes all outstanding predecessor and successor dues in one execution.
+`attempts[].execution_obligation` identifies the segment that fired; original due
+identities and historical telemetry stay on their own segments. Collapse links
+in history are derived from the frozen `covered` set. A changed Home breaks the
+continuation chain. A removed schedule requires repair because it cannot fire.
 
 Ordinary `cron trigger` records intervention before asking launchd to kickstart;
 it does not terminate an active job. A firing that may have resulted from that

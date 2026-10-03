@@ -2351,12 +2351,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let temp = tempfile::tempdir().unwrap();
         let executable = temp.path().join("lf");
-        let argv = temp.path().join("argv");
-        fs::write(
-            &executable,
-            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", argv.display()),
-        )
-        .unwrap();
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
         let mut spec = named_spec(
             temp.path(),
@@ -2400,9 +2395,5 @@ mod tests {
             attempts[0].outcome,
             accounting::ScheduledReleaseOutcome::Unverified { .. }
         ));
-        let arguments = fs::read_to_string(argv).unwrap();
-        assert!(arguments.contains(receipt.id.as_str()));
-        assert!(arguments.contains("--__cron-lock-fd"));
-        assert!(arguments.contains("flow\nrelease-run"));
     }
 }

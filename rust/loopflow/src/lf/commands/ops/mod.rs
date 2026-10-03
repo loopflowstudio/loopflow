@@ -199,7 +199,13 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                         let owner = opportunity
                             .coalesced_into
                             .as_ref()
-                            .and_then(|id| obligation.opportunities.iter().find(|o| &o.id == id))
+                            .and_then(|id| {
+                                history
+                                    .obligations
+                                    .iter()
+                                    .flat_map(|r| &r.opportunities)
+                                    .find(|o| &o.id == id)
+                            })
                             .unwrap_or(opportunity);
                         println!(
                             "{} {} {}{}",

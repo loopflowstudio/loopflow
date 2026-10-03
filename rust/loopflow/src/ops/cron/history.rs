@@ -258,14 +258,19 @@ fn summarize(
             let owner = opportunity
                 .coalesced_into
                 .as_ref()
-                .and_then(|id| record.opportunities.iter().find(|o| &o.id == id))
+                .and_then(|id| {
+                    obligations
+                        .iter()
+                        .flat_map(|r| &r.opportunities)
+                        .find(|o| &o.id == id)
+                })
                 .unwrap_or(opportunity);
             summary.accounted += usize::from(
                 !owner.attempts.is_empty() || owner.wait.is_some() || record.closed_at.is_some(),
             );
-            if let Some(first) = record
-                .opportunities
+            if let Some(first) = obligations
                 .iter()
+                .flat_map(|r| &r.opportunities)
                 .flat_map(|o| &o.attempts)
                 .filter(|a| a.covered.contains(&opportunity.id))
                 .min_by_key(|a| a.started_at)
@@ -322,7 +327,10 @@ fn summarize(
             if left.next_due_at != right.due_at {
                 continue;
             }
-            if let (Some(a), Some(b)) = (qualifying(record, left), qualifying(record, right)) {
+            if let (Some(a), Some(b)) = (
+                qualifying(obligations, left),
+                qualifying(obligations, right),
+            ) {
                 let one_publication = matches!(a, ScheduledReleaseOutcome::Published { .. })
                     || matches!(b, ScheduledReleaseOutcome::Published { .. });
                 let duplicate = matches!((a, b), (ScheduledReleaseOutcome::Published { tag: a_tag, commit: a_commit, .. }, ScheduledReleaseOutcome::Published { tag: b_tag, commit: b_commit, .. }) if a_tag == b_tag && a_commit == b_commit);
@@ -358,14 +366,14 @@ fn summarize(
 }
 
 fn qualifying<'a>(
-    record: &'a ObligationSegment,
+    obligations: &'a [ObligationSegment],
     opportunity: &'a ReleaseOpportunity,
 ) -> Option<&'a ScheduledReleaseOutcome> {
     if opportunity.historical_timezone_unknown
         || opportunity.coalesced_into.is_some()
-        || record
-            .opportunities
+        || obligations
             .iter()
+            .flat_map(|r| &r.opportunities)
             .filter(|o| {
                 o.id == opportunity.id || o.coalesced_into.as_ref() == Some(&opportunity.id)
             })
@@ -485,6 +493,15 @@ mod tests {
                 .covered
                 .push(earlier.id.clone());
             opportunities.insert(0, earlier);
+            if source == CronSource::Manual {
+                let earlier = obligation.opportunities.remove(0);
+                let mut predecessor = obligation.clone();
+                predecessor.id = "predecessor".into();
+                predecessor.closed_at = Some(0);
+                predecessor.opportunities = vec![earlier];
+                obligation.replaces = Some(predecessor.id.clone());
+                report.obligations.insert(0, predecessor);
+            }
 
             let summary = summarize(
                 &report.obligations,

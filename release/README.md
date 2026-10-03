@@ -115,8 +115,10 @@ Closed, unfinished release owners remain visible beyond the history window in
 `summary.closed_unsettled`. Record repair ownership with the printed
 `lf cron disposition` command on the original Home. This preserves the candidate,
 attempts and late ownership evidence without claiming product settlement or
-transferring execution to a new Home. Automatic continuation across closed
-segments remains unavailable.
+transferring execution to a new Home. A replacement schedule on the same Home
+continues its predecessors on the next wake, freezing all outstanding dues in
+one attempt. The saved candidate keeps its original owner. A Home change breaks
+that continuation chain; removed schedules have no future wake.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a
@@ -130,7 +132,7 @@ baseline and current required verification pass. Selection uses fetched origin
 without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
-Scheduled overlap deferrals retain the next due time from the original
+Scheduled overlap deferrals retain the next due time from the firing
 obligation's calendar and Home. That observation reserves no execution; if the
 obligation has closed, the continuation names its opportunity repair command
 on the original Home instead.

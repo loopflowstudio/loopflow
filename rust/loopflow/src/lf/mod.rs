@@ -78,6 +78,15 @@ pub struct Cli {
     )]
     pub only_account: Vec<String>,
 
+    /// Run in the selected account's own provider home, unmoved by account
+    /// switches. Applies to this invocation and its children.
+    #[arg(long, conflicts_with = "shared")]
+    pub isolate: bool,
+
+    /// Run in the provider's ordinary home despite an `isolate: true` default
+    #[arg(long, conflicts_with = "isolate")]
+    pub shared: bool,
+
     /// Internal SSH compatibility and broker-connectivity probe.
     #[arg(long = "__account-lease-probe", hide = true)]
     pub account_lease_probe: bool,
@@ -137,6 +146,8 @@ impl Cli {
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
+            ("--isolate", self.isolate),
+            ("--shared", self.shared),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -182,6 +193,8 @@ impl Cli {
             model: self.model.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
+            isolate: self.isolate,
+            shared: self.shared,
             account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
             mode: self.mode,
@@ -469,6 +482,7 @@ impl SessionMode {
 pub enum SessionCommand {
     /// Read this conversation's native start, usage and completion receipts
     History {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -516,6 +530,7 @@ pub enum SessionCommand {
     /// Connect to the live conversation, or resume its saved history
     #[command(name = "connect")]
     Open {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -541,9 +556,13 @@ pub enum SessionCommand {
         json: bool,
     },
     /// Complete a review or interactive session
-    Complete { id: String },
+    Complete {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        id: String,
+    },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(value_name = "NAME", required = true, num_args = 1..)]
         name: Vec<String>,
@@ -555,6 +574,7 @@ pub enum SessionCommand {
     },
     /// Assign a Task to a Session that has none; the Task never changes after
     Bind {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         /// The Task, by its issue identifier (e.g. INF-123) or stable Task ID
         #[arg(long)]
@@ -1440,6 +1460,8 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Sign the provider's ordinary home in as a stored login, from now on
+    Use { provider: String, email: String },
     /// Explain configured and automatic account selection, or replace a route
     #[command(args_conflicts_with_subcommands = true)]
     Route {

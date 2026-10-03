@@ -1477,6 +1477,12 @@ fn run() -> anyhow::Result<()> {
             preferred_accounts.extend(origin_account.iter().cloned());
             restricted_accounts.extend(origin_only_account.iter().cloned());
         }
+        let _account_isolation = cli
+            .isolate
+            .then_some(true)
+            .or(cli.shared.then_some(false))
+            .map(loopflow::provider_account::activation::isolation_env)
+            .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
             &preferred_accounts,
             &restricted_accounts,

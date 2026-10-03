@@ -836,7 +836,7 @@ impl BrokerState {
                     .remove(&(provider, account_id.clone()));
                 self.prepared
                     .store
-                    .pin_provider_session_route(provider, &provider_session_id, &account_id)
+                    .pin_provider_session_route(provider, &provider_session_id, &account_id, true)
                     .await?;
                 Ok(BrokerResponse::Ok)
             }
@@ -1493,7 +1493,7 @@ mod tests {
             .unwrap()
             .expect("the inspected candidate should be selectable");
         assert_eq!(route.account_id(), &inspected[0].0.account_id);
-        assert_eq!(!route.uses_native_home(), inspected[0].1);
+        assert_eq!(route.is_forwarded(), inspected[0].1);
         route
     }
 
@@ -1601,14 +1601,14 @@ mod tests {
 
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let codex_preference =
             AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
         std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let target_preference =
             AccountSelection::from_flags(&["claude=forwarded@".to_string()], &[]).unwrap();
@@ -1618,7 +1618,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &forwarded.account_id);
-        assert!(!route.uses_native_home());
+        assert!(route.is_forwarded());
 
         let shared_preference =
             AccountSelection::from_flags(&["claude=shared@".to_string()], &[]).unwrap();
@@ -1628,7 +1628,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let missing_preference =
             AccountSelection::from_flags(&["claude=missing@".to_string()], &[]).unwrap();
@@ -1638,7 +1638,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let mut missing_route = local.clone();
         missing_route.credential_state = CredentialState::Missing;
@@ -1649,7 +1649,7 @@ mod tests {
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let client = AccountLeaseClient::from_env().unwrap().unwrap();
         let facts = client
@@ -1786,7 +1786,7 @@ mod tests {
             .contains("missing or expired"));
         // A resumed fallback account does not consume the preferred attempt.
         store
-            .pin_provider_session_route(Provider::Codex, "fallback-session", &id("primary"))
+            .pin_provider_session_route(Provider::Codex, "fallback-session", &id("primary"), true)
             .await
             .unwrap();
         let fallback_resume = client
@@ -1827,7 +1827,7 @@ mod tests {
             .is_err());
         // Resume stays on the account the store recorded for the session.
         store
-            .pin_provider_session_route(Provider::Codex, "existing-session", &id("reserve"))
+            .pin_provider_session_route(Provider::Codex, "existing-session", &id("reserve"), true)
             .await
             .unwrap();
         let resumed = client
@@ -1844,7 +1844,12 @@ mod tests {
         );
         store.upsert_provider_account(&remote_only).await.unwrap();
         store
-            .pin_provider_session_route(Provider::Codex, "outside-session", &id("remote-only"))
+            .pin_provider_session_route(
+                Provider::Codex,
+                "outside-session",
+                &id("remote-only"),
+                true,
+            )
             .await
             .unwrap();
         let outside = client

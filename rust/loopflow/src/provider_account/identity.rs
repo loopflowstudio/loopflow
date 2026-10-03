@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use secrecy::ExposeSecret;
 use sha2::{Digest, Sha256};
 
 use crate::provider_auth::{codex_identity_from_home, Provider};
@@ -93,7 +94,7 @@ pub(crate) async fn validate_observed_identity(
         if let Some(home) = other
             .home
             .as_deref()
-            .filter(|home| home.join(".credentials.json").is_file())
+            .filter(|home| claude_login(home).is_some())
         {
             let observed = crate::subscription::claude_identity(home).await?;
             other.observed_email = Some(observed.email);
@@ -137,8 +138,54 @@ pub(crate) fn cached_identity(account: &ProviderAccount) -> Option<AccountIdenti
 }
 
 fn current_credential_digest(account: &ProviderAccount) -> Option<String> {
-    let raw = std::fs::read_to_string(account.home.as_ref()?.join(".credentials.json")).ok()?;
-    Some(credential_digest(&raw))
+    Some(credential_digest(&claude_login(account.home.as_ref()?)?))
+}
+
+pub(crate) fn claude_login(home: &Path) -> Option<String> {
+    let login = crate::provider_auth::read_claude_login(home).ok()??;
+    Some(login.expose_secret().clone())
+}
+
+/// Whether two homes hold a credential for the same person. A Codex login
+/// names its person. A Claude login is opaque, so only a shared token proves
+/// it: once the provider rotates both, the answer needs
+/// `activation::active_account`.
+pub(crate) fn same_login(provider: Provider, left: &Path, right: &Path) -> bool {
+    if provider == Provider::Claude {
+        return match (claude_login(left), claude_login(right)) {
+            (Some(left), Some(right)) => same_claude_grant(&left, &right),
+            _ => false,
+        };
+    }
+    match (
+        codex_identity_from_home(left),
+        codex_identity_from_home(right),
+    ) {
+        (Some(left), Some(right)) => left.same_login(&right),
+        _ => false,
+    }
+}
+
+fn same_claude_grant(left: &str, right: &str) -> bool {
+    let tokens = |raw: &str| {
+        let json: serde_json::Value = serde_json::from_str(raw).ok()?;
+        let oauth = json.get("claudeAiOauth").unwrap_or(&json);
+        let token = |name| {
+            oauth
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .filter(|token| !token.is_empty())
+                .map(str::to_string)
+        };
+        Some((token("accessToken"), token("refreshToken")))
+    };
+    match (tokens(left), tokens(right)) {
+        (Some((left_access, left_refresh)), Some((right_access, right_refresh))) => {
+            (left_access.is_some() && left_access == right_access)
+                || (left_refresh.is_some() && left_refresh == right_refresh)
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn credential_digest(credential: &str) -> String {

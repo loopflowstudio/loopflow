@@ -21,6 +21,7 @@ use crate::work::task::{Task, TaskId};
 #[cfg(test)]
 pub(crate) mod action_test;
 pub(crate) mod primary;
+pub(crate) mod provider_conversation;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
@@ -692,8 +693,9 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
 }
 
-/// Resolve a Session id, or the Run id linked to it. A conversation or Flow Run
-/// names its waiting boundary, so `$LF_RUN_ID` inside a review targets it.
+/// Resolve a Session id, the Run id linked to it, or the provider's own id for
+/// its conversation. A conversation or Flow Run names its waiting boundary, so
+/// `$LF_RUN_ID` inside a review targets it.
 async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
     // Membership outlives a pending boundary. Never reinterpret a retained
     // attempt's manifest as an independent conversation or current actor.
@@ -706,7 +708,13 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     }
     let selected = match store.sqlite.resolve_history_input(session_id) {
         Ok(selected) => selected,
-        Err(crate::store::StoreError::NotFound) => return Ok(None),
+        Err(crate::store::StoreError::NotFound) => {
+            let Some(session) = provider_conversation::recorded(store, session_id).await? else {
+                return Ok(None);
+            };
+            let id = session.id.clone();
+            return owned_target(store, &id, session).await.map(Some);
+        }
         Err(error) => return Err(error.into()),
     };
     let input = crate::session_record::parse_artifact_key(&selected)?;
@@ -1005,7 +1013,8 @@ async fn serve_flow_locked(
         .env(
             crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
             accounts.env_value()?,
-        );
+        )
+        .envs(position.invocation.isolation_env());
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;
@@ -1169,9 +1178,17 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
-    let target = find_session(store, session_id)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
+    let target = match find_session(store, session_id).await? {
+        Some(target) => target,
+        // Connecting is what brings a provider-started conversation in.
+        None => SessionTarget::Row {
+            session: Box::new(
+                provider_conversation::admit(store, session_id)
+                    .await?
+                    .ok_or_else(|| session_not_found(session_id))?,
+            ),
+        },
+    };
     match &target {
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
@@ -1763,17 +1780,27 @@ pub(crate) async fn preview_binding(
 }
 
 async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
-    let owned = match crate::session_record::parse_artifact_key(id) {
-        Ok(run_id) => store.session_for_artifact(&run_id).await?,
-        Err(_) => store.session(id).await?,
-    };
-    let session = owned.ok_or_else(|| session_not_found(id))?;
+    let session = session_by_id(store, id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
     let task = match crate::durable::TaskId::parse(task) {
         Ok(id) => store.get_task(&id).await?,
         Err(_) => store.get_task_by_issue(task).await?,
     }
     .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
     Ok((session, task))
+}
+
+/// The Session an id names whatever its state: its own id, any of its Runs',
+/// or the provider's id for its conversation.
+pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+    if let Some(session) = store.session(id).await? {
+        return Ok(Some(session));
+    }
+    if let Some(session) = store.session_for_artifact(id).await? {
+        return Ok(Some(session));
+    }
+    provider_conversation::recorded(store, id).await
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {

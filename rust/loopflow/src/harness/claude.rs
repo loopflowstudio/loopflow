@@ -110,9 +110,10 @@ impl ClaudeHarness {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut cmd);
-        }
+        let _activation = match &self.account_route {
+            Some(route) => route.launch_as(cmd.as_std_mut()).await?,
+            None => None,
+        };
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -374,7 +375,7 @@ impl Harness for ClaudeHarness {
         version_command.arg("--version");
         super::configure_agent_env(&mut version_command, config);
         if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut version_command);
+            route.launch_as(version_command.as_std_mut()).await?;
         }
         let output = version_command.output().await;
         match output {

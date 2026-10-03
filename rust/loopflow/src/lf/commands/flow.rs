@@ -909,6 +909,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         let mut step_cli = cli.exec_options();
         step_cli.account.clear();
         step_cli.only_account.clear();
+        step_cli.isolate = false;
+        step_cli.shared = false;
         command.args(step_cli.step_args());
         command.args([
             "--__flow-step",

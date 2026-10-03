@@ -256,6 +256,32 @@ outstanding.
   retain original dues, failed attempts, candidate identity, intervention evidence,
   exact-attempt fencing and qualifying-pair rules on the surviving shared reader.
 
+### Compression review (October 2, `a60ac0281`)
+
+No production reduction selected. The inspected model remains obligation segment
+→ original due → attempts, with independent physical receipts, verification and
+product outcomes. The review followed accounting writers/validation into release
+telemetry, history qualification, CLI text/JSON, the release-history fixture,
+scheduled-release tests, publisher receipts/tests and release documentation.
+
+`covered` and `coalesced_into` duplicate the coverage relationship, but deleting
+the latter alone would break owner lookup and late-writer fencing. Take that cut
+with the proposed cross-segment persistence revision above, including CLI owner
+display; do not refactor the segment-local joins that revision removes.
+`next_due_at` remains original adjacency evidence for qualifying pairs, even
+though retry timing now uses the calendar at observation. Removing it as a stale
+retry snapshot would conflate those contracts.
+
+Keep physical exit and product outcome separate. Keep prepared artifact hashes
+and publisher stages distinct from fresh public read-back/smoke evidence;
+`PublicReleaseReceipt` already shares `ArtifactReceipt` through inheritance.
+Rust's private `PublicReleaseProof` reads the identity/hash/stage subset, while
+the full JSON is retained as verification evidence. `ReleaseHistory` joins
+multiple independent facts and a derived summary; it is not a redundant wrapper
+around one object. No API, DTO or field was removed. Existing focused results
+are unchanged; this prose-only review warrants no behavioral rerun. Closed
+continuation, final gate and configured acceptance remain outstanding.
+
 ## Acceptance counterexamples
 
 ### Focused behavioral proof

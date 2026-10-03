@@ -3231,7 +3231,7 @@ pub(crate) async fn task_recovery_adoption(
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &task.worktree;
     let identifier = &task.plan.identifier;
-    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    let blockers = lifecycle::recovery_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -5466,7 +5466,7 @@ mod tests {
             .unwrap();
         let claimed = fixture.store.task_flow(&child.id).await.unwrap().unwrap();
         assert!(
-            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+            super::lifecycle::recovery_execution_blockers(&fixture.store, &fixture.task)
                 .unwrap()
                 .iter()
                 .any(|reason| reason.contains(flow.id()))
@@ -5487,6 +5487,108 @@ mod tests {
         );
         assert_eq!(
             fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
+    #[test]
+    fn task_work_recovery_keeps_history_without_treating_it_as_execution_authority() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("RECOVER-HISTORY", repo.path().into()));
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["checkout", "-b", "test/task-recovery-fixture"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let managed = runtime.block_on(claim_stop_fixture(&fixture, 999_999));
+        let exec = crate::exec::Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: None,
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some("historical diagnostic".into()),
+            repo: None,
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture.store.sqlite.record_exec(&exec).unwrap();
+        assert!(runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .is_ok());
+        for blockers in [
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task),
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task),
+        ] {
+            assert!(blockers
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(exec.id.as_str())));
+        }
+
+        // The same missing receipt still blocks when it owns a current Session.
+        let session = fixture.store.sqlite.test_session(
+            "competing-session",
+            &crate::session_record::new_artifact_key(),
+        );
+        fixture
+            .store
+            .sqlite
+            .claim_session_driver(&session.id, None, &exec.id, true)
+            .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?1,interactive=1 WHERE id=?2",
+            rusqlite::params![repo.path().to_str().unwrap(), session.id],
+        )
+        .unwrap();
+        let refusal = runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .unwrap_err();
+        assert!(refusal.to_string().contains(exec.id.as_str()), "{refusal}");
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        assert!(runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .is_ok());
+
+        // A completed conversation cannot exempt a genuinely live process.
+        let root = ledger.home().join(crate::journal::EXEC_PROCESS_ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        let pid = std::process::id();
+        let receipt = crate::journal::ExecProcessReceipt {
+            schema_version: 1,
+            trace_id: exec.trace_id.to_string(),
+            exec_id: exec.id.to_string(),
+            pid,
+            started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
+        };
+        let path = root.join(format!("{pid}.json"));
+        std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let refusal = runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .unwrap_err();
+        assert!(refusal.to_string().contains(exec.id.as_str()), "{refusal}");
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.task_flow(&fixture.task.id))
+                .unwrap(),
             Some(managed)
         );
     }

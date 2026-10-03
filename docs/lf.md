@@ -104,6 +104,12 @@ Its overview explains each item's state and next action. A mechanical Exec has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
 
+Resuming a Task's saved Flow checks current Session and Flow ownership and live
+competing processes. Unresolved historical Exec rows without current ownership
+remain visible but do not prevent resumption. Completion, abandonment and checkout
+restoration still require their retained-work checks; resumption never records an
+unobserved process exit.
+
 `lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
 in existing personal, repository or Wave settings.
 

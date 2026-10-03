@@ -55,6 +55,28 @@ copies its first client's environment into every later session. Fixtures open
 their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
 `LF_RUN_ID` presence still decides three behaviours without validating the Run.
 
+## Task purpose and completion (LOO-367, reconciled 2026-10-02)
+
+Jack Heart accepted Task admission/completion independent of optional Flow and
+delivery operations. On 2026-10-02 Jack confirmed that the working conversation
+can complete its Task before its own Session or provider turn ends, then report
+the result. Completion preserves that conversation and its history; cleanup
+retains a checkout while it is in use. Other unfinished work, review boundaries
+and unresolved delivery remain blockers. Membership alone grants no exemption,
+Flow settlement or process control. This refines the LOO-358 completion rule below;
+it does not weaken cleanup or abandonment protections.
+
+The branch confirms creation and mutation through the affected issue's normalized
+facts instead of a post-mutation whole-Wave refresh. Filing and marker recovery
+still require current-Project routing. Failed issue confirmation remains explicit;
+registered completion retains pending writeback. Recorded stateful fixture results
+cover planning-only completion and retries, not configured provider acceptance.
+Optional placement, admission for binding, shared explicit Flow startup and
+completion from the active conversation remain unimplemented. Existing cleanup
+already follows durable completion; preserve its separate safety checks instead
+of broadening the shared associated-work exemption. LOO-364 owns broader Session
+and Flow switching; LOO-366 owns Project availability and optional chapter resets.
+
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
 Jack Heart selected the Task's checkout as its general work set: every

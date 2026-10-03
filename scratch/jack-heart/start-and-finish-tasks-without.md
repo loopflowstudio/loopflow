@@ -23,7 +23,7 @@ Jack can file a research Task, associate an existing conversation, record its
 finding and complete it without creating a checkout, PR or Flow. Later choosing
 a Flow or software delivery preserves that same Task and all its work.
 
-The demo starts with `lf task create --wave infrastructure "Investigate a slow command"`,
+The demo starts with `lf task create --wave infrastructure --title "Investigate a slow command"`,
 then `lf task status <issue> --json` and
 `lf task complete <issue> --summary "Measured startup; retained findings in the issue"`.
 The Task is complete, the original summary is readable, and there are zero new
@@ -45,9 +45,7 @@ This serves Infrastructure's dependable self-hosting and architecture reduction
 objectives and the chapter KR about advancing a Task from an ordinary Session
 without plumbing blockers. No quantitative chapter targets were supplied.
 
-## Findings at the supplied base
-
-The checkout was clean and scratch contained no existing design.
+## Current source findings · reconciled 2026-10-02
 
 - `ops/task.rs::task_create` already supports filing without execution. Its
   `options: None` branch creates no runtime Task, checkout, PR or Flow.
@@ -56,14 +54,13 @@ The checkout was clean and scratch contained no existing design.
 - Planning completion validates nonempty summary, checks provider outcome,
   confirms completion and publishes one marker-keyed summary. Existing
   `ops/pm/task_planning_tests.rs` covers original-summary preservation,
-  lost responses, pending writeback and conflicting terminal outcomes. This is
-  existing source coverage, not a test result from kickoff.
-- `task_pm::create_and_load_task` requires a whole-Wave refresh after issue
-  creation. `pm_update_async` also confirms an individual mutation by refreshing
-  the entire Wave and finding the issue in that list. An unrelated acquisition
-  failure therefore reports failure after the requested effect already happened.
-  Existing issue lookup/revision ingestion can confirm the affected entity
-  instead; list omission must never become deletion or failed identity.
+  lost responses, pending writeback and conflicting terminal outcomes. The
+  recorded focused suite result below covers the current confirmation slice.
+- `task_pm::create_and_load_task` and `pm_update_async` now confirm mutations
+  through affected-issue lookup and normalized ingestion. Current-Project routing
+  still precedes filing and creation-marker recovery. The no-delivery fixture
+  seeds fresh planning for that routing; it proves post-mutation independence
+  from whole-Wave acquisition, not filing during arbitrary planning outages.
 - `work/task/mod.rs::Task` requires `worktree` and `workspace_slug`;
   `create_prepared_task` creates the Task and first PR together. This is the
   admission coupling to remove. A fake empty path would make absent placement
@@ -81,6 +78,11 @@ The checkout was clean and scratch contained no existing design.
   PRs and committed follow-up. `store/sqlite/task_work.rs` already unions
   explicit binds with checkout membership, including absent-checkout history.
   Retain that reader and managed Flow distinction from LOO-358.
+- `cleanup_completed_task` already runs after durable completion and retains the
+  checkout when associated work blocks cleanup. It also ends a settled managed
+  Flow before deletion. Reuse the existing cleanup operation; the new requesting
+  conversation allowance must not reach that Flow-ending or deletion path while
+  the conversation is active. Its Session and provider turn remain intact.
 - `task_actions::derive_task_actions` applies launch refusal before considering
   completion; its no-PR case recommends resuming a saved Flow. `task_flow` owns
   shared control explanations. Desktop's `RegistryQuery`, `PodiumModel` and
@@ -180,7 +182,7 @@ entity confirmation after routing is in scope. Missing required ownership at new
 admission remains an explicit error. Existing retained local association and
 inspection do not reacquire unrelated coordination.
 
-## Deletion and integration cut
+## Delete — do not maintain
 
 Delete unconditional workspace/PR requirements from registration, context,
 non-delivery completion and Task action derivation. Replace the Task-only
@@ -188,6 +190,21 @@ non-delivery completion and Task action derivation. Replace the Task-only
 Remove tests that assert these obsolete prerequisites, replacing them with
 behavior proofs. Correct the Task module's claim that every Task owns Flow
 progression and a PR chain.
+
+Remaining targets at their existing owners:
+
+- `Task::{worktree, workspace_slug}` as mandatory placement; replace together
+  with optional `TaskWorkspace`, including store and DTO consumers.
+- `create_prepared_task` as the admission prerequisite in attribution and binding;
+  retain it only for explicit delivery preparation.
+- `resolve_work_selection`'s unconditional PR requirement and
+  `FlowCommand::Start`'s Task-only dispatch.
+- `complete_task`'s unconditional checkout inspection and
+  `derive_task_actions`' launch refusal as a prerequisite to completion.
+
+The implemented confirmation cut already removes `load_wave_async` and the
+post-mutation `refresh_pm_snapshot` calls. Keep current-Project filing selection
+and the shared completion writer; neither is a deletion target.
 
 Keep `task_complete`, `complete_planning_task`, the existing gate, PR settlement,
 managed claim fencing, LOO-355 checkout/rotation operations and LOO-358 membership.
@@ -223,7 +240,7 @@ before reusing the creation marker. The new confirmation path must not be descri
 as eliminating all filing reads. Failed issue acquisition remains an explicit
 failure; registered completion retains its existing pending-writeback state.
 
-1. **This slice:** remove mandatory placement from admission and membership,
+1. **Next implementation slice:** remove mandatory placement from admission and membership,
    migrate existing rows and update minimum readers/DTO consumers. Add a focused
    `task_without_delivery` test: bind an existing conversation to an admitted Task,
    read membership, and prove zero PR/checkout/Flow creation; then allocate the
@@ -295,10 +312,10 @@ per-operation checks and confirmation/retry proofs are the safeguards.
 Simulated review finding: merely relaxing `task_completion_gate` would neither
 admit a research Session nor fix the context reader's PR requirement, and could
 weaken delivery. The complete deletion cut therefore starts with registration
-and placement and preserves the gate's evidence obligations. No implementation
-or configured acceptance is claimed by this draft.
+and placement and preserves the gate's evidence obligations. Only the narrow
+planning-confirmation slice is implemented; full acceptance remains unproven.
 
-Check: `cargo test -p loopflow ops::pm::task_planning_tests --lib` — 15 passed, 1 subprocess entry ignored; added `cargo test -p loopflow task_without_delivery --lib` — 2 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — pass; full acceptance remains with gate after implementation.
+Check: retained `cargo test -p loopflow ops::pm::task_planning_tests --lib` — 16 passed, 1 subprocess entry ignored, and `cargo fmt --check` — pass; realign `git diff --check` — pass; full acceptance and Clippy remain with gate on the finished implementation.
 
 Review source finding: `ops/task/lifecycle.rs::execution_blockers` exempts the
 current Exec but still checks the non-managed conversation's pending turn and

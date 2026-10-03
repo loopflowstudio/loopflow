@@ -1267,10 +1267,11 @@ pub(crate) async fn pm_update_async(
             .as_deref()
             .map(|notes| preserve_creation_marker(notes, &item.description));
     }
-    if matches!(options.update, PmTaskUpdate::Complete { .. }) {
+    let completing = matches!(options.update, PmTaskUpdate::Complete { .. });
+    if completing {
         validate_completion_outcome(&item)?;
     }
-    if !matches!(options.update, PmTaskUpdate::Complete { .. }) || !item.completed {
+    if !completing || !item.completed {
         apply_update(&ctx, &options, progress).await?;
     }
     let reconcile = async {
@@ -1283,14 +1284,14 @@ pub(crate) async fn pm_update_async(
             )));
         }
         let item = &confirmed.item;
-        if matches!(options.update, PmTaskUpdate::Complete { .. }) {
+        if completing {
             validate_completion_outcome(item)?;
-        }
-        if matches!(options.update, PmTaskUpdate::Complete { .. }) && !item.completed {
-            return Err(OpsError::Message(format!(
-                "Linear has not confirmed completion of {}",
-                item.identifier
-            )));
+            if !item.completed {
+                return Err(OpsError::Message(format!(
+                    "Linear has not confirmed completion of {}",
+                    item.identifier
+                )));
+            }
         }
         let store = pm_store().await?;
         if let Some(task) = store

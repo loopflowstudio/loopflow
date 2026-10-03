@@ -472,17 +472,15 @@ fn assert_task_without_delivery(fail_issue_read: bool) {
                 Some("Edited full directive".into()),
             )
         };
-        {
-            runtime.block_on(async {
-                state.lock().await.fail_after_update = true;
-            });
-            let error = edit().unwrap_err().to_string();
-            assert!(
-                error.contains("was updated, but issue confirmation failed"),
-                "{error}"
-            );
-            assert!(error.contains("Retry the same Task command"), "{error}");
-        }
+        runtime.block_on(async {
+            state.lock().await.fail_after_update = true;
+        });
+        let error = edit().unwrap_err().to_string();
+        assert!(
+            error.contains("was updated, but issue confirmation failed"),
+            "{error}"
+        );
+        assert!(error.contains("Retry the same Task command"), "{error}");
         edit().unwrap();
         let retry = crate::ops::task_pm::resolve_task(&repo, "FIX-1", PmRefresh::Never)
             .unwrap()
@@ -497,9 +495,6 @@ fn assert_task_without_delivery(fail_issue_read: bool) {
             .nth(1)
             .unwrap();
         assert!(retry.description.ends_with(marker));
-        let resolved = crate::ops::task_pm::resolve_task(&repo, "FIX-1", PmRefresh::Never).unwrap();
-        assert_eq!(resolved.item, retry);
-        assert!(runtime.block_on(async { state.lock().await.fail_snapshot }));
         crate::ops::task::task_complete(&repo, "FIX-1", "Recorded research findings".into())
             .unwrap();
         crate::ops::task::task_complete(&repo, "FIX-1", "Replacement summary".into()).unwrap();

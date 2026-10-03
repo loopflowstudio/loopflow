@@ -9,6 +9,9 @@
 - “Pinned binary”: only the account's own home, or also a pinned provider or `lf` executable.
 - Automatic switch on exhaustion uses “everyone now”; confirm.
 - Placement remains unresolved; no Wave supplied.
+- Plain `codex resume` is refused while Loopflow's retained engine for that conversation is alive (“already has an active writer”), including after a finished headless run. Should Loopflow stop a finished conversation's engine, so the demo's second line works straight away?
+- Only `lf session connect` brings in a conversation plain Codex started; `history`, `rename`, `bind` and `complete` report it as not found until then. Confirm.
+- A shared conversation now resumes under the active account rather than switching the home back to the account it began under. Confirm.
 
 ## To research
 
@@ -16,7 +19,8 @@
 
 ## To prove while building
 
-- Codex: whether refresh tokens rotate such that the active account's stale stored profile and the native home invalidate each other when both refresh. Decides how urgent it is that quota probes read the native home for the active account.
+- Codex: whether refresh tokens rotate such that the active account's stale stored profile and the native home invalidate each other when both refresh. Probes and readiness now read the native home; an `--isolate` launch on the active account still runs on the profile copy.
+- Codex terminal `codex resume` against a conversation whose Loopflow engine is alive: refused like `app-server`'s `thread/resume`, or not.
 
 - Claude: a credential written to the Keychain item by `security add-generic-password -U` (macOS) or to `.credentials.json` (elsewhere) is accepted by a subsequently started Claude.
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
@@ -31,3 +35,6 @@
 - Activation serializes on one provider-wide lock and writes profiles by atomic rename; it does not take the per-account managed-login lock.
 - A stored profile directory under `<LF_HOME>/accounts` is never treated as the native home, which is how a launch nested under an isolated parent finds the real one.
 - Test support now points `CODEX_HOME` at a temporary directory, so a shared launch in a test cannot sign the developer's own Codex home in as a fixture account.
+- Switch-log attribution covers rate-limit and credential-health observations, the only per-account usage evidence there is; no per-account usage report was added.
+- A provider conversation ID is searched for in provider homes only when it is a UUID.
+- An admitted conversation's Session takes the directory its transcript recorded, else the current one, and is titled `<provider> <first 8 of the ID>`.

@@ -482,6 +482,7 @@ impl SessionMode {
 pub enum SessionCommand {
     /// Read this conversation's native start, usage and completion receipts
     History {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -529,6 +530,7 @@ pub enum SessionCommand {
     /// Connect to the live conversation, or resume its saved history
     #[command(name = "connect")]
     Open {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -554,9 +556,13 @@ pub enum SessionCommand {
         json: bool,
     },
     /// Complete a review or interactive session
-    Complete { id: String },
+    Complete {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        id: String,
+    },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(value_name = "NAME", required = true, num_args = 1..)]
         name: Vec<String>,
@@ -568,6 +574,7 @@ pub enum SessionCommand {
     },
     /// Assign a Task to a Session that has none; the Task never changes after
     Bind {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         /// The Task, by its issue identifier (e.g. INF-123) or stable Task ID
         #[arg(long)]

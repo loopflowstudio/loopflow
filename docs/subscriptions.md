@@ -318,6 +318,20 @@ home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the
 default, and `--shared` overrides it for one invocation. Flow invocations keep
 the mode they were launched with.
 
+Codex's own conversation ID works wherever a Session ID does:
+
+```bash
+lf session connect 0199a213-81c0-7800-8aa1-bbab2a035a53   # the ID `codex resume` takes
+lf session history 0199a213-81c0-7800-8aa1-bbab2a035a53
+```
+
+Connecting to a conversation plain Codex started brings it in as a Session with
+no Task. Codex allows a conversation one writer at a time: while Loopflow still
+holds a conversation's engine, open it with `lf session connect` rather than
+`codex resume`.
+
+`lf account route --json` reports `isolated` and `active_account` per provider.
+
 A Codex home whose `config.toml` sets `cli_auth_credentials_store` to anything
 but `file` cannot be switched; set it to `file` or launch with `--isolate`.
 

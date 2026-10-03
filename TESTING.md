@@ -497,6 +497,9 @@ Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
 or successful retry, `--flow-blocked` for keyed feedback continuation, and
 `--public-connect` for a live headless-to-terminal handoff.
+`--shared-provider-home` proves Loopflow and plain Codex share one home signed
+in as one stored account at a time: switching, saved-back logins, isolation,
+and provider conversation IDs in `lf session`.
 The fixture copies the candidate, uses private Homes and stops only its identified
 engine children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior

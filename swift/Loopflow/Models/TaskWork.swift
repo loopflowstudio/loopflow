@@ -46,3 +46,28 @@ public struct TaskFlowMember: Codable, Sendable, Equatable, Identifiable {
         case endedAt = "ended_at"
     }
 }
+
+/// The exact saved capture returned by `flow show --sessions`.
+public struct FlowDetail: Decodable, Sendable {
+    public let entry: TaskFlowMember
+    public let graph: FlowGraph
+    public let current: UInt32?
+    public let completed: [UInt32]
+    public let returns: [FlowReturn]
+    public let version: UInt64
+    public let cwd: String
+    public let failure: FlowFailure?
+}
+
+public struct FlowFailure: Decodable, Sendable {
+    public let captured: Int64?
+    public let reason: String
+    public let restartRequired: Bool
+    public let observedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case captured, reason
+        case restartRequired = "restart_required"
+        case observedAt = "observed_at"
+    }
+}

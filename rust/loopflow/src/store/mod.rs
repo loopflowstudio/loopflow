@@ -2353,7 +2353,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .restart_task_flow(&task, Some(&stopped), "deadbeef")
+            .restart_task_flow(&task, Some(&stopped), Some("deadbeef"))
             .await
             .unwrap();
         let replacement = store

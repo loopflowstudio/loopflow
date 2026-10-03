@@ -496,3 +496,16 @@ fn task_without_delivery_wire_placement_and_binding_preview_are_explicitly_absen
         Some(loopflow::ops::task_actions::TaskAction::Complete)
     );
 }
+
+#[test]
+fn independent_flow_detail_preserves_capture_and_cwd() {
+    let json = include_str!("../../../tests/fixtures/dto/flow_detail.json");
+    let detail: loopflow::durable::FlowDetail = serde_json::from_str(json).unwrap();
+    assert!(!detail.entry.managed);
+    assert_eq!(detail.cwd, std::path::Path::new("/tmp/research"));
+    assert!(detail.current.is_some());
+    assert_eq!(
+        serde_json::to_value(&detail).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

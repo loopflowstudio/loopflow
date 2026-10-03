@@ -161,7 +161,7 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "complete", issue, "--summary", summary], cwd)
     }
 
-    /// Start (preparing when needed) the Task's managed Flow.
+    /// Start an independent capture, or resume the managed selection when no template is supplied.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["--task", issue, "flow", "start"]
         if let flow { args.append(flow) }
@@ -179,6 +179,16 @@ public struct RegistryQuery: Sendable {
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
         let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
+    }
+
+    public func flowDetail(id: String, cwd: String?) async throws -> FlowDetail {
+        try Self.decode(FlowDetail.self, from: await run(["flow", "show", id, "--sessions", "--json"], cwd))
+    }
+
+    public func resumeFlow(id: String, retry: Bool, cwd: String?) async throws {
+        var args = ["flow", "resume", id]
+        if retry { args.append("--retry") }
+        _ = try await run(args, cwd)
     }
 
     /// All associated Sessions, Flows and Execs, including closed history.

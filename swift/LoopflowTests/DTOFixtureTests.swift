@@ -7,6 +7,15 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Independent Flow keeps its captured progress and working directory")
+    func independentFlowDetail() throws {
+        let detail = try JSONDecoder().decode(FlowDetail.self, from: loadFixtureData("flow_detail.json"))
+        #expect(!detail.entry.managed)
+        #expect(detail.cwd == "/tmp/research")
+        #expect(detail.current.flatMap { detail.graph.node($0) } != nil)
+        #expect(detail.failure == nil)
+    }
+
     @Test("Task placement and binding admission may be absent")
     func unplacedTaskFixture() throws {
         let task = try JSONDecoder().decode(TaskStatusExecution.self, from: loadFixtureData("task_unplaced.json"))

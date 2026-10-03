@@ -1744,7 +1744,7 @@ mod durable_store_tests {
             .restart_task_flow(
                 &task,
                 store.task_flow(&task.id).unwrap().as_ref(),
-                "checkpoint",
+                Some("checkpoint"),
             )
             .unwrap();
         assert_eq!(store.task_flow(&task_id).unwrap(), None);
@@ -2116,7 +2116,7 @@ mod durable_store_tests {
             .release_flow(replacement.id(), held.position_version, Some(&held))
             .unwrap();
         store
-            .restart_task_flow(&task, Some(&stopped), "checkpoint")
+            .restart_task_flow(&task, Some(&stopped), Some("checkpoint"))
             .unwrap();
         assert!(store.task_flow(&task_id).unwrap().is_none());
         assert_eq!(

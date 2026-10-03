@@ -116,16 +116,17 @@ pub(crate) async fn ensure_flow_position(
     selected_flow: Option<&str>,
 ) -> Result<FlowSession> {
     let task = load_task(store, task_id).await?;
+    let cwd = crate::ops::task::task_execution_cwd(store, &task).await?;
     let current = match (store.task_flow(&task.id).await?, selected_flow) {
         (Some(current), Some(selected)) if current.invocation.flow != selected => {
             store
-                .start_task_flow(&task.id, start_task_flow(&task, selected)?)
+                .start_task_flow(&task.id, start_task_flow(&task, selected, &cwd)?)
                 .await?
         }
         (Some(current), _) => current,
         (None, Some(selected)) => {
             store
-                .start_task_flow(&task.id, start_task_flow(&task, selected)?)
+                .start_task_flow(&task.id, start_task_flow(&task, selected, &cwd)?)
                 .await?
         }
         (None, None) => anyhow::bail!(
@@ -176,14 +177,18 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 }
 
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
-fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
+pub(crate) fn start_task_flow(
+    task: &Task,
+    selected_flow: &str,
+    cwd: &std::path::Path,
+) -> Result<FlowSession> {
     Ok(FlowSession {
-        invocation: QueuedInvocation::load(&task.require_workspace()?.worktree, selected_flow)?,
+        invocation: QueuedInvocation::load(cwd, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,
         task_id: Some(task.id.clone()),
         wave_id: Some(task.wave_id.clone()),
-        cwd: task.require_workspace()?.worktree.clone(),
+        cwd: cwd.to_path_buf(),
         message: None,
         model: None,
         current_attempt: None,
@@ -311,7 +316,9 @@ mod planning_tests {
     #[tokio::test]
     async fn feature_repeats_the_whole_slice_then_stops_for_delivery() {
         let (_, task, _) = human_task_fixture().await;
-        let mut position = super::start_task_flow(&task, "feature").unwrap();
+        let mut position =
+            super::start_task_flow(&task, "feature", &task.workspace.as_ref().unwrap().worktree)
+                .unwrap();
         assert_eq!(position.current().step, "kickoff");
         finish(&mut position).unwrap();
         assert!(position.is_human());
@@ -407,7 +414,9 @@ mod planning_tests {
     #[tokio::test]
     async fn loop_requires_a_decision_and_discards_it_on_interrupt() {
         let (_, task, _) = human_task_fixture().await;
-        let mut position = super::start_task_flow(&task, "feature").unwrap();
+        let mut position =
+            super::start_task_flow(&task, "feature", &task.workspace.as_ref().unwrap().worktree)
+                .unwrap();
         while !position.is_decision() {
             assert!(!finish(&mut position).unwrap());
         }
@@ -552,7 +561,12 @@ mod planning_tests {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
         store.create_task(&task, &pr).await.unwrap();
-        let mut flow = super::start_task_flow(&task, "task-design").unwrap();
+        let mut flow = super::start_task_flow(
+            &task,
+            "task-design",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         flow.cursor.index = 1;
         (store, task, flow)
     }
@@ -660,7 +674,12 @@ mod planning_tests {
     #[tokio::test]
     async fn restart_only_failure_cannot_be_cleared_as_a_retry() {
         let (store, task, _) = human_task_fixture().await;
-        let started = super::start_task_flow(&task, "task-design").unwrap();
+        let started = super::start_task_flow(
+            &task,
+            "task-design",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         let started = store.start_task_flow(&task.id, started).await.unwrap();
         let blocked = store
             .fail_flow(
@@ -688,7 +707,12 @@ mod planning_tests {
     async fn task_agent_changed_during_worker_applies_to_next_review() {
         let _guard = super::TestLfBinGuard::pin();
         let (store, task, _) = human_task_fixture().await;
-        let flow = super::start_task_flow(&task, "task-design").unwrap();
+        let flow = super::start_task_flow(
+            &task,
+            "task-design",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         let mut flow = store.start_task_flow(&task.id, flow).await.unwrap();
         let owner = TaskWorkerOwner {
             trace_id: TraceId::new(),
@@ -862,7 +886,9 @@ mod planning_tests {
         let original = super::ensure_flow_position(&store, &task.id, Some("code"))
             .await
             .unwrap();
-        let contribution = super::start_task_flow(&task, "code").unwrap();
+        let contribution =
+            super::start_task_flow(&task, "code", &task.workspace.as_ref().unwrap().worktree)
+                .unwrap();
         let contribution = store.create_flow(contribution).await.unwrap();
         let replacement = super::ensure_flow_position(&store, &task.id, Some("pursue"))
             .await
@@ -914,7 +940,12 @@ mod planning_tests {
             "# Original\n\nExecute the definition captured at Flow start.\n",
         )
         .unwrap();
-        let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        let flow = super::start_task_flow(
+            &task,
+            "persisted-proof",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         drop(selected);
         store.start_task_flow(&task.id, flow.clone()).await.unwrap();
 
@@ -952,7 +983,12 @@ mod planning_tests {
         assert_eq!(active_op.item.command, "task");
         assert_eq!(active_op.item.args, ["sync", "--plan"]);
 
-        let future = super::start_task_flow(&task, "persisted-proof").unwrap();
+        let future = super::start_task_flow(
+            &task,
+            "persisted-proof",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         let crate::engine::ConcreteStep::Skill(future_skill) = future.current_plan() else {
             panic!("future first step is a skill")
         };
@@ -1606,7 +1642,7 @@ mod planning_tests {
             .restart_task_flow(
                 &task,
                 store.task_flow(&task.id).await.unwrap().as_ref(),
-                "fixture-checkpoint",
+                Some("fixture-checkpoint"),
             )
             .await
             .unwrap();
@@ -1631,7 +1667,12 @@ mod planning_tests {
     async fn claimed_autonomous_boundary_settles_once_at_the_human_node() {
         let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, _) = human_task_fixture().await;
-        let flow = super::start_task_flow(&task, "task-design").unwrap();
+        let flow = super::start_task_flow(
+            &task,
+            "task-design",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         let initial = store.start_task_flow(&task.id, flow).await.unwrap();
         let held = claim(&store, &task, &initial, 101).await;
         let mut flow = store.task_flow(&task.id).await.unwrap().unwrap();
@@ -1675,58 +1716,62 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn finished_task_or_final_skill_retires_the_worker_without_restarting() {
-        for task_done in [false, true] {
-            let (store, task, _) = human_task_fixture().await;
-            let mut position = super::start_task_flow(&task, "task-design").unwrap();
-            if !task_done {
-                position.invocation.steps.truncate(1);
-            }
-            position.cursor.iteration = 3;
-            let position = store.start_task_flow(&task.id, position).await.unwrap();
-            let held = claim(&store, &task, &position, 101).await;
-            let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
-            if task_done {
-                store.complete_task(&task, None).await.unwrap();
-                let launcher = <crate::lf::Cli as clap::Parser>::try_parse_from(["lf"]).unwrap();
-                let result = crate::lf::commands::flow::drive(
-                    store.clone(),
-                    position,
-                    Some(held),
-                    &launcher,
-                )
-                .await;
-                assert!(result.unwrap_err().to_string().contains("unsettled PR"));
-                assert!(task.workspace.as_ref().unwrap().worktree.exists());
-            } else {
-                assert!(finish(&mut position).unwrap());
-                assert_eq!(position.cursor.iteration, 3);
-                store
-                    .end_flow(position.id(), position.version, Some(&held), "done")
-                    .await
-                    .unwrap();
-            }
-            assert!(store.task_flow(&task.id).await.unwrap().is_none());
-            assert_eq!(
-                store
-                    .work_status(&WorkRef::Task(task.id.clone()))
-                    .await
-                    .unwrap(),
-                if task_done {
-                    crate::durable::WorkStatus::Done
-                } else {
-                    crate::durable::WorkStatus::Ready
-                }
-            );
-            let events = store.task_events_after(&task.id, 0).await.unwrap();
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
-                    .count(),
-                1
-            );
-        }
+    async fn task_completion_preserves_flow_and_refuses_new_managed_launches() {
+        let (store, task, position) = human_task_fixture().await;
+        let position = store.start_task_flow(&task.id, position).await.unwrap();
+        store.complete_task(&task, None).await.unwrap();
+        let error = crate::ops::task::resolve_managed_task_planning(
+            &store,
+            &task,
+            crate::ops::pm::PmRefresh::Auto,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("terminal"), "{error}");
+        assert_eq!(store.task_flow(&task.id).await.unwrap(), Some(position));
+        assert!(task.workspace.as_ref().unwrap().worktree.exists());
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. })));
+    }
+
+    #[tokio::test]
+    async fn final_skill_finishes_flow_without_completing_task() {
+        let (store, task, _) = human_task_fixture().await;
+        let mut position = super::start_task_flow(
+            &task,
+            "task-design",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
+        position.invocation.steps.truncate(1);
+        position.cursor.iteration = 3;
+        let position = store.start_task_flow(&task.id, position).await.unwrap();
+        let held = claim(&store, &task, &position, 101).await;
+        let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert!(finish(&mut position).unwrap());
+        assert_eq!(position.cursor.iteration, 3);
+        store
+            .end_flow(position.id(), position.version, Some(&held), "done")
+            .await
+            .unwrap();
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Task(task.id.clone()))
+                .await
+                .unwrap(),
+            crate::durable::WorkStatus::Ready
+        );
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
+                .count(),
+            1
+        );
     }
 
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
@@ -1782,7 +1827,9 @@ mod planning_tests {
         use crate::engine::transitions::{FlowDecision, FlowVerdict};
         use crate::engine::{ConcretePath, ConcreteStep, ConcreteXor, Skill};
         let (store, task, _) = human_task_fixture().await;
-        let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+        let mut flow =
+            super::start_task_flow(&task, "pursue", &task.workspace.as_ref().unwrap().worktree)
+                .unwrap();
         let body = flow.invocation.steps.clone();
         let suffix = body[0].clone();
         flow.invocation.steps = vec![

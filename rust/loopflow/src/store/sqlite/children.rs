@@ -192,10 +192,10 @@ impl SqliteStore {
         &self,
         task: &Task,
         expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
+        checkpoint_head: Option<&str>,
     ) -> StoreResult<()> {
         validate_task(task)?;
-        if checkpoint_head.trim().is_empty() {
+        if task.workspace.is_some() && checkpoint_head.is_none_or(|head| head.trim().is_empty()) {
             return Err(StoreError::InvalidData(
                 "Task restart requires a checkpoint head".to_string(),
             ));
@@ -238,7 +238,10 @@ impl SqliteStore {
             &transaction,
             &task.id,
             &TaskEventKind::Progress {
-                summary: format!("Task restarted from checkpoint {checkpoint_head}"),
+                summary: checkpoint_head.map_or_else(
+                    || "Task Flow restarted".to_string(),
+                    |head| format!("Task restarted from checkpoint {head}"),
+                ),
             },
         )?;
         transaction.commit()?;

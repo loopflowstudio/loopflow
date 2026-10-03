@@ -39,8 +39,11 @@ lf --task EXP-12 flow start incident # start an independent attributed Flow
 directory without adopting it. `--wt` selects a checkout. `--wave` supplies context
 and identity; it cannot override a Task's owning Wave. `flow start TEMPLATE`
 creates an independent FlowSession with optional Task attribution. Bare
-`--task … flow start` continues the selected managed Flow. `flow resume ID --retry` retries a saved boundary; `task restart`
-explicitly replaces the Task's workflow.
+`--task … flow start` resumes the selected managed Flow or starts the Project default.
+It creates no checkout or PR; request placement with `task checkout` or `--name`.
+`flow resume ID --retry` retries a saved boundary. `task restart` replaces the managed
+Flow, preserving Task identity and history; only an allocated checkout is checkpointed.
+Desktop shows independent Flow progress and resume controls alongside the managed selection.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files

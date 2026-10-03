@@ -275,7 +275,9 @@ Desktop navigation uses the same membership as Task status.
 The managed FlowSession is one marked member. Its selection remains authoritative
 only for Task worker run/retry/restart/stop, cursor/claim fencing, exact Task review
 settlement and worker delivery authority. The managed Flow panel describes that
-cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
+cursor; Desktop also reads independent captures from the same `task status`
+`work` inventory and resumes each by its exact Flow identity. `work` contains
+all Sessions, Flows and Execs, including
 headless and closed history. Completion waits for independent unfinished Flows;
 recovery preserves idle Flows and waits for unresolved execution, including a
 worker claim before its first step. Pending reviews and live or unresolved

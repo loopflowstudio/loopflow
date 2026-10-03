@@ -66,9 +66,14 @@ pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
                 .map_err(error)?;
             }
         }
+        let cwd = super::task::task_execution_cwd(&store, &task).await?;
         let _lock = store
             .sqlite
-            .lock_checkout(&task.require_workspace()?.worktree)
+            .lock_checkout(
+                task.workspace
+                    .as_ref()
+                    .map_or(cwd.as_path(), |workspace| &workspace.worktree),
+            )
             .map_err(error)?;
         store
             .sqlite
@@ -289,9 +294,14 @@ async fn reconcile_task(
     {
         return Ok("terminal Task; no new work".into());
     }
+    let cwd = super::task::task_execution_cwd(store, task).await?;
     let lock = store
         .sqlite
-        .lock_checkout(&task.require_workspace()?.worktree)
+        .lock_checkout(
+            task.workspace
+                .as_ref()
+                .map_or(cwd.as_path(), |workspace| &workspace.worktree),
+        )
         .map_err(error)?;
     // Selection is re-read after taking the reservation boundary.
     if store
@@ -366,8 +376,7 @@ async fn reconcile_task(
             .map_err(error)?;
     let retry = !completed
         && (state.exec_id.is_some() || flow.current_attempt.is_some() || flow.claim.is_some());
-    let config =
-        crate::engine::config::load_config_or_default(Some(&task.require_workspace()?.worktree));
+    let config = crate::engine::config::load_config_or_default(Some(&flow.cwd));
     if retry && state.retries >= config.automation.retries {
         return Ok(
             "unchanged failure exhausted automatic retries; inspect and explicitly retry".into(),

@@ -78,19 +78,33 @@ the provider generation recorded for that Session and its exact driver parent. R
 stale callers and unrelated execution receive no exemption. Cleanup and abandonment
 retain their previous blockers. A stateful test completes inside a recorded calling
 conversation, then records that same conversation's terminal provider event.
-This is simulated authoritative history, not a configured native-provider demo.
+The public binding → first `task_checkout` test now retains Task identity and the
+bound conversation, completes after a simulated merged PR, keeps the checkout while
+the conversation turn is pending, then cleans it up on a settled retry. An unrelated
+Exec blocks first with unknown evidence and then with a real owned sleep process;
+only its recorded settlement removes that blocker. Provider-turn and merge records
+are fixtures, not a configured native-provider or GitHub demo.
 
 Explicit `flow start TEMPLATE` uses the existing capture/driver with or without
 Task attribution. The public CLI regression runs two operations, checks persisted
 cwd and attribution, and proves Flow completion leaves the Task open without
-inventing placement or a PR. Bare managed startup and managed replacement still
-use their existing delivery-oriented paths; that remaining cut is listed below.
+inventing placement or a PR. Bare managed startup now admits without allocation;
+only explicit placement options enter checkout preparation. Managed creation,
+continuation, restart and automation read the captured cwd. New unplaced launches
+capture the caller directory, including a non-Git folder for an admitted Task.
+Managed planning still resolves through the owning repository. Restart captures
+its replacement from the saved directory and checkpoints only retained placement.
+Delivery recovery and no-active-PR refusal apply to placed Tasks.
 
 Rust/Swift DTOs represent absent placement and an unregistered binding preview.
 Desktop offers outcome entry through `task complete`; New Session uses the current
 repository when no placement exists, while a lost retained checkout still uses
 restoration. Review launch paths read the Flow's captured cwd. Optional-placement
 snapshots, Session controls and the affected Swift modules compile headlessly.
+The Flow pane reads independent members from Task work, shows their saved cursor
+and completed-step count, and resumes/retries their exact Flow IDs. Managed controls
+continue to use the managed snapshot. Shared FlowDetail fixture decoding preserves
+that distinction.
 
 Earlier supporting cuts remain: issue-specific provider confirmation instead of
 whole-Wave refresh; Flow launch cwd independent of Task placement; no Task-Done-driven
@@ -209,12 +223,12 @@ placement solely for steer publication; publication already resolves the owning
 Wave repository. Binding now calls admission directly, and checkout restoration,
 cleanup and their tests retain one workspace reference. PR observation again takes
 its mutation lock before reading the PR, preventing a stale pre-lock row from
-replacing a concurrent publication. Unplaced Tasks acquire no checkout lock.
+replacing a concurrent publication. PR observation acquires no checkout lock for unplaced Tasks.
 
-Remaining deletion targets are managed launch/restart's unconditional checkout,
-checkpoint and no-active-PR prerequisites, plus Desktop's assumption that every
-started Task Flow is the marked managed Flow. Preserve the exact managed claims,
-review boundaries and captured graph while completing those cuts.
+Removed in the remaining cut: managed launch/restart's unconditional delivery
+allocation, checkpoint and no-active-PR prerequisites; saved-Flow resumption's
+workspace lookup; and Desktop's managed-only Flow display. Exact managed claims,
+review boundaries, captured graphs and placed-Task delivery recovery remain.
 
 Keep `task_complete`, `complete_planning_task`, the existing gate, PR settlement,
 managed claim fencing, LOO-355 checkout/rotation operations and LOO-358 membership.
@@ -239,34 +253,12 @@ stages to ship independently.
 The core admission, context, explicit startup, completion and optional-placement
 consumer changes exist. This remains one architectural PR, not a completed Task.
 
-1. Finish bare managed startup and replacement without implicit delivery allocation.
-   `task_run` still shares `prepare_task` with checkout: an admitted unplaced Task
-   falls through to delivery preparation. Split launch from explicit allocation at
-   that owner; preserve the checkout path and its recovery receipts.
-   `task_run`, `continue_task_async`, `exec_task_process`, controller startup and
-   `restart_task_async` still contain placement/checkpoint assumptions. Capture the
-   actual launch cwd in the existing Flow; checkpoint only retained Task placement.
-   Keep exact replacement fencing and the current-Project checks specific to managed
-   progression. `continue_task_async` also invokes delivery recovery and refuses
-   no-active-PR state unconditionally; apply those promises only where delivery
-   exists. Upstream #1415 recovery is already integrated at base `8c72e591e`: retain
-   its missing-PR adoption and historical-Exec recovery for placed Tasks, without
-   extending the launch allowance into completion or cleanup.
-2. Reconcile Desktop Flow selection with explicit independent starts. Its Flow pane
-   reads `RoadmapTask.flow` / `TaskFlowSnapshot`, the managed selection; starting
-   an explicit independent Flow must
-   visibly expose its captured progress and resume path without pretending it acquired
-   the managed marker. LOO-364 continues to own broader Session switching UX.
-3. Cross the public allocation boundary with the bound conversation: current tests
-   prove public binding and store allocation separately. Existing checkout tests
-   exercise restoration of already-placed Tasks, not first allocation after binding.
-   Prove identity/history through
-   `task checkout`, then completion from a running conversation in that checkout and
-   later safe cleanup. Add the independent live/unknown execution counterexamples.
-4. Gate owns the remaining provider/review/retry and Desktop interaction scenarios
-   below, including fresh null DTO fixtures. The operation-only shared-driver test
-   does not establish native provider or review acceptance. No configured installation,
-   external provider mutation, publication or Task completion is claimed.
+Implementation and focused preservation proofs cover the requested cuts. Gate
+owns the provider/review/retry and Desktop interaction scenarios below. The failed
+managed-launch regression proves capture, replacement, retained identity and zero
+delivery allocation after a missing driver identity; it does not prove a successful
+native worker launch. No configured installation, external provider mutation,
+publication or Task completion is claimed.
 
 Remaining acceptance checks on the finished tree:
 
@@ -317,8 +309,12 @@ or an unknown provider result. Explicit absent placement, preserved membership,
 per-operation checks and confirmation/retry proofs are the safeguards.
 
 Simulated review: the domain pair removes invented empty paths, admission has one
-transactional owner, and completion keeps destructive retention separate. Remaining
-managed startup and Desktop Flow selection are substantial implementation work;
-passing the no-delivery fixtures does not settle those obligations.
+transactional owner, and completion keeps destructive retention separate. This
+pass caught two residual couplings: managed planning still required a checkout,
+and restart could validate one directory then capture from another. Owning-repo
+planning and pre-captured replacement fix them. The allocation fixture also
+confirmed that an unpublished PR blocks completion until delivery settles. A stale
+controller test still expected Task completion to end its Flow; it is replaced by
+separate preservation/new-launch-refusal and final-step-completion proofs.
 
-Check (compression): `cargo check -p loopflow --lib`, `cargo test -p loopflow --lib task_without_delivery` (7), `cargo test -p loopflow --lib task_completion` (11), `cargo test -p loopflow --test task_initialization_tests --test task_github_cache_tests` (6), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; remaining managed/allocation/Desktop acceptance stays with implementation and gate.
+Check: `cargo test -p loopflow --lib task_without_delivery` (9), restart fencing (8 retained tests) and both replacement controller proofs, the explicit CLI Flow proof, Rust FlowDetail fixture, Swift Task (64), DTOFixtureTests (23) and TaskFlowTests (6) passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; gate owns provider/review/retry and Desktop interaction acceptance.

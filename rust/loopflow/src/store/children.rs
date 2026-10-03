@@ -79,13 +79,13 @@ impl Store {
         &self,
         task: &Task,
         expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
+        checkpoint_head: Option<&str>,
     ) -> StoreResult<()> {
         let expected = expected.cloned();
         let task = task.clone();
-        let checkpoint_head = checkpoint_head.to_string();
+        let checkpoint_head = checkpoint_head.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, expected.as_ref(), &checkpoint_head)
+            store.restart_task_flow(&task, expected.as_ref(), checkpoint_head.as_deref())
         })
         .await
     }

@@ -169,30 +169,29 @@ and marker recovery still require their current-Project routing. Failed confirma
 stays explicit, and registered completion retains pending writeback.
 
 October 3 branch implementation admits Tasks with optional placement through public
-Session binding and CLI execution. Binding preview and generic Work readers remain
-observational. A path/slug pair distinguishes no delivery from lost placement;
-explicit binds retain history without adopting the caller directory. Store allocation
-retains identity/events, but public first allocation after binding and checkout
-retention remain unproven; restoration tests cover already-placed Tasks.
+Session binding and CLI execution; binding preview and generic readers stay
+observational. A path/slug pair distinguishes absent delivery from lost placement.
+Public bind → first checkout allocation preserves identity/history. After simulated
+PR settlement, the requesting conversation completes its Task while retaining the
+checkout; a later settled retry cleans it up. Unknown and live independent Execs
+still block. Provider-turn and merge evidence are fixtures, not native acceptance.
 
-The requesting conversation allowance uses its current provider generation and
-exact driver parent, solely during completion. Stale callers and review Sessions
-remain blocked; cleanup and abandonment keep their retention checks. Stateful
-fixtures prove no-delivery completion, retry and a post-completion provider event,
-not native-provider acceptance. Explicit attributed/unattributed CLI Flows share
-the driver and leave the Task open. Desktop has nullable placement and outcome entry;
-managed startup/replacement still couples launch to checkout and PR recovery, and
-the Flow pane still projects only the managed selection. These remain implementation
-gaps, not merely acceptance checks.
+Managed startup/replacement now avoid implicit allocation. The caller directory
+becomes the new Flow's captured cwd; continuation and replacement retain it, while
+managed planning resolves the owning repository. Checkpoint and PR recovery apply
+only to retained placement. Explicit attributed/taskless Flows share the driver and
+leave Tasks open. Desktop shows independent Flow progress/resume alongside the
+managed selection. A failed managed-launch/replacement proof retains identity and
+both captures without delivery objects; successful native-worker and Desktop
+interaction acceptance remain with gate.
 
-Flows persist launch cwd independently of placement. Migration freezes retained
-paths without inventing unknown history. Task completion never ends a Flow; recorded
-results settle through the graph and managed planning gates new launches. Cleanup
-retains unfinished Flows' checkouts. Upstream #1415's historical-Exec recovery remains
-separate: completion, cleanup and abandonment still reject unknown execution.
-Compression restored PR observation locking before reading the mutable PR row;
-absent placement takes no checkout lock. LOO-364 owns broader switching; LOO-366
-owns Project availability/chapter resets.
+Completion never ends a Flow or grants process control. The requesting allowance
+matches current provider generation and exact driver parent, solely for completion;
+cleanup, abandonment, pending reviews and stale callers keep their protections.
+Migration freezes retained Flow paths without inventing unknown history. Upstream
+#1415 recovery remains separate from completion's unknown-execution refusal.
+PR observation locks before reading mutable PR state; absent placement needs no
+PR lock. LOO-364 owns broader switching; LOO-366 owns Project availability/resets.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

@@ -410,15 +410,20 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
 
 #[test]
 fn task_without_delivery_binds_existing_conversation_and_completes_without_checkout() {
-    assert_bound_task_completion(false);
+    assert_bound_task_completion(false, false);
 }
 
 #[test]
 fn task_without_delivery_requesting_conversation_completes_and_retains_pending_turn() {
-    assert_bound_task_completion(true);
+    assert_bound_task_completion(true, false);
 }
 
-fn assert_bound_task_completion(active: bool) {
+#[test]
+fn task_without_delivery_first_checkout_preserves_bound_conversation_and_retains_live_work() {
+    assert_bound_task_completion(true, true);
+}
+
+fn assert_bound_task_completion(active: bool, allocate: bool) {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -456,6 +461,36 @@ fn assert_bound_task_completion(active: bool) {
         assert_eq!(binding.cwd, repo);
         assert!(binding.context.contains("Research"));
         assert!(!binding.context.contains("Base commit:"));
+        let task = if allocate {
+            for args in [vec!["remote", "remove", "origin"], vec!["symbolic-ref", "HEAD", "refs/heads/main"],
+                vec!["config", "user.name", "Fixture"], vec!["config", "user.email", "fixture@example.com"],
+                vec!["add", "."], vec!["commit", "-qm", "Baseline"]] {
+                let output = std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            }
+            let bin = fixture.directory.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            let gh = bin.join("gh");
+            std::fs::write(&gh, "#!/bin/sh\necho '[]'\n").unwrap();
+            std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = std::env::var_os("PATH").unwrap();
+            std::env::set_var("PATH", std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap());
+            let placed = crate::ops::task::task_checkout(&repo, "FIX-1", crate::ops::task::TaskCheckoutOptions::default()).unwrap();
+            assert_eq!(placed.id, task.id);
+            assert_eq!(placed.created_at, task.created_at);
+            assert_eq!(fixture.store.sqlite.task_work(&task.id).unwrap().sessions[0].id, original.id);
+            let connection = rusqlite::Connection::open(&fixture.database).unwrap();
+            connection.execute("UPDATE agent_sessions SET cwd=?2 WHERE id=?1", rusqlite::params![original.id, placed.workspace.as_ref().unwrap().worktree.to_str().unwrap()]).unwrap();
+            let mut pr = runtime.block_on(fixture.store.active_task_pr(&placed.id)).unwrap().unwrap();
+            pr.publication = Some(PrPublication {
+                requested_at: pr.created_at, presentation: None,
+                github: Some(GithubPr { number: 42, url: "https://github.com/loopflowstudio/fixture/pull/42".into(), head_sha: Some(pr.base_commit.clone()) }),
+                merge: None,
+            });
+            pr.merge_commit = Some(pr.base_commit.clone());
+            runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
+            placed
+        } else { task };
         std::fs::write(repo.join("unrelated.txt"), "not Task-owned").unwrap();
         runtime.block_on(async { state.lock().await.fail_snapshot = true; });
         let completed = if active {
@@ -472,7 +507,32 @@ fn assert_bound_task_completion(active: bool) {
                     rusqlite::params![current.as_str(), original.id, driver.provider_generation - 1, driver_exec.as_str()]).unwrap();
                 assert!(crate::ops::task::task_complete(&repo, "FIX-1", "Stale caller".into()).is_err());
                 connection.execute("UPDATE execs SET caller_provider_generation=?2 WHERE id=?1", rusqlite::params![current.as_str(), driver.provider_generation]).unwrap();
-                Ok(crate::ops::task::task_complete(&repo, "FIX-1", "Measured startup".into())?.unwrap())
+                let independent = crate::id::ExecId::new();
+                connection.execute("INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?2,1)", rusqlite::params![independent.as_str(), crate::id::TraceId::new().as_str()]).unwrap();
+                connection.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES(?1,'observed','independent',?2,1,'{}')", rusqlite::params![original.id, independent.as_str()]).unwrap();
+                let error = crate::ops::task::task_complete(&repo, "FIX-1", "Must retain unknown execution".into()).unwrap_err().to_string();
+                assert!(error.contains("unresolved execution"), "{error}");
+                let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+                let receipt = crate::journal::ExecProcessReceipt {
+                    schema_version: 1, trace_id: crate::id::TraceId::new().to_string(),
+                    exec_id: independent.to_string(), pid: child.id(),
+                    started_at: crate::journal::process_started_at(child.id()).unwrap().unwrap(),
+                };
+                let root = fixture.directory.path().join(crate::journal::EXEC_PROCESS_ROOT);
+                std::fs::create_dir_all(&root).unwrap();
+                let path = root.join(format!("{}.json", child.id()));
+                std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+                let evidence = crate::journal::exec_process_evidence(&fixture.store.sqlite, &independent);
+                let refused = crate::ops::task::task_complete(&repo, "FIX-1", "Must retain live execution".into());
+                child.kill().unwrap();
+                child.wait().unwrap();
+                std::fs::remove_file(path).unwrap();
+                assert_eq!(evidence, crate::journal::ProcessIdentityEvidence::Live);
+                assert!(refused.unwrap_err().to_string().contains("unresolved execution"));
+                connection.execute("UPDATE execs SET completed_at=2 WHERE id=?1", [independent.as_str()]).unwrap();
+                let completed = crate::ops::task::task_complete(&repo, "FIX-1", "Measured startup".into())?.unwrap();
+                if let Some(workspace) = &task.workspace { assert!(workspace.worktree.exists()); }
+                Ok(completed)
             }).unwrap()
         } else {
             crate::ops::task::task_complete(&repo, "FIX-1", "Measured startup".into()).unwrap().unwrap()
@@ -481,6 +541,8 @@ fn assert_bound_task_completion(active: bool) {
             assert!(fixture.store.sqlite.session_has_pending_turn(&original.id).unwrap());
             fixture.store.sqlite.record_session_event(&original.id, "research-thread", "turn", crate::session::SessionEventKind::Completed, &json!({"status":"completed","text":"Task complete; findings retained"})).unwrap();
             assert!(!fixture.store.sqlite.session_has_pending_turn(&original.id).unwrap());
+            let connection = rusqlite::Connection::open(&fixture.database).unwrap();
+            connection.execute("UPDATE execs SET completed_at=2 WHERE completed_at IS NULL", []).unwrap();
         }
         let retry = crate::ops::task::task_complete(&repo, "FIX-1", "Must not replace".into()).unwrap().unwrap();
         assert_eq!(completed.id, task.id);
@@ -490,10 +552,89 @@ fn assert_bound_task_completion(active: bool) {
         assert_eq!(retained.task_id, Some(task.id.clone()));
         assert!(retained.completed_at.is_none());
         assert!(repo.join("unrelated.txt").exists());
-        assert!(runtime.block_on(fixture.store.task_prs(&task.id)).unwrap().is_empty());
+        if let Some(workspace) = &task.workspace {
+            assert!(!workspace.worktree.exists(), "settled checkout should be cleaned up on completion retry");
+            assert_eq!(runtime.block_on(fixture.store.task_prs(&task.id)).unwrap().len(), 1);
+        } else {
+            assert!(runtime.block_on(fixture.store.task_prs(&task.id)).unwrap().is_empty());
+        }
         let events = runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap();
         assert_eq!(events.iter().filter(|event| matches!(&event.kind, TaskEventKind::Progress { summary } if summary == "Measured startup")).count(), 1);
         assert!(fixture.store.sqlite.task_work(&task.id).unwrap().flows.is_empty());
+    });
+    server.abort();
+}
+
+#[test]
+fn task_without_delivery_managed_launch_and_replacement_keep_identity_after_failed_driver_launch() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Research".into()),
+            Some("Keep findings".into()),
+            None,
+        )
+        .unwrap();
+        runtime
+            .block_on(crate::ops::task::admit_task(&fixture.store, &repo, "FIX-1"))
+            .unwrap();
+        let caller = fixture.directory.path().join("research");
+        std::fs::create_dir(&caller).unwrap();
+        let options = crate::ops::task::TaskExecOptions {
+            flow: Some("feature".into()),
+            ..Default::default()
+        };
+        let error = crate::ops::task::task_run(&caller, "FIX-1", options)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("registered Loopflow process identity"),
+            "{error}"
+        );
+        let task = runtime
+            .block_on(fixture.store.get_task_by_issue("FIX-1"))
+            .unwrap()
+            .unwrap();
+        let before = runtime
+            .block_on(fixture.store.task_flow(&task.id))
+            .unwrap()
+            .unwrap();
+        assert!(task.workspace.is_none());
+        assert!(runtime
+            .block_on(fixture.store.task_prs(&task.id))
+            .unwrap()
+            .is_empty());
+        let error = crate::ops::task::task_restart("FIX-1", None, Some("feature".into()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("registered Loopflow process identity"),
+            "{error}"
+        );
+        let after = runtime
+            .block_on(fixture.store.task_flow(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_ne!(before.id(), after.id());
+        assert_eq!(before.cwd, after.cwd);
+        assert_eq!(after.task_id.as_ref(), Some(&task.id));
+        let work = fixture.store.sqlite.task_work(&task.id).unwrap();
+        assert_eq!(work.flows.len(), 2);
+        assert_eq!(work.flows.iter().filter(|flow| flow.managed).count(), 1);
+        assert!(runtime
+            .block_on(fixture.store.task_prs(&task.id))
+            .unwrap()
+            .is_empty());
     });
     server.abort();
 }

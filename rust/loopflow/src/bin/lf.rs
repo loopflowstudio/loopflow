@@ -1863,13 +1863,12 @@ fn execute_command(
                         "taskless flow start requires an explicit template; Task placement options require --task"
                     )
                 })?;
-            let repo = loopflow::ops::task::task_repository(&directory, Some(&task))?;
             let _skill_options = EnvGuard::set(
                 loopflow::lf::TASK_SKILL_OPTIONS_ENV,
                 serde_json::to_string(&cli.step_args())?,
             );
             let snapshot = loopflow::ops::task::task_run(
-                &repo,
+                &directory,
                 &task,
                 loopflow::ops::task::TaskExecOptions {
                     wave: cli.wave.clone(),

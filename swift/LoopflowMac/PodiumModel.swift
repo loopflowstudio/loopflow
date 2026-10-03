@@ -377,6 +377,9 @@ final class PodiumModel {
         }) {
             clearSelectionIfOutsideScope()
         }
+        if let selection, selection.kind == .task, let selected = task(id: selection.id) {
+            await loadTaskWork(task: selected.task, wave: selected.wave.wave)
+        }
         await refreshWorkActivity()
     }
 
@@ -718,6 +721,16 @@ final class PodiumModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
+    func flowDetail(id: String) async throws -> FlowDetail {
+        try await query.flowDetail(id: id, cwd: repoPath)
+    }
+
+    func resumeFlow(id: String, retry: Bool, task: RoadmapTask, wave: WaveSnapshot) async throws {
+        try await query.resumeFlow(id: id, retry: retry, cwd: repoPath)
+        await loadTaskWork(task: task, wave: wave)
+        await refresh()
+    }
+
     func completeTask(_ task: RoadmapTask, wave: WaveSnapshot, summary: String) async throws {
         try await query.completeTask(issue: task.task.identifier, summary: summary, cwd: WaveOrigin.resolve(wave.repo))
         await refresh()
@@ -744,6 +757,7 @@ final class PodiumModel {
                 try await query.runTaskFlow(issue: issue, flow: nil, cwd: cwd)
             }
             owner.flowDrafts[taskId] = nil
+            await loadTaskWork(task: task, wave: wave)
             await refresh()
         } catch {
             owner.flowDrafts[taskId]?.acting = false

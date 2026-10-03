@@ -137,6 +137,14 @@ struct TaskFlowView: View {
                     .accessibilityIdentifier("task-flow-status")
             }
             .padding(.leading, 2)
+            if let error = model.taskWork[task.id].errorMessage {
+                Text("Flow history unavailable: \(error)").textSelection(.enabled)
+            }
+            if let work = model.taskWork[task.id].value {
+                ForEach(work.flows.filter { !$0.managed }) { member in
+                    IndependentTaskFlowView(model: model, task: task, wave: wave, member: member)
+                }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             if !task.task.completed {
@@ -161,7 +169,10 @@ struct TaskFlowView: View {
             }
         }
         .id("task-flow-anchor")
-        .task { await model.loadFlowCatalog() }
+        .task {
+            await model.loadFlowCatalog()
+            await model.loadTaskWork(task: task, wave: wave)
+        }
         .task(id: runningStep != nil) {
             // Elapsed time only moves while the worker runs; unchanged readings
             // do not re-render, so the line keeps its own coarse clock.
@@ -358,7 +369,7 @@ struct TaskFlowView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Stop \(pinned?.graph.name ?? "the Flow") and restart with \(replacement)?")
                 .font(Typography.body(13).weight(.bold))
-            Text("Loopflow refreshes this Task from Linear, commits and pushes every change in its worktree as a checkpoint, stops the current worker, and starts \(replacement) from its first step. The Task, worktree, and PR history stay.")
+            Text("Loopflow refreshes this Task from Linear, checkpoints its checkout if allocated, stops the current worker, and starts \(replacement) from its first step. Task identity and history stay.")
                 .font(Typography.body(12))
                 .foregroundStyle(palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1139,6 +1150,51 @@ enum FlowPalette {
         case .unknown: "current, worker state unknown"
         case .pendingHuman: "human review, pending"
         case .pending: "pending"
+        }
+    }
+}
+
+private struct IndependentTaskFlowView: View {
+    let model: PodiumModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
+    let member: TaskFlowMember
+    @State private var detail: FlowDetail?
+    @State private var error: String?
+    @State private var resuming = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(member.name ?? member.id).font(.headline)
+            Text("Flow · \(member.state)")
+            if let detail {
+                Text("\(detail.completed.count) completed steps")
+                if let current = detail.current, let node = detail.graph.node(current) {
+                    Text("Current: \(node.label)")
+                }
+                if let failure = detail.failure { Text(failure.reason).textSelection(.enabled) }
+                if member.state == "current" {
+                    Button(detail.failure == nil ? "Resume" : "Retry") {
+                        resuming = true
+                        error = nil
+                        Task {
+                            defer { resuming = false }
+                            do {
+                                try await model.resumeFlow(id: member.id, retry: detail.failure != nil, task: task, wave: wave)
+                                self.detail = try await model.flowDetail(id: member.id)
+                            } catch { self.error = error.localizedDescription }
+                        }
+                    }
+                    .disabled(resuming || detail.failure?.restartRequired == true)
+                }
+            }
+            if let error { Text(error).textSelection(.enabled) }
+        }
+        .workspacePanel(padding: 13)
+        .accessibilityIdentifier("task-independent-flow-\(member.id)")
+        .task(id: member.updatedAt) {
+            do { detail = try await model.flowDetail(id: member.id); error = nil }
+            catch { self.error = error.localizedDescription }
         }
     }
 }

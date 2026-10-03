@@ -3,8 +3,8 @@
 LOO-285 · accepted outcome; same-Home coverage and overlap consumers implemented locally.
 Reconciled October 2 against `02d6b3c00` (atomic coverage), `f7a3769dc`
 (main integration through v0.12.32) and `95643bd50` (overlap consumers and
-telemetry regression). The latest feedback's two consumer gaps are resolved;
-integrated recovery proof and the complete Task outcome remain open.
+telemetry regression). The consumer gaps and selected local interruption proofs are resolved;
+affected gate, review and configured Task acceptance remain open.
 
 ## Outcome and accepted decisions
 
@@ -211,29 +211,56 @@ evidence and its limits retained above.
 
 ## Remaining implementation and proof
 
-1. **Integrated interruption/verification proof.** Remaining boundaries are
-   candidate-ref/workflow recovery, interruption during public reconciliation,
-   Task compensation beyond pre-push and release materialization. Existing
-   pre-push revocation proof includes retry through a successful push; it does
-   not cover every later compensation boundary. Closed continuation already has
-   synthetic post-publication/pre-settlement recovery proof. The public verifier
-   passes both target and checkout descriptors to the reconciliation child;
-   source inspection alone does not prove survival after controller death.
-   Remaining tests should follow these actual boundaries and merged
-   Session/Exec/Home/Flow dispatch, preserving caller bytes, exact candidate,
-   frozen coverage and independent physical/product outcomes.
-2. **Affected-suite gate and configured acceptance.** Focused passes are not the
-   final affected-suite gate or hosted matrix. After code proof and authorized
-   delivery, supported installed acceptance still needs telemetry, UI-host/public
-   proof and the actual two-execution pair. No branch binary may repair the main
-   Home, and no release/schedule/operator intervention may manufacture that pair.
+1. **Affected-suite gate.** The selected local interruption boundaries now have
+   focused proofs, described below. Gate still owns the affected suites and
+   automated acceptance against the complete final tree; these focused passes
+   do not establish that gate or hosted matrix.
+2. **Review and configured acceptance.** Jack Heart's review remains open. After
+   authorized delivery, supported installed acceptance still needs telemetry,
+   UI-host/public proof and the actual two-execution pair. No branch binary may
+   repair the main Home, and no release/schedule/operator intervention may
+   manufacture that pair.
+
+### Integrated interruption proof (October 2)
+
+The scheduled CLI/Flow regression kills the release controller during public
+reconciliation after simulated publication. The surviving verifier retains both
+release-target and exact-checkout locks. Its completed public proof cannot settle
+the dead controller's attempt: cron retains a failed physical receipt and history
+shows no publication settlement. The next scheduled fixture wake reuses the exact
+candidate and frozen coverage, reconciles without publishing again, and records
+one product settlement while preserving the original physical failure and caller
+HEAD, branch, raw index, staged/unstaged/untracked bytes and local commit.
+Cron can exit before its orphaned verifier: the fixture observes job-lock release,
+not parent exit or a guessed delay, before retrying. Dues and external services are
+synthetic; this is not a configured automatic settlement.
+
+Candidate recovery now tests lost acknowledgements after the real bare-origin
+candidate-ref push and after simulated workflow dispatch. Retry retains the exact
+commit, dispatches once, and tags only after preparation. The public verifier also
+recovers empty-path, branch-only and missing-checkout materialization prefixes
+through scheduled dispatch. Existing preparation/publisher materialization proofs
+retain their earlier scope.
+
+The Task lock fixture now covers compensation after remote auto-arm succeeds but
+its acknowledgement fails, in addition to pre-push revocation. Controller death
+and failed-controller/surviving-child cases retain both locks and durable merge
+intent until the child revokes the remote arm. A subsequent authored head change
+observes revocation, clears stale intent and pushes successfully. This establishes
+that compensation boundary, not arbitrary vendor-descendant behavior. The fixture's
+old boolean merge response was stale after main integration; it now uses the shared
+structured merge observation. No production API or persistence change was needed.
+
+Simulated review retained the existing owners and found no production reduction.
+The tests assert retained state and actual Git/lock behavior; their remote
+publication, signing and hosted verification remain simulated.
 
 Same-Home continuation and observation-time retry are implemented in
 `02d6b3c00` and `a60ac0281`. Source inspection confirms the materialize-before-owner
 write, shared derived coverage, candidate preservation, late-writer fencing and
 Home-change boundary. The existing synthetic unit and CLI tests cover those
 contracts, including reconciliation after publication but before settlement.
-They do not close the integrated or configured proof above.
+They complement the interruption proofs above without establishing configured acceptance.
 
 The `f7a3769dc` merge adds v0.12.32 version/lock metadata and release notes for
 Task-worker recovery and PR rediscovery. It adds no accounting implementation or
@@ -438,4 +465,4 @@ remain outstanding.
 
 Recorded overlap checks remain at `95643bd504de3364587c60801895a6a582a14f3e:scratch/account-for-scheduled-release-opportunities.md`: 45 cron unit tests, focused doctor and scheduled-overlap regressions, all-target Clippy and formatting passed. This prose-only reconciliation reuses those results without claiming a full gate.
 
-Check (October 2 realign): `git diff --check` and `lf context --skill realign` passed; recorded focused tests reused for prose-only edits; broader interruption proofs, gate and configured acceptance remain outstanding.
+Check (October 2 implement): focused public reconciliation, verifier materialization, candidate acknowledgement recovery and Task compensation tests passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed; full affected gate and configured acceptance deferred to their owners.

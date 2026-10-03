@@ -1486,6 +1486,90 @@ exit 2
 }
 
 #[test]
+fn candidate_retry_recovers_lost_ref_and_workflow_acknowledgements() {
+    for boundary in ["ref", "workflow"] {
+        let repo = TestRepo::new();
+        let state = tempfile::tempdir().unwrap();
+        let fixture = configure_candidate_publisher(&repo, state.path());
+        let real_git = Command::new("which").arg("git").output().unwrap();
+        let real_git = String::from_utf8(real_git.stdout).unwrap();
+        let interrupted = state.path().join("interrupted");
+        let git_script = format!(
+            r#"#!/bin/sh
+if [ '{boundary}' = ref ] && [ "$1 $2" = 'push origin' ]; then
+  case "$3" in
+    *:refs/heads/release-candidate/*)
+      if [ ! -f '{marker}' ]; then
+        '{git}' "$@" || exit $?
+        : > '{marker}'
+        echo 'candidate ref acknowledgement lost' >&2
+        exit 74
+      fi ;;
+  esac
+fi
+exec '{git}' "$@"
+"#,
+            marker = interrupted.display(),
+            git = real_git.trim(),
+        );
+        let gh = if boundary == "workflow" {
+            fixture.gh_script.replace(
+                "    : > \"$dispatched\"\n    exit 0;;",
+                &format!("    : > \"$dispatched\"\n    if [ ! -f '{}' ]; then\n      : > '{}'\n      echo 'workflow acknowledgement lost' >&2\n      exit 74\n    fi\n    exit 0;;", interrupted.display(), interrupted.display()),
+            )
+        } else {
+            fixture.gh_script.clone()
+        };
+        let _env = EnvGuard::new(&[("gh", &gh), ("git", &git_script)]);
+        repo.create_file("caller.txt", "staged\n");
+        git(&repo, &["add", "caller.txt"]);
+        repo.create_file("caller.txt", "working\n");
+        repo.create_file("untracked.txt", "untracked\n");
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let branch = git_output(&repo, &["symbolic-ref", "HEAD"]);
+        let error = release_run(repo.path(), "patch", None, &NullProgress).unwrap_err();
+        assert!(
+            error.to_string().contains("acknowledgement lost"),
+            "{error}"
+        );
+        let candidate_ref = format!(
+            "refs/heads/release-candidate/default/v0-9-2/{}",
+            fixture.head
+        );
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", &candidate_ref]),
+            fixture.head
+        );
+        assert!(git_output_bare(&repo, &["tag", "--list", "v0.9.2"]).is_empty());
+        let result = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
+        let ReleaseRunOutcome::Released(receipt) = result else {
+            panic!("expected recovered candidate");
+        };
+        assert_eq!(receipt.commit, fixture.head);
+        assert_eq!(receipt.workflow_run_id, 84);
+        assert_eq!(
+            fs::read_to_string(state.path().join("gh.log.dispatch-count")).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+            fixture.head
+        );
+        assert_eq!(repo.head_sha(), fixture.head);
+        assert_eq!(git_output(&repo, &["symbolic-ref", "HEAD"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("caller.txt")).unwrap(),
+            "working\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+    }
+}
+
+#[test]
 fn release_run_owns_each_interrupted_candidate_preparation_materialization() {
     for interrupted in [
         InterruptedWorktree::EmptyPath,

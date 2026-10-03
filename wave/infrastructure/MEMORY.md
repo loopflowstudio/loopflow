@@ -43,9 +43,13 @@ own telemetry/retry, and Home changes break continuation. Synthetic tests cover
 interruption, late writers and recovery without republishing. `95643bd50` adds
 calendar/closure overlap continuation and retains old physical receipts. Save
 physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. Integrated proof, gate, Jack Heart's review
-and configured settlements remain open. `f7a3769dc` adds v0.12.32 metadata,
-not installed accounting acceptance.
+Repeated overlap adds no settlement. October 2 local interruption tests prove
+public reconciliation retains target/checkout locks after controller death;
+retry preserves the failed cron receipt, candidate, coverage and caller bytes
+without republishing. Cron exit can precede orphaned verifier lock release.
+Candidate-ref/workflow lost acknowledgements, verifier materialization and
+post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
+review and configured settlements remain open.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -940,16 +944,10 @@ local configuration, optional provider connection and later PM setup. Today's
 
 ## Historical shipped index
 
-Detailed PR #818 placement/rebase history and PR #852 native Linear migration,
-skill installation, OAuth pre-emption and aligned PM output are retained in the
-archived memory. Their retired command names and Run-based placement model do
-not override current docs. Stable identity remains independent of names; never
-infer ownership from a directory delimiter or derived Project slug.
-
-LOO-241's durable lesson remains current: unchanged cron sync preserves activation;
-legacy receipts can establish it. Doctor judges the latest due interval against
-an exact Scheduled receipt, even when its target failed. Raw gap days remain
-history. Product settlement needs separate release evidence.
+PR #818/#852 detail remains at
+`85d3e5d2bf5e8fac8570d4e04c57b6dfd652d3e4:wave/infrastructure/MEMORY.md`.
+LOO-241: unchanged cron sync preserves activation; doctor judges Scheduled
+receipts independently of product settlement.
 
 ## Gotchas
 

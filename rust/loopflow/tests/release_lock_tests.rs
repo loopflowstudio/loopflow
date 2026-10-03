@@ -1540,7 +1540,9 @@ exit 1
 
 #[test]
 fn surviving_task_revocation_retains_release_ownership_and_settlement_intent() {
-    for kill_controller in [true, false] {
+    for (kill_controller, compensation) in
+        [(true, false), (false, false), (true, true), (false, true)]
+    {
         let state = tempfile::tempdir().unwrap();
         let mutation = blocking_mutation(
             state.path(),
@@ -1554,13 +1556,37 @@ fn surviving_task_revocation_retains_release_ownership_and_settlement_intent() {
                 state.path().display()
             )
         };
+        let armed =
+            support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
+        let unarmed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", None);
         let gh = format!(
             r#"#!/bin/sh
+if [ '{compensation}' = true ]; then
+  case "$1 $2" in
+    'pr create') : > '{state}/created'; echo 'https://example.com/pr/912'; exit 0;;
+    'pr edit'|'pr ready') exit 0;;
+    'pr list')
+      if [ -f '{state}/created' ]; then
+        printf '[{{"number":912,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/912","headRefOid":"%s"}}]\n' "$(git rev-parse HEAD)"
+      else echo '[]'; fi
+      exit 0;;
+    'pr merge')
+      case " $* " in
+        *' --disable-auto '*) ;;
+        *) printf armed > '{state}/remote-auto'; echo 'arm acknowledgement lost' >&2; exit 75;;
+      esac;;
+  esac
+fi
 case "$1 $2" in
 '--version ') exit 0;;
 'run list'|'pr list') echo '[]'; exit 0;;
 'release view') exit 1;;
 'api graphql')
+  case "$*" in
+    *LoopflowPrMerge*)
+      if [ "$(cat '{state}/remote-auto')" = armed ]; then echo '{armed}'; else echo '{unarmed}'; fi
+      exit 0;;
+  esac
   if [ "$(cat '{state}/remote-auto')" = armed ]; then echo true; else echo false; fi
   exit 0;;
 'pr merge')
@@ -1646,12 +1672,15 @@ NOTES
             }),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();
+        if compensation {
+            pr.publication = None;
+        }
         runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
-        let pr = runtime
-            .block_on(task.store.active_task_pr(&task.task.id))
-            .unwrap()
-            .unwrap();
-        fs::write(state.path().join("remote-auto"), "armed").unwrap();
+        fs::write(
+            state.path().join("remote-auto"),
+            if compensation { "disabled" } else { "armed" },
+        )
+        .unwrap();
         fs::remove_file(state.path().join("ready")).unwrap();
         fs::write(state.path().join("registered"), "").unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -1663,6 +1692,11 @@ NOTES
             );
             thread::sleep(Duration::from_millis(10));
         }
+        let pr = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        assert!(pr.merge_request().is_some());
         if kill_controller {
             parent.child.kill().unwrap();
         } else {
@@ -1691,8 +1725,8 @@ NOTES
             .output()
             .unwrap();
         assert!(
-            !remote.status.success(),
-            "pushed before revocation completed"
+            remote.status.success() == compensation,
+            "only post-arm compensation may have an already-pushed head"
         );
         fs::write(state.path().join("allow"), "").unwrap();
         assert!(
@@ -1727,10 +1761,15 @@ NOTES
             .unwrap()
             .unwrap();
         assert_eq!(persisted.merge_request(), pr.merge_request());
+        if compensation {
+            // The compensated head was already pushed. A subsequent authored
+            // change must observe revocation before superseding its intent.
+            fs::write(checkout.join("follow-up.txt"), "follow-up work\n").unwrap();
+        }
         commit_workflow(
             &checkout,
             &CommitOptions {
-                add: false,
+                add: compensation,
                 push: true,
                 create_draft_pr: false,
                 task: "commit".to_string(),

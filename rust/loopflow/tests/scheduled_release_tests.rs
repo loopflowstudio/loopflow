@@ -47,6 +47,16 @@ fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
 }
 
 #[test]
+fn public_reconciliation_survives_controller_death_without_republishing() {
+    run_scenarios(&["reconcile-interrupted"]);
+}
+
+#[test]
+fn public_verification_recovers_interrupted_checkout_materialization() {
+    run_scenarios(&["reconcile-empty", "reconcile-branch", "reconcile-missing"]);
+}
+
+#[test]
 fn historical_telemetry_segments_survive_schedule_replacement_in_release_history() {
     run_scenarios(&["telemetry-history"]);
 }
@@ -357,6 +367,15 @@ case "$1" in
     exit 92 ;;
   publish) printf 'published\n' >> '{}' ;;
   reconcile)
+    if [ '{scenario}' = reconcile-interrupted ] && [ ! -f '{state}/allow' ]; then
+      pwd > '{state}/checkout'
+      kill -9 "$PPID"
+      : > '{state}/ready'
+      while [ ! -f '{state}/allow' ]; do
+        [ -d '{state}' ] || exit 1
+        sleep 0.02
+      done
+    fi
     [ '{scenario}' != smoke-failure ] || {{ echo 'exact-tag smoke failed' >&2; exit 73; }}
     mkdir -p "$LF_RELEASE_MAIN_REPO/.lf/logs"
     cp '{}' "$LF_RELEASE_MAIN_REPO/.lf/logs/release.{expected_tag}.verified.json" ;;
@@ -365,6 +384,7 @@ esac
 "#,
                 published.display(),
                 public_proof.display(),
+                state = state.path().display(),
             ),
         )
         .unwrap();
@@ -905,6 +925,138 @@ exit 0
             }
             assert!(seeded_attempt.is_some());
         }
+        if matches!(
+            scenario,
+            "reconcile-empty" | "reconcile-branch" | "reconcile-missing"
+        ) {
+            let name = format!("verify-public-default-{rejected_commit}");
+            let checkout = repo_path.parent().unwrap().join(format!(
+                "{}.{}",
+                repo_path.file_name().unwrap().to_str().unwrap(),
+                name
+            ));
+            let branch = format!("jack/{name}");
+            match scenario {
+                "reconcile-empty" => fs::create_dir(&checkout).unwrap(),
+                "reconcile-branch" => {
+                    git(&repo_path, &["branch", &branch, &rejected_commit]);
+                }
+                _ => {
+                    git(
+                        &repo_path,
+                        &[
+                            "worktree",
+                            "add",
+                            "-b",
+                            &branch,
+                            checkout.to_str().unwrap(),
+                            &rejected_commit,
+                        ],
+                    );
+                    fs::remove_dir_all(&checkout).unwrap();
+                }
+            }
+        }
+        let mut killed_attempt = None;
+        if scenario == "reconcile-interrupted" {
+            let log = fs::File::create(state.path().join("controller.log")).unwrap();
+            let child = Command::new(env!("CARGO_BIN_EXE_lf"))
+                .args([
+                    "cron",
+                    "run",
+                    "--wave",
+                    "infrastructure",
+                    "--flow",
+                    "release-run",
+                    "--scheduled",
+                ])
+                .current_dir(&repo_path)
+                .env("LF_HOME", &lf_home)
+                .stdout(Stdio::from(log.try_clone().unwrap()))
+                .stderr(Stdio::from(log))
+                .spawn()
+                .unwrap();
+            let mut parent = TelemetryParent {
+                child,
+                state: state.path().to_path_buf(),
+            };
+            wait_for(&state.path().join("ready"));
+            let checkout = PathBuf::from(
+                fs::read_to_string(state.path().join("checkout"))
+                    .unwrap()
+                    .trim(),
+            );
+            assert!(matches!(
+                loopflow::ops::release_tag(&repo_path, "0.9.2", None),
+                Err(loopflow::ops::OpsError::ReleaseDeferred { .. })
+            ));
+            assert!(loopflow::engine::git::worktree_remove(&repo_path, &checkout).is_err());
+            assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), rejected_commit);
+            assert_eq!(caller_state(), before);
+            let pending = release_history(
+                &lf_home,
+                &repo_path,
+                &release.wave,
+                5,
+                Utc::now().timestamp(),
+            )
+            .unwrap();
+            let attempt = pending
+                .obligations
+                .iter()
+                .flat_map(|r| &r.opportunities)
+                .flat_map(|o| &o.attempts)
+                .next()
+                .unwrap()
+                .clone();
+            assert!(!matches!(
+                attempt.outcome,
+                ScheduledReleaseOutcome::Published { .. }
+            ));
+            assert_eq!(pending.summary.published, 0);
+            assert_eq!(fs::read_to_string(&published).unwrap(), "published\n");
+            fs::write(state.path().join("allow"), "").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "cron did not record controller death"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!parent.child.wait().unwrap().success());
+            let failed = release_history(
+                &lf_home,
+                &repo_path,
+                &release.wave,
+                5,
+                Utc::now().timestamp(),
+            )
+            .unwrap();
+            let physical = failed
+                .receipts
+                .iter()
+                .find(|r| r.id == attempt.receipt_id)
+                .unwrap()
+                .clone();
+            assert_eq!(physical.outcome, loopflow::ops::CronOutcome::Failed);
+            assert_eq!(failed.summary.published, 0);
+            // Cron can finish before its orphaned verifier releases inherited locks.
+            let key = hex::encode(sha2::Sha256::digest(
+                serde_json::to_vec(&(&repo_path, "infrastructure", "release-run")).unwrap(),
+            ));
+            let lock = fs::File::open(lf_home.join("cron/locks").join(key)).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while fs2::FileExt::try_lock_exclusive(&lock).is_err() {
+                assert!(
+                    Instant::now() < deadline,
+                    "verifier did not release job lock"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            drop(lock);
+            killed_attempt = Some((attempt, physical));
+        }
         let result = run_cron(
             &agents,
             &release.wave,
@@ -938,7 +1090,7 @@ exit 0
             attempts.len(),
             if interrupted.is_some() {
                 3
-            } else if recovering {
+            } else if recovering || killed_attempt.is_some() {
                 2
             } else {
                 1
@@ -947,6 +1099,22 @@ exit 0
         );
         let attempt = *attempts.last().unwrap();
         assert!(attempt.covered.len() >= 3);
+        if let Some((killed, physical)) = &killed_attempt {
+            assert_eq!(attempt.selection, killed.selection);
+            assert_eq!(attempt.covered, killed.covered);
+            assert_eq!(
+                history.receipts.iter().find(|r| r.id == physical.id),
+                Some(physical)
+            );
+            assert!(matches!(
+                attempt.outcome,
+                ScheduledReleaseOutcome::Published { .. }
+            ));
+            assert_eq!(history.summary.published, 1);
+            assert_eq!(fs::read_to_string(&published).unwrap(), "published\n");
+            assert_eq!(caller_state(), before);
+        }
+
         assert!(
             history.summary.qualifying_pairs.is_empty(),
             "synthetic historical coverage cannot qualify"
@@ -1067,6 +1235,10 @@ exit 0
             | "candidate-valid"
             | "candidate-valid-closed"
             | "published"
+            | "reconcile-interrupted"
+            | "reconcile-empty"
+            | "reconcile-branch"
+            | "reconcile-missing"
             | "no-change"
             | "telemetry-recovered"
             | "telemetry-missing"

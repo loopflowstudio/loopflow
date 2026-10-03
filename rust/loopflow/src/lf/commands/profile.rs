@@ -162,13 +162,14 @@ async fn show_routes(
                 demotion,
             });
         }
-        let isolated = crate::provider_account::activation::launch_isolated(provider);
+        let isolated = crate::provider_account::activation::launch_isolated();
         let active_account = match store {
             Some(store) if !isolated => {
                 let stored = store
                     .list_provider_accounts(Some(provider.as_str()))
                     .await?;
                 crate::provider_account::activation::active_account(
+                    provider,
                     &crate::provider_account::activation::native_home(provider, None),
                     &stored,
                 )

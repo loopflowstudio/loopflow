@@ -22,10 +22,17 @@
 - Codex: whether refresh tokens rotate such that the active account's stale stored profile and the native home invalidate each other when both refresh. Probes and readiness now read the native home; an `--isolate` launch on the active account still runs on the profile copy.
 - Codex terminal `codex resume` against a conversation whose Loopflow engine is alive: refused like `app-server`'s `thread/resume`, or not.
 
-- Claude: a credential written to the Keychain item by `security add-generic-password -U` (macOS) or to `.credentials.json` (elsewhere) is accepted by a subsequently started Claude.
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
 - A conversation started under A resumes under B across different workspaces or plans.
 - SSH-forwarded Codex: the lease exports `CODEX_ACCESS_TOKEN`, recorded in `provider_auth/mod.rs` as the wrong credential type. Untouched by this plan.
+
+## Assumptions made while building slice 2
+
+- Loopflow asks Claude's profile endpoint whose login the native home holds once Claude has refreshed it, and refreshes an expired one in place to do so. Routing with no network sees no active account, and may then switch to the first eligible account.
+- A switch that cannot learn the native Claude login's owner keeps it as `accounts/claude/native-<digest>.credentials.json` and proceeds.
+- The default home's Keychain item is the unsuffixed `Claude Code-credentials` unless a suffixed one already exists for `~/.claude`. A caller who sets `CLAUDE_CONFIG_DIR` to `~/.claude` with no item yet would be written to the unsuffixed one.
+- `.claude.json` in the native home is left alone, so plain Claude may display the previous account's email after a switch until Claude rewrites it.
+- Unit tests keep Claude logins in files; only the fixture exercises the Keychain.
 
 ## Assumptions made while building slice 1
 

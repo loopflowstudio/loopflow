@@ -9,9 +9,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use secrecy::SecretString;
 use sha2::{Digest, Sha256};
 
-use super::identity::same_codex_login;
+use super::identity::{claude_login, credential_digest, same_login, AccountIdentity};
 use super::{account_login, ProviderAccountError};
 use crate::provider_auth::{codex_identity_from_home, Provider};
 use crate::store::{ProviderAccount, ProviderAccountId, RoutingState, SharedStore};
@@ -81,12 +82,8 @@ pub(crate) fn native_home(provider: Provider, launch_home: Option<&OsStr>) -> Pa
         })
 }
 
-/// Flag, then `isolate:` in config, then shared. Claude launches stay
-/// isolated until its native credential has an activation path.
-pub(crate) fn launch_isolated(provider: Provider) -> bool {
-    if provider != Provider::Codex {
-        return true;
-    }
+/// Flag, then `isolate:` in config, then shared.
+pub(crate) fn launch_isolated() -> bool {
     isolation_from_env().unwrap_or_else(|| {
         let repo = std::env::current_dir()
             .ok()
@@ -102,22 +99,52 @@ pub(crate) fn running_agents_follow_native_login(provider: Provider) -> bool {
     provider == Provider::Claude
 }
 
-/// The stored account the native credential identifies.
+/// The stored account the native credential identifies, from what is on
+/// disk. A Claude login the provider has rotated since it was stored
+/// matches nothing here; [`observe_active_account`] places it.
 pub(crate) fn active_account<'a>(
+    provider: Provider,
     native: &Path,
     accounts: &'a [ProviderAccount],
 ) -> Option<&'a ProviderAccount> {
-    let identity = codex_identity_from_home(native)?;
     accounts
         .iter()
-        .filter(|account| account.provider == Provider::Codex.as_str())
+        .filter(|account| account.provider == provider.as_str())
         .find(|account| {
             account
                 .home
                 .as_deref()
-                .and_then(codex_identity_from_home)
-                .is_some_and(|stored| stored.same_login(&identity))
+                .is_some_and(|home| same_login(provider, native, home))
         })
+}
+
+/// The active account, asking the provider who a rotated Claude login belongs
+/// to and bringing that account's stored profile back in step with it.
+pub(crate) async fn observe_active_account(
+    store: &SharedStore,
+    provider: Provider,
+    native: &Path,
+) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let active = |accounts| {
+        active_account(provider, native, accounts).map(|account| account.account_id.clone())
+    };
+    if let Some(active) = active(&accounts) {
+        return Ok(Some(active));
+    }
+    if provider != Provider::Claude || read_login(provider, native).is_none() {
+        return Ok(None);
+    }
+    let _lock = lock_native_credential(provider)?;
+    if let Some(active) = active(&accounts) {
+        return Ok(Some(active));
+    }
+    Ok(match save_back(store, provider, native, &accounts).await? {
+        Kept::Profile(account_id) => Some(account_id),
+        Kept::Unplaced(_) | Kept::Nothing => None,
+    })
 }
 
 /// The home holding an account's live credential: the native one while that
@@ -125,7 +152,7 @@ pub(crate) fn active_account<'a>(
 /// last switch and refreshing both copies could invalidate one of them.
 pub(crate) fn credential_home(provider: Provider, profile: &Path) -> PathBuf {
     let native = native_home(provider, None);
-    if provider == Provider::Codex && same_codex_login(&native, profile) {
+    if same_login(provider, &native, profile) {
         native
     } else {
         profile.to_path_buf()
@@ -142,7 +169,7 @@ pub(crate) async fn activate(
     native: &Path,
     cause: SwitchCause,
 ) -> Result<Option<fs::File>, ProviderAccountError> {
-    if provider != Provider::Codex {
+    if !matches!(provider, Provider::Codex | Provider::Claude) {
         return Err(ProviderAccountError::UnsupportedProvider);
     }
     let accounts = store
@@ -155,7 +182,7 @@ pub(crate) async fn activate(
     let profile = selected
         .home
         .as_deref()
-        .filter(|home| codex_identity_from_home(home).is_some());
+        .filter(|home| has_login(provider, home));
     let Some(profile) = profile else {
         return Err(ProviderAccountError::NoAuthenticatedAccount {
             provider,
@@ -165,7 +192,7 @@ pub(crate) async fn activate(
             ),
         });
     };
-    let is_active = || same_codex_login(native, profile);
+    let is_active = || same_login(provider, native, profile);
     if is_active() {
         return Ok(None);
     }
@@ -173,16 +200,53 @@ pub(crate) async fn activate(
     if is_active() {
         return Ok(None);
     }
-    require_file_credential_store(native)?;
-    save_back(store, provider, native, &accounts).await?;
-    let credential = fs::read(profile.join("auth.json")).map_err(|error| {
-        ProviderAccountError::Filesystem(format!("read stored {provider} credential: {error}"))
+    if provider == Provider::Codex {
+        require_file_credential_store(native)?;
+    }
+    match save_back(store, provider, native, &accounts).await? {
+        // The native login was this account's all along, rotated since it was stored.
+        Kept::Profile(owner) if owner == *account_id => return Ok(None),
+        Kept::Profile(_) | Kept::Nothing => {}
+        Kept::Unplaced(credential) => keep_aside(provider, &credential)?,
+    }
+    let credential = read_login(provider, profile).ok_or_else(|| {
+        ProviderAccountError::Filesystem(format!("read stored {provider} credential"))
     })?;
-    write_private(&native.join("auth.json"), &credential)?;
+    write_login(provider, native, &credential)?;
     store
         .record_provider_account_switch(provider, account_id, "from_now_on", cause.as_str())
         .await?;
     Ok(Some(lock))
+}
+
+/// A home's login, as its provider stores it.
+fn read_login(provider: Provider, home: &Path) -> Option<Vec<u8>> {
+    match provider {
+        Provider::Claude => claude_login(home).map(String::into_bytes),
+        _ => fs::read(home.join("auth.json")).ok(),
+    }
+}
+
+fn write_login(
+    provider: Provider,
+    home: &Path,
+    credential: &[u8],
+) -> Result<(), ProviderAccountError> {
+    if provider != Provider::Claude {
+        return write_private(&home.join("auth.json"), credential);
+    }
+    let credential = String::from_utf8(credential.to_vec())
+        .map_err(|_| ProviderAccountError::Filesystem("Claude login is not UTF-8".into()))?;
+    crate::provider_auth::write_claude_login(home, &SecretString::new(credential))
+        .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))
+}
+
+/// Whether a stored profile holds a login worth installing.
+fn has_login(provider: Provider, home: &Path) -> bool {
+    match provider {
+        Provider::Claude => claude_login(home).is_some(),
+        _ => codex_identity_from_home(home).is_some(),
+    }
 }
 
 /// A launch waits here rather than failing: a switch in progress is short.
@@ -228,52 +292,120 @@ fn require_file_credential_store(native: &Path) -> Result<(), ProviderAccountErr
     }
 }
 
-/// Keep the native credential before it is replaced: in the stored profile
-/// with the same identity, else as a new profile. Nothing is discarded.
+/// Where [`save_back`] put the native credential.
+enum Kept {
+    Nothing,
+    Profile(ProviderAccountId),
+    /// It names no account to file it under: an API key, or a login whose
+    /// owner could not be learned.
+    Unplaced(Vec<u8>),
+}
+
+/// Nothing is discarded: a login with no profile is kept beside them.
+fn keep_aside(provider: Provider, credential: &[u8]) -> Result<(), ProviderAccountError> {
+    let digest = hex::encode(Sha256::digest(credential));
+    let file = match provider {
+        Provider::Claude => "credentials.json",
+        _ => "auth.json",
+    };
+    let kept = crate::store::lf_home_dir()
+        .join("accounts")
+        .join(provider.as_str())
+        .join(format!("native-{}.{file}", &digest[..12]));
+    tracing::warn!(path = %kept.display(), "kept an unidentified native {provider} login");
+    write_private(&kept, credential)
+}
+
+/// Who the native login belongs to. Codex's names its person; Claude's is
+/// opaque, so its provider is asked, which refreshes an expired login in
+/// place as Claude itself would.
+async fn native_identity(provider: Provider, native: &Path) -> Option<AccountIdentity> {
+    match provider {
+        Provider::Claude => crate::subscription::claude_identity(native).await.ok(),
+        _ => codex_identity_from_home(native),
+    }
+}
+
+/// File the native credential under its account: the stored profile with the
+/// same identity, else a new profile.
 async fn save_back(
     store: &SharedStore,
     provider: Provider,
     native: &Path,
     accounts: &[ProviderAccount],
-) -> Result<(), ProviderAccountError> {
-    let Ok(credential) = fs::read(native.join("auth.json")) else {
-        return Ok(());
+) -> Result<Kept, ProviderAccountError> {
+    if read_login(provider, native).is_none() {
+        return Ok(Kept::Nothing);
+    }
+    let offline = active_account(provider, native, accounts);
+    let identity = match offline {
+        Some(_) if provider == Provider::Claude => None,
+        _ => native_identity(provider, native).await,
     };
-    let identity = codex_identity_from_home(native);
+    // Read after identifying: a refresh there replaces the login.
+    let Some(credential) = read_login(provider, native) else {
+        return Ok(Kept::Nothing);
+    };
+    let owner = offline.or_else(|| {
+        let identity = identity.as_ref()?;
+        accounts.iter().find(|account| {
+            account.observed_subject.as_deref() == Some(identity.subject.as_str())
+                || account
+                    .login_email
+                    .as_ref()
+                    .is_some_and(|email| email.as_str().eq_ignore_ascii_case(&identity.email))
+        })
+    });
+    let observed = |account: &ProviderAccount| {
+        let identity = identity.clone().or_else(|| {
+            Some(AccountIdentity {
+                email: account.observed_email.clone()?,
+                subject: account.observed_subject.clone()?,
+                credential_digest: None,
+            })
+        })?;
+        // A Claude profile's identity is only trusted for the bytes it was observed on.
+        let digest = (provider == Provider::Claude)
+            .then(|| credential_digest(&String::from_utf8_lossy(&credential)));
+        Some((identity, digest))
+    };
+    if let Some((owner, home)) = owner.and_then(|account| Some((account, account.home.as_deref()?)))
+    {
+        write_login(provider, home, &credential)?;
+        if let Some((identity, Some(digest))) = observed(owner) {
+            store
+                .record_provider_account_identity(
+                    provider.as_str(),
+                    &owner.account_id,
+                    &identity.email,
+                    &identity.subject,
+                    owner.observed_plan.as_deref(),
+                    Some(&digest),
+                )
+                .await?;
+        }
+        return Ok(Kept::Profile(owner.account_id.clone()));
+    }
     let login = identity
         .as_ref()
         .and_then(|identity| crate::profile::EmailAddress::parse(&identity.email).ok());
     let (Some(identity), Some(login)) = (identity, login) else {
-        // An API key or unreadable login names no account to file it under.
-        let digest = hex::encode(Sha256::digest(&credential));
-        let kept = crate::store::lf_home_dir()
-            .join("accounts")
-            .join(provider.as_str())
-            .join(format!("native-{}.auth.json", &digest[..12]));
-        tracing::warn!(path = %kept.display(), "kept an unidentified native {provider} login");
-        return write_private(&kept, &credential);
+        return Ok(Kept::Unplaced(credential));
     };
-    let owner = active_account(native, accounts).or_else(|| {
-        accounts.iter().find(|account| {
-            account
-                .login_email
-                .as_ref()
-                .is_some_and(|email| email.as_str().eq_ignore_ascii_case(login.as_str()))
-        })
-    });
-    if let Some(home) = owner.and_then(|account| account.home.as_deref()) {
-        return write_private(&home.join("auth.json"), &credential);
-    }
     let account_id = super::account_id_for_login(&login);
     let home = super::ensure_account_home(provider, &account_id)?;
-    write_private(&home.join("auth.json"), &credential)?;
-    let mut account = super::new_account(provider, account_id, home, Some(login));
+    write_login(provider, &home, &credential)?;
+    let mut account = super::new_account(provider, account_id.clone(), home, Some(login));
+    if provider == Provider::Claude {
+        account.observed_credential_digest =
+            Some(credential_digest(&String::from_utf8_lossy(&credential)));
+    }
     account.observed_email = Some(identity.email);
     account.observed_subject = Some(identity.subject);
     // A login nobody registered is kept, not volunteered for automatic work.
     account.routing_state = RoutingState::ExplicitOnly;
     store.upsert_provider_account(&account).await?;
-    Ok(())
+    Ok(Kept::Profile(account_id))
 }
 
 /// Replace `path` by rename so a reader sees the old or the new credential.

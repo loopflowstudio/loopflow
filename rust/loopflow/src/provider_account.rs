@@ -381,7 +381,13 @@ impl ProviderAccountRoute {
             .find(|account| account.account_id == self.account_id)
             .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
         let mut selected = account.clone();
-        selected.home = Some(home.clone());
+        // The active account's live credential is the native home's.
+        selected.home = Some(match self.authority {
+            AccountRouteAuthority::Shared { .. } => {
+                activation::credential_home(self.provider, home)
+            }
+            _ => home.clone(),
+        });
         identity::check_current_identity(&selected, &accounts)
             .await
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()))
@@ -866,7 +872,7 @@ pub(crate) async fn resolve_provider_account_exact(
         }
         _ => None,
     };
-    let isolated = recorded.unwrap_or_else(|| activation::launch_isolated(provider));
+    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
     let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
@@ -952,7 +958,7 @@ pub(crate) async fn resolve_provider_account_exact(
             .select_provider_account(provider, &eligible, provider_session_id)
             .await?
     } else {
-        select_shared_account(&store, provider, &accounts, &eligible).await?
+        select_shared_account(&store, provider, &eligible).await?
     };
     let Some(selection) = selection else {
         let accounts = store
@@ -1009,14 +1015,13 @@ pub(crate) async fn resolve_provider_account_exact(
 async fn select_shared_account(
     store: &SharedStore,
     provider: Provider,
-    accounts: &[ProviderAccount],
     eligible: &[ProviderAccountId],
 ) -> Result<Option<crate::store::ProviderAccountSelection>, ProviderAccountError> {
     let native = activation::native_home(provider, None);
-    let active = activation::active_account(&native, accounts)
-        .map(|account| &account.account_id)
+    let active = activation::observe_active_account(store, provider, &native)
+        .await?
         .filter(|account_id| eligible.contains(account_id));
-    if let Some(active) = active {
+    if let Some(active) = &active {
         let limits = store
             .provider_account_limits(Some(provider.as_str()))
             .await?;
@@ -1049,7 +1054,7 @@ async fn resolve_merged_provider_account(
         exact_account_id,
         client,
         repo_id.as_ref(),
-        local_store,
+        local_store.clone(),
         true,
     )
     .await?
@@ -1057,7 +1062,12 @@ async fn resolve_merged_provider_account(
         return Ok(None);
     };
     if !isolated {
-        if let Some(index) = active_candidate(provider, &candidates) {
+        let native = activation::native_home(provider, None);
+        let active = match &local_store {
+            Some(store) => activation::observe_active_account(store, provider, &native).await?,
+            None => None,
+        };
+        if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
             let active = candidates.remove(index);
             candidates.insert(0, active);
         }
@@ -1139,17 +1149,17 @@ async fn resolve_merged_provider_account(
 
 /// A shared launch stays on the active account where its own choice allows:
 /// among the accounts it named, or among all of them when it named none.
-fn active_candidate(provider: Provider, candidates: &[(AccountCandidate, bool)]) -> Option<usize> {
-    let native = activation::native_home(provider, None);
+fn active_candidate(
+    active: &ProviderAccountId,
+    candidates: &[(AccountCandidate, bool)],
+) -> Option<usize> {
     let named = candidates.iter().any(|(_, explicit)| *explicit);
     candidates.iter().position(|(candidate, explicit)| {
-        let AccountCandidateAuthority::Local { home, .. } = &candidate.authority else {
-            return false;
-        };
-        *explicit == named
+        matches!(candidate.authority, AccountCandidateAuthority::Local { .. })
+            && *explicit == named
             && candidate.credential_available
             && !candidate.is_strained(now_unix())
-            && identity::same_codex_login(&native, home)
+            && candidate.account.account_id == *active
     })
 }
 
@@ -2925,6 +2935,176 @@ mod account_first_tests {
 
         assert!(error.to_string().contains("cli_auth_credentials_store"));
         assert_eq!(codex_login(&native), "first@example.com");
+    }
+
+    const SHARED_CLAUDE_ENV: [&str; 5] = [
+        "LF_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "LF_TEST_CLAUDE_PROFILE_URL",
+        lease::ACCOUNT_LEASE_ENV,
+        activation::ACCOUNT_ISOLATION_ENV,
+    ];
+
+    /// A Home with Claude accounts `first` and `second` on the default route
+    /// and a native home holding `first`'s login.
+    async fn shared_claude_home(temp: &Path) -> (SharedStore, PathBuf) {
+        std::env::set_var("LF_HOME", temp);
+        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
+        std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
+        let native = temp.join("native");
+        fs::create_dir_all(&native).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(temp.join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let mut route = Vec::new();
+        for account_id in ["first", "second"] {
+            let stored = account(Provider::Claude, account_id, temp);
+            store.upsert_provider_account(&stored).await.unwrap();
+            route.push(stored.account_id);
+        }
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Claude,
+                accounts: route,
+                created_at: now_unix(),
+                updated_at: now_unix(),
+            })
+            .await
+            .unwrap();
+        fs::copy(
+            temp.join("first/.credentials.json"),
+            native.join(".credentials.json"),
+        )
+        .unwrap();
+        (store, native)
+    }
+
+    /// Claude's profile endpoint, reporting `login` to the one request it serves.
+    fn claude_reports(login: &str) -> std::thread::JoinHandle<()> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        std::env::set_var(
+            "LF_TEST_CLAUDE_PROFILE_URL",
+            format!("http://{}/profile", listener.local_addr().unwrap()),
+        );
+        let body =
+            serde_json::json!({"account":{"email":format!("{login}@example.com"),"uuid":login}})
+                .to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request).unwrap();
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(response.as_bytes()).unwrap();
+        })
+    }
+
+    fn claude_credential(home: &Path) -> String {
+        fs::read_to_string(home.join(".credentials.json")).unwrap()
+    }
+
+    async fn activate_claude(store: &SharedStore, account_id: &str, native: &Path) -> bool {
+        activation::activate(
+            store,
+            Provider::Claude,
+            &parse_account_id(account_id).unwrap(),
+            native,
+            activation::SwitchCause::Person,
+        )
+        .await
+        .unwrap()
+        .is_some()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn claude_switching_away_and_back_keeps_a_login_the_provider_rotated() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
+        let (store, native) = shared_claude_home(temp.path()).await;
+        // Claude refreshed the active login in place; neither token survives.
+        let rotated = claude_credential(&native).replace("fixture-first", "rotated-first");
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        let asked = claude_reports("first");
+
+        // Only the provider can say whose login this is now.
+        assert!(!activate_claude(&store, "first", &native).await);
+        asked.join().unwrap();
+        assert_eq!(claude_credential(&temp.path().join("first")), rotated);
+
+        assert!(activate_claude(&store, "second", &native).await);
+        assert_eq!(
+            claude_credential(&native),
+            claude_credential(&temp.path().join("second"))
+        );
+        assert!(activate_claude(&store, "first", &native).await);
+        assert_eq!(claude_credential(&native), rotated);
+        // The rotated profile still proves its identity without the provider.
+        let accounts = store.list_provider_accounts(Some("claude")).await.unwrap();
+        assert!(identity::check_account_identity(&accounts[0], &accounts).is_ok());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unknown_native_claude_login_is_kept_as_a_new_profile() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
+        let (store, native) = shared_claude_home(temp.path()).await;
+        let stranger = claude_credential(&native).replace("fixture-first", "fixture-stranger");
+        fs::write(native.join(".credentials.json"), &stranger).unwrap();
+        let asked = claude_reports("stranger");
+
+        assert!(activate_claude(&store, "second", &native).await);
+        asked.join().unwrap();
+
+        let kept = store
+            .list_provider_accounts(Some("claude"))
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|account| account_login(account) == "stranger@example.com")
+            .expect("the unknown login became a stored profile");
+        assert_eq!(kept.routing_state, RoutingState::ExplicitOnly);
+        assert_eq!(claude_credential(&kept.home.unwrap()), stranger);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn shared_claude_launch_names_no_home_or_credential() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
+        let (store, native) = shared_claude_home(temp.path()).await;
+        assert!(activate_claude(&store, "second", &native).await);
+
+        // `second` is active though the route lists `first` ahead of it.
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut command = Command::new("claude");
+        command.env("CLAUDE_CODE_OAUTH_TOKEN", "inherited");
+        let switched = route.launch_as(&mut command).await.unwrap();
+
+        assert!(route.is_shared());
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(switched.is_none());
+        let set = |name: &str| {
+            command
+                .get_envs()
+                .any(|(key, value)| key == std::ffi::OsStr::new(name) && value.is_some())
+        };
+        assert!(!set("CLAUDE_CONFIG_DIR") && !set("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert_eq!(
+            activation::credential_home(Provider::Claude, &temp.path().join("second")),
+            native
+        );
     }
 
     fn launch_home(command: &Command) -> Option<Option<PathBuf>> {

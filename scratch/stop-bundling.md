@@ -1,6 +1,6 @@
 # Shared provider homes, multiple credentials
 
-Draft plan — 2026-10-02. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Slice 1 (Codex) is built on this branch and its gate fixture passes; slices 2–4 remain, and one finding under Risk findings bears on the demo. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
+Draft plan — 2026-10-02. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Slices 1 (Codex), 2 (Claude) and 4 (docs) are built on this branch and both fixtures pass; slice 3 remains, gated on research, and one finding under Risk findings bears on the demo. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
 
 ## Problem
 
@@ -48,7 +48,9 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 
 **Claude re-reads its login.** Claude Code 2.1.288 caches the Keychain read for 30 seconds and at refresh adopts a stored token that differs from its own; no identity check appears there. Read from the binary, not exercised. A running shared Claude agent follows the native login.
 
-**Claude's native login is two stores.** On macOS it is the Keychain item `Claude Code-credentials`; a non-default config directory uses `Claude Code-credentials-<8 hex of sha256(path)>`, and ten such items exist for the per-account homes. Loopflow already reads both stores (`read_claude_keychain_credential`, `.credentials.json`) and writes the file atomically (`write_claude_profile_credentials`), but has no Keychain writer. Activation needs one; that a subsequently started Claude accepts an item written by `security add-generic-password -U` is the one mechanism still unproven.
+**A Claude started after a switch accepts the installed login.** Proven with Claude Code 2.1.288, synthetic logins and a local endpoint: after `security add-generic-password -U` wrote the hashed item `Claude Code-credentials-<8 hex of sha256(path)>` for a temporary config directory, the next `claude -p` sent that login's bearer; the same for `.credentials.json`. Where both exist on macOS the Keychain item wins. The default home's unsuffixed item was not written by any check.
+
+**A Claude login names no person.** Unlike Codex's, it carries no identity, so “which account is active” is answered offline only while the native login still shares a token with a stored profile. After Claude refreshes it, Loopflow asks Claude's profile endpoint once, under the credential lock, and copies the login into that account's profile (`observe_active_account`). That request refreshes an expired native login in place, as Claude would. If it cannot be asked, routing sees no active account and a switch keeps the login as `accounts/claude/native-<digest>.credentials.json`.
 
 **The lock does not need a readiness signal.** The earlier worry was a second launch swapping the credential before a just-started process read it. Chosen instead: install the credential by atomic rename, and hold the lock across activate and spawn; at “from now on” either account is then a correct outcome for a concurrent launch, and no per-launch-site signal is required. Built that far. Holding it across recording the launch as a shared agent too, so a concurrent “everyone now” sees and resumes the new agent, waits on slice 3's record of running shared agents.
 
@@ -132,9 +134,9 @@ One Task, complete end state above. Each slice leaves the tree working.
    - A launch naming several accounts stays on the active one it includes; naming only another account moves to it.
    - `lf account route --json` reports `isolated` and `active_account` (fixture `auth_routes.json`).
    - Switch-log reader: `provider_account_switched_since`, read by `ProviderAccountRoute::used_account`. Rate-limit and credential-health observations from a shared agent go to the account the log says it moved to, only for providers whose running agents follow the native login (`running_agents_follow_native_login`: Claude). For Codex the launch's account stays correct until a process is resumed. No per-account usage report exists to redirect; these observations are the account attribution there is.
-2. **Claude shared by default.** Keychain writer and activation for Claude (`activate` returns `UnsupportedProvider` for anything but Codex), then drop the `provider != Codex` branch in `launch_isolated`. `active_account`, `credential_home` and `same_codex_login` read Codex identities only and need a Claude form. Starts with the fixture proving a started Claude accepts an activated credential, using a temporary config directory and its hashed Keychain item on macOS and the file elsewhere.
+2. **Claude shared by default — built.** One reader and writer for a Claude home's login (`provider_auth::read_claude_login` / `write_claude_login`: Keychain for a native home on macOS, written through `security -i` on standard input; the file for stored profiles, other platforms and unit tests). Activation, `active_account`, `credential_home` and `identity::same_login` take the provider. Routing, live status and activation place a refreshed login through `observe_active_account`. Quota polls, identity checks and token preparation read the native store for the active account. Integration test support points `CLAUDE_CONFIG_DIR` at a temporary directory.
 3. **“Everyone now” for Codex.** Gated on the research below. Resume each running shared Codex agent under the new account; exhaustion switches use it (today a strained active account makes routing activate the next one at “from now on”, logged with cause `exhaustion`). Needs a record of running shared agents, which slice 1 does not keep: the credential lock is held across activate and spawn only.
-4. Remaining docs: security and environment pages.
+4. **Docs — built.** `docs/subscriptions.md` and `docs/security.md` (where logins live, what a provider child's environment carries, `LF_ACCOUNT_ISOLATION`); `TESTING.md` names the Claude fixture. There is no separate environment page.
 
 ## Remaining questions
 
@@ -157,9 +159,14 @@ Gate, headless:
 - Owed to slice 3: “everyone now” leaving a running shared agent on B with its native ID unchanged.
 - Not shown by the fixture: a Loopflow-started isolated conversation reopening in its home. A finished headless conversation's Session is complete and `connect` refuses it under either ID, and a terminal conversation cannot run headless. `isolated_launch_and_its_conversation_stay_in_the_account_home` covers that routing.
 
-Claude's Keychain path is macOS-only; its fixture runs in the macOS CI job and the file path runs everywhere.
+- `uv run --script tests/e2e/claude_shared_home.py --claude "&#36;(command -v claude)" --lf target/debug/lf --output <dir>`: exits 0. With a temporary config directory, synthetic logins and a local endpoint it shows: plain Claude sending A, then B, then A's login across switches; a switch to the active account changing nothing; a shared launch, naming no account or the active one, getting no account home or credential variable and logging no switch; a launch naming B moving plain Claude to B; and an `--isolate` launch running in its account's home without touching the native login.
+- Not shown by the Claude fixture: a rotated login placed by asking Claude, and an unknown login kept as a new profile, since both need Claude's real profile endpoint. `claude_switching_away_and_back_keeps_a_login_the_provider_rotated` and `an_unknown_native_claude_login_is_kept_as_a_new_profile` cover them against a local endpoint. Claude conversation IDs in `lf session` and plain `claude --resume` of a Loopflow conversation were not exercised.
+
+Claude's Keychain path is macOS-only and the fixture uses it there, the file elsewhere; neither fixture runs in CI today.
 
 ## Evidence
+
+Check, slice 2: `cargo clippy -p loopflow --all-targets -- -D warnings` — clean; `cargo test -p loopflow --lib -- provider_account subscription identity account_status profile session_launch provider_auth` — 208 passed; `uv run --script tests/e2e/claude_shared_home.py …` against Claude Code 2.1.288 on macOS (Keychain store) — exits 0. `agent_tests` and `auth_tests` passed before the last Claude edits; `flow_tests` and the Codex fixture were not rerun; owed to gate. A full `--lib` run inside a Task Session fails two `lf::commands::run` tests on the ambient Flow environment; they pass with it removed.
 
 Check, at `46eaa2bd4` merged with `main` v0.12.31: `cargo test -p loopflow --lib -- provider_conversation human_session provider_account subscription profile` — 100 passed; `uv run --script tests/e2e/codex_connect.py … --shared-provider-home` against Codex 0.160.0 — exits 0. Clippy, `agent_tests`, `auth_tests` last passed before that routing refactor and merge, `flow_tests` before the earlier routing change; all four owed to gate. `store::migrations::tests::remove_ask_preserves_conversations_and_history` failed with and without this branch's draft when last run; not caused here.
 

@@ -21,6 +21,7 @@ use crate::provider_auth::Provider;
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+#[cfg(not(test))]
 const CLAUDE_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
 /// Claude Code's public OAuth client id — the tokens in an imported account
 /// home were minted for it, so refreshes must present the same client.
@@ -54,7 +55,7 @@ pub async fn poll_account(
         SubscriptionError::Unavailable("account has no managed credential home".to_string())
     })?;
     match account.provider.as_str() {
-        "claude" => poll_claude(home).await,
+        "claude" => poll_claude(&credential_home(Provider::Claude, home)).await,
         "codex" => {
             crate::provider_account::identity::check_account_identity(account, &[])
                 .map_err(SubscriptionError::NeedsLogin)?;
@@ -73,14 +74,12 @@ pub async fn poll_account(
 // -- Claude ------------------------------------------------------------------
 
 async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError> {
-    let credentials_path = home.join(".credentials.json");
     let client = reqwest::Client::new();
-    let (mut token, mut credential, refreshed) =
-        fresh_claude_token(&client, &credentials_path, false).await?;
+    let (mut token, mut credential, refreshed) = fresh_claude_token(&client, home, false).await?;
     let mut response = request_claude_usage(&client, token.expose_secret()).await?;
-    ensure_claude_credential_unchanged(&credentials_path, credential.expose_secret())?;
+    ensure_claude_credential_unchanged(home, credential.expose_secret())?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED && !refreshed {
-        (token, credential, _) = fresh_claude_token(&client, &credentials_path, true).await?;
+        (token, credential, _) = fresh_claude_token(&client, home, true).await?;
         response = request_claude_usage(&client, token.expose_secret()).await?;
     }
     let observation = async {
@@ -105,17 +104,16 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
     .await;
     // A result describes the credential used for this request, not a replacement
     // installed by a native provider while the request was in flight.
-    ensure_claude_credential_unchanged(&credentials_path, credential.expose_secret())?;
+    ensure_claude_credential_unchanged(home, credential.expose_secret())?;
     observation
 }
 
 pub(crate) async fn claude_identity(home: &Path) -> Result<AccountIdentity, SubscriptionError> {
-    let path = home.join(".credentials.json");
     let client = reqwest::Client::new();
-    let (token, credential, _) = fresh_claude_token(&client, &path, false).await?;
+    let (token, credential, _) = fresh_claude_token(&client, home, false).await?;
     let identity =
         request_claude_identity(&client, token.expose_secret(), credential.expose_secret()).await?;
-    ensure_claude_credential_unchanged(&path, credential.expose_secret())?;
+    ensure_claude_credential_unchanged(home, credential.expose_secret())?;
     Ok(identity)
 }
 
@@ -244,16 +242,14 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
 /// Returns the access token, its serialized credential, and whether refreshed.
 async fn fresh_claude_token(
     client: &reqwest::Client,
-    credentials_path: &Path,
+    home: &Path,
     force_refresh: bool,
 ) -> Result<(SecretString, SecretString, bool), SubscriptionError> {
-    let raw = std::fs::read_to_string(credentials_path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            SubscriptionError::NeedsLogin("no stored credentials".into())
-        } else {
-            SubscriptionError::Unavailable("cannot read stored credentials".into())
-        }
-    })?;
+    let raw = crate::provider_auth::read_claude_login(home)
+        .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
+        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?
+        .expose_secret()
+        .to_string();
     let mut credentials: Value = serde_json::from_str(&raw)
         .map_err(|_| SubscriptionError::Unavailable("unreadable credential format".into()))?;
     let oauth = credentials.get("claudeAiOauth").unwrap_or(&credentials);
@@ -281,7 +277,8 @@ async fn fresh_claude_token(
         })?;
     let response = client.post({
             #[cfg(test)]
-            { std::env::var("LF_TEST_CLAUDE_TOKEN_URL").unwrap_or_else(|_| CLAUDE_TOKEN_URL.to_string()) }
+            // A test never refreshes a real login it happened to find.
+            { std::env::var("LF_TEST_CLAUDE_TOKEN_URL").unwrap_or_else(|_| "http://127.0.0.1:1/token".into()) }
             #[cfg(not(test))]
             { CLAUDE_TOKEN_URL }
         })
@@ -292,7 +289,7 @@ async fn fresh_claude_token(
     let body: Value = response.json().await.map_err(|_| {
         SubscriptionError::Unavailable("token refresh returned invalid JSON".into())
     })?;
-    ensure_claude_credential_unchanged(credentials_path, &raw)?;
+    ensure_claude_credential_unchanged(home, &raw)?;
     if status == reqwest::StatusCode::BAD_REQUEST
         && body.get("error").and_then(Value::as_str) == Some("invalid_grant")
     {
@@ -336,7 +333,7 @@ async fn fresh_claude_token(
     {
         oauth["expiresAt"] = json!(expiry);
     }
-    persist_claude_refresh(credentials_path, &raw, &credentials)?;
+    persist_claude_refresh(home, &raw, &credentials)?;
     Ok((
         SecretString::new(new_access),
         SecretString::new(credentials.to_string()),
@@ -345,29 +342,27 @@ async fn fresh_claude_token(
 }
 
 fn persist_claude_refresh(
-    path: &Path,
+    home: &Path,
     original: &str,
     credentials: &Value,
 ) -> Result<(), SubscriptionError> {
-    ensure_claude_credential_unchanged(path, original)?;
-    let home = path.parent().expect("credential file has a parent");
-    crate::provider_auth::write_claude_profile_credentials(
-        home,
-        &SecretString::new(credentials.to_string()),
-    )
-    .map_err(|_| SubscriptionError::Unavailable("failed to persist refreshed credential".into()))
+    ensure_claude_credential_unchanged(home, original)?;
+    crate::provider_auth::write_claude_login(home, &SecretString::new(credentials.to_string()))
+        .map_err(|_| {
+            SubscriptionError::Unavailable("failed to persist refreshed credential".into())
+        })
 }
 
 fn ensure_claude_credential_unchanged(
-    path: &Path,
+    home: &Path,
     original: &str,
 ) -> Result<(), SubscriptionError> {
-    let current = std::fs::read_to_string(path).map_err(|_| {
-        SubscriptionError::Unavailable(
-            "credential changed during verification; retry verification".into(),
-        )
-    })?;
-    if current != original {
+    let current = crate::provider_auth::read_claude_login(home).ok().flatten();
+    if current
+        .as_ref()
+        .map(|current| current.expose_secret().as_str())
+        != Some(original)
+    {
         return Err(SubscriptionError::Unavailable(
             "credential changed during verification; retry verification".into(),
         ));

@@ -120,11 +120,32 @@ machine where it was connected:
 ~/.lf/accounts/codex/<account-id>/
 ```
 
-That home contains the provider CLI's own authentication and session state.
-Loopflow points local provider children at it with `CLAUDE_CONFIG_DIR` or
-`CODEX_HOME`. Shared settings, skills, and plugins may be linked from the
-normal `~/.claude` or `~/.codex` home; credentials and session state remain
-isolated by account.
+That home holds the identity's stored login. By default it is not where
+conversations run: Loopflow signs the provider's ordinary home (`~/.claude`,
+`~/.codex`, or the caller's own `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) in as one
+stored identity at a time, and launches there.
+
+| Launch | Provider home | What Loopflow sets on the provider child |
+|---|---|---|
+| Shared (default) | the provider's ordinary home | no home and no credential variable; inherited ones are removed, except a home the caller chose |
+| `--isolate` | the identity's own home | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
+| Forwarded over `lf ssh` | the target's ordinary home | the leased access token |
+
+Switching the shared identity writes one login into the provider's own store:
+Codex's `auth.json`, replaced by atomic rename, or Claude's Keychain item on
+macOS (`Claude Code-credentials`, suffixed for a non-default home) and
+`.credentials.json` elsewhere. The login being replaced is first saved back to
+its identity's stored home, or kept as a new one, so it is never discarded.
+The Keychain write goes through `security` on standard input, not its
+arguments. The provider's ordinary home therefore holds a login Loopflow
+manages; your own `claude` and `codex` run as whichever identity is active.
+
+`LF_ACCOUNT_ISOLATION` (`isolated` or `shared`) carries `--isolate` /
+`--shared` to child `lf` processes. It selects a home and carries no secret.
+
+In an isolated home, shared settings, skills, and plugins may be linked from
+the normal `~/.claude` or `~/.codex` home; credentials and session state
+remain isolated by account.
 
 `~/.lf/loopflow.db` stores non-secret account metadata: verified login,
 routing and credential state, health signals, repository routes,

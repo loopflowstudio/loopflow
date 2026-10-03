@@ -111,10 +111,10 @@ lf account --details
 The profile is an authentication venue, not the identity that spends provider
 usage. It is never a run-time account selector.
 
-Codex conversations run in Codex's ordinary home, signed in as one stored
-account at a time, so plain `codex resume` finds them. See
-[Switch the shared account](#switch-the-shared-account). Claude launches, and
-Codex launches under `--isolate`, run in the selected account's own home through
+Claude and Codex conversations run in the provider's ordinary home, signed in as
+one stored account at a time, so plain `claude --resume` and `codex resume` find
+them. See [Switch the shared account](#switch-the-shared-account). Launches
+under `--isolate` run in the selected account's own home through
 `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; the provider CLI reads and refreshes its
 credential there. Loopflow records health and session ownership against the
 account ID, and reopens each conversation in the home it started in.
@@ -301,13 +301,24 @@ codex resume                              # plain Codex sees that conversation
 lf account use codex work@                # ~/.codex is now work@, for lf and codex
 lf account route                          # shows the mode and the active account
 lf --isolate --account codex=work@ -m codex : "say hi"   # stays in work@'s own home
+lf account use claude work@               # the same for ~/.claude and plain claude
 ```
 
-`lf account use` is the only command that changes which stored account Codex's
-home is signed in as. It first saves the current login back to its stored
-account, so a token Codex refreshed while active is kept; a login Loopflow has
-never seen is kept as a new explicit-only account. Running Codex processes keep
-the login they started with until they restart.
+`lf account use` is the only command that changes which stored account a
+provider's home is signed in as. It first saves the current login back to its
+stored account, so a token the provider refreshed while active is kept; a login
+Loopflow has never seen is kept as a new explicit-only account.
+
+| | Codex | Claude |
+|---|---|---|
+| Where the home's login lives | `auth.json` | macOS Keychain item; `.credentials.json` elsewhere |
+| A process already running | keeps the login it started with until it restarts | follows the switch |
+| Whose login the home holds | read from the login | asked of Claude once after Claude refreshes it |
+
+A Claude login names no person. After Claude refreshes the home's login,
+Loopflow asks Claude whose it is before the next launch or switch and brings
+that account's stored copy up to date. If it cannot ask, a switch keeps the
+unrecognized login beside the stored accounts rather than discarding it.
 
 A shared launch follows the active account while it is eligible and below the
 95% threshold, and otherwise moves the home to the next account in the route.

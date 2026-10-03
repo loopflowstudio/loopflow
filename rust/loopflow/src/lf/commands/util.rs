@@ -1854,7 +1854,7 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn session_launch_tui_claude_uses_a_healthy_managed_login() {
+    async fn session_launch_tui_claude_signs_its_native_home_in_as_a_healthy_managed_login() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
@@ -1866,7 +1866,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_ACCOUNT_LEASE");
-        std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
+        let native = temp.path().join("native");
+        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
 
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1911,7 +1912,11 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
-            account_home.to_string_lossy()
+            native.to_string_lossy()
+        );
+        assert_eq!(
+            std::fs::read(native.join(".credentials.json")).unwrap(),
+            std::fs::read(account_home.join(".credentials.json")).unwrap()
         );
     }
 

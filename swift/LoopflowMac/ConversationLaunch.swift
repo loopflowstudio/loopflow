@@ -65,29 +65,30 @@ extension PodiumModel {
     }
 }
 
-/// Capture stays in the repository checkout even when a Task is selected.
-struct TaskCaptureLaunch: Equatable {
+/// New Sessions stay in the repository checkout even when a Task is selected.
+struct SessionSkillLaunch: Equatable {
     let repoPath: String
     let wave: String?
+    let skill: String
 
     func arguments(lf: String) -> [String] {
-        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["capture-tasks"]
+        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
     }
 }
 
 extension PodiumModel {
-    var taskCaptureLaunch: TaskCaptureLaunch? {
+    var sessionSkillLaunch: SessionSkillLaunch? {
         guard navigation.content != .overview, let selection else {
-            return repoPath.map { TaskCaptureLaunch(repoPath: $0, wave: nil) }
+            return repoPath.map { SessionSkillLaunch(repoPath: $0, wave: nil, skill: selectedSessionSkill) }
         }
-        return taskCaptureLaunch(wave: selection)
+        return sessionSkillLaunch(wave: selection)
     }
 
-    func taskCaptureLaunch(wave work: WorkReference) -> TaskCaptureLaunch? {
+    func sessionSkillLaunch(wave work: WorkReference) -> SessionSkillLaunch? {
         guard let repoPath else { return nil }
         let name = waveId(for: work).flatMap { id in
             wave(id: id)?.wave.name ?? rosterWave(id: id)?.api.name
         }
-        return TaskCaptureLaunch(repoPath: repoPath, wave: name)
+        return SessionSkillLaunch(repoPath: repoPath, wave: name, skill: selectedSessionSkill)
     }
 }

@@ -77,3 +77,15 @@ This confirms prototype styling; the configurable picker is not implemented in
 Desktop yet. The prototype uses illustrative skills, local browser persistence,
 and simulated launches. Native skill discovery, selection persistence and real
 launch behavior still need implementation and verification.
+
+## Pursue launch recovery
+
+Jack Heart requested launching pursue. Task restart checkpointed work as
+`aa3506246d848ca6ecbf85c23f01f5210a944bef` and replaced feature with managed pursue
+`12ff7516-5fc7-4cb6-a602-452897965dc6`, but detached worker startup timed out and
+readback confirmed no active Task Session. Direct `lf --task LOO-368 --mode batch
+pursue` then started Task-associated Flow `22608ecf-787b-4cbc-8e8d-4c322717e387`.
+Its implement Session `session_b4b784b6ae0b4592adaaaad93342caf9` is live and confirmed
+it is implementing the approved picker. The managed Flow remains idle; do not
+resume it concurrently. This direct Flow retains pursue's publication and human
+demo boundary. Managed/direct Flow reconciliation remains unresolved.

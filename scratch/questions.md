@@ -69,3 +69,11 @@ final naming, broader gate acceptance and the real capture-to-owner demo listed
 in [the design](capture-task.md#reviewable-implementation-2026-10-02). No external
 Tasks were filed to manufacture demo evidence, no publication occurred, and no
 Flow navigation or completion was performed.
+
+## Picker implementation choices (2026-10-03 UTC)
+
+The Wave menu uses the repository's selected skill, matching New Session. A saved
+skill that disappears remains selected until Jack chooses another; launching it
+surfaces the CLI's existing error instead of silently substituting a skill.
+Discovery refreshes whenever the picker opens. The existing repository identity
+resolver also keys the native preference. No Edit skill action was added.

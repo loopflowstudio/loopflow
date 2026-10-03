@@ -393,8 +393,8 @@ struct SessionsView: View {
                     if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
                     multiplexer.newShell()
                     navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onCaptureTask: captureTask)
-                    .frame(width: 264)
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
+                    .frame(width: 320)
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
@@ -619,7 +619,7 @@ struct SessionsView: View {
         model.observeActiveSessions()
     }
 
-    private func captureTask(_ launch: TaskCaptureLaunch) {
+    private func launchSessionSkill(_ launch: SessionSkillLaunch) {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
             worktreeLayout.select(launch.repoPath)

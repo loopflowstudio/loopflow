@@ -422,3 +422,35 @@ Task's builtin source to unblock demo discovery; that is not shipped packaging
 or proof that the released runtime contains the skill. Preserve authored pursue
 review boundaries. Jack's launch request does not constitute demo acceptance of
 unimplemented native picker behavior.
+
+## Native picker implementation (2026-10-03 UTC)
+
+The approved split row is implemented. `RegistryQuery.sessionSkills` consumes
+`lf list --json` in the selected repository and filters skill entries, including
+namespaced and repository-local definitions. No CLI catalog or prompt copy was
+added. The popover searches names/descriptions, supports arrow/Return selection
+and Escape dismissal, and exposes loading, empty and retryable failure states.
+Selection persists in native preferences by canonical repository identity.
+
+Delete — do not maintain: `TaskCaptureLaunch`, its fixed-skill argument and
+capture-only callback names are replaced by `SessionSkillLaunch` and the selected
+skill. Existing scope derivation and pane presentation remain on their original
+owners. General and Task conversations and the capture prompt are unchanged.
+Launch uses explicit `lf --mode interactive [--wave W] skill <name>`: review
+caught that bare skill names can collide with Flow names. Preference writes merge
+existing repository choices rather than overwriting another window's saved choices.
+
+The sidebar matches the prototype’s 320-point width so the default skill name
+fits without shrinking the labels. The row uses the accepted 34-point height,
+13-point matching labels, native weight
+between medium and semibold, 12-point skill padding, seven-point gap and raised
+12-point chevron. These are native implementations of the prototype; matching
+appearance is still a demo judgment.
+
+Remaining: configured native picker keyboard/popover interaction, appearance and
+provider launch, plus the previously specified capture-to-owner handoff. The
+headless build and production-control test do not establish those results. No
+provider or external Task was started to manufacture acceptance. The authored
+pursue demo boundary remains for review.
+
+Check: `scripts/test_desktop.sh --filter TaskCaptureTests` — Desktop built and six tests passed; configured `lf list --json` returned 58 skills (capture-tasks included, nine namespaced); `git diff --check` passed; native interaction/provider launch and visual acceptance remain for gate/demo.

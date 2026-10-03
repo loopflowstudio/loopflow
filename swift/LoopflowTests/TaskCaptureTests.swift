@@ -11,6 +11,55 @@ private final class CaptureBundleMarker: NSObject {}
 @Suite("TaskCapture without a display", .serialized)
 @MainActor
 struct TaskCaptureTests {
+    @Test("Skill selection persists per repository and only New Session launches")
+    func selectedSkill() throws {
+        let defaults = UserDefaults.standard
+        let key = "sessionSkillsByRepository"
+        let before = defaults.object(forKey: key)
+        defer { defaults.set(before, forKey: key) }
+        let repo = "/tmp/session-picker-" + UUID().uuidString
+        let other = repo + "-other"
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") }
+        let model = PodiumModel(query: query, repoPath: repo)
+        #expect(model.selectedSessionSkill == "capture-tasks")
+        var launches: [SessionSkillLaunch] = []
+        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-skill").button().tap()
+        #expect(launches.isEmpty)
+        model.selectSessionSkill("wave/session", repo: repo)
+        #expect(launches.isEmpty)
+        #expect(model.selectedSessionSkill == "wave/session")
+        let updated = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
+        try updated.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
+        #expect(launches.map { $0.arguments(lf: "lf") } == [["lf", "--mode", "interactive", "skill", "wave/session"]])
+        #expect(PodiumModel(query: query, repoPath: repo).selectedSessionSkill == "wave/session")
+        #expect(PodiumModel(query: query, repoPath: other).selectedSessionSkill == "capture-tasks")
+        model.selectSessionSkill("debug", repo: other)
+        #expect(model.selectedSessionSkill == "wave/session")
+        #expect(PodiumModel(query: query, repoPath: other).selectedSessionSkill == "debug")
+    }
+
+    @Test("Skill discovery includes namespaced skills and keeps failures explicit")
+    func discovery() async throws {
+        let json = """
+        [
+          {"name":"design","kind":"flow","source":"builtin","description":"Flow","invocation":"lf flow design"},
+          {"name":"wave/session","kind":"skill","source":"builtin","description":"Talk about a Wave","invocation":"lf skill wave/session"},
+          {"name":"design","kind":"skill","source":".lf/skills/design.md","description":"Local design","invocation":"lf skill design"}
+        ]
+        """
+        let query = RegistryQuery { _, cwd in
+            guard cwd == "/tmp/selected-repo" else { throw RegistryQueryError("Repository unavailable") }
+            return json
+        }
+        let skills = try await query.sessionSkills(cwd: "/tmp/selected-repo")
+        #expect(skills.map(\.name) == ["design", "wave/session"])
+        #expect(skills.first?.description == "Local design")
+        await #expect(throws: RegistryQueryError.self) { try await query.sessionSkills(cwd: "/missing") }
+        let encoded = try JSONEncoder().encode(skills)
+        #expect(try JSONDecoder().decode([DiscoveryEntry].self, from: encoded) == skills)
+    }
+
     @Test("Capture button uses repository or parent Wave without moving selection")
     func captureScopes() throws {
         let model = try makeModel()
@@ -23,19 +72,19 @@ struct TaskCaptureTests {
                 model.navigation.selection = selection
                 model.navigation.content = .details
             }
-            var captured: TaskCaptureLaunch?
-            let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onCaptureTask: { captured = $0 })
+            var captured: SessionSkillLaunch?
+            let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { captured = $0 })
             try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
             let launch = try #require(captured)
             let name = selection == nil || selection?.id == "missing" ? nil : wave.wave.name
-            #expect(launch == TaskCaptureLaunch(repoPath: "/src/loopflow", wave: name))
-            let expected = ["/path with spaces/lf", "--mode", "interactive"] + (name.map { ["--wave", $0] } ?? []) + ["capture-tasks"]
+            #expect(launch == SessionSkillLaunch(repoPath: "/src/loopflow", wave: name, skill: "capture-tasks"))
+            let expected = ["/path with spaces/lf", "--mode", "interactive"] + (name.map { ["--wave", $0] } ?? []) + ["skill", "capture-tasks"]
             #expect(launch.arguments(lf: "/path with spaces/lf") == expected)
             #expect(model.selection == selection)
         }
         model.select(.task(id: task.id))
         model.navigation.content = .overview
-        #expect(model.taskCaptureLaunch?.wave == nil)
+        #expect(model.sessionSkillLaunch?.wave == nil)
     }
 
     @Test("Explicit Wave capture retains its own destination")
@@ -44,16 +93,16 @@ struct TaskCaptureTests {
         let wave = try #require(model.visibleRoadmaps.first)
         let task = try #require(wave.tasks.items.first)
         model.select(.task(id: task.id))
-        let launch = model.taskCaptureLaunch(wave: .wave(id: wave.wave.id))
-        #expect(launch == TaskCaptureLaunch(repoPath: "/src/loopflow", wave: wave.wave.name))
+        let launch = model.sessionSkillLaunch(wave: .wave(id: wave.wave.id))
+        #expect(launch == SessionSkillLaunch(repoPath: "/src/loopflow", wave: wave.wave.name, skill: "capture-tasks"))
         #expect(model.selection == .task(id: task.id))
     }
 
     @Test("No repository means no capture entry point")
     func noRepository() throws {
         let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
-        #expect(model.taskCaptureLaunch == nil)
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onCaptureTask: { _ in })
+        #expect(model.sessionSkillLaunch == nil)
+        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { _ in })
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task")
         }
@@ -129,7 +178,7 @@ struct TaskCaptureTests {
         #expect(taskPanes.layout == taskLayout)
         for pane in retained { #expect(repoPanes.layout.pane(for: pane.id) == pane) }
         #expect(repoPanes.shellCommands[repoPanes.focusedPaneId] ==
-            TaskCaptureLaunch(repoPath: repo, wave: wave.wave.name).arguments(lf: helper.path))
+            SessionSkillLaunch(repoPath: repo, wave: wave.wave.name, skill: "capture-tasks").arguments(lf: helper.path))
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
         model.select(.task(id: task.id))
         #expect(!model.navigation.showsRetainedTerminals)

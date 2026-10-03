@@ -221,11 +221,16 @@ Rust `SessionRecord` projection; it owns no parallel queue.
 Every record carries a required `runId` for Run lookup, including unopened Ask
 and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
 Run. A prepared Run alone does not establish live provider activity.
-Click **New Session** below the repository name to explore an idea and capture
+Choose a skill beside **New Session** below the repository name. Search by name
+or description, use ↑/↓ and Return to select, or Escape to close. Selection is
+remembered per repository and does not launch anything. Click **New Session**
+to launch the selected skill in an interactive conversation.
+
+The default **capture-tasks** skill explores an idea and captures
 Tasks for their owning Waves, including in other repositories. From a Task, capture
 starts with its parent Wave in the repository checkout. The conversation remains
 available for more ideas; filing does not start workers or move existing panes.
-Wave rows also offer **New Session** in their context menu.
+Wave rows also offer **New Session** with the selected skill in their context menu.
 
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without

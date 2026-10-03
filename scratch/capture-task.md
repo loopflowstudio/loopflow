@@ -454,3 +454,5 @@ provider or external Task was started to manufacture acceptance. The authored
 pursue demo boundary remains for review.
 
 Check: `scripts/test_desktop.sh --filter TaskCaptureTests` — Desktop built and six tests passed; configured `lf list --json` returned 58 skills (capture-tasks included, nine namespaced); `git diff --check` passed; native interaction/provider launch and visual acceptance remain for gate/demo.
+
+Check: 2026-10-03 sync onto main — `scripts/test_desktop.sh --filter TaskCaptureTests` passed all six tests after reconciling Home-qualified workspaces with retained capture presentation; native demo remains pending.

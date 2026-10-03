@@ -147,15 +147,18 @@ struct TaskCaptureTests {
         model.select(.task(id: task.id))
         let repo = "/src/loopflow"
         let taskPath = task.reference.workspace?.worktree ?? "/src/task-checkout"
-        let registry = SessionsWorkspaceRegistry()
-        let repoPanes = registry.workspace(for: repo).multiplexer
+        let homeId = "capture-test-home"
+        let repoIdentity = WorkspaceIdentity(homeId: homeId, worktree: repo)
+        let taskIdentity = WorkspaceIdentity(homeId: homeId, worktree: taskPath)
+        let registry = SessionsWorkspaceRegistry(localHomeId: homeId)
+        let repoPanes = registry.workspace(for: repoIdentity).multiplexer
         repoPanes.newShell(command: ["retained-shell"])
         repoPanes.load(sessionId: "existing-conversation")
         let retained = repoPanes.layout.allPanes
-        let taskPanes = registry.workspace(for: taskPath).multiplexer
+        let taskPanes = registry.workspace(for: taskIdentity).multiplexer
         taskPanes.newShell(command: ["task-shell"])
         let taskLayout = taskPanes.layout
-        registry.layout(for: repo).select(taskPath)
+        registry.layout(for: repoIdentity).select(taskIdentity)
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry,
             query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
         let before = repoPanes.layout
@@ -166,7 +169,7 @@ struct TaskCaptureTests {
         #expect(taskPanes.layout == taskLayout)
         #expect(model.navigation.content == content)
         #expect(!model.navigation.showsRetainedTerminals)
-        #expect(registry.layout(for: repo).focusedPath == taskPath)
+        #expect(registry.layout(for: repoIdentity).focusedPath == taskIdentity)
 
         let helper = URL(fileURLWithPath: host).appendingPathComponent("lf")
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
@@ -174,7 +177,7 @@ struct TaskCaptureTests {
         #expect(model.selection == .task(id: task.id))
         #expect(model.navigation.showsRetainedTerminals)
         #expect(model.navigation.content == .terminals)
-        #expect(registry.layout(for: repo).focusedPath == repo)
+        #expect(registry.layout(for: repoIdentity).focusedPath == repoIdentity)
         #expect(taskPanes.layout == taskLayout)
         for pane in retained { #expect(repoPanes.layout.pane(for: pane.id) == pane) }
         #expect(repoPanes.shellCommands[repoPanes.focusedPaneId] ==

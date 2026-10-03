@@ -1,5 +1,21 @@
 # LOO-292 current dependencies and decisions
 
+- 2026-10-02: the latest supplied Task contract supersedes the coupled refresh
+  design below. Install updates published artifacts only; rebase updates
+  checkouts; scheduling defaults to login plus weekly. Published and installed
+  CLI are now 0.12.29. Preflight succeeds. The earlier missing-daemon diagnosis
+  is superseded: v0.12.29 retires the separate daemon. Jack reports successful
+  unbound `lf install` (“already installed”). Read-only app signatures and
+  CLI/app/helper hashes match the published receipt; retained history is readable.
+  Task-bound install attempts were refused, but no installation repair is
+  indicated. The unbound coordinator can run `lf install schedule` (weekly),
+  repeat it, and inspect launchd/logs; natural login/wake proof remains outstanding.
+  No new product decision is required. Preserve the saved Flow's separate
+  migration blocker without restart. No activation or release was attempted here.
+  Current evidence and remaining proof: [October 2 demo](demo-published-install-20261002.md).
+
+## Historical September 24 observations
+
 - 2026-09-24: latest published destination remains v0.12.19, before #1273.
   Its candidate preflight refusal is reproduced, not an environment hypothesis.
   A published release containing the startup repair and #1273 is required for

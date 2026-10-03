@@ -141,7 +141,6 @@ LEVELS_CONTENT = _require_content_path("homepage.levels")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
 WHY_CONTENT = _require_content_path("homepage.why")
 AUTONOMY_CONTENT = _require_content_path("homepage.autonomy")
-FEATURES_CONTENT = _require_content_path("homepage.features")
 INSTALL_CONTENT = _require_content_path("homepage.install")
 
 for required_key in (
@@ -157,7 +156,6 @@ for required_key in (
     "homepage.why.claim",
     "homepage.why.paragraphs",
     "homepage.autonomy.levels",
-    "homepage.features.items",
     "homepage.install.command_display",
     "homepage.install.command_copy",
 ):
@@ -873,6 +871,15 @@ def _section_head(content, heading_id: str) -> FT:
     )
 
 
+def _part(part) -> FT:
+    return Article(
+        H3(part["title"]),
+        P(part["description"], cls="feature-description"),
+        A(part["link_label"], Span(" →", aria_hidden="true"), href=part["href"]),
+        cls="home-part",
+    )
+
+
 def _levels_section() -> FT:
     return Section(
         Div(
@@ -880,12 +887,16 @@ def _levels_section() -> FT:
             Ol(
                 *[
                     Li(
-                        P(item["label"], cls="home-label"),
-                        H3(item["title"]),
-                        P(item["text"]),
-                        A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"])
-                        if "href" in item
-                        else None,
+                        Div(P(item["label"], cls="home-label"), H3(item["title"])),
+                        Div(
+                            P(item["text"]),
+                            Div(*[_part(part) for part in item["parts"]], cls="home-parts")
+                            if "parts" in item
+                            else None,
+                            A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"])
+                            if "href" in item
+                            else None,
+                        ),
                         cls="home-way",
                     )
                     for item in LEVELS_CONTENT["items"]
@@ -894,6 +905,7 @@ def _levels_section() -> FT:
             ),
             cls="home-wrap",
         ),
+        id="features",
         cls="home-levels-section",
         aria_labelledby="levels-heading",
     )
@@ -987,31 +999,6 @@ def _showcase_section():
         id="product",
         cls="home-showcase",
         aria_labelledby="product-heading",
-    )
-
-
-def FeaturesSection() -> FT:
-    return Section(
-        Div(
-            _section_head(FEATURES_CONTENT, "features-heading"),
-            Div(
-                *[
-                    Article(
-                        H3(item["title"]),
-                        P(item["description"], cls="feature-description"),
-                        Pre(item["sketch"].rstrip(), cls="feature-sketch", aria_hidden="true"),
-                        A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"]),
-                        cls="home-part",
-                    )
-                    for item in FEATURES_CONTENT["items"]
-                ],
-                cls="home-parts",
-            ),
-            cls="home-wrap",
-        ),
-        id="features",
-        cls="home-features",
-        aria_labelledby="features-heading",
     )
 
 
@@ -1124,7 +1111,6 @@ def build_homepage():
                 cls="home-why",
             ),
             _autonomy_section(),
-            FeaturesSection(),
             # Install — the app first; the command line tool rides along
             Section(
                 Div(

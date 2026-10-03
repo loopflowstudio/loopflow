@@ -49,30 +49,63 @@ homepage:
   levels:
     heading: "What we’re building."
     introduction: >-
-      One shared language, built in three parts, in order. Each part stays
-      good at its job as the next one arrives.
+      The same loopflows, tasks, and records in your terminal, on your Mac,
+      and in your team’s channel.
     items:
-      - label: "01 · Available"
+      - label: "In the terminal"
         title: "A command line for software process."
         text: >-
-          lf runs your agents and manages what they rely on: working
-          copies, checks, plans, credentials, and memory.
-        href: "#features"
-        link_label: "See the parts"
-      - label: "02 · In progress"
+          lf runs your agents and manages what they rely on: working copies,
+          checks, plans, credentials, and memory.
+        parts:
+          - title: "Skills & workflows"
+            description: >-
+              Instructions are Markdown and sequences are YAML, kept in your repository, or use the built-ins. Choose the steps, and which of them are conversations with you.
+            href: "/docs/authoring"
+            link_label: "Skills and workflows"
+          - title: "Memory & context"
+            description: >-
+              Reviewed notes carry goals and lessons into later sessions, so you do not rebuild context by hand.
+            href: "/docs/waves#nested-waves"
+            link_label: "Memory and context"
+          - title: "Worktrees & Git"
+            description: >-
+              Each task gets its own working copy, branch, and pull request. Return to a task and its work is where you left it.
+            href: "/architecture/delivery"
+            link_label: "Worktrees and delivery"
+          - title: "Checks & review"
+            description: >-
+              Checks run on each change. After a task’s pull request is handed off for landing, a failed required check can start a repair in the same task.
+            href: "/docs/authoring#loopflows"
+            link_label: "Review workflows"
+          - title: "Project plans"
+            description: >-
+              Linear holds the plan. Each task links to its working copy, sessions, and pull request.
+            href: "/docs/waves"
+            link_label: "Tasks and Waves"
+          - title: "Credential forwarding"
+            description: >-
+              Work on a remote machine over SSH with the Claude and Codex accounts you are signed into at home. Work that outlives the connection uses credentials on the remote machine.
+            href: "/docs/security#understand-account-authority-over-ssh"
+            link_label: "Remote access"
+      - label: "On your Mac"
         title: "A Mac app that organizes your sessions."
         text: >-
           Every conversation lands with the task it belongs to, beside its
           working copy and pull request, from the plan down to the terminal.
-          Free for macOS.
         href: "#product"
         link_label: "See it"
-      - label: "03 · Later"
+      - label: "With your team"
         title: "A shared room for people working with agents."
-        text: "We’ll have more to say about this later."
+        text: >-
+          Talk to a Wave from a Discord channel. Each message starts a
+          conversation with that Wave’s goal and memory, and the answer comes
+          back to the channel.
+        href: "/docs/waves#discord-bridge"
+        link_label: "Discord bridge"
 
   showcase:
-    label: "On the desktop"
+    label: "On your Mac"
     heading: "Your sessions, organized around the work."
     introduction: >-
       Loopflow for Mac files each conversation with the task it belongs to.
@@ -157,73 +190,6 @@ homepage:
           - {name: "kickoff", you: false}
           - {name: "implement", you: false}
           - {name: "gate", you: false}
-
-  features:
-    label: "In the terminal"
-    heading: "Parts that play together in harmony."
-    introduction: >-
-      Many people have built these parts on their own. Loopflow does all of
-      them, and builds on them working together.
-    items:
-      - title: "Skills & workflows"
-        description: >-
-          Instructions are Markdown and sequences are YAML, kept in your
-          repository, or use the built-ins. Choose the steps, and which of
-          them are conversations with you.
-        sketch: |
-          .lf/skills/design.md      what a good design note contains
-          .lf/flows/feature.yaml    the steps, and where you come in
-        href: "/docs/authoring"
-        link_label: "Skills and workflows"
-      - title: "Memory & context"
-        description: >-
-          Reviewed notes carry goals and lessons into later sessions, so you
-          do not rebuild context by hand.
-        sketch: |
-          wave/product/MEMORY.md
-          + Rate limits are per organization.
-        href: "/docs/waves#nested-waves"
-        link_label: "Memory and context"
-      - title: "Worktrees & Git"
-        description: >-
-          Each task gets its own working copy, branch, and pull request.
-          Return to a task and its work is where you left it.
-        sketch: |
-          main
-           ├─ rate-limit   PR open
-           └─ csv-export   PR open
-        href: "/architecture/delivery"
-        link_label: "Worktrees and delivery"
-      - title: "Checks & review"
-        description: >-
-          Checks run on each change. After a task’s pull request is handed
-          off for landing, a failed required check can start a repair in the
-          same task.
-        sketch: |
-          ✓ fmt   ✓ lint   ✗ test
-                  └─ back to rate-limit
-        href: "/docs/authoring#loopflows"
-        link_label: "Review workflows"
-      - title: "Project plans"
-        description: >-
-          Linear holds the plan. Each task links to its working copy,
-          sessions, and pull request.
-        sketch: |
-          LOO-293 ─ working copy
-                  ─ sessions
-                  ─ pull request
-        href: "/docs/waves"
-        link_label: "Tasks and Waves"
-      - title: "Credential forwarding"
-        description: >-
-          Work on a remote machine over SSH with the Claude and Codex accounts
-          you are signed into at home. Work that outlives the connection uses
-          credentials on the remote machine.
-        sketch: |
-          laptop ──ssh──▶ build box
-          saved logins stay on the laptop
-        href: "/docs/security#understand-account-authority-over-ssh"
-        link_label: "Remote access"
 
   install:
     label: "Install"

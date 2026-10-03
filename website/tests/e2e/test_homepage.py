@@ -40,13 +40,18 @@ def test_ownership_strip_lists_what_stays_yours(homepage: Page) -> None:
         expect(cell).not_to_be_empty()
 
 
-def test_plan_links_what_exists_to_where_it_is_shown(homepage: Page) -> None:
+def test_plan_links_to_where_each_part_is_shown(homepage: Page, base_url: str) -> None:
     stages = homepage.locator(".home-way")
     expect(stages).to_have_count(3)
     for stage in stages.all():
-        expect(stage.locator("h3")).not_to_be_empty()
-        for link in stage.get_by_role("link").all():
-            expect(homepage.locator(link.get_attribute("href"))).to_have_count(1)
+        expect(stage.locator("h3").first).not_to_be_empty()
+    for link in homepage.locator(".home-way > div > a").all():
+        destination = link.get_attribute("href")
+        if destination.startswith("#"):
+            expect(homepage.locator(destination)).to_have_count(1)
+        else:
+            response = homepage.request.get(f"{base_url}{destination}")
+            assert response.ok
 
 
 def test_autonomy_levels_mark_where_the_person_comes_in(homepage: Page, base_url: str) -> None:

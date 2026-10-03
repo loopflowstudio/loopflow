@@ -40,7 +40,9 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
-            crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
+            let repo = find_repo_root()?;
+            crate::ops::task::reconcile_checkout_pr(&repo)?;
+            crate::ops::pr_landing::reconcile_repository(&repo, &progress)?;
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),

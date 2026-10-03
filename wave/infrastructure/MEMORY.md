@@ -99,6 +99,69 @@ remain pending until their owners settle. After release, repeat default/source,
 nested Flow/agent and disposable-Home acceptance, then recheck live ownership
 before retiring the remaining stores. LOO-342 remains open.
 
+### Release and acceptance recovery (2026-10-02)
+
+Jack Heart authorized publishing the patch, installation, and the remaining
+one-Home acceptance. [PR #1406](https://github.com/loopflowstudio/loopflow/pull/1406)
+repaired the publisher's installed-CLI command mismatch: staging and finalization
+use `lf release publish`. Six publisher tests and hosted checks passed, and
+v0.12.30 publication completed through `lf release run patch`.
+
+Installed upgrade refused v0.12.30. Its Task-checkout guard opened the old shared
+schema before migration; an isolated preflight also proved the published binary
+still embedded the uncut `remove_ask` draft. Main's #1402 removes the unrelated
+Task guard. The v0.12.31 release batch includes `remove_ask` and its candidate tree
+has no SQL drafts. Publication is not installation acceptance; v0.12.29 remained
+selected after both refused install attempts. Do not manually advance the Home
+or promote a source build to work around these failures.
+
+The v0.12.31 queued run
+[37072469684](https://github.com/loopflowstudio/loopflow/actions/runs/37072469684)
+also exposed missing terminal outcome history after capture completion. The
+recorder queued terminal observations with best-effort telemetry and drained for
+only 250 ms. [PR #1409](https://github.com/loopflowstudio/loopflow/pull/1409), now
+merged, persists terminal outcomes synchronously through the existing Session
+owner, preserves the original receipt on retry, and leaves stream telemetry
+asynchronous. Prepared captures without an admitted Session remain valid. The
+regression disables the recorder, completes twice, removes artifacts, then reads
+the outcome from SQLite; 28 Session-record tests, the scorecard regression and
+all-target Clippy passed, with the regression passing again after sync.
+
+The first v0.12.31 candidate built successfully, but artifact download timed out.
+Re-entry selected newer merged fixes under the same version through release
+[PR #1411](https://github.com/loopflowstudio/loopflow/pull/1411). An exact candidate
+ref creation race also recovered through re-entry, without manually deleting a
+ref or generated worktree. [v0.12.31](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.31)
+then published from `a278d6bc1bd4373f78f27027b8ae249100ef14d3` after
+[workflow 37077794913](https://github.com/loopflowstudio/loopflow/actions/runs/37077794913)
+and signed preparation passed. `lf install` successfully migrated the main Home
+from 0.12.29 through 0.12.31; all 33 executable references resolved in preflight.
+The CLI reports 0.12.31 and promotion installed the matching macOS app.
+
+Configured checks passed on the installed release:
+
+- Installed and current validation-only source CLIs return the same main Home
+  identity, including with a stale `LF_BIN` value.
+- A fresh explicit `LF_HOME` remains empty on initial and repeated reads, and
+  the source CLI reads that same experiment without importing main's data.
+- Installed and source CLIs each complete `sync --plan` as a nested Flow
+  operation on both main and experimental Homes. Both experimental child
+  success receipts are in the experimental database.
+- After an intentional schema change confined to the experiment, the valid
+  `lf monitor list --json` command refuses it, explains disposal, and leaves
+  the schema unchanged without a backup or repair. An earlier probe used the
+  retired `exec` command and was superseded by this valid-command check.
+- An agent-issued `lf home id` uses the published executable, succeeds on main,
+  and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
+  issue, checkout, PR ids and saved Flow invocation match the pre-install read.
+
+Final `lsof` inspection still found 15 processes holding the four retained
+development stores. `lf monitor prune --dry-run --json` reported no registered
+orphan providers; its dead receipt cleanup cannot retire these live stores.
+No legacy process was signaled. The seven archived snapshots remain preserved
+at the retirement path above. Installed routing acceptance is now demonstrated;
+retirement of the four live stores remains the reason LOO-342 is open.
+
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 
 Jack Heart requested an audit of every `LF_*` variable against the policy it

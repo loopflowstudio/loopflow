@@ -21,7 +21,8 @@ pub fn execute_flow_command(
     item: &FlowCommand,
     progress: &impl Progress,
 ) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
-    let argv = crate::lf::navigation::normalize_args(item.argv());
+    let argv = crate::lf::navigation::normalize_args(item.argv())
+        .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
     let cli = Cli::try_parse_from(argv)
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 

@@ -173,7 +173,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         vec!["lf", "skill", "list"],
         vec!["lf", "skill", "--", "list"],
     ] {
-        let args = normalize_args(args.into_iter().map(str::to_string).collect());
+        let args = normalize_args(args.into_iter().map(str::to_string).collect()).unwrap();
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(matches!(cli.command,
             Some(Commands::Skill { cmd: SkillCommand::External(args) }) if args == ["list"]));
@@ -342,13 +342,26 @@ fn skill_catalog_preserves_namespace_discovery() {
 }
 
 #[test]
-fn descendant_names_remain_available_for_definitions() {
+fn ambiguous_commands_never_fall_back_to_installed_definitions() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for args in [["complete", "--help"], ["help", "complete"]] {
-        let help = success(run(repo.path(), home.path(), &args));
-        assert!(String::from_utf8_lossy(&help).contains("Skill complete body."));
+    for args in [
+        &["complete"][..],
+        &["complete", "--help"],
+        &["help", "complete"],
+    ] {
+        let result = run(repo.path(), home.path(), args);
+        assert_eq!(result.status.code(), Some(2));
+        let message = String::from_utf8_lossy(&result.stderr);
+        assert!(message.contains("lf session complete"), "{message}");
+        assert!(message.contains("lf task complete"), "{message}");
     }
+    let selected = success(run(
+        repo.path(),
+        home.path(),
+        &["run", "complete", "--help"],
+    ));
+    assert!(String::from_utf8_lossy(&selected).contains("Skill complete body."));
     assert!(!home.path().join(".lf").exists());
 }
 
@@ -421,7 +434,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let ConcreteStep::Command(captured) = &restored else {
         panic!("expected saved command");
     };
-    let canonical = normalize_args(captured.item.argv());
+    let canonical = normalize_args(captured.item.argv()).unwrap();
     assert_eq!(canonical, step.item.argv());
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
@@ -444,15 +457,15 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
 }
 
 #[test]
-fn literal_paths_preserve_leaf_and_passthrough_arguments() {
+fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
-        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect());
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
         normalized(&["lf", "account", "rou"]),
-        ["lf", "account", "rou"]
+        ["lf", "account", "route"]
     );
     assert_eq!(
-        normalized(&["lf", "pr", "land", "--next", "show"]),
+        normalized(&["lf", "land", "--next", "show"]),
         ["lf", "pr", "land", "--next", "show"]
     );
     assert_eq!(
@@ -460,7 +473,7 @@ fn literal_paths_preserve_leaf_and_passthrough_arguments() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "home", "ssh", "somewhere", "show", "--help"]),
+        normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
         ["lf", "home", "ssh", "somewhere", "show", "--help"]
     );
     assert_eq!(
@@ -485,19 +498,42 @@ fn help_preserves_location_without_promoting_query_filters() {
             None,
         ),
     ] {
-        let cli = Cli::try_parse_from(normalize_args(args.into_iter().map(String::from).collect()))
-            .unwrap();
+        let cli = Cli::try_parse_from(
+            normalize_args(args.into_iter().map(String::from).collect()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(cli.task.as_deref(), task);
         assert!(matches!(cli.command, Some(Commands::Help { .. })));
     }
 }
 
 #[test]
-fn command_lookup_requires_literal_immediate_children() {
+fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
+    let tree = clap::Command::new("lf")
+        .subcommand(
+            clap::Command::new("task")
+                .subcommand(clap::Command::new("pr").subcommand(clap::Command::new("land"))),
+        )
+        .subcommand(clap::Command::new("repo").subcommand(clap::Command::new("pr")))
+        .subcommand(clap::Command::new("monitor"))
+        .subcommand(clap::Command::new("landing"))
+        .subcommand(clap::Command::new("__internal").hide(true))
+        .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
+    let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
+    assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
+    assert!(resolve("pr").is_err());
+    assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
+    assert_eq!(resolve("__internal").unwrap().unwrap(), ["__internal"]);
+    assert!(resolve("__int").unwrap().is_none());
+    assert!(resolve("p").is_err());
+    let collision = tree.clone().subcommand(clap::Command::new("money"));
+    assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
+    assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+}
+
+#[test]
+fn git_commands_keep_their_root_ownership() {
     let tree = loopflow::lf::navigation::command_tree();
-    for name in ["land", "mon", "syn", "rou", "id"] {
-        assert!(loopflow::lf::navigation::resolve_path(&tree, &[name.into()]).is_err());
-    }
     for name in ["pr", "wt", "sync", "commit"] {
         assert!(tree.find_subcommand(name).is_some());
         assert!(tree
@@ -529,7 +565,7 @@ fn account_has_one_owner_without_predecessor_aliases() {
 }
 
 #[test]
-fn repository_commands_require_their_literal_owner() {
+fn repository_commands_have_one_owner_and_derived_shorthand() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
@@ -542,9 +578,10 @@ fn repository_commands_require_their_literal_owner() {
         let mut canonical = path.clone();
         canonical.push("--help");
         let help = success(run(repo.path(), home.path(), &canonical));
-        assert!(!run(repo.path(), home.path(), &[leaf, "--help"])
-            .status
-            .success());
+        assert_eq!(
+            success(run(repo.path(), home.path(), &[leaf, "--help"])),
+            help
+        );
         assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
         let command = tree
             .find_subcommand("repo")

@@ -84,7 +84,7 @@ worktrees, placement and execution history.
   Sessions retain their own feedback and completion contract.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
-- Update an authorized plan through `lf wave update-plan --wave <wave> --plan
+- Update an authorized plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `flow` and `krs`; for example
@@ -215,5 +215,5 @@ Missing checkouts recover committed state only. Live conversations retain their
 placement until an idle driver boundary permits adoption of the resident workspace.
 
 `lf wt create <name> --resident` creates or reuses an independent document workspace.
-Ordinary Task delivery retains its lifecycle and authority. Memory updates need no
-PR or distribution schedule.
+PR landing clears scratch in non-resident workspaces, whether or not a Task is
+associated. Memory updates need no PR or distribution schedule.

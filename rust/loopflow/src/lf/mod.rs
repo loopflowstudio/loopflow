@@ -1611,7 +1611,8 @@ mod tests {
             ["lf", "wt", "create", "csv-export"]
                 .map(String::from)
                 .to_vec(),
-        );
+        )
+        .unwrap();
         assert_eq!(literal, ["lf", "wt", "create", "csv-export"]);
         assert!(Cli::try_parse_from(literal).is_ok());
         assert!(command

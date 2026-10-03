@@ -28,7 +28,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
-| Run on another machine | `lf home ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
+| Run on another machine | `lf ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -102,8 +102,8 @@ Start from a Linear task; Loopflow creates and retains its worktree.
 ```bash
 lf task create --run --wave <wave> --title "add OAuth login"
 lf task status <issue-id>
-lf task comment <issue-id> "support passkeys too"
-lf task wait <issue-id> --until terminal
+lf comment <issue-id> "support passkeys too"
+lf wait <issue-id> --until terminal
 ```
 
 ### Skills chain
@@ -173,11 +173,11 @@ and Wave goals.
 ```bash
 lf pr open      # push + create or update a draft, then open its page
 lf pr publish   # push + create or update PR and mark ready (no browser)
-lf pr submit    # prepare the exact head; you click merge
-lf pr arm       # arm exact-head auto-merge and return
-lf pr land      # request auto-merge, record delivery, and return
+lf submit    # prepare the exact head; you click merge
+lf arm       # arm exact-head auto-merge and return
+lf land      # request auto-merge, record delivery, and return
 lf pr reconcile # check recorded landings once and settle merges
-lf repo ci watch     # watch PR checks; start a ci-fix when a landing fails
+lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -190,14 +190,14 @@ branch and Task PR record when present; they do not require a live Task worker.
 ```bash
 lf --wave shipper wave/operate "Review the release blockers"
 lf wave status shipper
-lf monitor ps --json
+lf ps --json
 ```
 
 Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave/operate` invocation reviews the plan and takes a bounded next action.
-Tasks own implementation in stable worktrees; `lf pr land` hands off delivery and
-`lf pr reconcile` settles verified merges; `lf repo ci watch` repairs failed CI
+Tasks own implementation in stable worktrees; `lf land` hands off delivery and
+`lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
@@ -213,21 +213,21 @@ planning, process, journal, and conversation history; its SSH route can change.
 Bootstrap the remote identity once:
 
 ```bash
-lf home ssh jack@mini.local home id --json
-lf home observe <home-id> ssh://jack@mini.local
+lf ssh jack@mini.local home id --json
+lf observe <home-id> ssh://jack@mini.local
 lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
-lf home ssh <home-id> --wave shipper wave/operate
+lf ssh <home-id> --wave shipper wave/operate
 ```
 
 The target Home proves its identity before running the command and keeps the
 resulting execution locally.
 
-Reads follow the same rule: `lf monitor list`, `lf monitor usage`, `lf wave list`, and `lf wave status`
-read the executing Home. Prefix the command with `lf home ssh <home-id>` to read
+Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
+read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate execution records.
 
-Foreground `lf home ssh` commands can choose from subscription accounts installed on
+Foreground `lf ssh` commands can choose from subscription accounts installed on
 the origin and target. A detached process sheds forwarded credentials
 and uses authority installed on its own machine. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).

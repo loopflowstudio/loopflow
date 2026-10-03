@@ -54,7 +54,7 @@ once the direction is ready and the user has agreed.
 
 This conversation grants no authority beyond the user's existing authorization.
 Inspection is read-only. Ask before pushing, merging, external messages or
-destructive operations unless already authorized. Do not run `lf session ready`
+destructive operations unless already authorized. Do not run `lf ready`
 or `lf session complete` for this conversation: nothing waits on it.
 
 ## Resident workspace and document publication
@@ -93,5 +93,5 @@ Missing checkouts recover committed state only. Live conversations retain their
 placement until an idle driver boundary permits adoption of the resident workspace.
 
 `lf wt create <name> --resident` creates or reuses an independent document workspace.
-Ordinary Task delivery retains its lifecycle and authority. Memory updates need no
-PR or distribution schedule.
+PR landing clears scratch in non-resident workspaces, whether or not a Task is
+associated. Memory updates need no PR or distribution schedule.

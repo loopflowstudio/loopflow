@@ -14,10 +14,10 @@ lf implement
 Put unattended or untrusted work behind an OS boundary you control:
 
 ```bash
-lf home ssh build-vm implement
+lf ssh build-vm implement
 ```
 
-`lf home ssh` connects to an existing environment. It does not copy the repository
+`lf ssh` connects to an existing environment. It does not copy the repository
 or create a sandbox around the target. The remote OS user, container, or VM
 defines which files, processes, networks, and credentials the work can reach.
 
@@ -74,7 +74,7 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
+is ready to ship. `lf submit` leaves the exact-head merge to a person;
 `land` requests GitHub auto-merge. GitHub remains authoritative for
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
@@ -83,19 +83,19 @@ configured publisher workflow and credentials.
 
 ### Do I have to be logged in on the remote machine?
 
-No—not for foreground work. The machine where you type `lf home ssh` is the
+No—not for foreground work. The machine where you type `lf ssh` is the
 **origin**; the named machine is the **target**. The target `lf` can choose from
 subscription accounts installed on either one:
 
 ```bash
 # Offer the origin's accounts and include accounts installed on the target.
-lf home ssh my-company implement
+lf ssh my-company implement
 
 # Prefer an account installed on the origin.
-lf home ssh --account jack@personal my-company implement
+lf ssh --account jack@personal my-company implement
 
 # Select from the target lf's combined local and forwarded catalog.
-lf home ssh my-company --account jack@company implement
+lf ssh my-company --account jack@company implement
 ```
 
 The target does not need its own Claude or Codex login for the first two
@@ -134,7 +134,7 @@ account service.
 
 ### What crosses SSH for a subscription account
 
-`lf home ssh` does not copy an account home, refresh credential, browser profile,
+`lf ssh` does not copy an account home, refresh credential, browser profile,
 or database row. The origin runs a short-lived broker for the foreground SSH
 process:
 
@@ -161,7 +161,7 @@ temporary sockets are removed, and a surviving child cannot request another
 token. Broker failure, an expired handle, a missing credential, an incompatible
 remote `lf`, and a failed Home identity check all fail closed.
 
-Nested `lf home ssh` is rejected so borrowed authority cannot cross a second SSH
+Nested `lf ssh` is rejected so borrowed authority cannot cross a second SSH
 hop. Obvious detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
 and `--detach` are rejected when they would retain borrowed authority. Durable
 Loopflow spawns scrub forwarded handles and singleton credentials before the
@@ -170,7 +170,7 @@ child starts.
 ### What crosses SSH for other credentials
 
 GitHub, Linear, and OpenCode Zen each have one effective credential for an
-launch rather than a routable catalog. `lf home ssh` forwards the origin
+launch rather than a routable catalog. `lf ssh` forwards the origin
 credential automatically when one is available. If the origin does not provide
 one, the target can use its native credential.
 
@@ -184,13 +184,13 @@ local file fallback.
 SSH agent forwarding remains off unless requested:
 
 ```bash
-lf home ssh --forward-agent build-vm implement
+lf ssh --forward-agent build-vm implement
 ```
 
 Forward one Doppler secret by name:
 
 ```bash
-lf home ssh --secret SENTRY_AUTH_TOKEN build-vm release check
+lf ssh --secret SENTRY_AUTH_TOKEN build-vm release check
 ```
 
 The Doppler CLI resolves the value on the origin. Only the requested value
@@ -208,14 +208,14 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Home store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Home. Reading another Home with `lf home ssh <home-id> monitor list` executes the read on
+Home. Reading another Home with `lf ssh <home-id> monitor list` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
 `lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
-or Home HTTP service is required. Use `lf home ssh` for remote operation.
+or Home HTTP service is required. Use `lf ssh` for remote operation.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

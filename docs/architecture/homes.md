@@ -7,21 +7,21 @@ Its SSH route may change without changing its identity.
 ```bash
 lf home id
 lf wave place product <home-id>
-lf home ssh <home-id> --wave product wave/operate
+lf ssh <home-id> --wave product wave/operate
 ```
 
 ## Local by default
 
 ```bash
-lf monitor list                                # Execs recorded on this Home
-lf monitor ps --json                           # OS-live processes on this Home
+lf mon list                                # Execs recorded on this Home
+lf ps --json                           # OS-live processes on this Home
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf home ssh build-home mon list   # run the same reader on build-home
-lf home ssh build-home --wave product wave/operate
+lf ssh build-home mon list   # run the same reader on build-home
+lf ssh build-home --wave product wave/operate
 ```
 
-`lf home ssh` is transport, not a second API. The target runs its own `lf`, verifies
+`lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
 its Home identity, resolves its own files and store, and returns the result.
 There is no implicit fan-out and no central execution database.
 
@@ -63,16 +63,16 @@ no signal authority.
 ## Observe processes
 
 ```bash
-lf monitor ps --json
-lf monitor top
-lf monitor prune --dry-run
+lf ps --json
+lf top
+lf mon prune --dry-run
 ```
 
-The outer command journal records command receipts. `lf monitor ps` and `lf monitor top` join
+The outer command journal records command receipts. `lf ps` and `lf top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf monitor prune` removes dead command receipts and may reap only registered orphan
+`lf mon prune` removes dead command receipts and may reap only registered orphan
 OpenCode process groups whose ownership is known. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
@@ -103,7 +103,7 @@ and SQLite commit boundary so retry can finish verified cleanup after a crash.
 ## One main Home
 
 ```bash
-lf home install                            # update the installed release and main Home
+lf install                            # update the installed release and main Home
 uv run python scripts/install.py local # build an experimental CLI
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
@@ -134,7 +134,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 
 - Home identity is stable; network route is replaceable.
 - Commands and read surfaces act locally unless explicitly routed with
-  `lf home ssh`.
+  `lf ssh`.
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.

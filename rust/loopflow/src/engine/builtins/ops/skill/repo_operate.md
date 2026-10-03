@@ -204,7 +204,7 @@ Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
-Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
+Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
 The complete content object has `metric_targets`, a nonempty `flow` string and
 `krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
@@ -247,7 +247,7 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task checkout <issue> --json
+lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf --task <issue> flow start <chosen-flow>
 ```
@@ -282,11 +282,11 @@ Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
 Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
-`lf home ssh <home-id> --wave <wave> wave/operate` at its placement. `lf home ssh` runs the target's `lf`;
+`lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf task checkout <issue> --json`.
+Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's
@@ -313,10 +313,10 @@ An explicitly selected Flow governs even when it differs from that default.
 
 ## Diagnose execution and auth
 
-When work seems stuck, run `lf monitor top` before guessing; redirected output gives one
-frame. `lf monitor ps --json` is the parseable snapshot. These show OS-live call trees,
+When work seems stuck, run `lf top` before guessing; redirected output gives one
+frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
-Time alone never means dead. `lf monitor prune --dry-run` shows cleanup candidates;
+Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
@@ -365,5 +365,5 @@ Missing checkouts recover committed state only. Live conversations retain their
 placement until an idle driver boundary permits adoption of the resident workspace.
 
 `lf wt create <name> --resident` creates or reuses an independent document workspace.
-Ordinary Task delivery retains its lifecycle and authority. Memory updates need no
-PR or distribution schedule.
+PR landing clears scratch in non-resident workspaces, whether or not a Task is
+associated. Memory updates need no PR or distribution schedule.

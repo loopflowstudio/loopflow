@@ -115,12 +115,12 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
             return Ok(entries);
         }
     }
-    let command = resolve_path(tree, path)?;
+    let (command, canonical) = resolve_path(tree, path)?;
     for child in command
         .get_subcommands()
         .filter(|child| !child.is_hide_set())
     {
-        let mut child_path = path.to_vec();
+        let mut child_path = canonical.clone();
         child_path.push(child.get_name().to_string());
         entries.push(Entry {
             name: child.get_name().to_string(),

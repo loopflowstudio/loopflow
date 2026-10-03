@@ -24,7 +24,7 @@ def main() -> None:
         "lf monitor --json",
         "```",
         "",
-        "Generated from the compiled Clap tree. Command paths are literal. See",
+        "Generated from the compiled Clap tree. Canonical command paths are shown; unique shortcuts also resolve. See",
         "[the workflow guide](lf.md) for examples. Hidden commands",
         "are internal process boundaries and are marked below.",
         "",

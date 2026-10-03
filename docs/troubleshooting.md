@@ -6,10 +6,10 @@ written.
 ## Doctor reports a failure
 
 ```bash
-lf home doctor
-lf wave cron list
-lf wave cron history --wave infrastructure --flow telemetry-daily --days 2
-lf wave cron sync --wave infrastructure
+lf doctor
+lf cron list
+lf cron history --wave infrastructure --flow telemetry-daily --days 2
+lf cron sync --wave infrastructure
 ```
 
 Doctor checks installation selection, store compatibility, Exec integrity and
@@ -21,8 +21,8 @@ successful completion of its Flow or Skill.
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
 installed before the stable entry gate may pin an inactive retained binary and
 fail before recording a receipt. After installing a release with this repair,
-run `lf wave cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
-use `lf wave cron sync --repo` for repository Task checks. New scheduled invocations
+run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
+use `lf cron sync --repo` for repository Task checks. New scheduled invocations
 follow the selected machine installation across promotions. Existing Sessions
 retain their runtime ownership.
 
@@ -32,8 +32,8 @@ selection.
 
 Binary freshness compares against locally cached `origin/main`, without fetching.
 That reference may be stale, and merged source may be newer than the latest
-published release. `lf home install` installs that published release; Doctor
-itself home installs nothing.
+published release. `lf install` installs that published release; Doctor
+itself installs nothing.
 
 ## A Wave has no active conversation
 
@@ -43,7 +43,7 @@ or inspect its cron schedule:
 ```bash
 lf wave status <wave> --json
 lf --wave <wave> wave/operate
-lf wave cron list
+lf cron list
 ```
 
 A quiet Wave needs no service restart.
@@ -57,7 +57,7 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf monitor usage --days 0 --task INF-123 --json
+lf usage --days 0 --task INF-123 --json
 lf session list
 ```
 
@@ -73,7 +73,7 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
-Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
+Task status and `lf mon list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
@@ -83,8 +83,8 @@ Steer, or resume a stopped process through the same Task Work:
 ```bash
 lf session connect <session-id>
 lf session complete <session-id>       # return saved review feedback
-lf task comment INF-123 "address the latest feedback"
-lf task interrupt INF-123
+lf comment INF-123 "address the latest feedback"
+lf interrupt INF-123
 lf --task INF-123 flow start
 lf --task INF-123 flow start --reason "provider credentials repaired"
 ```

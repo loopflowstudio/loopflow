@@ -28,13 +28,13 @@ print, and keeps no separate copy.
 ```bash
 lf roadmap                             # tasks in this project, sorted by what they need
 lf roadmap --all                       # every project on this computer
-lf monitor top                                 # what is running right now
-lf monitor usage --days 0 --wave infra                   # the record of each time the AI was started
-lf home ssh <home-id> roadmap               # ask another computer the same question
+lf top                                 # what is running right now
+lf usage --days 0 --wave infra                   # the record of each time the AI was started
+lf ssh <home-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine
-at once; `lf home ssh` is how you ask a different one.
+at once; `lf ssh` is how you ask a different one.
 
 ## See everything
 
@@ -43,7 +43,7 @@ lf wave list                  # every registered Wave and its placement
 lf wave status <wave>       # one wave's Project → Task hierarchy, execution and conditions
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
-lf monitor activity            # what changed, newest first, with durable evidence
+lf activity            # what changed, newest first, with durable evidence
 ```
 
 `lf wave status` and every `lf roadmap --json` Wave row carry the same
@@ -58,9 +58,9 @@ on the Linear-backed plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of
 unresolved conversations. Add `--all` for the machine-wide projection.
 
-`lf monitor activity` orders durable Work creation, execution, Task PR, and Steer facts.
+`lf activity` orders durable Work creation, execution, Task PR, and Steer facts.
 Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
-It is history, not another live process model: `lf monitor ps` owns current motion.
+It is history, not another live process model: `lf ps` owns current motion.
 
 ## Drill down
 
@@ -70,8 +70,8 @@ lf session list --orphan --json          # Sessions without Task association
 lf session list --interactive false --history --task INF-123 --json
 lf session history SESSION --json
 lf session connect SESSION
-lf monitor show --task INF-123 --json
-lf monitor show run_ab12 --final
+lf mon show --task INF-123 --json
+lf mon show run_ab12 --final
 lf replay run_ab12
 ```
 
@@ -84,7 +84,7 @@ successful provider turn, the command's outcome and the Flow's progress can
 differ: the engine can finish after its driver dies, and a completed command
 can leave a Flow parked at review.
 
-`lf monitor show` and `lf replay` retain their historical selectors during the conversion.
+`lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
 [cutover status](architecture-reference.md#cutover-status) and the
 [CLI reference](lf-reference.md#monitor-history-and-live-activity). Replay uses the captured prompt,
@@ -97,24 +97,24 @@ that a provider is still running; inspect exact OS evidence separately.
 ## Health and usage
 
 ```bash
-lf monitor ps              # one OS-live process and call-tree snapshot
-lf monitor top             # continuously refresh elapsed time and process state
-lf monitor prune --dry-run # inspect safely removable process state
-lf monitor usage --days 30 # recorded provider usage
-lf monitor usage --task INF-123 # the same evidence drilled to one Task
-lf monitor usage --json    # current usage wire, newest first
-lf repo tokens          # lines and tokens per directory; --days walks history
-lf repo ci --since 7d   # how failed CI was detected, repaired, and landed
-lf repo ci watch --status # the CI watcher: live or not, last poll, what it started
-lf home doctor          # check installation, Exec integrity and scheduled receipts
+lf ps              # one OS-live process and call-tree snapshot
+lf top             # continuously refresh elapsed time and process state
+lf mon prune --dry-run # inspect safely removable process state
+lf usage --days 30 # recorded provider usage
+lf usage --task INF-123 # the same evidence drilled to one Task
+lf usage --json    # current usage wire, newest first
+lf tokens          # lines and tokens per directory; --days walks history
+lf ci --since 7d   # how failed CI was detected, repaired, and landed
+lf ci watch --status # the CI watcher: live or not, last poll, what it started
+lf doctor          # check installation, Exec integrity and scheduled receipts
 ```
 
-`lf monitor top` is the first move when work feels slow — live machine-health evidence.
-Use `lf monitor ps --json` when another tool or agent needs one stable, parseable frame.
+`lf top` is the first move when work feels slow — live machine-health evidence.
+Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
-`lf monitor prune --dry-run` before cleanup. Plain `lf monitor prune` removes stale Exec
+`lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Exec
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
-`lf repo ci` reads the local ledger, not GitHub: it reports how
+`lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 
 ## Steer
@@ -124,8 +124,8 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
 lf --wave <wave> : "Review this plan"          # start a conversation
-lf task comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
-lf task interrupt INF-123                     # end this turn and re-read direction
+lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
+lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --needs-me --json             # conversations waiting for review or reply
 lf session connect <session-id> --json           # recover one exact conversation
 ```
@@ -149,7 +149,7 @@ through its authored edge. Pane close and provider exit choose nothing.
 ## Inspect and resume
 
 ```bash
-lf monitor top                                 # live Loopflow process activity
+lf top                                 # live Loopflow process activity
 lf wave status shipper                 # work and its current conditions
 lf session connect <id>                   # start or resume the selected conversation
 ```
@@ -159,7 +159,7 @@ Task workspace shells run directly in the app's terminal.
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
-Use `lf task comment` for durable Task direction,
+Use `lf comment` for durable Task direction,
 and `lf --task` for another agent perspective. Author interactive review nodes
 in the Flow when a Task needs its own review conversation.
 

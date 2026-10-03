@@ -1,7 +1,8 @@
 # Wave and repo worktrees
 
 Accepted, 2026-10-02. Jack accepted moving Git operations out of the Task CLI
-hierarchy and removing command-path shorthand. Jack authorized a background pursue Flow through demo. Scratch remains local and
+hierarchy. During demo review, Jack requested retaining automatic command shortcuts
+and restoring the short commands in docs; this supersedes the earlier removal decision. Jack authorized a background pursue Flow through demo. Scratch remains local and
 must survive publishing; implement the simplest direct resident publication path.
 Scheduled distribution remains deferred.
 
@@ -19,7 +20,7 @@ Placement: unresolved; no owning Wave was named.
 
 ## Shape and boundary
 
-Additive series. Keystone: literal root Git commands, Task-independent resident
+Additive series. Keystone: root Git commands with automatic shortcuts, Task-independent resident
 workspaces, and a manually invoked document PR workflow that preserves scratch.
 Implement these in internal slices; the keystone is complete only when the real
 agent workflow works. Follow-up: scheduled memory distribution, with its own
@@ -28,7 +29,7 @@ design for cadence, destination, authority and conflict policy. No Tasks filed.
 ## Implemented state — reconciled 2026-10-02
 
 - The feature CLI exposes root `pr`, `wt`, `sync`, and `commit`.
-  Immediate-child parsing replaces recursive owner/abbreviation expansion;
+  Recursive owner omission and unique command-prefix expansion are retained;
   skill/Flow discovery remains. Compression and bounded repairs are checkpointed
   at 0ec9e2fa5. Published runtime 0.12.31 is installed and the saved Flow has passed
   its previously blocked decision boundary.
@@ -45,7 +46,7 @@ design for cadence, destination, authority and conflict policy. No Tasks filed.
   coverage exercises failed-update retry, staged/unstaged separation, and resolved
   sync through the same preservation boundary used by the CLI.
 - Saved Flow command decoding already migrates removed spellings. A populated-store
-  proof checks literal CLI parsing, retained identity/cursor/claim, and stable
+  proof checks command parsing, retained identity/cursor/claim, and stable
   reserialization. Stale builtin graph and documentation expectations were corrected.
 
 ## Data and functions
@@ -59,7 +60,7 @@ Result<AgentWorktree>` adapts the existing placement helper. Reuse it at primary
 admission/replacement and scope-operated launch boundaries. Explicit contributions
 in a supplied checkout stay there; Wave attribution alone must not relocate them.
 
-Clap immediate-child lookup replaces `resolve_child` and its path-expansion wrapper. Preserve skill/Flow discovery,
+Clap metadata remains the source of automatic shortcut resolution. Preserve skill/Flow discovery,
 explicit collision escapes, read-only help and argument passthrough.
 
 ## Workspace behavior
@@ -98,9 +99,9 @@ every memory update; cron and non-PR distribution are outside this increment.
 
 1. Task-owned Git command variants/dispatch; move to root and update mechanical
    Flow callers in `ops/flow.rs` in the same cut.
-2. Recursive descendant/abbreviation lookup and its exclusive ambiguity tests.
-   Update `cli_discovery.rs`, `user_cli_tests.rs`, module tests, generated command
-   references, skills and AGENTS shorthand guidance together. Keep help tests.
+2. Remove the literal-only parsing restriction and its refusal tests. Preserve
+   recursive shortcut resolution, exact-name precedence, ambiguity diagnostics,
+   leaf/passthrough boundaries, and read-only help. Restore short doc examples.
 3. Primary-session checkout selection from ambient Task/main; replace with scope
    placement while preserving explicit contribution behavior and Session history.
 4. Resident-placement refusal test for moved branches; replace with successful reuse.
@@ -108,13 +109,12 @@ every memory update; cron and non-PR distribution are outside this increment.
 
 ## Internal slices
 
-Implementation covers the full keystone: literal root Git commands; stable scope
+Implementation covers the full keystone: root Git commands with automatic shortcuts; stable scope
 workspaces and idle primary adoption; selected-path document commits; resident
 scratch preservation through publication and delivery; explicit upkeep; and owning
 instructions. Independent document checkouts can use `lf wt create NAME --resident`.
 
-Compression removed the obsolete command-expansion wrapper, impossible error paths,
-and duplicate help cases. Resident instructions now use the scope’s own document
+Demo review restores automatic command expansion and its ambiguity errors. Resident instructions now use the scope’s own document
 example and a shorter self-contained maintenance recipe. Deletion targets above
 are implemented; captured Flow command migration is covered for stored executions.
 
@@ -134,7 +134,7 @@ distribution and non-PR memory distribution remain deferred by the accepted scop
 
 Forbidden: fake sync Tasks; Task ownership inferred from primary cwd; duplicate
 memory stores; dropping scratch during export; resetting unpublished edits;
-silently moving live drivers; retained aliases for removed command paths.
+silently moving live drivers; registered compatibility aliases for removed Task-owned paths. Derived shortcuts remain supported.
 
 ## Demo and acceptance
 
@@ -146,7 +146,7 @@ after export survive. Repeat with a moved worktree and conflicting upstream memo
 Headless gate: `cargo test -p loopflow --test cli_discovery --test user_cli_tests
 --test worktree_tests --test session_lifecycle_tests`; add focused primary-session
 and resident-publication tests using temporary Git repositories and mocked provider effects.
-Expected: literal command paths, retained definition lookup, no Task creation,
+Expected: root command ownership, unique shortcuts and actionable ambiguity, retained definition lookup, no Task creation,
 idempotent admission/publication, and preserved files across recovery. Run
 `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`.
 

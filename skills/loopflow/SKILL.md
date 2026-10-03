@@ -38,10 +38,10 @@ authority, and never impersonates the User in chat.
 ```bash
 lf commit -m "message"               # local checkpoint
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                            # done; the user clicks merge
-lf pr arm                               # request auto-merge; return
-lf pr land                              # watch CI, repair, and finish merged
-lf pr land -c                           # complete the Task after merge
+lf submit                            # done; the user clicks merge
+lf arm                               # request auto-merge; return
+lf land                              # watch CI, repair, and finish merged
+lf land -c                           # complete the Task after merge
 lf sync --plan                  # show strategy; bare `lf sync` applies it
 lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
@@ -73,12 +73,12 @@ implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
 lf --task <issue-id> flow start                 # durable Task Work, own worktree
-lf task comment <issue-id> "smaller approach" # post direction for the Task advancer
+lf comment <issue-id> "smaller approach" # post direction for the Task advancer
 lf task status <issue-id> --json       # inspect durable state
-lf task wait <issue-id> --until terminal
+lf wait <issue-id> --until terminal
 ```
 
-When work feels slow or stuck, run `lf monitor top` before guessing — it shows
+When work feels slow or stuck, run `lf top` before guessing — it shows
 last-hour provider throughput and live processes.
 
 ## Inspect
@@ -104,11 +104,11 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 lf home id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
-lf home ssh <home-id> status <wave> --json           # inspect it on that Home
-lf home ssh <home-id> --wave <wave> wave/operate       # one finite pass there
+lf ssh <home-id> status <wave> --json           # inspect it on that Home
+lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
-`lf home ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
+`lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
 target-local subscription accounts. Durable processes scrub forwarded provider,
 GitHub, PM, and secret authority before detaching and use credentials installed

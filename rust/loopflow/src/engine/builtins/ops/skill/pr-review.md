@@ -73,7 +73,7 @@ find the code responsible, and decide what still needs judgment.
    Do not replace the walkthrough with a dashboard of counts or a wall of diff.
 
    Render through an available browser capture tool (in Loopflow,
-   `lf home screenshot scratch/pr-review.html -o scratch/pr-review.png`). Inspect the
+   `lf screenshot scratch/pr-review.html -o scratch/pr-review.png`). Inspect the
    result at desktop and narrow widths; check code overflow, contrast, navigation,
    and disclosure controls. Fix defects before delivery. If rendering is
    unavailable, report that limit explicitly. Recheck excerpts against the named

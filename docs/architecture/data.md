@@ -4,7 +4,7 @@
 lf session list --interactive false --json
 lf session history SESSION --json
 lf flow resume FLOW_SESSION
-lf monitor ps --json
+lf ps --json
 ```
 
 A conversation, a saved Flow and an operating-system process answer different

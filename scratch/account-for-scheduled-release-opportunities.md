@@ -1,6 +1,7 @@
 # Account for scheduled release opportunities and settle product outcomes
 
-LOO-285 · accepted design, reconciled against `fe36937faf75151a2f5d7195b32ff708ce335e86`.
+LOO-285 · accepted outcome; persistence revision remains draft.
+Reconciled against `328c7a065` (main integration) and `a60ac0281` (retry timing).
 The source integration is present; the complete Task outcome remains unproved.
 
 ## Outcome and accepted decisions
@@ -68,8 +69,8 @@ History materializes missing dues read-only, preserving an absent-wake denominat
 The shared calendar uses the first ambiguous occurrence and skips nonexistent
 local times. Today's timezone cannot reconstruct unobserved historical changes.
 
-Whole-document replacement commits frozen coverage and collapse links together,
-replacing the kickoff proposal for separate opportunity files and reciprocal
+The implemented segment-local document replacement commits frozen coverage and
+collapse links together, replacing the kickoff proposal for separate opportunity files and reciprocal
 writes. Accounting uses a short lock, released before target acquisition/network
 work. The target lock covers selection and mutations; the existing job descriptor
 authenticates scheduled attribution; checkout leases protect exact source removal.
@@ -198,8 +199,8 @@ missing capability never silently waives required acceptance.
    settlement or cross-Home transfer. A removed schedule has no future firing;
    unresolved old-Home authority remains a named repair blocker. This is a
    substantial remaining controller/accounting change, not supplied by disposition.
-2. **Wait continuation accuracy implemented.** Telemetry failure/deferral reads
-   the retained calendar at the observation after recovery returns. It no longer
+2. **Wait continuation accuracy implemented in `a60ac0281`.** Telemetry
+   failure/deferral reads the retained calendar at the observation after recovery returns. It no longer
    uses entry `next_due_at`; removed schedules report closure rather than a past
    retry. Physical job-overlap text and out-of-window overlap receipt inclusion
    remain consumer work.
@@ -243,9 +244,22 @@ before that write; interruption before it leaves unclaimed dues, after it leaves
 one complete frozen set. Move validation, telemetry lookup, history settlement
 and late-writer fencing to that shared cross-segment view. Preserve original
 segment/Home and candidate ownership; do not infer authority across a Home change.
-This changes the accepted per-document representation and must be reconciled
-before building dependent continuation behavior. Gate and configured proof remain
-outstanding.
+This is a draft implementation approach within the accepted outcome, not a new
+product policy or Jack Heart's approval of the representation. The local change
+remains substantial and belongs to implementation; the realign pass does not
+claim it complete or remove Jack's review boundary. Gate and configured proof
+remain outstanding.
+
+The persistence proof must cover interruption after each due-materialization
+write, immediately before/after the owner write, and after external publication
+before settlement. Retry must recover the same complete frozen set, reject a
+late predecessor attempt, retain intervention/failed evidence and count at most
+one settlement. Resolve original telemetry from each due's own segment; resolve
+current execution and future retry from the successor that fired. A replacement
+on another Home stays outside this authority. History, disposition eligibility,
+CLI owner display and qualification must use the same coverage reader, including
+closed owners outside the display window. Existing retained accounting documents
+remain readable; changing the derived relationship cannot discard their history.
 
 ### Delete — do not maintain
 
@@ -353,8 +367,11 @@ logs, publisher receipt and read projections are available in the same git tree.
 The baseline cannot establish a settlement percentage or the two-opportunity KR.
 The independent invalid v0.12.30 incident source `8cbd0c5b1c99a12151908c59f923b0128706a34f`
 contained canonical release SQL plus `drafts/remove_ask.sql`; the retained
-run-records assessment names packaged rejection. Present provider publication
-state was not checked, so that incident is not asserted as a current blocker.
+run-records assessment names packaged rejection. Infrastructure memory now
+records v0.12.31 publication and supported installation,
+plus one-Home acceptance. This supersedes the earlier pending-install observation;
+it does not establish this branch's installation or scheduled settlement. No fresh
+provider read was made during this reconciliation.
 
 Latest supplied feedback reports focused recovery, publisher, minor-release and
 static passes after main merge and CI-repair ownership repair. This reconciliation
@@ -362,10 +379,12 @@ reuses those results within their scope; it does not invent a final-tree gate,
 hosted outcome, current installed check or configured settlement. The prior Docker
 proof used seeded dues and simulated external services with real Git/CLI/locks.
 
-The simulated review identified stale completion claims in the plan: assignment
+The earlier simulated review identified stale completion claims: assignment
 had been conflated with continuation, dated telemetry diagnosis with current
 source, and repetitive completed slices with remaining work. The reconciled plan
 separates these boundaries and retains the full acceptance criteria. Production
 code is unchanged; no behavioral rerun is warranted for these prose edits.
 
-Check: `cargo test -p loopflow --lib overlap_continuation_uses_current_calendar_and_preserves_closed_ownership` and `cargo test -p loopflow --test scheduled_release_tests scheduled_release_flow_settles_product_results_and_preserves_failures -- --test-threads=1` passed with isolated Home/executable and inherited authority removed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; context within limits; gate/configured proof deferred.
+Recorded implementation checks (`a60ac0281`): `cargo test -p loopflow --lib overlap_continuation_uses_current_calendar_and_preserves_closed_ownership` and `cargo test -p loopflow --test scheduled_release_tests scheduled_release_flow_settles_product_results_and_preserves_failures -- --test-threads=1` passed with isolated Home/executable and inherited authority removed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate/configured proof deferred.
+
+Check: `git diff --check` passed; `lf context --skill realign` within limits after curation; prose-only changes, behavioral checks reused within their recorded scope.

@@ -37,6 +37,14 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
+At `a60ac0281`, telemetry failure/deferral computes continuation after recovery
+returns; original `next_due_at` remains adjacency evidence. Closed continuation
+still needs one atomic coverage owner across same-Home predecessor segments.
+The current per-segment joins cannot represent the full frozen due set after
+replacement. Dropping closed checks or covering only old dues would violate the
+accepted outcome. The working plan retains the draft persistence revision and
+its interruption proof; no representation approval or implementation is implied.
+
 The full child Release memory and goal were read in this reconciliation; it is
 the only immediate child scope in this checkout. Its September 28 incident shows
 why operation-level recovery must survive the scheduled entry point: an agent's
@@ -802,56 +810,26 @@ deleting fallback prose did not repair ordinary execution. Idle triggers, worker
 lifetime and installed continuity were unresolved in that dated evidence, not
 permission to widen current scope or create duplicate Tasks.
 
-## Observation must not manufacture idle work (2026-09-23)
+## Observation must not manufacture idle work — retained lessons (September 23–24)
 
-The `task-viewer` repair (`7a41fc0b2`, `d7e221fda`, `aabc03966`) followed two
-duplicate helper implementations of LOO-293. Separate readers had reconstructed
-identity and liveness from display conventions, and a supervisor treated missing
-observations as absence. This branch repairs those readers; it neither adds a
-launch lock nor establishes a deployed execution cutover.
+The `task-viewer` repair followed duplicate LOO-293 implementations caused by
+readers reconstructing identity and treating missing observations as absence.
+Full incident receipts and retired Run-era mechanics are preserved at
+`fea4480d59eada9dc0a9203871fefecc9720399f:wave/infrastructure/MEMORY.md`.
+Current Session/Exec and one-Home contracts supersede those mechanisms.
 
-- **One catalog resolves Work for Runs, Usage, and Activity.** Read stable
-  identity/ancestry columns through a read-only query, not full Project records:
-  the latter failed on the installed store's missing `iteration` column. Keep
-  the minimal-schema regression. Public issue identifiers, internal Work IDs,
-  and external IDs select the same Work. Resolve an unambiguous most-specific
-  Work before checking historical ancestor labels; use ancestry to disambiguate
-  shared names. Current user filters still apply to today's hierarchy. Preserve
-  original manifests and record full ancestry on future bound Runs.
-  The catalog is an ephemeral index, not a second durable owner; its selector
-  aliases preserve historical Run discovery and are not obsolete compatibility.
-- **Receipt ownership survives executable renaming.** Pinned `lf-<hash>` workers
-  are legitimate. Visibility and prune share PID/start-identity matching, without
-  a basename precondition. Retain reused-PID rejection and keep that fixture's
-  PID distinct from the absent OpenCode owner. A completed native launcher says
-  nothing definitive about the remaining client or unresolved Session.
-- **Sample execution and lifecycle once per Task detail.** TaskExecutionSnapshot
-  projects the existing FlowPosition/claim/process evidence for status,
-  conditions, actions, and roadmap. Current non-idle evidence wins over dirty
-  progress and next-launch configuration failure. An unresolved review boundary
-  still yields a waiting condition on terminal Work. Keep lifecycle, worker
-  evidence, and UI condition distinct; remove parallel derived Session booleans.
-  Run attribution does not acquire advancement or process-control authority.
-- **Source proof and promotion are separate.** The incident read found all
-  three Runs via public/internal selectors and Usage; source `ps` saw 20 live
-  nodes versus installed 0.12.19's two, and dry-run prune excluded all ten live
-  Exec PIDs. Nothing was reaped or migrated. Current-schema status has isolated
-  test evidence only. Installed projection/cutover proof remains in LOO-286's
-  existing obligations; this does not settle it or LOO-293.
-  The 2026-09-24 read repeated the three-Run result and excluded all six live
-  Execs from dry-run prune (12 live nodes at that sample). Source builds default
-  to a development Home: an empty result there says nothing about installed
-  history. Use the owning executable/database pair for installed incident reads;
-  a branch executable may redirect an explicit installed directory to private data
-  under LOO-321's isolation contract above. For isolated tests, clear
-  `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`, `LF_HOME`, and `LF_DB_PATH`.
-  Neither sample proves the older installed Flow schema works.
-- **Isolate launch tests from ambient authority.** A research fixture inherited
-  the live control database, and a Session fixture failed to publish its fake
-  client during the initial broad suite. Isolated reruns passed after clearing
-  execution authority. Fixture cleanup may stop
-  only its identified fake provider child. A passing DTO round-trip alone cannot
-  prove execution precedence.
+Use stable identity and one shared execution snapshot for status, conditions and
+actions. Missing provider evidence is unknown; lifecycle and process state remain
+separate. A pending review survives terminal Work. Renamed executables retain
+ownership through PID/start identity; launcher exit does not prove provider exit.
+Read-only observation grants neither progression nor signal authority.
+
+The September 23–24 samples found the retained Runs and excluded live processes
+from prune. Nothing was reaped or migrated; isolated schema tests did not prove
+installed Flow recovery. LOO-286 retains configured projection/cutover proof and
+LOO-293 is not completed by those observations. Scrub inherited execution
+authority, pin the fixture executable and stop only owned fake children; a DTO
+round-trip cannot prove execution precedence.
 
 ## Prompt reduction boundary (2026-09-24)
 
@@ -917,21 +895,13 @@ reported main-rebase failure or its preservation obligations.
 
 ### Evidence and demo traps
 
-Review through `ac0b51aad` records 67 focused tests and static checks, plus three
-earlier checkout tests. The disposable Ubuntu 24.04 candidate demo passed fresh
-installation without Git, repeat without asset downloads, missing-daemon repair,
-dirty-checkout/ref and migration-ledger preservation, failed-activation recovery,
-and external transition from authentic checksum-verified 0.12.18 binaries.
-That older account had no populated historical Home. The candidate reported
-0.12.19 with drafts materialized only in a disposable source snapshot; local
-HTTPS release transport is not a public release. Captured logs and full audit
-remain in branch history at `1f2d2c051:scratch/` after scratch is cleared.
-
-The real published 0.12.20 demo failed clean-home promotion after preflight
-accepted the absent store. Preserve that observation; candidate success cannot
-rewrite it. Public-channel acceptance needs a released fix and repeated
-fresh-install/repair proof. Real macOS app installation and populated historical
-Home migration are still unproven. No full CI or current-tree pass is implied.
+The September 24 candidate checks passed locally, including disposable Ubuntu
+installation/repair and 0.12.18 transition. They used simulated transport and an
+unpopulated historical Home. Public 0.12.20 clean-home promotion then failed;
+local success never supersedes that contrary result. Full receipts remain at
+`fea4480d59eada9dc0a9203871fefecc9720399f:wave/infrastructure/MEMORY.md` and
+`1f2d2c051:scratch/`. Fresh-install recovery and populated migration were unproved
+there; the later v0.12.31 installed acceptance above has its own bounded evidence.
 
 - Machine installation resolves the OS account home, ignoring `HOME` overrides.
   `HOME`/`LF_HOME` alone cannot isolate promotion. Use a disposable OS account or
@@ -984,7 +954,6 @@ history. Product settlement needs separate release evidence.
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.

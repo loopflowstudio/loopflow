@@ -19,6 +19,9 @@ are preserved at `fe36937faf75151a2f5d7195b32ff708ce335e86:scratch/questions.md`
 
 October 2 implementation found a persistence conflict: replacement wakes span
 segment documents, while frozen coverage and all owner joins are segment-local.
-The plan records a cross-segment reader/atomic-owner-write proposal for review.
+The plan retains a draft cross-segment reader/atomic-owner-write approach with
+interruption and retained-document proof requirements. This is implementation
+work within the accepted outcome, not a request to narrow coverage or a claim
+of Jack Heart's representation approval.
 Recovering only old dues is rejected because it narrows Jack Heart's accepted
 frozen-all-outstanding set. Closed continuation remains unimplemented.

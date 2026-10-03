@@ -144,13 +144,13 @@ pub async fn resolve_work_selection(
         let steers = Vec::new();
         let pr = store.task_prs(&task.id).await.map_err(run_error)?.pop();
         let context = render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
-        let cwd = if crate::engine::git::current_branch(repo)
-            .ok()
-            .flatten()
-            .as_deref()
-            == pr.as_ref().map(|pr| pr.branch.as_str())
-            && pr.is_some()
-        {
+        let cwd = if pr.as_ref().is_some_and(|pr| {
+            crate::engine::git::current_branch(repo)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(pr.branch.as_str())
+        }) {
             crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
             task.workspace

@@ -1015,8 +1015,8 @@ fn create_prepared_task(
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
-        let mut admitted = None;
-        if let Some(mut existing) = store
+        let now = time::OffsetDateTime::now_utc();
+        let mut task = if let Some(mut existing) = store
             .get_task_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
@@ -1039,37 +1039,34 @@ fn create_prepared_task(
                     if existing.workspace.is_some() {
                         return Ok(existing);
                     }
-                    admitted = Some(existing);
+                    existing
                 }
             }
-        }
-        let now = time::OffsetDateTime::now_utc();
-        let mut task = Task {
-            id: crate::work::task::TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
-                identifier: resolved.item.identifier.clone(),
-                title: resolved.item.name.clone(),
-                description: resolved.item.description.clone(),
-                pm_snapshot_synced_at: resolved.observed_at,
-            },
-            wave_id,
-            project_id,
-            pm_writeback: PmWritebackState::Current,
-            workspace: Some(crate::work::task::TaskWorkspace {
-                worktree: plan.worktree_path.clone(),
-                slug: workspace_slug.clone(),
-            }),
-            agent: requested_agent,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
+        } else {
+            Task {
+                id: crate::work::task::TaskId::new(),
+                plan: TaskPlan {
+                    id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
+                    identifier: resolved.item.identifier.clone(),
+                    title: resolved.item.name.clone(),
+                    description: resolved.item.description.clone(),
+                    pm_snapshot_synced_at: resolved.observed_at,
+                },
+                wave_id,
+                project_id,
+                pm_writeback: PmWritebackState::Current,
+                workspace: None,
+                agent: requested_agent,
+                abandon_intent: None,
+                created_at: now,
+                updated_at: now,
+                observation: crate::work::task::Observation::NotRequired,
+            }
         };
-        if let Some(mut existing) = admitted {
-            existing.workspace = task.workspace.take();
-            task = existing;
-        }
+        task.workspace = Some(crate::work::task::TaskWorkspace {
+            worktree: plan.worktree_path.clone(),
+            slug: workspace_slug.clone(),
+        });
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
@@ -1495,9 +1492,9 @@ pub(crate) async fn task_worktree_blocker(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Option<TaskWorktreeBlocker>> {
-    if task.workspace.is_none() {
+    let Some(workspace) = &task.workspace else {
         return Ok(None);
-    }
+    };
     let event = store
         .latest_task_event(&task.id)
         .await
@@ -1523,7 +1520,7 @@ pub(crate) async fn task_worktree_blocker(
             }));
         }
     }
-    if task.require_workspace()?.worktree.exists() {
+    if workspace.worktree.exists() {
         return Ok(None);
     }
     let active = store
@@ -1539,7 +1536,7 @@ pub(crate) async fn task_worktree_blocker(
         reason: format!(
             "Task {} worktree {} is missing; restore that exact path{branch} before `lf --task {} flow start`; Task identity and PR history are unchanged",
             task.plan.identifier,
-            task.require_workspace()?.worktree.display(),
+            workspace.worktree.display(),
             task.plan.identifier,
         ),
     }))
@@ -3787,7 +3784,8 @@ async fn ensure_working_pr_with_options(
             )));
         }
     }
-    let committed_carry = committed_follow_up_range(&task.require_workspace()?.worktree, &settled)?;
+    let worktree = &task.require_workspace()?.worktree;
+    let committed_carry = committed_follow_up_range(worktree, &settled)?;
     // A settled completing PR normally never rotates. Two things independently
     // authorize one more serial PR: follow-up committed past the merged tip,
     // which the completion gate refuses to settle over, and a pending
@@ -3800,28 +3798,27 @@ async fn ensure_working_pr_with_options(
     let sequence = settled.sequence + 1;
     let slug = next_pr_slug(&settled, rotate.slug_override.as_deref());
     let branch = deterministic_next_branch(task, &settled, rotate.slug_override.as_deref())?;
-    let default_branch = get_default_branch(&task.require_workspace()?.worktree)
+    let default_branch = get_default_branch(worktree)
         .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
     // `base_ref` positions the branch below; the recorded `base_commit` is read
     // from the branch itself once it is positioned, never from a parallel read of
     // the upstream — see `fork_point`.
-    let (base_ref, _) =
-        resolve_upstream_base(&task.require_workspace()?.worktree, &default_branch)?;
+    let (base_ref, _) = resolve_upstream_base(worktree, &default_branch)?;
     if !rotate.carry_dirty
-        && !is_clean(&task.require_workspace()?.worktree)
+        && !is_clean(worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
     {
         return Err(task_error(format!(
             "Task {} cannot rotate PRs while {} has uncommitted changes",
             task.plan.identifier,
-            task.require_workspace()?.worktree.display()
+            worktree.display()
         )));
     }
     // The merged branch tip GitHub recorded (`head_sha`) is the cut between
     // already-merged work and the follow-up the worker committed on top after the
     // merge. Rotation carries that committed range forward — plus any dirty edits
     // — so no work is dropped when moving onto the next serial branch.
-    let current = current_branch(&task.require_workspace()?.worktree)
+    let current = current_branch(worktree)
         .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
         .ok_or_else(|| task_error("Task worktree is detached"))?;
     if current != branch {
@@ -3831,15 +3828,15 @@ async fn ensure_working_pr_with_options(
                 task.plan.identifier,
                 settled.branch,
                 branch,
-                task.require_workspace()?.worktree.display(),
+                worktree.display(),
                 current
             )));
         }
         let local_ref = format!("refs/heads/{branch}");
         let remote_ref = format!("refs/remotes/origin/{branch}");
-        let collision = ref_exists(&task.require_workspace()?.worktree, &local_ref)
+        let collision = ref_exists(worktree, &local_ref)
             .map_err(|error| task_error(format!("failed to inspect branch collision: {error}")))?
-            || ref_exists(&task.require_workspace()?.worktree, &remote_ref).map_err(|error| {
+            || ref_exists(worktree, &remote_ref).map_err(|error| {
                 task_error(format!("failed to inspect branch collision: {error}"))
             })?;
         if collision {
@@ -3850,12 +3847,10 @@ async fn ensure_working_pr_with_options(
         // Stash dirty edits so the new branch starts clean: `checkout -b` then
         // carries nothing, the committed range cherry-picks onto a clean index,
         // and the stash pop reapplies the dirty edits on top.
-        let stashed = stash_including_untracked(&task.require_workspace()?.worktree)
+        let stashed = stash_including_untracked(worktree)
             .map_err(|error| task_error(format!("failed to stash follow-up edits: {error}")))?;
-        if let Err(error) =
-            checkout_new_branch_from(&task.require_workspace()?.worktree, &branch, &base_ref)
-        {
-            let recovered = current_branch(&task.require_workspace()?.worktree)
+        if let Err(error) = checkout_new_branch_from(worktree, &branch, &base_ref) {
+            let recovered = current_branch(worktree)
                 .map_err(|read_error| {
                     task_error(format!("failed to inspect recovery branch: {read_error}"))
                 })?
@@ -3863,7 +3858,7 @@ async fn ensure_working_pr_with_options(
                 == Some(branch.as_str());
             if !recovered {
                 if stashed {
-                    stash_pop(&task.require_workspace()?.worktree).map_err(|recovery_error| {
+                    stash_pop(worktree).map_err(|recovery_error| {
                         task_error(format!(
                             "failed to rotate Task worktree: {error}; restoring follow-up edits \
                              also failed: {recovery_error}"
@@ -3876,20 +3871,16 @@ async fn ensure_working_pr_with_options(
             }
         }
         if let CommittedFollowUp::Range { from, to } = &committed_carry {
-            if let Err(error) = cherry_pick_range(&task.require_workspace()?.worktree, from, to) {
-                roll_back_failed_rotation(
-                    &task.require_workspace()?.worktree,
-                    &settled.branch,
-                    &branch,
-                    stashed,
-                )
-                .map_err(|recovery_error| {
-                    task_error(format!(
+            if let Err(error) = cherry_pick_range(worktree, from, to) {
+                roll_back_failed_rotation(worktree, &settled.branch, &branch, stashed).map_err(
+                    |recovery_error| {
+                        task_error(format!(
                         "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
                          automatic recovery also failed: {recovery_error}",
                         settled.branch
                     ))
-                })?;
+                    },
+                )?;
                 return Err(task_error(format!(
                     "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
                      restored {:?} with its follow-up edits so the rotation can be retried",
@@ -3898,11 +3889,11 @@ async fn ensure_working_pr_with_options(
             }
         }
         if stashed {
-            stash_pop(&task.require_workspace()?.worktree).map_err(|error| {
+            stash_pop(worktree).map_err(|error| {
                 task_error(format!(
                     "carried the committed follow-up but could not reapply dirty edits: {error}; \
                      the recovery branch and retained stash are in {} for conflict resolution",
-                    task.plan.identifier
+                    worktree.display()
                 ))
             })?;
         }
@@ -3912,10 +3903,10 @@ async fn ensure_working_pr_with_options(
     // the pair agrees by construction whichever of those two it was. Reading the
     // upstream tip here instead is what paired a fresh base with a stale branch
     // and left completion unable to prove the successor empty (W2-300).
-    let base_commit = fork_point(&task.require_workspace()?.worktree, &base_ref, &branch)?;
+    let base_commit = fork_point(worktree, &base_ref, &branch)?;
 
-    let _mutation = lock_task_pr_mutation(&task.require_workspace()?.worktree)?;
-    push_with_upstream(&task.require_workspace()?.worktree, "origin", &branch)
+    let _mutation = lock_task_pr_mutation(worktree)?;
+    push_with_upstream(worktree, "origin", &branch)
         .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
 
     let now = time::OffsetDateTime::now_utc();

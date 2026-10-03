@@ -12,7 +12,8 @@ struct DTOFixtureTests {
         let detail = try JSONDecoder().decode(FlowDetail.self, from: loadFixtureData("flow_detail.json"))
         #expect(!detail.entry.managed)
         #expect(detail.cwd == "/tmp/research")
-        #expect(detail.current.flatMap { detail.graph.node($0) } != nil)
+        #expect(detail.current.flatMap { detail.graph.node($0) }?.label == "report")
+        #expect(detail.completed == [0])
         #expect(detail.failure == nil)
     }
 

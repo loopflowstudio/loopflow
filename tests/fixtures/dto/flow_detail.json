@@ -13,146 +13,42 @@
     "current_capture": null
   },
   "graph": {
-    "name": "feature",
+    "name": "research",
     "steps": [
       {
         "key": 0,
-        "id": "design",
-        "label": "task-design",
+        "id": "measure",
+        "label": "measure",
         "kind": "skill",
         "human": false,
         "returns_to": null,
         "sources": [
-          "feature"
+          "research"
         ],
         "paths": []
       },
       {
         "key": 1,
-        "id": "implement",
-        "label": "implement",
+        "id": "report",
+        "label": "report",
         "kind": "skill",
         "human": false,
         "returns_to": null,
         "sources": [
-          "feature",
-          "pursue"
-        ],
-        "paths": []
-      },
-      {
-        "key": 2,
-        "id": null,
-        "label": "realign",
-        "kind": "skill",
-        "human": false,
-        "returns_to": null,
-        "sources": [
-          "feature",
-          "pursue"
-        ],
-        "paths": []
-      },
-      {
-        "key": 3,
-        "id": "decide",
-        "label": "loop-decide",
-        "kind": "skill",
-        "human": false,
-        "returns_to": 1,
-        "sources": [
-          "feature",
-          "pursue"
-        ],
-        "paths": []
-      },
-      {
-        "key": 4,
-        "id": "demo",
-        "label": "demo",
-        "kind": "skill",
-        "human": true,
-        "returns_to": null,
-        "sources": [
-          "feature",
-          "pursue"
-        ],
-        "paths": []
-      },
-      {
-        "key": 5,
-        "id": "decide_delivery",
-        "label": "loop-decide",
-        "kind": "skill",
-        "human": false,
-        "returns_to": 1,
-        "sources": [
-          "feature",
-          "pursue"
-        ],
-        "paths": []
-      },
-      {
-        "key": 6,
-        "id": null,
-        "label": "xor-route",
-        "kind": "xor",
-        "human": false,
-        "returns_to": null,
-        "sources": [
-          "feature"
-        ],
-        "paths": [
-          {
-            "name": "fix",
-            "description": "Repair the failing check",
-            "steps": [
-              {
-                "key": 7,
-                "id": "patch",
-                "label": "patch",
-                "kind": "skill",
-                "human": false,
-                "returns_to": null,
-                "sources": [],
-                "paths": []
-              }
-            ]
-          },
-          {
-            "name": "skip",
-            "description": "Nothing to repair",
-            "steps": []
-          }
-        ]
-      },
-      {
-        "key": 8,
-        "id": null,
-        "label": "pr land -c",
-        "kind": "op",
-        "human": false,
-        "returns_to": null,
-        "sources": [
-          "feature",
-          "queue"
+          "research"
         ],
         "paths": []
       }
     ],
     "interactions": {
-      "stages": [
-        "4"
-      ],
+      "stages": [],
       "transitions": [
         {
           "from": "@start",
-          "to": "4",
+          "to": "@end",
           "nodes": [
             "0",
-            "1",
-            "2",
-            "3"
+            "1"
           ],
           "routes": [
             {
@@ -167,106 +63,7 @@
             },
             {
               "from": "1",
-              "to": "2",
-              "condition": null
-            },
-            {
-              "from": "2",
-              "to": "3",
-              "condition": null
-            },
-            {
-              "from": "3",
-              "to": "4",
-              "condition": "advance"
-            },
-            {
-              "from": "3",
-              "to": "1",
-              "condition": "repeat"
-            }
-          ]
-        },
-        {
-          "from": "4",
-          "to": "4",
-          "nodes": [
-            "1",
-            "2",
-            "3",
-            "5"
-          ],
-          "routes": [
-            {
-              "from": "4",
-              "to": "5",
-              "condition": null
-            },
-            {
-              "from": "5",
-              "to": "1",
-              "condition": "repeat"
-            },
-            {
-              "from": "1",
-              "to": "2",
-              "condition": null
-            },
-            {
-              "from": "2",
-              "to": "3",
-              "condition": null
-            },
-            {
-              "from": "3",
-              "to": "4",
-              "condition": "advance"
-            },
-            {
-              "from": "3",
-              "to": "1",
-              "condition": "repeat"
-            }
-          ]
-        },
-        {
-          "from": "4",
-          "to": "@end",
-          "nodes": [
-            "5",
-            "6",
-            "7",
-            "8"
-          ],
-          "routes": [
-            {
-              "from": "4",
-              "to": "5",
-              "condition": null
-            },
-            {
-              "from": "5",
-              "to": "6",
-              "condition": "advance"
-            },
-            {
-              "from": "6",
-              "to": "7",
-              "condition": "fix"
-            },
-            {
-              "from": "6",
-              "to": "8",
-              "condition": "skip"
-            },
-            {
-              "from": "8",
               "to": "@end",
-              "condition": null
-            },
-            {
-              "from": "7",
-              "to": "8",
               "condition": null
             }
           ]
@@ -274,8 +71,10 @@
       ]
     }
   },
-  "current": 0,
-  "completed": [],
+  "current": 1,
+  "completed": [
+    0
+  ],
   "returns": [],
   "version": 3,
   "cwd": "/tmp/research",

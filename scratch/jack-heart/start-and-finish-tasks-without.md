@@ -230,6 +230,15 @@ allocation, checkpoint and no-active-PR prerequisites; saved-Flow resumption's
 workspace lookup; and Desktop's managed-only Flow display. Exact managed claims,
 review boundaries, captured graphs and placed-Task delivery recovery remain.
 
+The follow-up compression removes the temporary replacement Task built during
+first-checkout allocation: existing admission is retained directly before attaching
+placement. Rotation and missing-checkout checks reuse their validated workspace;
+PR recovery errors name the checkout holding the stash. Unplaced context avoids an
+irrelevant Git branch lookup. The independent Flow DTO fixture now contains only
+two research steps, with completed and current progress checked in Rust and Swift,
+instead of duplicating the feature graph's unrelated review and routing topology.
+No deletion target remains from this pass; broader acceptance stays with gate.
+
 Keep `task_complete`, `complete_planning_task`, the existing gate, PR settlement,
 managed claim fencing, LOO-355 checkout/rotation operations and LOO-358 membership.
 Do not repair or duplicate those mechanisms as a prerequisite to deleting coupling.
@@ -317,4 +326,4 @@ confirmed that an unpublished PR blocks completion until delivery settles. A sta
 controller test still expected Task completion to end its Flow; it is replaced by
 separate preservation/new-launch-refusal and final-step-completion proofs.
 
-Check: `cargo test -p loopflow --lib task_without_delivery` (9), restart fencing (8 retained tests) and both replacement controller proofs, the explicit CLI Flow proof, Rust FlowDetail fixture, Swift Task (64), DTOFixtureTests (23) and TaskFlowTests (6) passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; gate owns provider/review/retry and Desktop interaction acceptance.
+Check: `cargo test -p loopflow --lib task_without_delivery` (9), `cargo test -p loopflow --lib ops::run::tests` (8), `cargo test -p loopflow --test dto_fixtures independent_flow_detail` (1), `swift test --package-path swift --filter DTOFixtureTests` (23), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; prior focused evidence remains at `f656edf5f:scratch/jack-heart/start-and-finish-tasks-without.md`; gate owns provider/review/retry and Desktop interaction acceptance.

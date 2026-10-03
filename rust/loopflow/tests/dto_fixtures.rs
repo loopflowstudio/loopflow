@@ -503,7 +503,8 @@ fn independent_flow_detail_preserves_capture_and_cwd() {
     let detail: loopflow::durable::FlowDetail = serde_json::from_str(json).unwrap();
     assert!(!detail.entry.managed);
     assert_eq!(detail.cwd, std::path::Path::new("/tmp/research"));
-    assert!(detail.current.is_some());
+    assert_eq!(detail.current, Some(1));
+    assert_eq!(detail.completed, [0]);
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

@@ -16,3 +16,9 @@ SessionHistory source must be exercised before assigning another analytics repai
 
 The existing plan owns remaining implementation and proof; archived discussions
 are preserved at `fe36937faf75151a2f5d7195b32ff708ce335e86:scratch/questions.md`.
+
+October 2 implementation found a persistence conflict: replacement wakes span
+segment documents, while frozen coverage and all owner joins are segment-local.
+The plan records a cross-segment reader/atomic-owner-write proposal for review.
+Recovering only old dues is rejected because it narrows Jack Heart's accepted
+frozen-all-outstanding set. Closed continuation remains unimplemented.

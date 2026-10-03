@@ -198,13 +198,11 @@ missing capability never silently waives required acceptance.
    settlement or cross-Home transfer. A removed schedule has no future firing;
    unresolved old-Home authority remains a named repair blocker. This is a
    substantial remaining controller/accounting change, not supplied by disposition.
-2. **Wait continuation accuracy.** Target/job overlap uses the retained calendar
-   to calculate an exact next due at observation. Telemetry still uses the entry
-   snapshot's `next_due_at`; a long wait can advertise a past retry time. Resolve
-   it through the existing calendar/continuation reader and prove a crossed-due
-   boundary. Physical job-overlap error text remains generic and out-of-window
-   receipt inclusion follows telemetry links, not overlap links; complete those
-   consumer checks before claiming comprehensive overlap presentation.
+2. **Wait continuation accuracy implemented.** Telemetry failure/deferral reads
+   the retained calendar at the observation after recovery returns. It no longer
+   uses entry `next_due_at`; removed schedules report closure rather than a past
+   retry. Physical job-overlap text and out-of-window overlap receipt inclusion
+   remain consumer work.
 3. **Integrated interruption/verification proof.** Exercise actual telemetry's
    missing-natural-receipt path against current SessionHistory analytics without
    relabeling Recovery or weakening doctor. Retain truthful blockers and dated
@@ -225,6 +223,38 @@ Those changes are not selected. Concrete operational blockers belong beside thei
 observations; historical startup errors do not prove a current blocker. The old
 0.12.29 foreign-Team restart and pre-merge missing-Daemon fixture failures remain
 historical after Jack's reported 0.12.31 recovery and main integration.
+
+## Persistence counterexample (October 2 implementation review)
+
+Closed continuation needs a revised persistence cut before implementation.
+`begin`, `validate`, `receipt_context`, telemetry coverage lookup and history's
+owner/qualification joins all assume that an attempt's covered opportunities
+live in one segment document. A wake after replacement has outstanding dues in
+both the closed predecessor and open successor. Recovering only the predecessor
+would violate Jack Heart's accepted frozen-all-outstanding coverage; writing
+cross-segment collapse links separately would lose atomicity on interruption.
+Simply dropping the closed checks therefore cannot implement the accepted model.
+No continuation code or narrower coverage policy was introduced.
+
+Proposed revision for review: keep the attempt on its original opportunity, make
+its one atomic `covered` write authoritative across same-Home predecessor segments,
+and derive collapse links in the shared reader. Materialize original due identities
+before that write; interruption before it leaves unclaimed dues, after it leaves
+one complete frozen set. Move validation, telemetry lookup, history settlement
+and late-writer fencing to that shared cross-segment view. Preserve original
+segment/Home and candidate ownership; do not infer authority across a Home change.
+This changes the accepted per-document representation and must be reconciled
+before building dependent continuation behavior. Gate and configured proof remain
+outstanding.
+
+### Delete — do not maintain
+
+- Deleted telemetry's entry-snapshot `next_due` calculation; the existing calendar
+  continuation reader owns retry timing, including closure and DST.
+- Pending the persistence revision: remove same-document-only coverage joins in
+  `begin`, `validate`, `receipt_context`, telemetry and release history together;
+  retain original dues, failed attempts, candidate identity, intervention evidence,
+  exact-attempt fencing and qualifying-pair rules on the surviving shared reader.
 
 ## Acceptance counterexamples
 
@@ -312,4 +342,4 @@ source, and repetitive completed slices with remaining work. The reconciled plan
 separates these boundaries and retains the full acceptance criteria. Production
 code is unchanged; no behavioral rerun is warranted for these prose edits.
 
-Check: `git diff --check` — passed; `lf context --wave infrastructure --skill realign --json` — memory 15,600/16,000 tokens, scratch below 12,000; both byte limits pass. Prose only; behavioral checks not rerun.
+Check: `cargo test -p loopflow --lib overlap_continuation_uses_current_calendar_and_preserves_closed_ownership` and `cargo test -p loopflow --test scheduled_release_tests scheduled_release_flow_settles_product_results_and_preserves_failures -- --test-threads=1` passed with isolated Home/executable and inherited authority removed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; context within limits; gate/configured proof deferred.

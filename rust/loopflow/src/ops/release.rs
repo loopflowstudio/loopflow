@@ -1756,12 +1756,8 @@ fn verify_scheduled_telemetry(
             recovery_receipt: None,
         }
     };
-    let next_due = context
-        .opportunities
-        .iter()
-        .map(|o| o.next_due_at)
-        .max()
-        .unwrap_or(now);
+    let continuation =
+        || accounting::overlap_continuation(home, receipt_id, chrono::Utc::now().timestamp());
     let current = observation
         .current_receipts
         .last()
@@ -1797,15 +1793,18 @@ fn verify_scheduled_telemetry(
                 accounting::record_telemetry(home, receipt_id, &observation)
             },
         );
-        result.map_err(|error| match error {
-            OpsError::ReleaseDeferred { reason, continuation } => OpsError::ReleaseDeferred {
-                reason,
-                continuation: format!("{continuation}; next configured release due {next_due}"),
-            },
-            error => OpsError::Message(format!(
-                "{error}; prerequisite retry exhausted for release receipt {receipt_id}; assign the failed telemetry receipt a repair disposition; next configured release due {next_due}"
-            )),
-        })?;
+        if let Err(error) = result {
+            let retry = continuation()?;
+            return Err(match error {
+                OpsError::ReleaseDeferred { reason, continuation } => OpsError::ReleaseDeferred {
+                    reason,
+                    continuation: format!("{continuation}; {retry}"),
+                },
+                error => OpsError::Message(format!(
+                    "{error}; prerequisite retry exhausted for release receipt {receipt_id}; assign the failed telemetry receipt a repair disposition; {retry}"
+                )),
+            });
+        }
     } else if attempt.telemetry.is_none() {
         accounting::record_telemetry(home, receipt_id, &observation)?;
     }
@@ -1815,13 +1814,14 @@ fn verify_scheduled_telemetry(
         .as_ref()
         .or_else(|| observation.current_receipts.last());
     let selected = selected.and_then(|id| all_receipts.iter().find(|r| &r.id == id));
-    let receipt = selected.ok_or_else(|| OpsError::ReleaseDeferred {
-        reason: "reserved telemetry receipt has no retained result; no second retry in this wake"
-            .into(),
-        continuation: format!(
-            "inspect release receipt {receipt_id}; next configured release due {next_due}"
-        ),
-    })?;
+    let Some(receipt) = selected else {
+        return Err(OpsError::ReleaseDeferred {
+            reason:
+                "reserved telemetry receipt has no retained result; no second retry in this wake"
+                    .into(),
+            continuation: format!("inspect release receipt {receipt_id}; {}", continuation()?),
+        });
+    };
     if receipt.outcome == CronOutcome::Running {
         return Err(OpsError::ReleaseDeferred {
             reason: format!(
@@ -1830,16 +1830,17 @@ fn verify_scheduled_telemetry(
                 receipt.runner_evidence()
             ),
             continuation: format!(
-                "observe {} at {}; next configured release due {next_due}",
+                "observe {} at {}; {}",
                 receipt.id,
-                receipt.log_path.display()
+                receipt.log_path.display(),
+                continuation()?
             ),
         });
     }
     if receipt.outcome != CronOutcome::Succeeded {
         return Err(OpsError::Message(format!(
-            "required telemetry {} did not pass: {}; inspect {} and assign its repair disposition; next configured release due {next_due}",
-            receipt.id, receipt.error.as_deref().unwrap_or("verification failed"), receipt.log_path.display()
+            "required telemetry {} did not pass: {}; inspect {} and assign its repair disposition; {}",
+            receipt.id, receipt.error.as_deref().unwrap_or("verification failed"), receipt.log_path.display(), continuation()?
         )));
     }
     persist_verification(

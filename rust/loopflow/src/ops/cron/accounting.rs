@@ -1354,6 +1354,11 @@ mod tests {
         let owner = begin(home, &id, &wake).unwrap().unwrap();
         let original = read(home).unwrap().remove(0).opportunities;
         for (now, next) in [(36000, 122400), (120000, 122400), (208800, 295200)] {
+            // Telemetry can outlive the entry snapshot's next due. The continuation
+            // must still name a future firing without expanding frozen coverage.
+            if now == 208800 {
+                assert!(original[0].next_due_at < now);
+            }
             let continuation = super::overlap_continuation(home, wake.id.as_str(), now).unwrap();
             assert!(
                 continuation.contains(&format!("next configured release due {next}")),

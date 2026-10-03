@@ -55,7 +55,7 @@ homepage:
       - label: "01 · Available"
         title: "A command line for software process."
         text: >-
-          lf runs your loopflows and manages what they rely on: working
+          lf runs your agents and manages what they rely on: working
           copies, checks, plans, credentials, and memory.
         href: "#features"
         link_label: "See the parts"

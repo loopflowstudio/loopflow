@@ -166,6 +166,8 @@ Claude's Keychain path is macOS-only and the fixture uses it there, the file els
 
 ## Evidence
 
+Check, compress: `cargo test -p loopflow --lib -- provider_account` — 49 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` — clean. No behavior change; both fixtures and the integration suites stay owed to gate.
+
 Check, slice 2: `cargo clippy -p loopflow --all-targets -- -D warnings` — clean; `cargo test -p loopflow --lib -- provider_account subscription identity account_status profile session_launch provider_auth` — 208 passed; `uv run --script tests/e2e/claude_shared_home.py …` against Claude Code 2.1.288 on macOS (Keychain store) — exits 0. `agent_tests` and `auth_tests` passed before the last Claude edits; `flow_tests` and the Codex fixture were not rerun; owed to gate. A full `--lib` run inside a Task Session fails two `lf::commands::run` tests on the ambient Flow environment; they pass with it removed.
 
 Check, at `46eaa2bd4` merged with `main` v0.12.31: `cargo test -p loopflow --lib -- provider_conversation human_session provider_account subscription profile` — 100 passed; `uv run --script tests/e2e/codex_connect.py … --shared-provider-home` against Codex 0.160.0 — exits 0. Clippy, `agent_tests`, `auth_tests` last passed before that routing refactor and merge, `flow_tests` before the earlier routing change; all four owed to gate. `store::migrations::tests::remove_ask_preserves_conversations_and_history` failed with and without this branch's draft when last run; not caused here.

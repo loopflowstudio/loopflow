@@ -356,23 +356,18 @@ async fn save_back(
                     .is_some_and(|email| email.as_str().eq_ignore_ascii_case(&identity.email))
         })
     });
-    let observed = |account: &ProviderAccount| {
-        let identity = identity.clone().or_else(|| {
-            Some(AccountIdentity {
-                email: account.observed_email.clone()?,
-                subject: account.observed_subject.clone()?,
-                credential_digest: None,
-            })
-        })?;
-        // A Claude profile's identity is only trusted for the bytes it was observed on.
-        let digest = (provider == Provider::Claude)
-            .then(|| credential_digest(&String::from_utf8_lossy(&credential)));
-        Some((identity, digest))
-    };
     if let Some((owner, home)) = owner.and_then(|account| Some((account, account.home.as_deref()?)))
     {
         write_login(provider, home, &credential)?;
-        if let Some((identity, Some(digest))) = observed(owner) {
+        let identity = identity.or_else(|| {
+            Some(AccountIdentity {
+                email: owner.observed_email.clone()?,
+                subject: owner.observed_subject.clone()?,
+                credential_digest: None,
+            })
+        });
+        // A Claude profile's identity is only trusted for the bytes it was observed on.
+        if let (Provider::Claude, Some(identity)) = (provider, identity) {
             store
                 .record_provider_account_identity(
                     provider.as_str(),
@@ -380,7 +375,7 @@ async fn save_back(
                     &identity.email,
                     &identity.subject,
                     owner.observed_plan.as_deref(),
-                    Some(&digest),
+                    Some(&credential_digest(&String::from_utf8_lossy(&credential))),
                 )
                 .await?;
         }

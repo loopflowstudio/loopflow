@@ -297,6 +297,18 @@ impl ProviderAccountRoute {
         matches!(self.authority, AccountRouteAuthority::Shared { .. })
     }
 
+    /// The home holding this route's live credential. A shared route's is the
+    /// native home while its account is active there; an isolated conversation
+    /// runs on its profile's own copy.
+    fn credential_home(&self, profile: &Path) -> PathBuf {
+        match self.authority {
+            AccountRouteAuthority::Shared { .. } => {
+                activation::credential_home(self.provider, profile)
+            }
+            _ => profile.to_path_buf(),
+        }
+    }
+
     /// Provider arguments that must precede the subcommand. An isolated Codex
     /// home keeps its login in a file whatever the mirrored config selects.
     pub(crate) fn provider_args(&self) -> &'static [&'static str] {
@@ -320,12 +332,7 @@ impl ProviderAccountRoute {
             AccountRouteAuthority::Local { home, .. }
             | AccountRouteAuthority::Shared { home, .. }
             | AccountRouteAuthority::Direct { home, .. } => {
-                // An isolated conversation runs on its profile's own copy.
-                let home = if matches!(self.authority, AccountRouteAuthority::Shared { .. }) {
-                    activation::credential_home(self.provider, home)
-                } else {
-                    home.clone()
-                };
+                let home = self.credential_home(home);
                 crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
                     .await
                     .map_err(|error| ProviderAccountError::ForwardingCredential {
@@ -381,13 +388,7 @@ impl ProviderAccountRoute {
             .find(|account| account.account_id == self.account_id)
             .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
         let mut selected = account.clone();
-        // The active account's live credential is the native home's.
-        selected.home = Some(match self.authority {
-            AccountRouteAuthority::Shared { .. } => {
-                activation::credential_home(self.provider, home)
-            }
-            _ => home.clone(),
-        });
+        selected.home = Some(self.credential_home(home));
         identity::check_current_identity(&selected, &accounts)
             .await
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()))
@@ -2770,9 +2771,11 @@ mod account_first_tests {
         assert_eq!(route.account_id(), &healthy.account_id);
     }
 
-    const SHARED_ENV: [&str; 4] = [
+    const SHARED_ENV: [&str; 6] = [
         "LF_HOME",
         "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "LF_TEST_CLAUDE_PROFILE_URL",
         lease::ACCOUNT_LEASE_ENV,
         activation::ACCOUNT_ISOLATION_ENV,
     ];
@@ -2782,14 +2785,16 @@ mod account_first_tests {
         std::env::set_var(name, mode);
     }
 
-    /// A Home with Codex accounts `first` and `second` on the default route
-    /// and a native home signed in as `active`.
-    async fn shared_codex_home(temp: &Path, active: &str) -> (SharedStore, PathBuf) {
+    /// A Home with `provider` accounts `first` and `second` on the default
+    /// route and a native home signed in as `active`; `native` is a login no
+    /// stored account holds.
+    async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {
         std::env::set_var("LF_HOME", temp);
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
         let native = temp.join("native");
-        std::env::set_var("CODEX_HOME", &native);
+        fs::create_dir_all(&native).unwrap();
+        std::env::set_var(activation::home_env(provider).unwrap(), &native);
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(temp.join("loopflow.db")))
                 .await
@@ -2797,28 +2802,28 @@ mod account_first_tests {
         );
         let mut route = Vec::new();
         for account_id in ["first", "second"] {
-            let stored = account(Provider::Codex, account_id, temp);
+            let stored = account(provider, account_id, temp);
             store.upsert_provider_account(&stored).await.unwrap();
             route.push(stored.account_id);
         }
         store
             .set_provider_route(&ProviderRoute {
                 scope: RouteScope::Default,
-                provider: Provider::Codex,
+                provider,
                 accounts: route,
                 created_at: now_unix(),
                 updated_at: now_unix(),
             })
             .await
             .unwrap();
-        // Writes a login no stored account holds; `active` then replaces it.
-        account(Provider::Codex, "native", temp);
-        if active != "native" {
-            fs::copy(
-                temp.join(active).join("auth.json"),
-                native.join("auth.json"),
-            )
-            .unwrap();
+        if active == "native" {
+            account(provider, "native", temp);
+        } else {
+            let login = match provider {
+                Provider::Claude => ".credentials.json",
+                _ => "auth.json",
+            };
+            fs::copy(temp.join(active).join(login), native.join(login)).unwrap();
         }
         (store, native)
     }
@@ -2829,10 +2834,15 @@ mod account_first_tests {
             .email
     }
 
-    async fn activate(store: &SharedStore, account_id: &str, native: &Path) -> bool {
+    async fn activate(
+        store: &SharedStore,
+        provider: Provider,
+        account_id: &str,
+        native: &Path,
+    ) -> bool {
         activation::activate(
             store,
-            Provider::Codex,
+            provider,
             &parse_account_id(account_id).unwrap(),
             native,
             activation::SwitchCause::Person,
@@ -2848,22 +2858,22 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_codex_home(temp.path(), "first").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
         // The provider refreshed the active login in place.
         let rotated = fs::read_to_string(native.join("auth.json"))
             .unwrap()
             .replace("fixture", "rotated");
         fs::write(native.join("auth.json"), &rotated).unwrap();
 
-        assert!(!activate(&store, "first", &native).await);
-        assert!(activate(&store, "second", &native).await);
+        assert!(!activate(&store, Provider::Codex, "first", &native).await);
+        assert!(activate(&store, Provider::Codex, "second", &native).await);
         assert_eq!(codex_login(&native), "second@example.com");
         assert_eq!(
             fs::read_to_string(temp.path().join("first/auth.json")).unwrap(),
             rotated
         );
 
-        assert!(activate(&store, "first", &native).await);
+        assert!(activate(&store, Provider::Codex, "first", &native).await);
         assert_eq!(
             fs::read_to_string(native.join("auth.json")).unwrap(),
             rotated
@@ -2876,7 +2886,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (_store, native) = shared_codex_home(temp.path(), "first").await;
+        let (_store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
 
         let probed = |account: &str| {
             activation::credential_home(Provider::Codex, &temp.path().join(account))
@@ -2891,10 +2901,10 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_codex_home(temp.path(), "native").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "native").await;
         let stranger = fs::read_to_string(native.join("auth.json")).unwrap();
 
-        assert!(activate(&store, "first", &native).await);
+        assert!(activate(&store, Provider::Codex, "first", &native).await);
 
         let kept = store
             .list_provider_accounts(Some("codex"))
@@ -2916,7 +2926,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_codex_home(temp.path(), "first").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
         fs::write(
             native.join("config.toml"),
             "cli_auth_credentials_store = \"keyring\"\n",
@@ -2935,52 +2945,6 @@ mod account_first_tests {
 
         assert!(error.to_string().contains("cli_auth_credentials_store"));
         assert_eq!(codex_login(&native), "first@example.com");
-    }
-
-    const SHARED_CLAUDE_ENV: [&str; 5] = [
-        "LF_HOME",
-        "CLAUDE_CONFIG_DIR",
-        "LF_TEST_CLAUDE_PROFILE_URL",
-        lease::ACCOUNT_LEASE_ENV,
-        activation::ACCOUNT_ISOLATION_ENV,
-    ];
-
-    /// A Home with Claude accounts `first` and `second` on the default route
-    /// and a native home holding `first`'s login.
-    async fn shared_claude_home(temp: &Path) -> (SharedStore, PathBuf) {
-        std::env::set_var("LF_HOME", temp);
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
-        std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
-        let native = temp.join("native");
-        fs::create_dir_all(&native).unwrap();
-        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(temp.join("loopflow.db")))
-                .await
-                .unwrap(),
-        );
-        let mut route = Vec::new();
-        for account_id in ["first", "second"] {
-            let stored = account(Provider::Claude, account_id, temp);
-            store.upsert_provider_account(&stored).await.unwrap();
-            route.push(stored.account_id);
-        }
-        store
-            .set_provider_route(&ProviderRoute {
-                scope: RouteScope::Default,
-                provider: Provider::Claude,
-                accounts: route,
-                created_at: now_unix(),
-                updated_at: now_unix(),
-            })
-            .await
-            .unwrap();
-        fs::copy(
-            temp.join("first/.credentials.json"),
-            native.join(".credentials.json"),
-        )
-        .unwrap();
-        (store, native)
     }
 
     /// Claude's profile endpoint, reporting `login` to the one request it serves.
@@ -3007,42 +2971,29 @@ mod account_first_tests {
         fs::read_to_string(home.join(".credentials.json")).unwrap()
     }
 
-    async fn activate_claude(store: &SharedStore, account_id: &str, native: &Path) -> bool {
-        activation::activate(
-            store,
-            Provider::Claude,
-            &parse_account_id(account_id).unwrap(),
-            native,
-            activation::SwitchCause::Person,
-        )
-        .await
-        .unwrap()
-        .is_some()
-    }
-
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn claude_switching_away_and_back_keeps_a_login_the_provider_rotated() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
-        let (store, native) = shared_claude_home(temp.path()).await;
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
         // Claude refreshed the active login in place; neither token survives.
         let rotated = claude_credential(&native).replace("fixture-first", "rotated-first");
         fs::write(native.join(".credentials.json"), &rotated).unwrap();
         let asked = claude_reports("first");
 
         // Only the provider can say whose login this is now.
-        assert!(!activate_claude(&store, "first", &native).await);
+        assert!(!activate(&store, Provider::Claude, "first", &native).await);
         asked.join().unwrap();
         assert_eq!(claude_credential(&temp.path().join("first")), rotated);
 
-        assert!(activate_claude(&store, "second", &native).await);
+        assert!(activate(&store, Provider::Claude, "second", &native).await);
         assert_eq!(
             claude_credential(&native),
             claude_credential(&temp.path().join("second"))
         );
-        assert!(activate_claude(&store, "first", &native).await);
+        assert!(activate(&store, Provider::Claude, "first", &native).await);
         assert_eq!(claude_credential(&native), rotated);
         // The rotated profile still proves its identity without the provider.
         let accounts = store.list_provider_accounts(Some("claude")).await.unwrap();
@@ -3054,13 +3005,13 @@ mod account_first_tests {
     async fn an_unknown_native_claude_login_is_kept_as_a_new_profile() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
-        let (store, native) = shared_claude_home(temp.path()).await;
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
         let stranger = claude_credential(&native).replace("fixture-first", "fixture-stranger");
         fs::write(native.join(".credentials.json"), &stranger).unwrap();
         let asked = claude_reports("stranger");
 
-        assert!(activate_claude(&store, "second", &native).await);
+        assert!(activate(&store, Provider::Claude, "second", &native).await);
         asked.join().unwrap();
 
         let kept = store
@@ -3079,9 +3030,9 @@ mod account_first_tests {
     async fn shared_claude_launch_names_no_home_or_credential() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_CLAUDE_ENV);
-        let (store, native) = shared_claude_home(temp.path()).await;
-        assert!(activate_claude(&store, "second", &native).await);
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        assert!(activate(&store, Provider::Claude, "second", &native).await);
 
         // `second` is active though the route lists `first` ahead of it.
         let route = resolve_provider_account(Provider::Claude, None)
@@ -3121,7 +3072,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         // `second` is active though the route lists `first` ahead of it.
-        let (_store, native) = shared_codex_home(temp.path(), "second").await;
+        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
 
         let route = resolve_provider_account(Provider::Codex, None)
             .await
@@ -3144,7 +3095,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_codex_home(temp.path(), "first").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
         store
             .upsert_provider_account_limits(
                 "codex",
@@ -3176,7 +3127,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (_store, native) = shared_codex_home(temp.path(), "second").await;
+        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
         set_isolation(true);
 
         let route = resolve_provider_account(Provider::Codex, None)
@@ -3208,13 +3159,13 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_codex_home(temp.path(), "first").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
             .unwrap();
         route.pin_session("conversation").await.unwrap();
-        assert!(activate(&store, "second", &native).await);
+        assert!(activate(&store, Provider::Codex, "second", &native).await);
 
         set_isolation(true);
         let resumed = resolve_provider_account(Provider::Codex, Some("conversation"))
@@ -3243,7 +3194,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let _selection = EnvRestore::capture(&[lease::ACCOUNT_SELECTION_ENV]);
-        let (_store, native) = shared_codex_home(temp.path(), "second").await;
+        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
         let listed = |accounts: &[&str]| {
             let accounts: Vec<String> = accounts.iter().map(|id| format!("codex={id}")).collect();
             let selection = lease::AccountSelection::from_flags(&accounts, &[]).unwrap();
@@ -3279,7 +3230,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, _native) = shared_codex_home(temp.path(), "first").await;
+        let (store, _native) = shared_home(Provider::Codex, temp.path(), "first").await;
         let first = parse_account_id("first").unwrap();
         let second = parse_account_id("second").unwrap();
         let launched = |provider| {
@@ -3312,7 +3263,7 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (_store, _native) = shared_codex_home(temp.path(), "first").await;
+        let (_store, _native) = shared_home(Provider::Codex, temp.path(), "first").await;
         let inherited = temp.path().join("accounts/codex/second");
         std::env::set_var("CODEX_HOME", &inherited);
         // The provider default is this test's HOME; route without touching it.

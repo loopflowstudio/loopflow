@@ -171,9 +171,9 @@ stays explicit, and registered completion retains pending writeback.
 October 3 branch implementation admits Tasks with optional placement through public
 Session binding and CLI execution. Binding preview and generic Work readers remain
 observational. A path/slug pair distinguishes no delivery from lost placement;
-explicit binds retain history without adopting the caller directory. Transactional
-later allocation keeps identity and events. Public binding and store allocation are
-proven separately; configured public allocation/retention remains acceptance work.
+explicit binds retain history without adopting the caller directory. Store allocation
+retains identity/events, but public first allocation after binding and checkout
+retention remain unproven; restoration tests cover already-placed Tasks.
 
 The requesting conversation allowance uses its current provider generation and
 exact driver parent, solely during completion. Stale callers and review Sessions
@@ -181,14 +181,18 @@ remain blocked; cleanup and abandonment keep their retention checks. Stateful
 fixtures prove no-delivery completion, retry and a post-completion provider event,
 not native-provider acceptance. Explicit attributed/unattributed CLI Flows share
 the driver and leave the Task open. Desktop has nullable placement and outcome entry;
-managed startup/replacement and independent-Flow presentation still need reconciliation.
+managed startup/replacement still couples launch to checkout and PR recovery, and
+the Flow pane still projects only the managed selection. These remain implementation
+gaps, not merely acceptance checks.
 
 Flows persist launch cwd independently of placement. Migration freezes retained
 paths without inventing unknown history. Task completion never ends a Flow; recorded
 results settle through the graph and managed planning gates new launches. Cleanup
 retains unfinished Flows' checkouts. Upstream #1415's historical-Exec recovery remains
 separate: completion, cleanup and abandonment still reject unknown execution.
-LOO-364 owns broader switching; LOO-366 owns Project availability/chapter resets.
+Compression restored PR observation locking before reading the mutable PR row;
+absent placement takes no checkout lock. LOO-364 owns broader switching; LOO-366
+owns Project availability/chapter resets.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

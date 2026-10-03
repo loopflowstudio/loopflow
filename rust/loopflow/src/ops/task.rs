@@ -597,28 +597,19 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
         .ok_or_else(|| task_error("Task has no active PR from which to restore its checkout"))?;
     let wave = owning_wave(store, task).await?;
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
-    let _lease = crate::engine::git::acquire_worktree_lease(
-        &repo,
-        &task.require_workspace()?.worktree,
-        "Task checkout",
-    )?;
-    if task.require_workspace()?.worktree.join(".git").exists() {
+    let worktree = &task.require_workspace()?.worktree;
+    let _lease = crate::engine::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    if worktree.join(".git").exists() {
         return finish_task_checkout(store, task, &pr).await;
     }
-    if task
-        .require_workspace()?
-        .worktree
-        .symlink_metadata()
-        .is_ok()
-    {
+    if worktree.symlink_metadata().is_ok() {
         return Err(task_error(format!(
             "Task checkout path {} is occupied; its contents were preserved",
-            task.require_workspace()?.worktree.display()
+            worktree.display()
         )));
     }
     let checkouts = crate::engine::worktrees::list_worktrees(&repo)?;
-    let destination =
-        crate::store::canonicalize_with_missing_tail(&task.require_workspace()?.worktree)?;
+    let destination = crate::store::canonicalize_with_missing_tail(worktree)?;
     for other in checkouts
         .iter()
         .filter(|entry| entry.branch.as_deref() == Some(&pr.branch))
@@ -628,7 +619,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
                 "Task branch {} is registered at {}; preserve that checkout before restoring {}",
                 pr.branch,
                 other.path.display(),
-                task.require_workspace()?.worktree.display()
+                worktree.display()
             )));
         }
     }
@@ -675,14 +666,11 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             "--no-track".into(),
             "-b".into(),
             pr.branch.clone(),
-            task.require_workspace()?.worktree.display().to_string(),
+            worktree.display().to_string(),
             base,
         ]);
     } else {
-        args.extend([
-            task.require_workspace()?.worktree.display().to_string(),
-            pr.branch.clone(),
-        ]);
+        args.extend([worktree.display().to_string(), pr.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     finish_task_checkout(store, task, &pr).await
@@ -698,15 +686,14 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task, pr: &TaskPr) -> 
     ) {
         // The first child commit owns the deletion. A retry after that commit
         // but before PrStarted must preserve any notes the child has since made.
-        if pr.parent_pr_id.is_some()
-            && rev_parse(&task.require_workspace()?.worktree, "HEAD")? == pr.base_commit
-        {
+        let worktree = &task.require_workspace()?.worktree;
+        if pr.parent_pr_id.is_some() && rev_parse(worktree, "HEAD")? == pr.base_commit {
             git_output_bytes(
-                &task.require_workspace()?.worktree,
+                worktree,
                 &["rm", "-r", "-f", "--ignore-unmatch", "--", "scratch"],
             )?;
             git_output_bytes(
-                &task.require_workspace()?.worktree,
+                worktree,
                 &["commit", "--allow-empty", "-m", "Clear inherited scratch"],
             )?;
         }
@@ -1073,14 +1060,7 @@ fn create_prepared_task(
         match store.create_task_with_worktree(&task, &pr).await {
             Ok(()) => {
                 if let Some(direction) = directive.as_deref() {
-                    let mut publication_task = task.clone();
-                    publication_task
-                        .workspace
-                        .as_mut()
-                        .expect("prepared Task has placement")
-                        .worktree = main_repo.clone();
-                    super::linear_observe::publish_task_steer(&store, &publication_task, direction)
-                        .await?;
+                    super::linear_observe::publish_task_steer(&store, &task, direction).await?;
                 }
             }
             Err(StoreError::Sqlite(_)) => {
@@ -3087,10 +3067,15 @@ async fn reconcile_task_pr_observation(
     // Reconciliation updates the same projection as publication/finalization.
     // Refuse overlap so a remote read begun before a push cannot overwrite the
     // request or head recorded by the command that completed after it.
+    let _mutation = task
+        .workspace
+        .as_ref()
+        .map(|workspace| lock_task_pr_mutation(&workspace.worktree))
+        .transpose()?;
     let Some(mut pr) = reconcile_subject(store, task).await? else {
         return Ok(None);
     };
-    let _mutation = lock_task_pr_mutation(&task.require_workspace()?.worktree)?;
+    let worktree = &task.require_workspace()?.worktree.clone();
     if pr.phase() == PrPhase::Merged {
         task.observation = Observation::NotRequired;
         return Ok(Some(pr));
@@ -3112,15 +3097,10 @@ async fn reconcile_task_pr_observation(
     }
     let previous = pr.clone();
     let observation = match number {
-        Some(number) => crate::ops::pr::observe_pr_by_number(
-            &task.require_workspace()?.worktree,
-            number,
-            &pr.branch,
-            freshness,
-        ),
-        None => {
-            crate::ops::pr::observe_pr_by_branch(&task.require_workspace()?.worktree, &pr.branch)
+        Some(number) => {
+            crate::ops::pr::observe_pr_by_number(worktree, number, &pr.branch, freshness)
         }
+        None => crate::ops::pr::observe_pr_by_branch(worktree, &pr.branch),
     };
     let github_pr = match observation {
         crate::ops::pr::PrObservation::Fresh(info) => {
@@ -3178,7 +3158,7 @@ async fn reconcile_task_pr_observation(
         github: None,
         merge: None,
     });
-    invalidate_stale_merge_request(&task.require_workspace()?.worktree, publication, &github_pr)?;
+    invalidate_stale_merge_request(worktree, publication, &github_pr)?;
     publication.github = Some(GithubPr {
         number,
         url: url.clone(),
@@ -3244,7 +3224,7 @@ async fn reconcile_task_pr_observation(
             // it was closed. Clearing it returns the same row to `Open`.
             pr.abandoned_at = None;
             if let Some(ci_observation) = observe_required_checks(
-                &task.require_workspace()?.worktree,
+                worktree,
                 github_pr.number,
                 github_pr.head_sha.as_deref(),
                 now,

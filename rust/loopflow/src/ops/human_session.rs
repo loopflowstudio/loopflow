@@ -1724,7 +1724,8 @@ pub(crate) async fn rename(
 /// Assign a Task to future Session work. The id is the Session's
 /// or any of its Runs'; a closed Session binds like an open one.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
-    let (session, task) = binding_target(store, id, task).await?;
+    let session = binding_session(store, id).await?;
+    let task = crate::ops::task::admit_task(store, &session.cwd, task).await?;
     let session = store
         .bind_session(&session.id, session.captured, &task.id)
         .await
@@ -1786,12 +1787,6 @@ async fn binding_session(store: &SharedStore, id: &str) -> Result<AgentSession> 
         Err(_) => store.session(id).await?,
     }
     .ok_or_else(|| session_not_found(id))
-}
-
-async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
-    let session = binding_session(store, id).await?;
-    let task = crate::ops::task::admit_task(store, &session.cwd, task).await?;
-    Ok((session, task))
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {

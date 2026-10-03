@@ -16,7 +16,10 @@ use super::{block_on_task, owning_wave, task_error, task_store};
 
 /// Completion is durable before cleanup; failure never reverses the outcome.
 pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if task.workspace.is_none() || super::task_work_status(store, task).await? != WorkStatus::Done {
+    let Some(workspace) = &task.workspace else {
+        return Ok(());
+    };
+    if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
     let blockers = associated_work_blockers(store, task)?;
@@ -41,9 +44,8 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let result = async {
         let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
-        if task.require_workspace()?.worktree.exists()
-            && std::fs::canonicalize(&task.require_workspace()?.worktree)?
-                == std::fs::canonicalize(&repo)?
+        if workspace.worktree.exists()
+            && std::fs::canonicalize(&workspace.worktree)? == std::fs::canonicalize(&repo)?
         {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
@@ -51,11 +53,10 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
             );
             return Ok(());
         }
-        let _mutation = task
-            .require_workspace()?
+        let _mutation = workspace
             .worktree
             .exists()
-            .then(|| super::lock_task_pr_mutation(&task.require_workspace()?.worktree))
+            .then(|| super::lock_task_pr_mutation(&workspace.worktree))
             .transpose()?;
         let mut deletions = Vec::new();
         for pr in store.task_prs(&task.id).await.map_err(task_error)? {
@@ -81,7 +82,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         for deletion in deletions {
             crate::ops::wt::apply_delete(deletion, &NullProgress)?;
         }
-        if task.require_workspace()?.worktree.exists() {
+        if workspace.worktree.exists() {
             return Err(task_error(
                 "checkout is on a different branch; retained it for explicit wt delete",
             ));

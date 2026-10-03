@@ -298,13 +298,13 @@ impl ProviderAccountRoute {
             AccountRouteAuthority::Local { home, .. }
             | AccountRouteAuthority::Shared { home, .. }
             | AccountRouteAuthority::Direct { home, .. } => {
-                // The native home holds the active account's live credential;
-                // its stored profile is only current as of the last switch.
-                let native = activation::native_home(self.provider, None);
-                let active = matches!(self.authority, AccountRouteAuthority::Shared { .. })
-                    && identity::same_codex_login(&native, home);
-                let home = if active { &native } else { home };
-                crate::provider_auth::prepare_provider_account_access_token(self.provider, home)
+                // An isolated conversation runs on its profile's own copy.
+                let home = if matches!(self.authority, AccountRouteAuthority::Shared { .. }) {
+                    activation::credential_home(self.provider, home)
+                } else {
+                    home.clone()
+                };
+                crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
                     .await
                     .map_err(|error| ProviderAccountError::ForwardingCredential {
                         provider: self.provider,
@@ -783,7 +783,8 @@ pub(crate) async fn prepare_account_access_token(
     identity::check_current_identity(account, accounts)
         .await
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, home)
+    let home = activation::credential_home(provider, home);
+    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, &home)
         .await
         .map_err(|error| ProviderAccountError::ForwardingCredential {
             provider,
@@ -2817,6 +2818,21 @@ mod account_first_tests {
             fs::read_to_string(native.join("auth.json")).unwrap(),
             rotated
         );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn the_active_account_is_probed_in_the_native_home() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (_store, native) = shared_codex_home(temp.path(), "first").await;
+
+        let probed = |account: &str| {
+            activation::credential_home(Provider::Codex, &temp.path().join(account))
+        };
+        assert_eq!(probed("first"), native);
+        assert_eq!(probed("second"), temp.path().join("second"));
     }
 
     #[allow(clippy::await_holding_lock)]

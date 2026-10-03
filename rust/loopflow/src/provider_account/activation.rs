@@ -114,6 +114,18 @@ pub(crate) fn active_account<'a>(
         })
 }
 
+/// The home holding an account's live credential: the native one while that
+/// account is active there, since its stored profile is only current as of the
+/// last switch and refreshing both copies could invalidate one of them.
+pub(crate) fn credential_home(provider: Provider, profile: &Path) -> PathBuf {
+    let native = native_home(provider, None);
+    if provider == Provider::Codex && super::identity::same_codex_login(&native, profile) {
+        native
+    } else {
+        profile.to_path_buf()
+    }
+}
+
 /// Sign `native` in as `account_id`. Returns the provider credential lock
 /// when the native credential changed, to be held until the launch that asked
 /// for it has spawned; `None` when that account was already active.

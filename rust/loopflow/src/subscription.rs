@@ -15,7 +15,9 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::provider_account::activation::credential_home;
 use crate::provider_account::identity::{credential_digest, AccountIdentity};
+use crate::provider_auth::Provider;
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -56,7 +58,8 @@ pub async fn poll_account(
         "codex" => {
             crate::provider_account::identity::check_account_identity(account, &[])
                 .map_err(SubscriptionError::NeedsLogin)?;
-            let usage = poll_codex(home).await?;
+            let home = credential_home(Provider::Codex, home);
+            let usage = poll_codex(&home).await?;
             crate::provider_account::identity::check_account_identity(account, &[])
                 .map_err(SubscriptionError::NeedsLogin)?;
             Ok(usage)
@@ -492,6 +495,7 @@ pub(crate) async fn redeem_codex_reset(
         .ok_or_else(|| SubscriptionError::Unavailable("account has no credential home".into()))?;
     crate::provider_account::identity::check_account_identity(account, accounts)
         .map_err(SubscriptionError::NeedsLogin)?;
+    let home = &credential_home(Provider::Codex, home);
     let mut connection = codex_connection(home).await?;
     let before = codex_usage(&mut connection, home).await?;
     crate::provider_account::identity::validate_identity(account, &before.identity, accounts)

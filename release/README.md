@@ -108,9 +108,26 @@ An ambiguous Fly command result is accepted only when `/healthz` and the root
 page prove the exact tag; rollback starts only after that production proof
 fails.
 
-The daily run is idempotent. No merged changes is success. If a tag's hosted
+The daily run is idempotent. No merged changes is success. If a valid tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
-artifacts and resumes the same tag instead of cutting another patch.
+artifacts and resumes the same tag. Cached receipts never bypass installer
+preflight: preparation reuse and publication validate the packaged CLI in a fresh
+disposable Home.
+
+After integration, the publisher inspects the exact merged source before the
+controller builds or tags it. A migration arriving after preparation causes a
+new patch cut; canonical batches already on main stay immutable. For an invalid
+tagged candidate, replacement first requires confirmed absence of a GitHub
+Release (including drafts), crates.io version, and versioned R2 download.
+Provider errors leave publication state unresolved. Partial publication needs
+reconciliation; the controller never rewrites the old tag.
+
+The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
+with `preparation_required` (a list of reasons) and `publications` (null when
+unchecked). `--check-publication` queries external publication when source needs
+preparation; only a successfully queried empty list permits replacement.
+Progress goes to stderr. The publisher owns repository-specific source and
+publication facts; the release controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
@@ -123,8 +140,10 @@ preceding `.0` tag. A missing cycle baseline is reported explicitly.
 An explicit minor version such as `lf release run 0.13.0` follows the same policy.
 
 The selected pair and snapshot survive interruption in
-`.lf/releases/minor-<target>.json`. Retrying finishes the same pair without
-creating another patch. A minor candidate whose merged tree differs from its
+`.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing
+an unprepared candidate advances the closing patch within the same cycle. A
+completed successor is recovered even if publication finished before the pair
+was saved. A minor candidate whose merged tree differs from its
 prepared snapshot is stopped before tagging. Notes previews print Markdown to
 stdout and progress to stderr, without changing manifests or release archives.
 For an existing version, previews end at its tag and read historical release

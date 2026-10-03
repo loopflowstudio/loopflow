@@ -1949,12 +1949,12 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
 
 fn print_runs(runs: &Evidence<SessionHistory>) {
     match runs {
-        Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
+        Evidence::Unavailable { reason } => println!("  sessions unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
-            println!("  runs       no Run records in the window")
+            println!("  sessions   no Session history in the window")
         }
         Evidence::Ok { items, truncated } => {
-            println!("  runs");
+            println!("  sessions");
             for run in items {
                 println!(
                     "    {label:<24}  {status:<12}  tok {tokens:>7}  {age:>7} ago",

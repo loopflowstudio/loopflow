@@ -2,8 +2,8 @@
 
 Jack Heart confirmed on 2026-10-02 that the working conversation can complete its
 Task. No further product question is outstanding from this review. The
-[completion notes](task-completion-conversation.md) retain the cleanup implications
-and implementation proof still required; the assumptions below remain proposals.
+[working design](jack-heart/start-and-finish-tasks-without.md) retains the cleanup
+implications and implementation proof still required; the assumptions below remain proposals.
 
 - The kickoff design preserves existing current-Project selection for filing;
   LOO-366 owns Project availability and optional chapter resets. Narrow issue

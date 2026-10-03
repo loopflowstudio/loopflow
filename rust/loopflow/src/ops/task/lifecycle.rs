@@ -555,7 +555,6 @@ pub(super) fn recovery_execution_blockers(
     )
 }
 
-#[derive(Clone, Copy)]
 enum ExecutionCheck {
     RetainWork,
     ResumeFlow,
@@ -606,7 +605,7 @@ fn execution_blockers(
         }
     }
     for session in work.sessions.iter().filter(|session| !session.managed) {
-        if session.completed_at.is_none() {
+        if matches!(check, ExecutionCheck::ResumeFlow) && session.completed_at.is_none() {
             if let Some(driver) = store
                 .sqlite
                 .session_driver(&session.id)

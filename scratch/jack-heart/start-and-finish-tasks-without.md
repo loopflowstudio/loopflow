@@ -14,8 +14,21 @@ Jack Heart confirmed that the conversation doing the work can complete its Task.
 It need not finish its own Session or provider turn before requesting completion.
 Task completion preserves that conversation and its history. Implementation details
 remain proposed; this review does not claim implementation or acceptance proof.
-The recovery implications and remaining work are recorded in
-[completion from the working conversation](../task-completion-conversation.md).
+The current Exec is exempted by the associated-work checker, but a non-managed
+Session's pending turn still blocks. Cleanup shares that checker: keep any new
+completion allowance separate from cleanup and abandonment protections. The
+unrelated color-scheme message was withdrawn and contributes no requirement.
+
+The earlier schema blocker is resolved for this continuation. Failed Session
+event 30887 rejected root `maxProperties` in Codex's output schema; it supplied
+no navigation verdict. Source repair `fac48dd22` (#1401) removed that keyword
+and root union; its four local schema tests passed. Jack Heart's supplied steer
+reports installed 0.12.31 contains the repair and authorizes blocked-worker
+recovery. Supplied step feedback confirms the corrected decision request reached
+the agent and returned to implementation. No further recovery or product approval
+is required here. Original diagnostic details remain at
+`7c1d84b1e:scratch/flow-decision-schema-blocker.md`; they do not describe the current
+runtime or establish Task acceptance.
 
 ## Outcome and demo
 
@@ -90,6 +103,14 @@ without plumbing blockers. No quantitative chapter targets were supplied.
   `TaskFlowView` consume these operations, while the local Session launcher
   obtains Task checkout placement. UI-only relaxation would leave CLI and agents
   blocked and would misrepresent permissions.
+- Recovery distinguishes unknown historical Execs from current execution without
+  recording their exit. Session-driver reads serve only that resumption exception;
+  cleanup and abandonment block unknown Execs without needing those extra reads.
+  Upstream #1415 is included through the current base; it already owns this
+  recovery distinction and missing-PR discovery. The retained local edit only
+  avoids Session-driver reads in retention checks; it grants no completion
+  exemption. Existing `task_work` tests cover recovery versus retention. Preserve
+  these behaviors while removing unrelated delivery prerequisites.
 
 Relevant retained memory: planning and completion have separate writers; bind is
 write-once and can target done/landed Tasks; membership grants no execution
@@ -273,7 +294,9 @@ as eliminating all filing reads. Failed issue acquisition remains an explicit
 failure; registered completion retains its existing pending-writeback state.
 
 1. **Next implementation slice:** remove mandatory placement from admission and membership,
-   migrate existing rows and update minimum readers/DTO consumers. Add a focused
+   update readers/writers and DTO consumers while preserving existing rows.
+   The Flow cwd migration is already present; Task placement columns are already
+   nullable and need no redundant schema conversion. Add a focused
    `task_without_delivery` test: bind an existing conversation to an admitted Task,
    read membership, and prove zero PR/checkout/Flow creation; then allocate the
    existing delivery path and prove identity/history survive.
@@ -287,7 +310,7 @@ failure; registered completion retains its existing pending-writeback state.
    Apply Jack Heart's requesting-conversation decision: its own active turn may
    remain open, while other associated work and delivery obligations must settle.
    Separate completion eligibility from destructive cleanup eligibility at their
-   existing owners; preserve the current Session and checkout across completion.
+   existing owners; preserve the requesting Session and checkout across completion.
 4. Cut over Desktop controls, Session launch placement, CLI/help and agent guidance.
    Update `docs/lf.md`, architecture reference and relevant builtin skills. Keep
    stored historical skill wording historical. Complete migration and consumer
@@ -344,10 +367,10 @@ per-operation checks and confirmation/retry proofs are the safeguards.
 Simulated review finding: merely relaxing `task_completion_gate` would neither
 admit a research Session nor fix the context reader's PR requirement, and could
 weaken delivery. The complete deletion cut therefore starts with registration
-and placement and preserves the gate's evidence obligations. Only the narrow
-planning-confirmation slice is implemented; full acceptance remains unproven.
+and placement and preserves the gate's evidence obligations. Planning confirmation
+and independent Flow cwd persistence are implemented; public admission and full acceptance remain unproven.
 
-Check: `cargo test -p loopflow task_without_delivery --lib` — 4 passed; `cargo test -p loopflow task_work --lib` — 18 passed, including retained recovery edits; `cargo test -p loopflow store::sqlite::flow --lib` — 14 passed; formatting and `cargo clippy --all-targets -- -D warnings` passed; full public admission/binding, completion and Desktop acceptance remain unimplemented.
+Check: realign `git diff --check` passed and `lf context --wave infrastructure --json` fits memory/scratch budgets; no new code changes or behavioral reruns. Prior compression ran `cargo test -p loopflow task_work --lib` — 18 passed, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; unchanged `task_without_delivery --lib` (4) and `store::sqlite::flow --lib` (14) retain prior passes; full public admission/binding, completion and Desktop acceptance remain with implementation and gate.
 
 Review finding: the Flow-directory proof exercises the real store and released
 migration frontier, but uses a directly seeded Task without a workspace. It must

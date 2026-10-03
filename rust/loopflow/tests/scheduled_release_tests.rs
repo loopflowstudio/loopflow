@@ -41,10 +41,70 @@ fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
         "telemetry-failure",
         "telemetry-recovered",
         "telemetry-missing",
-        "telemetry-history",
         "smoke-failure",
         "missing-stage",
     ]);
+}
+
+#[test]
+fn historical_telemetry_segments_survive_schedule_replacement_in_release_history() {
+    run_scenarios(&["telemetry-history"]);
+}
+
+#[test]
+fn telemetry_history_does_not_imply_release_coverage() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/release_history.json"
+    ))
+    .unwrap();
+    let mut segment = fixture["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["flow"] == "telemetry-daily")
+        .unwrap()
+        .clone();
+    segment["repo"] = serde_json::json!(repo.path().canonicalize().unwrap());
+    let now = Utc::now().timestamp();
+    for field in ["installation_activated_at", "activated_at", "observed_at"] {
+        segment[field] = now.into();
+    }
+    let directory = home.path().join("cron/obligations");
+    fs::create_dir_all(&directory).unwrap();
+    for flow in ["telemetry-daily", "release-run"] {
+        segment["id"] = flow.into();
+        segment["flow"] = flow.into();
+        fs::write(
+            directory.join(format!("{flow}.json")),
+            serde_json::to_vec(&segment).unwrap(),
+        )
+        .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
+            .args(["release", "history", "--wave", "infrastructure"])
+            .current_dir(repo.path());
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("infrastructure/telemetry-daily"));
+        assert_eq!(
+            text.contains("Opportunity coverage unknown"),
+            flow == "telemetry-daily",
+            "{text}"
+        );
+        let output = command.arg("--json").output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let history: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            history["observation_frontier"].is_null(),
+            flow == "telemetry-daily"
+        );
+        assert_eq!(history["summary"]["published"], 0);
+        assert_eq!(history["summary"]["no_change"], 0);
+    }
 }
 
 #[test]
@@ -53,12 +113,173 @@ fn interrupted_telemetry_recovers_only_after_its_runner_and_child_exit() {
 }
 
 #[test]
+fn closed_release_history_records_repair_without_settling_or_transferring_work() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    let task = support::register_task(
+        home.path(),
+        repo.path(),
+        &git(repo.path(), &["branch", "--show-current"]),
+        &git(repo.path(), &["rev-parse", "HEAD"]),
+    );
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/release_history.json"
+    ))
+    .unwrap();
+    let mut segment = fixture["obligations"][0].clone();
+    segment["repo"] = serde_json::json!(repo.path().canonicalize().unwrap());
+    segment["wave"] = "task-pr-tests".into();
+    segment["closed_at"] = 122500.into();
+    let owner = &mut segment["opportunities"][0];
+    owner["attempts"][0]["outcome"] = serde_json::json!({"status": "running"});
+    owner["attempts"][0]["finished_at"] = serde_json::Value::Null;
+    let directory = home.path().join("cron/obligations");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("fixture.json");
+    let original = serde_json::to_vec(&segment).unwrap();
+    fs::write(&path, &original).unwrap();
+    let history = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args([
+                "release",
+                "history",
+                "--wave",
+                "task-pr-tests",
+                "--days",
+                "1",
+                "--json",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let before = history();
+    assert_eq!(before["summary"]["due"], 0);
+    assert_eq!(
+        before["summary"]["closed_unsettled"],
+        serde_json::json!(["opportunity_0"])
+    );
+    assert_eq!(
+        before["summary"]["undispositioned_failures"],
+        serde_json::json!(["opportunity_0"])
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "cron",
+            "disposition",
+            "opportunity_0",
+            "--wave",
+            "task-pr-tests",
+            "--owner",
+            task.task.id.as_str(),
+            "--reason",
+            "reconcile v1.2.3 on the original Home",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let after = history();
+    assert_eq!(
+        after["summary"]["closed_unsettled"],
+        before["summary"]["closed_unsettled"]
+    );
+    assert_eq!(
+        after["summary"]["late_dispositions"],
+        serde_json::json!(["opportunity_0"])
+    );
+    assert_eq!(
+        after["summary"]["undispositioned_failures"],
+        serde_json::json!([])
+    );
+    assert_eq!(after["dispositions"][0]["owner"], task.task.id.as_str());
+    assert_eq!(after["summary"]["published"], 0);
+    assert_eq!(after["summary"]["qualifying_pairs"], serde_json::json!([]));
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "release",
+            "history",
+            "--wave",
+            "task-pr-tests",
+            "--days",
+            "1",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("blocked opportunity_0"), "{text}");
+    assert!(text.contains("v1.2.3 at abc"), "{text}");
+    assert!(text.contains("lf cron disposition opportunity_0"), "{text}");
+    assert!(text.contains(task.task.id.as_str()), "{text}");
+
+    // A saved wait predates closure and cannot promise another firing afterward.
+    let pending = &mut segment["opportunities"][1];
+    pending["attempts"] = serde_json::json!([]);
+    pending["wait"] = serde_json::json!({
+        "recorded_at": 122450,
+        "reason": "became due after this wake froze its coverage",
+        "retry_at": 208800
+    });
+    let retained = serde_json::to_vec(&segment).unwrap();
+    fs::write(&path, &retained).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "release",
+            "history",
+            "--wave",
+            "task-pr-tests",
+            "--days",
+            "30000",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("blocked opportunity_1"), "{text}");
+    assert!(!text.contains("next firing 208800"), "{text}");
+    assert!(text.contains("previously expected firing 208800"), "{text}");
+    assert_eq!(fs::read(&path).unwrap(), retained);
+    assert_eq!(
+        history()["obligations"][0]["opportunities"][1]["wait"],
+        segment["opportunities"][1]["wait"]
+    );
+}
+
+#[test]
 fn legacy_telemetry_without_runner_identity_stays_unresolved() {
     run_scenarios(&["telemetry-unknown"]);
 }
 
+#[test]
+fn release_overlap_records_exact_next_firing_without_mutation() {
+    run_scenarios(&["release-overlap"]);
+}
+
+#[test]
+fn saved_candidate_recovers_only_with_affirmative_unpublished_source_evidence() {
+    run_scenarios(&[
+        "candidate-successor",
+        "candidate-unknown",
+        "candidate-partial",
+        "candidate-valid",
+    ]);
+}
+
 fn run_scenarios(scenarios: &[&str]) {
     for &scenario in scenarios {
+        let recovering = scenario.starts_with("candidate-");
+        let expected_tag = if recovering && scenario != "candidate-valid" {
+            "v0.9.2"
+        } else {
+            "v0.9.1"
+        };
         let home = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let published = state.path().join("published");
@@ -71,12 +292,23 @@ fn run_scenarios(scenarios: &[&str]) {
 case "$1 $2" in
   'run list')
     commit=$(git rev-parse v0.9.1)
-    printf '[{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/42"}}]\n' "$commit" ;;
+    if [ '{recovering}' = true ]; then
+      successor=$(git rev-parse origin/main)
+      printf '[{{"databaseId":43,"headBranch":"v0.9.2","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/43"}},' "$successor"
+    else printf '['; fi
+    printf '{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/42"}}]\n' "$commit" ;;
   'release view')
     [ -f '{}' ] || exit 1
     printf '{{"isDraft":false}}\n' ;;
   'run download') exit 0 ;;
-  'pr list') printf '[]\n' ;;
+  'pr list')
+    case "$*" in
+      *--head*)
+        if [ '{recovering}' = true ]; then
+          printf '[{{"number":5,"state":"MERGED","mergeCommit":{{"oid":"%s"}}}}]\n' "$(git rev-parse origin/main)"
+        else printf '[]\n'; fi ;;
+      *) printf '[]\n' ;;
+    esac ;;
   'repo view') printf 'test/repo\n' ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 91 ;;
 esac
@@ -98,6 +330,15 @@ esac
 set -eu
 case "$1" in
   check) exit 0 ;;
+  inspect)
+    if [ '{recovering}' = true ] && [ "$5" = v0.9.1 ] && [ '{scenario}' != candidate-valid ]; then
+      [ '{scenario}' != candidate-unknown ] || {{ echo 'cannot establish publication state' >&2; exit 74; }}
+      publications='[]'
+      [ '{scenario}' != candidate-partial ] || publications='["versioned DMG"]'
+      printf '{{"preparation_required":["drafts/incoming.sql"],"publications":%s}}\n' "$publications"
+    else
+      printf '{{"preparation_required":[],"publications":null}}\n'
+    fi ;;
   prepare)
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --output ]; then
@@ -112,7 +353,7 @@ case "$1" in
   reconcile)
     [ '{scenario}' != smoke-failure ] || {{ echo 'exact-tag smoke failed' >&2; exit 73; }}
     mkdir -p "$LF_RELEASE_MAIN_REPO/.lf/logs"
-    cp '{}' "$LF_RELEASE_MAIN_REPO/.lf/logs/release.v0.9.1.verified.json" ;;
+    cp '{}' "$LF_RELEASE_MAIN_REPO/.lf/logs/release.{expected_tag}.verified.json" ;;
   *) echo "unexpected publisher stage: $1" >&2; exit 93 ;;
 esac
 "#,
@@ -136,6 +377,14 @@ esac
         for args in [["tag", "v0.9.1"], ["push", "--tags"]] {
             git(repo.path(), &args);
         }
+        let rejected_commit = repo.head_sha();
+        if recovering {
+            repo.create_file("prepared.txt", "Successor with migrations materialized\n");
+            repo.stage_all();
+            repo.commit("Prepared successor");
+            repo.push();
+        }
+        let successor_commit = repo.head_sha();
         let stages: Vec<_> = [
             "ui_host_verified",
             "public_artifacts_verified",
@@ -151,7 +400,9 @@ esac
         fs::write(
             &public_proof,
             serde_json::to_vec(&serde_json::json!({
-                "tag": "v0.9.1", "source_commit": repo.head_sha(), "workflow_run_id": "42",
+                "tag": expected_tag,
+                "source_commit": if scenario == "candidate-valid" { &rejected_commit } else { &successor_commit },
+                "workflow_run_id": if recovering && scenario != "candidate-valid" { "43" } else { "42" },
                 "artifact_sha256": {"simulated-artifact": "simulated-hash"},
                 "completed_stages": stages,
             }))
@@ -363,18 +614,52 @@ exit 0
             );
             fs::write(telemetry_path.path, plist).unwrap();
             add_cron(&agents, &release, &SystemLaunchctl).unwrap();
-            let record_path = fs::read_dir(lf_home.join("cron/obligations"))
+            let paths: Vec<_> = fs::read_dir(lf_home.join("cron/obligations"))
                 .unwrap()
-                .map(|e| e.unwrap().path())
-                .find(|p| p.extension().is_some_and(|e| e == "json"))
-                .unwrap();
-            let mut record: serde_json::Value =
-                serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
-            record["observed_at"] = activation.into();
-            fs::write(record_path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            for path in paths {
+                if path.extension().is_none_or(|e| e != "json") {
+                    continue;
+                }
+                let mut record: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                record["observed_at"] = activation.into();
+                if record["flow"] == "telemetry-daily" {
+                    let boundary = activation + 2 * 86400;
+                    let mut prior = record.clone();
+                    let prior_id = format!("{}-prior", record["id"].as_str().unwrap());
+                    let previous_time = scheduled - chrono::Duration::minutes(1);
+                    prior["id"] = prior_id.clone().into();
+                    prior["schedule"] = format!(
+                        "0 {} {} * * *",
+                        previous_time.minute(),
+                        previous_time.hour()
+                    )
+                    .into();
+                    prior["activated_at"] = activation.into();
+                    prior["installation_activated_at"] = activation.into();
+                    prior["closed_at"] = boundary.into();
+                    fs::write(
+                        path.with_file_name(format!("{prior_id}.json")),
+                        serde_json::to_vec_pretty(&prior).unwrap(),
+                    )
+                    .unwrap();
+                    record["replaces"] = prior_id.into();
+                    record["activated_at"] = boundary.into();
+                    record["installation_activated_at"] = activation.into();
+                }
+                fs::write(path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+            }
             let mut old = original_receipts[0].clone();
             old.id = loopflow::durable::CronReceiptId::new();
             old.started_at -= 2 * 86400;
+            let previous_time = scheduled - chrono::Duration::minutes(1);
+            old.schedule = format!(
+                "0 {} {} * * *",
+                previous_time.minute(),
+                previous_time.hour()
+            );
             old.finished_at = Some(old.started_at + 1);
             old.outcome = loopflow::ops::CronOutcome::Failed;
             old.exit_code = Some(72);
@@ -503,6 +788,72 @@ exit 0
             drop(lock);
         }
 
+        let target_lock = if scenario == "release-overlap" {
+            let locks = repo_path.join(".lf/locks");
+            fs::create_dir_all(&locks).unwrap();
+            let file = fs::File::create(locks.join(format!(
+                "release-{}.lock",
+                hex::encode(sha2::Sha256::digest("default"))
+            )))
+            .unwrap();
+            fs2::FileExt::lock_exclusive(&file).unwrap();
+            Some(file)
+        } else {
+            None
+        };
+        let mut seeded_attempt = None;
+        if recovering {
+            let directory = repo_path.join(".lf/locks");
+            fs::create_dir_all(&directory).unwrap();
+            let held = fs::File::create(directory.join(format!(
+                "release-{}.lock",
+                hex::encode(sha2::Sha256::digest("default"))
+            )))
+            .unwrap();
+            fs2::FileExt::lock_exclusive(&held).unwrap();
+            assert!(run_cron(
+                &agents,
+                &release.wave,
+                &release.flow,
+                &host.home_id,
+                &host.home_id,
+                CronSource::Scheduled
+            )
+            .is_err());
+            drop(held);
+            // The starting historical failure is seeded, like the historical due dates.
+            // Subsequent inspection, retry, selection and settlement use the real CLI.
+            for entry in fs::read_dir(lf_home.join("cron/obligations")).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_none_or(|e| e != "json") {
+                    continue;
+                }
+                let mut record: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                if record["flow"] != "release-run" {
+                    continue;
+                }
+                for opportunity in record["opportunities"].as_array_mut().unwrap() {
+                    if let Some(attempt) =
+                        opportunity["attempts"].as_array_mut().unwrap().last_mut()
+                    {
+                        attempt["selection"] = serde_json::json!({"tag":"v0.9.1", "commit": rejected_commit, "workflow_run_id":42});
+                        attempt["outcome"] = serde_json::json!({"status":"failed", "cause":"packaged install preflight rejected"});
+                        attempt["target"] = "default".into();
+                        let evidence = b"packaged install preflight rejected";
+                        let evidence_path = state.path().join("historical-preflight.txt");
+                        fs::write(&evidence_path, evidence).unwrap();
+                        attempt["verification"] = serde_json::json!([{
+                            "name":"packaged-preflight", "subject":rejected_commit, "passed":false,
+                            "evidence_path":evidence_path, "sha256":hex::encode(sha2::Sha256::digest(evidence))
+                        }]);
+                        seeded_attempt = Some(attempt.clone());
+                    }
+                }
+                fs::write(path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+            }
+            assert!(seeded_attempt.is_some());
+        }
         let result = run_cron(
             &agents,
             &release.wave,
@@ -534,7 +885,13 @@ exit 0
             .collect();
         assert_eq!(
             attempts.len(),
-            if interrupted.is_some() { 3 } else { 1 },
+            if interrupted.is_some() {
+                3
+            } else if recovering {
+                2
+            } else {
+                1
+            },
             "{scenario}: {log}"
         );
         let attempt = *attempts.last().unwrap();
@@ -543,7 +900,62 @@ exit 0
             history.summary.qualifying_pairs.is_empty(),
             "synthetic historical coverage cannot qualify"
         );
+        if let Some(seed) = &seeded_attempt {
+            assert_eq!(
+                serde_json::to_value(attempts[0]).unwrap(),
+                *seed,
+                "historical attempt changed"
+            );
+            assert_eq!(attempt.covered, attempts[0].covered);
+            assert_eq!(git(&repo_path, &["rev-parse", "v0.9.1"]), rejected_commit);
+        }
         match scenario {
+            "candidate-unknown" | "candidate-partial" => {
+                assert!(result.is_err(), "{scenario}: {log}");
+                assert!(matches!(
+                    attempt.outcome,
+                    ScheduledReleaseOutcome::Failed { .. }
+                ));
+                assert_eq!(attempt.selection.as_ref().unwrap().commit, rejected_commit);
+                assert!(attempt.replacement.is_none());
+                assert!(!published.exists());
+                assert_eq!(git(&repo_path, &["tag", "--list"]), "v0.9.1");
+                assert_eq!(history.summary.published + history.summary.no_change, 0);
+            }
+            "release-overlap" => {
+                assert!(result.is_err(), "{scenario}: {log}");
+                let owner = history
+                    .obligations
+                    .iter()
+                    .flat_map(|r| &r.opportunities)
+                    .find(|o| {
+                        o.attempts
+                            .iter()
+                            .any(|a| a.receipt_id == attempt.receipt_id)
+                    })
+                    .unwrap();
+                let ScheduledReleaseOutcome::Deferred {
+                    reason,
+                    continuation,
+                } = &attempt.outcome
+                else {
+                    panic!("expected overlap deferral: {attempt:?}");
+                };
+                assert!(reason.contains("active execution"));
+                assert!(
+                    continuation.contains(&format!(
+                        "next configured release due {}",
+                        owner.next_due_at
+                    )),
+                    "{continuation}"
+                );
+                assert!(log.contains(continuation), "{log}");
+                assert!(attempt.selection.is_none());
+                assert!(attempt.telemetry.is_none());
+                assert!(!published.exists());
+                assert_eq!(history.summary.published + history.summary.no_change, 0);
+                assert!(target_lock.is_some());
+            }
             "telemetry-unknown" => {
                 assert!(result.is_err(), "{scenario}: {log}");
                 assert!(
@@ -555,7 +967,9 @@ exit 0
                 assert!(!published.exists());
                 assert_eq!(history.summary.published + history.summary.no_change, 0);
             }
-            "published"
+            "candidate-successor"
+            | "candidate-valid"
+            | "published"
             | "no-change"
             | "telemetry-recovered"
             | "telemetry-missing"
@@ -574,6 +988,21 @@ exit 0
                     );
                 }
                 assert_eq!(history.summary.published + history.summary.no_change, 1);
+                if recovering {
+                    assert_eq!(attempt.selection.as_ref().unwrap().tag, expected_tag);
+                    if scenario == "candidate-successor" {
+                        let replacement = attempt.replacement.as_ref().unwrap();
+                        assert_eq!(replacement.rejected.commit, rejected_commit);
+                        let proof: serde_json::Value = serde_json::from_slice(
+                            &fs::read(&replacement.inspection.evidence_path).unwrap(),
+                        )
+                        .unwrap();
+                        assert_eq!(proof["publications"], serde_json::json!([]));
+                        assert_eq!(attempt.selection.as_ref().unwrap().commit, successor_commit);
+                    } else {
+                        assert!(attempt.replacement.is_none());
+                    }
+                }
                 assert!(attempt
                     .verification
                     .iter()
@@ -603,6 +1032,42 @@ exit 0
                 }
             }
         }
+        assert_eq!(caller_state(), before, "{scenario}: caller work changed");
+        if scenario == "release-overlap" {
+            let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+                .args([
+                    "release",
+                    "history",
+                    "--wave",
+                    "infrastructure",
+                    "--days",
+                    "5",
+                    "--json",
+                ])
+                .current_dir(&repo_path)
+                .env("LF_HOME", &lf_home)
+                .env("LF_DB_PATH", &host.db_path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let cli: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(cli["summary"]["published"], 0);
+            assert!(String::from_utf8_lossy(&output.stdout).contains("next configured release due"));
+            assert_eq!(git(&repo_path, &["tag", "--list"]), "v0.9.1");
+            assert_eq!(
+                fs::read_to_string(&telemetry_calls)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            assert_eq!(caller_state(), before, "history changed caller work");
+            continue;
+        }
         let prerequisite = attempt
             .telemetry
             .as_ref()
@@ -624,6 +1089,21 @@ exit 0
                 .original
                 .iter()
                 .any(|p| p.receipts.contains(&original_receipts[1].id)));
+            let segments: std::collections::HashSet<_> = prerequisite
+                .original
+                .iter()
+                .map(|p| p.obligation_id.as_ref().unwrap())
+                .collect();
+            assert_eq!(
+                segments.len(),
+                2,
+                "catch-up retains both historical schedules"
+            );
+            for id in segments {
+                let segment = history.obligations.iter().find(|s| &s.id == id).unwrap();
+                assert_eq!(segment.flow, "telemetry-daily");
+                assert!(segment.opportunities.is_empty());
+            }
             assert_eq!(history.summary.failed_verifications, 1);
         } else {
             assert!(
@@ -681,7 +1161,6 @@ exit 0
                 .undispositioned_failures
                 .contains(&original_receipts[0].id.to_string()));
         }
-        assert_eq!(caller_state(), before, "{scenario}: caller work changed");
     }
 }
 

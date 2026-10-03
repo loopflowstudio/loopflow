@@ -528,22 +528,32 @@ half-contracts.
 
 ## This slice
 
-Bound automatic telemetry recovery observation to one hour through the existing
-cron executor. A deadline defers release with the reserved receipt and log path;
-it never fabricates a target exit, kills the check, releases the child's job lock,
-or selects another retry within the same wake. Leave the physical receipt
-Running when no terminal result was observed. A later check after job-lock release
-can prove current recovery; an unobserved late exit cannot settle the old receipt.
-Ordinary scheduled/manual target execution retains its existing waiting behavior.
+Recover a scheduled opportunity's invalid unpublished saved candidate through
+run-records' exact-source inspection and the existing successor controller.
+Persist the rejected selection and affirmative publication inspection before
+allowing one successor selection in the running attempt. Keep original dues,
+prior failed attempts, intervention provenance, required verification and caller
+bytes. Unknown or partial publication blocks replacement; a valid candidate
+resumes unchanged. Interruption before selection keeps the rejected owner pinned.
 
-Prove finite observation, retained Running evidence, surviving-child exclusion,
-and a fresh successful recovery after child exit with real processes and OS
-locks. Exercise the wait boundary with a short duration, without adding a runtime
-override solely for tests; retain the built-CLI interruption proof for the joined
-path. This bounds prerequisite observation, not the child's runtime. Actual
-telemetry continuity, prior obligation segments, dated repair ownership, closed
-obligations, the scorecard blocker, UI/public proof and two automatic settlements
-remain in this serial Task.
+### Delete — do not maintain
+
+- Unconditional saved-candidate completion: inspect exact source before choosing
+  resume or evidenced replacement; keep one controller and settlement writer.
+- `GhPrView` release-only polling: use current main's combined queue observation
+  and queue-aware integration decision, retaining mutation lock inheritance.
+- Publisher acceptance based only on `authority=published`: require successful
+  packaged preflight in a fresh Home, including cached prepared artifacts.
+
+The October 2 contribution ports only the required release interfaces; it does
+not sync main's Session/Exec/Home/Flow model or run-records' minor-cycle controller.
+Another invalid integrated successor fails visibly with its exact selection saved
+for the next wake, rather than draining candidates in this wake. Full main
+integration, closed same-Home continuation, remaining interruption proofs, the
+affected-suite gate, and configured telemetry/UI/public acceptance remain open.
+The two adjacent original dues still require two distinct automatic executions,
+one publication, all required checks, and no manual repair. All retained telemetry
+failures remain counterevidence; no new Intelligence handoff is implied.
 
 ## Slice ledger
 
@@ -941,6 +951,76 @@ See [review-interrupted-telemetry.md](review-interrupted-telemetry.md).
   [release-telemetry-wait.md](release-telemetry-wait.md).
 
 
+Telemetry wait review remains **iterate**. Three focused deadline, observation-error
+and exclusion cases passed again (0.64s); the built-CLI interruption demonstration
+passed its three firing boundaries (19.12s). No additional bounded defect was
+established and executable code is unchanged. The deadline proof directly calls
+the production wait with 50ms; the CLI proof covers interruption, not one-hour
+deadline expiry. Actual telemetry continuity, prior segments, dated repair
+ownership, closed obligations, remaining interruption proof and configured
+acceptance remain open. See [review-telemetry-wait.md](review-telemetry-wait.md).
+
+- 2026-09-24: telemetry now retains schedule/timezone/Home segments through the
+  existing obligation store. Sync preserves legacy predecessors before replacement,
+  closes old placement in its original store, and retains removal boundaries.
+  Original prerequisite references select their own segment and scheduled receipts;
+  missing/unobserved history stays unknown. Telemetry creates no release dues.
+- The segment tests exposed repository-alias matching (`/var` versus `/private/var`);
+  the join now uses canonical identity. Focused segment/reservation and installation
+  cases passed, and the history DTO/qualification cases retained their counts.
+  The joined CLI proof spans two telemetry schedules and retains an older failure
+  outside the display window, with frozen coverage and exact caller preservation.
+  Final validation and limits: [release-telemetry-segments.md](release-telemetry-segments.md).
+- Actual telemetry continuity, dated repair ownership, closed release continuation,
+  remaining interruption proof, required UI/public proof and configured acceptance
+  stay open. No installed cutover or qualifying automatic pair is claimed.
+
+
+Telemetry segment review remains **iterate**. The joined built-CLI historical
+schedule demonstration passed again (9.84s), retaining both segment references,
+the older failed receipt and caller bytes. A new CLI counterexample reproduced
+telemetry-only history suppressing the unknown release-coverage warning. Text
+now uses the existing release observation frontier; the regression passed after
+repair (10.71s), as did formatting and all-target Clippy. Closed release
+continuation, dated repair ownership, actual telemetry/UI/public proof, remaining
+interruption proof and configured acceptance stay open. See
+[review-telemetry-segments.md](review-telemetry-segments.md).
+
+- 2026-09-24: closed unsettled release owners now remain visible beyond the
+  history window and accept dated repair ownership through the existing
+  disposition command. Candidate, attempt, collapsed due and original Home
+  evidence remain unchanged; assignment neither settles nor transfers work.
+- The new regression reproduced the missing repair obligation, then passed
+  removal, schedule/timezone/Home replacement and interrupted predecessor-write
+  cases (0.49s). The built CLI disposition/history proof passed (16.34s), as did
+  four history/DTO cases, formatting and all-target Clippy. These are seeded
+  local records, not configured release acceptance.
+- Automatic continuation across closed segments, exact overlap continuation,
+  actual telemetry/UI/public proof and two adjacent automatic settlements remain
+  open. Details: [release-closed-disposition.md](release-closed-disposition.md).
+
+Closed disposition review remains **iterate**. The built-CLI demonstration
+passed again (11.41s), then an expanded case reproduced a closed opportunity
+still advertising its saved wait as a future firing. Text now labels that wait
+and expected firing as historical; the expanded proof passed (15.81s), retaining
+byte-identical opportunity storage and the original JSON wait. Automatic closed
+continuation, exact overlap continuation, actual telemetry/UI/public evidence
+and two adjacent configured settlements remain open. See
+[review-closed-disposition.md](review-closed-disposition.md).
+
+- 2026-09-24: scheduled target-lock and cron-job overlap now retain an exact next
+  due time from the original obligation calendar, with its Home and observation
+  time. A closed segment instead names its opportunity repair command on the
+  original Home. The existing attempt/settlement writers and active frozen
+  coverage remain unchanged; no retry reservation or new execution owner exists.
+- The real-CLI counterexample reproduced generic continuation before repair.
+  Focused accounting checks passed for later-day observations, cron overlap,
+  original-Home repair after closure and retained timezone across DST. The joined
+  CLI proof passed with no release mutation and exact caller preservation.
+  Final validation and limitations: [release-overlap-continuation.md](release-overlap-continuation.md).
+  Automatic closed-segment execution recovery, actual telemetry/UI/public proof,
+  other wait-boundary continuations and two configured settlements remain open.
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.
@@ -951,3 +1031,11 @@ settlements. Collapsed entries contribute to accounted count, never to product
 settlement count; their owner's unresolved result remains visible. Always retain
 the original due times and intervention flags. Baseline is 70 physical receipts with no authoritative
 opportunity join; it cannot supply a truthful historical settlement percentage.
+
+## Saved-candidate integration check — 2026-10-02
+
+Bounded implementation and remaining obligations are recorded in
+[release-saved-candidate-recovery.md](release-saved-candidate-recovery.md).
+Focused Docker CLI recovery/child/queue proofs, local accounting/DTO checks,
+30 publisher tests, Rust formatting/Clippy and Python Ruff passed; gate owns the
+affected suites and configured acceptance remains open.

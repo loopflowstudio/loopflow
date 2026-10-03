@@ -100,7 +100,7 @@ when its release needs it; do not extract a generic deployment platform.
 
 ```bash
 lf release history --wave infrastructure --days 35 --json
-lf cron disposition <failed-receipt-or-opportunity-id> \
+lf cron disposition <failed-receipt-or-closed-opportunity-id> \
   --wave infrastructure --owner <registered-task-work-id> \
   --reason "Repair the failed check; retry through the next configured firing"
 ```
@@ -130,9 +130,13 @@ published baseline, and current scheduled telemetry. Deferred work retains its
 reason and continuation; failed attempts survive later recovery.
 
 Each release attempt freezes `telemetry` observations for its covered due times.
-Original prerequisite intervals retain their receipt ids; an unobserved schedule
-or timezone remains explicitly unknown. Linked receipts stay in the history
-response even when older than its requested window.
+Original prerequisite intervals retain their receipt ids and `obligation_id`,
+which names the retained telemetry schedule, timezone and Home segment in
+`obligations`. Sync and removal preserve those segments before replacing the
+installed job. Telemetry segments contain no release opportunities. Unobserved
+history, installation gaps and dues before the segment's first scheduled check
+remain explicitly unknown. Linked receipts stay in history even when older than
+its requested window; a replacement job's receipt cannot repair an old interval.
 
 Missing or failed current telemetry gets at most one automatic retry through the
 installed cron executor before release selection. Its receipt has source
@@ -154,10 +158,27 @@ a later wake can run a fresh check. An unobserved late exit does not retroactive
 pass the original receipt. Ordinary scheduled/manual targets retain their
 existing wait behavior.
 
+Release overlap records the exact next configured due time, obligation and Home
+observed by the contender. The active execution keeps its frozen coverage.
+If closure is already observed, the continuation points to the original Home's
+opportunity disposition command. A later schedule change can supersede a saved
+retry time; history retains it as an observation, not a reservation.
+
 A repair disposition references an existing registered Task and records local
 repair ownership. It does not start work, assign a remote issue, or erase the
 failure. The earliest disposition timestamp determines whether ownership was
 recorded within a day. Pending external handoffs remain pending.
+
+Closed schedules retain unfinished opportunities on their original Home.
+`release history` lists their execution owners under `summary.closed_unsettled`,
+even outside `--days`, and prints the retained candidate and disposition command.
+Use the opportunity id on that Home to assign its repair; ownership is late if
+first recorded more than a day after closure. Collapsed dues share their owner's
+blocker. Disposition leaves the blocker, attempts and candidate intact: it neither
+settles a release nor moves execution to a replacement Home. An already running
+operation can still record its exact settlement; closure does not prove its exit.
+Saved waits show their previously expected firing as history after closure.
+Automatic continuation across closed segments is not yet implemented.
 
 Ordinary `cron trigger` records intervention before asking launchd to kickstart;
 it does not terminate an active job. A firing that may have resulted from that

@@ -489,7 +489,6 @@ Task compensation, notes and source/worktree child ownership, historical
 telemetry linkage and bounded retry, dated repair ownership, closed-obligation
 continuation and configured acceptance remain open. The scorecard blocker,
 required UI/public proof and two adjacent automatic settlements remain unresolved.
-This compression review does not approve the branch or complete the Task.
 
 ## Notes ownership compression review at `d6e4504e78`
 
@@ -780,3 +779,211 @@ previous obligation segments, dated repair ownership, closed obligations and
 configured acceptance remain open. The scorecard blocker, required UI/public
 proof and two adjacent automatic settlements are unchanged; this compression
 review does not approve the branch or complete the Task.
+
+## Telemetry wait compression review at `7458ab8d6`
+
+No executable reduction selected. Before and after this pass, obligations own
+original due opportunities; execution owners retain attempts with frozen coverage,
+prerequisites, selection, verification and product outcome. Physical receipts
+record observed process results. A prerequisite reserves one recovery receipt
+before launch; `settle` atomically writes product evidence. The new deadline
+bounds observation, leaving the child and its inherited job lock intact.
+
+Inspected the latest cron executor diff and followed `run_cron_recorded`,
+`spawn_cron_target` and `wait_for_cron_target` through receipt persistence,
+`verify_scheduled_telemetry`, `record_telemetry`, `finish_process` and `settle`.
+Checked history's linked-receipt retention and qualification, doctor continuity,
+and the existing trigger receipt wait. This reviews the current slice and its
+direct model path, not every earlier mutation boundary in the Task patch.
+
+Mirrors checked: CLI source/outcome rendering, explicit receipt/descriptor
+plumbing through Flow, the release-history JSON fixture, deadline and interruption
+tests, release documentation, cron host guide and the implementation report.
+Searches found no Swift or Python mirror of the cron/history/prerequisite types.
+Python artifact and public receipts retain their separate publication evidence.
+
+| Candidate | Why retained |
+|---|---|
+| Spawn and wait functions | Failure to launch can produce a terminal receipt; failure to observe an already launched child cannot. One launcher remains. Inlining the wait would only relocate this boundary. |
+| Optional wait duration | Recovery has a finite observation window; ordinary scheduled/manual execution retains blocking waiting. Both modes have production callers. There is no new runtime configuration or test-only override to delete. |
+| Physical Running and release Deferred/Failed | A deadline ends release observation while telemetry may continue. An observation error fails the release without proving the child's exit. Combining outcomes would fabricate terminal evidence. |
+| Transient `ReleaseDeferred` and persisted deferred outcome | The error carries a stop through the executor; settlement records it against the exact attempt and adds release continuation. Returning persisted attempt state from the generic executor would couple different owners. |
+| Child wait and trigger receipt wait | One observes an owned child; the other reads durable receipts for an operator-triggered launch. The latter's stale-result hint is not child-control authority. Sharing their loop would conceal that distinction. |
+| Recovery reservation and verification artifact | Reservation fences the side effect before launch. Verification binds an observed successful receipt afterward. Neither can replace the other without losing ordering or evidence. |
+| Runner identity, job lock and observation deadline | These establish controller identity, surviving-child exclusion and how long to wait. Elapsed time cannot replace either ownership boundary. |
+
+The simulated review followed deadline/error exits to ensure only an observed
+exit writes a terminal physical result. The release caller retains the reserved
+receipt and next due continuation; history includes linked receipts outside its
+display window. No background observer, alternate launcher or settlement writer
+was introduced. Searches of the inspected production paths found no restored
+success-proof wrappers, `record_verification`, separate candidate/publish receipt
+classes or release-selection `sync_main`. Historical schema-1 receipts remain
+explicitly required compatibility.
+
+Only this report changed. No APIs, DTOs, fields, migrations or executable code
+were removed or changed; no behavioral tests or compiler/lint checks were rerun.
+The results in [release-telemetry-wait.md](release-telemetry-wait.md) remain prior
+implementation evidence. Actual telemetry continuity, previous obligation
+segments, dated repair ownership, closed-obligation continuation, remaining
+interruption proof and configured acceptance stay open. The scorecard blocker,
+required UI/public proof and two adjacent automatic settlements remain unresolved.
+
+## Telemetry segments compression review at `7458ab8d6`
+
+No further structural reduction selected. This review includes the uncommitted
+telemetry-segment implementation above that HEAD. Before and after this pass,
+one `ObligationSegment` document owns a job's observed calendar and placement
+interval. Release segments own original due opportunities; telemetry segments
+have none. An opportunity's attempts retain frozen prerequisite observations,
+selection, verification and outcome. Physical receipts retain process results.
+`settle` remains the atomic product-evidence writer.
+
+Inspected installation replacement/removal and legacy retention in `cron.rs`,
+then `observe`, `close`, `read`, `materialize`, `telemetry_due`, `record_telemetry`,
+`finish_process` and `settle` in accounting. Followed these into release prerequisite
+selection/recovery, history's linked receipts, counters and qualification, and
+doctor's current installed-obligation reader. This is the latest slice and its
+direct model path, not an exhaustive new review of every earlier Task mutation.
+
+Mirrors checked: release-history text/JSON rendering, the JSON fixture's segment
+reference and telemetry record, segment/installation tests, the joined CLI's
+historical-schedule assertions, release README, cron host guide and implementation
+report. Searches found no Swift or Python mirror of the segment/prerequisite types
+and no remaining production `ReleaseObligation` alias. Python artifact/public
+receipts remain separate publication evidence.
+
+| Candidate | Why retained |
+|---|---|
+| `CronObligation` and `ObligationSegment` | The former is an ephemeral projection of currently installed jobs and receipts for doctor, including jobs outside release accounting. The latter retains closed calendar/placement history. Substitution would change continuity's population and authority. |
+| Segment and `TelemetryPrerequisite` calendar fields | Original associations reference their historical segments. The prerequisite captures the current installation and observation used before recovery; schedule also fences reservation against installation changes. Current inputs can differ from every covered original segment. Deleting that snapshot would lose execution provenance. |
+| Installation activation, segment activation and observation time | Unchanged installation, timezone replacement and legacy cutover can give these different values. Combining them invents historical knowledge or changes due enumeration. |
+| `TelemetryDue.obligation_id`, due and receipt references | A segment establishes the applicable calendar; the snapshot records the selected interval and receipts known to the attempt. A later receipt read must not rewrite an earlier observation. A known segment can still have an unknown due before its observation frontier. |
+| Original, current and recovery receipts | These record historical prerequisites, current natural firing evidence and the single reserved automatic retry. Combining them can turn current recovery into a historical or scheduled pass. |
+| Predecessor retention and `observe` | Retention preserves an already observed timezone before replacement; `observe` applies today's timezone and may create a successor. They have different inputs and share the existing writer. Merging them requires another mode rather than deleting an authority. |
+| Successor link and closure timestamp | The successor commits closure even if the predecessor rewrite is interrupted; removal can close a segment without a successor. Both facts are needed. |
+| Empty telemetry opportunity lists | They let both job kinds use the existing segment store without inventing telemetry release attempts. A tagged wrapper or separate ledger adds vocabulary without removing an owner. |
+| History envelope and summary | The response joins segments, physical receipts and dated dispositions, with windowed counts and explicit observation missingness. It does not merely wrap one durable object. |
+
+The simulated review found one direct consumer gap to carry into slice review:
+`run_release` still uses `history.obligations.is_empty()` for the text warning
+about unknown release coverage. With telemetry-only segments that predicate is
+false even though `observation_frontier` is `None`. The JSON frontier already
+filters release segments. Align the text warning with that existing field and
+prove the telemetry-only case during correctness review; no new model or API is
+needed. This is source evidence, not a newly executed CLI reproduction.
+
+Scoped searches found no restored duplicate success-proof wrappers,
+`record_verification`, separate candidate/publish receipt classes, or `sync_main`
+in release and named-worktree source. Historical schema-1 receipt decoding stays
+because absence of runner evidence must remain unknown. No additional API, DTO,
+field, compatibility path or executable code was removed in this pass.
+
+Only this report changed. No behavioral tests or compiler/lint checks were rerun;
+the focused results in [release-telemetry-segments.md](release-telemetry-segments.md)
+remain prior implementation evidence. Actual telemetry continuity, dated repair
+ownership, closed release continuation, exact overlap continuation, remaining
+interruption proof and configured acceptance remain open. The scorecard blocker,
+required UI/public proof and two adjacent automatic settlements are unresolved.
+This compression pass does not approve the branch or complete the Task.
+This compression review does not approve the branch or complete the Task.
+
+## Closed opportunity disposition compression review at `7458ab8d6`
+
+No structural reduction selected. This review includes the uncommitted closed
+opportunity implementation above that HEAD. The model before and after is one
+retained calendar/Home segment containing original release opportunities.
+Collapsed dues reference an execution owner; its attempts own selection,
+verification and product outcome. Physical receipts record process results.
+Separate dated dispositions record repair ownership. Closure plus absent product
+settlement derives a repair obligation; it does not create another lifecycle or
+declare a process dead.
+
+Inspected `ObligationSegment` and `ReleaseOpportunity` through `observe`, `close`,
+`read`, `materialize`, `closed_unsettled`, `settle` and `receipt_context`, then
+history's disposition writer, summary, lateness and qualification readers.
+Checked the CLI declaration, registered-Task validation, text/JSON rendering,
+history DTO fixture, closed-segment library regression and built-CLI regression
+source, release README, cron host guide, repository Flow and evidence direction.
+Searches found no Swift or Python mirror of the segment/history/disposition
+types. Python artifact and public receipt types still describe publication
+evidence independently. This is a review of the current slice and direct
+consumers, not a fresh exhaustive review of the entire Task patch.
+
+| Candidate | Why retained |
+|---|---|
+| Closure timestamp and successor link | Removal has no successor; replacement must commit closure even if rewriting the predecessor fails. Neither fact substitutes for the other. |
+| `closed_unsettled` and windowed `unresolved` | The former identifies execution owners even outside the display window; the latter counts original dues inside it. Merging them changes population and loses collapsed-due accounting. The owner list is computed, not separately persisted. |
+| Closed-owner list and undispositioned failures | Assignment removes an unassigned repair but leaves the release unresolved. One list cannot express both facts without making assignment look like settlement. |
+| Disposition, intervention and attempt outcome | These respectively record dated repair ownership, manual mutation provenance and execution/product evidence. Folding them together would alter unattended qualification or invent an attempt for a missed wake. |
+| Append-only dispositions versus an owner field | Repeated assignments must retain first-assignment lateness and current ownership. A field on the opportunity would erase history or add duplicate ownership storage. |
+| `closed_unsettled` method and materialization | The predicate is shared by command validation, JSON summary and text rendering. Existing calendar materialization lets validation recognize missed dues recovered through successor closure; it adds no calendar implementation or durable writer. |
+| Wait, deferred outcome and closed segment | A wait can exist before any attempt; a deferred outcome records an actual execution stop; closure removes future firings without stopping existing execution. Unifying them requires synthetic evidence. |
+| `FailureDisposition` name and history envelope | Renaming the type alone removes no concept. The envelope joins calendar, process and ownership evidence with a summary; it is not a wrapper around one durable object. |
+
+The simulated review retained the distinction between closure and settlement:
+`receipt_context` still rejects a new entry into a closed segment, while an
+already executing operation can retain its exact settlement write. Changing that
+boundary would implement recovery policy, not compress the current model.
+Selection remains necessary before any product result exists. Historical
+schema-1 physical receipts remain required compatibility. Scoped searches found
+no restored success-proof wrappers, separate verification writer, candidate/
+publish receipt classes, or `sync_main` in release and named-worktree source.
+
+No API, DTO, field or executable code changed. Only this report was appended;
+no behavioral tests or compiler/lint checks were rerun. The checks recorded in
+[release-closed-disposition.md](release-closed-disposition.md) remain prior
+implementation evidence. Automatic continuation across closed segments, exact
+overlap continuation, actual telemetry and repair handoff, remaining interruption
+proof, required UI/public evidence and two adjacent configured automatic
+settlements remain open. This pass does not approve publication or complete
+LOO-285.
+
+## Overlap continuation compression review at `7458ab8d6`
+
+No structural reduction selected. This pass includes the uncommitted overlap
+continuation implementation above that HEAD. Before and after: a retained
+calendar/Home segment owns original release opportunities; collapsed dues point
+to an execution owner; attempts retain coverage, selection, prerequisites,
+verification and outcome. Physical receipts describe processes. `settle` owns
+atomic product evidence. Retry text observes an existing schedule or closure;
+it adds no reservation, executor or durable owner.
+
+Inspected `ObligationSegment`, `ReleaseOpportunity`, `ReleaseAttempt`,
+`OpportunityWait` and `ScheduledReleaseOutcome`; followed cron job contention
+through `record_overlap`, target contention through `overlap_continuation` and
+`retry_continuation`, and their receipt-context, calendar, completion and
+settlement boundaries. Checked history qualification and linked-receipt
+selection. This is scoped review of the latest slice and its direct owners,
+not a fresh exhaustive review of the entire Task patch.
+
+Mirrors checked: `OpsError::ReleaseDeferred`, CLI/Flow receipt-descriptor
+plumbing, history text/JSON, the history fixture, overlap accounting and joined
+CLI regression source, publisher artifact/public receipt declarations, release
+README, cron host guide, mechanical repository Flow and release-evidence
+direction. Searches found no Swift or Python mirror of the release opportunity,
+segment or history types.
+
+| Candidate | Why retained |
+|---|---|
+| Receipt-context and overlap readers | Entry rejects closed obligations and binds a repository; overlap observes closure for an already attributed attempt. Combining them requires a mode or changes authority. Their shared predicate alone is a local helper cleanup. |
+| Saved `next_due_at` and calculated retry time | The former bounds the original interval; the latter can be several days later. Substitution would restore stale continuation. Extracting the repeated calendar expression alone removes no model or API. |
+| `OpportunityWait` and Deferred attempt | A due can wait without any execution. Combining them invents an attempt or discards its process identity. |
+| Transient and persisted Deferred | The error carries a stop through manual and scheduled operations; the outcome records that stop against a fenced attempt. Returning durable release state from lock acquisition would couple separate owners. |
+| `overlapping_receipts` and attempt receipts | Some contenders create no attempt because an opportunity already has an owner. The list preserves that explicit association in stored/JSON evidence. Summary does not consume it; deleting it as unread would lose those associations. |
+| Home/time repeated in continuation text | These keep a standalone CLI error actionable and retain what was observed. They are denormalized diagnostic evidence, not independently editable placement or retry state. |
+| Selection, product outcome and publisher receipt | Selection survives before success; publisher stages and public observations supply evidence beyond process exit. Combining them erases recovery or overstates publication. |
+
+The simulated review also checked limits: physical cron job-overlap errors still
+use generic text, while a newly recorded deferred opportunity gets the exact
+continuation. History's out-of-window receipt inclusion follows telemetry links,
+not overlap links. These are consumer coverage questions for correctness review,
+not grounds to delete retained evidence or claim complete overlap presentation.
+Telemetry's separate entry-snapshot retry-time limitation remains recorded in
+[the implementation report](release-overlap-continuation.md).
+
+No API, DTO, field, format or executable code changed. Only this report was
+appended; no behavioral tests or compiler/lint checks were rerun. Prior focused
+passes retain their recorded scope. Closed-segment execution recovery, actual
+telemetry and repair ownership, remaining interruption proof, required UI/public
+verification and two adjacent configured automatic settlements remain open.

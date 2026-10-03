@@ -98,12 +98,19 @@ Release records an external effect. Scheduled settlement follows public artifact
 read-back and exact-version installer smoke, with every required check retained.
 In history JSON, `attempts[].verification` holds those checks once; each attempt
 saves its checks and product outcome together. `attempts[].telemetry` retains
-original prerequisite associations and the current execution's automatic retry,
-if needed. Successful recovery leaves the earlier failure and its repair
-disposition visible. An interrupted telemetry runner can recover after its exact
+original prerequisite associations with retained schedule/Home segments and the
+current execution's automatic retry, if needed. Successful recovery leaves the
+earlier failure and its repair disposition visible. An interrupted telemetry runner can recover after its exact
 process identity is confirmed gone and its surviving children release the cron
 job lock. The original receipt remains unresolved; the new check supplies current
 verification. Receipts without runner identity cannot authorize that recovery.
+
+Closed, unfinished release owners remain visible beyond the history window in
+`summary.closed_unsettled`. Record repair ownership with the printed
+`lf cron disposition` command on the original Home. This preserves the candidate,
+attempts and late ownership evidence without claiming product settlement or
+transferring execution to a new Home. Automatic continuation across closed
+segments remains unavailable.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a
@@ -117,6 +124,10 @@ baseline and current required verification pass. Selection uses fetched origin
 without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
+Scheduled overlap deferrals retain the next due time from the original
+obligation's calendar and Home. That observation reserves no execution; if the
+obligation has closed, the continuation names its opportunity repair command
+on the original Home instead.
 Preparation, publication, and public verification retain the publisher checkout
 lease in their child processes. If the controller dies, ordinary checkout
 removal remains blocked until those children exit; unrelated checkouts remain
@@ -159,6 +170,14 @@ independent.
 Manual tag and publication commands record intervention on pending scheduled
 releases. Nested publisher calls reusing the active lock preserve the owning
 execution's provenance.
+
+An invalid saved candidate can advance to a patch successor only after exact-source
+inspection confirms that preparation remains and GitHub, crates.io, and the
+versioned DMG are all unpublished. Unknown or partial publication blocks
+replacement. Release history retains the rejected candidate and inspection on
+the same opportunity's attempt; earlier failures and original dues remain.
+A valid interrupted candidate resumes unchanged. Cached packaged binaries must
+still pass installation preflight in a fresh Home before reuse or publication.
 
 Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
 The publisher retains candidate hashes and gate evidence before external writes.

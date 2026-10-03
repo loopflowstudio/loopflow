@@ -109,15 +109,19 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
+  'api graphql')
+    case "$*" in
+      *LoopflowPrMerge*)
     head="$(git rev-parse HEAD)"
     if [ -f "$armed" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}}}}}}}\n' "$head"
     else
-      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null}}}}}}}}\n'
     fi
+        ;;
+      *)  echo 'false';  ;;
+    esac
     exit 0;;
-  'api graphql') echo 'false'; exit 0;;
   'pr merge') : > "$armed"; exit 0;;
   'run download') exit 0;;
   'release view')
@@ -156,16 +160,20 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
+  'api graphql')
+    case "$*" in
+      *LoopflowPrMerge*)
     head="$(git rev-parse HEAD)"
     if [ -f "$armed" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}}}}}}}\n' "$head"
     else
-      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null}}}}}}}}\n'
     fi
-    exit 0;;
-  'api graphql')
+        ;;
+      *)
     if [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
+     ;;
+    esac
     exit 0;;
   'pr merge')
     touch "$armed"
@@ -204,13 +212,15 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
+  'api graphql')
+    case "$*" in
+      *LoopflowPrMerge*)
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     if [ -f "$integrated" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$release_head"
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}}}}}}}\n' "$release_head"
     elif [ ! -f "$seen" ]; then
       touch "$seen"
-      printf '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null}}}}}}}}\n'
     else
       main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
       if git merge-base --is-ancestor "$main_head" "$release_head"; then
@@ -218,10 +228,12 @@ case "$1 $2" in
       else
         merge_state=BEHIND
       fi
-      printf '{{"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n' "$merge_state"
+      printf '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null}}}}}}}}\n' "$merge_state"
     fi
+        ;;
+      *)  echo 'false';  ;;
+    esac
     exit 0;;
-  'api graphql') echo 'false'; exit 0;;
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
@@ -900,6 +912,7 @@ fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":null}}' ;;
   prepare)
     if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
       echo 'version tag existed before publisher preparation' >&2
@@ -1408,13 +1421,13 @@ fn release_run_fails_closed_when_the_publisher_role_is_missing() {
 
 #[test]
 fn release_run_refuses_to_skip_an_incomplete_tag() {
-    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [publisher]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -1427,13 +1440,13 @@ fn release_run_refuses_to_skip_an_incomplete_tag() {
 
 #[test]
 fn release_run_keeps_a_failed_tag_red_until_a_fix_merges() {
-    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [publisher]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -1462,6 +1475,7 @@ fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":null}}' ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -1641,6 +1655,7 @@ fn configure_candidate_publisher(
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":null}}' ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -1778,6 +1793,7 @@ fn configure_same_tag_publisher(repo: &TestRepo, state: &std::path::Path) -> Str
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":null}}' ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do

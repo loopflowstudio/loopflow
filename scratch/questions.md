@@ -56,11 +56,15 @@
   observer invents its exit result. A fresh check at a later wake can prove
   current recovery after exclusion ends. This bounds observation, not runtime;
   no background receipt writer or scheduler was introduced.
-- Original prerequisite associations use observed release timezone and the
-  unchanged installed telemetry schedule. Dates preceding that observation or
-  installation stay explicitly unknown. Retaining and reconciling previous
-  telemetry schedule/Home segments is still required; current installation
-  cannot reconstruct their authority.
+- Original prerequisites now reference retained telemetry obligation segments,
+  including their own schedule, timezone, Home and observation frontier. The
+  existing obligation document owns both job kinds; only release jobs have
+  release opportunities. Replacement and removal preserve old segments first.
+  A missing segment, a different Home, or a prerequisite before observation or
+  segment activation stays unknown. In particular, changing a schedule between
+  telemetry and release does not borrow the previous segment's check to satisfy
+  the new segment before its first due. Current installation cannot reconstruct
+  unobserved historical authority. Closed release continuation remains open.
 - `doctor` still judges scheduled firings, not recovery process success. A missing
   scheduled receipt can therefore remain a continuity failure inside the real
   telemetry retry. The simulated verifier proves retry mechanics, not that the
@@ -76,3 +80,11 @@
   still returned all 70 retained receipts. This is separate runtime evidence;
   no registry/auth repair was attempted and no production-journal health is
   claimed.
+
+- Closed obligations first gain an explicit repair-disposition path. Their
+  retained closure timestamp supplies the blocker and ownership deadline;
+  attempts retain their actual process/product observations. History exposes
+  unsettled execution owners even outside its date window. Disposition records
+  ownership, not cancellation, successful settlement or a transfer to the new
+  Home. Automatic candidate continuation across segments remains separate
+  required work; this slice does not add a manual publication bypass.

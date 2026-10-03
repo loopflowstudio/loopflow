@@ -239,7 +239,21 @@ pub fn add_cron(
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
         let prior = read_cron_obligation(&path)?;
-        if same_obligation(&prior, spec) {
+        let prior_spec = read_cron_spec(&path)?;
+        retain_installed_obligation(&prior_spec, prior.activated_at, now)?;
+        if matches!(prior_spec.flow.as_str(), "release-run" | "telemetry-daily")
+            && (prior_spec.host.lf_home != spec.host.lf_home
+                || prior_spec.host.home_id != spec.host.home_id
+                || prior_spec.working_directory.canonicalize()?
+                    != spec.working_directory.canonicalize()?)
+        {
+            accounting::close(&prior_spec, now)?;
+        }
+        if same_obligation(&prior, spec)
+            && prior_spec.host.lf_home == spec.host.lf_home
+            && prior_spec.working_directory.canonicalize()?
+                == spec.working_directory.canonicalize()?
+        {
             prior.activated_at
         } else {
             now
@@ -247,7 +261,7 @@ pub fn add_cron(
     } else {
         now
     };
-    if spec.flow == "release-run" {
+    if matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         accounting::observe(spec, activated_at, now, &zone)?;
     }
@@ -270,12 +284,38 @@ pub fn remove_cron(
         return Ok(None);
     }
     let cron = inspect_cron(&path, launchctl)?;
-    if cron.flow == "release-run" {
-        accounting::close(&read_cron_spec(&path)?, Utc::now().timestamp())?;
+    if matches!(cron.flow.as_str(), "release-run" | "telemetry-daily") {
+        let spec = read_cron_spec(&path)?;
+        let now = Utc::now().timestamp();
+        retain_installed_obligation(&spec, cron.activated_at, now)?;
+        accounting::close(&spec, now)?;
     }
     launchctl.unload(&path)?;
     fs::remove_file(&path)?;
     Ok(Some(cron))
+}
+
+fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> OpsResult<()> {
+    if !matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
+        return Ok(());
+    }
+    let repo = spec.working_directory.canonicalize()?;
+    // The predecessor keeps its observed timezone. Only a legacy job without
+    // retained evidence needs today's zone, explicitly unknown before now.
+    let retained = accounting::read(&spec.host.lf_home)?.iter().any(|s| {
+        s.repo == repo
+            && s.home_id == spec.host.home_id
+            && s.wave == spec.wave
+            && s.flow == spec.flow
+            && s.schedule == spec.schedule.expression()
+            && s.installation_activated_at == activated_at
+            && s.closed_at.is_none()
+    });
+    if !retained {
+        let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
+        accounting::observe(spec, activated_at, now, &zone)?;
+    }
+    Ok(())
 }
 
 pub fn list_crons(
@@ -482,7 +522,7 @@ pub(crate) fn run_cron_recorded(
         return Err(error);
     }
 
-    let release_obligation = if flow == "release-run" {
+    let obligation = if matches!(flow, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         let obligation = read_cron_obligation(&path)?;
         Some(accounting::observe(
@@ -494,6 +534,7 @@ pub(crate) fn run_cron_recorded(
     } else {
         None
     };
+    let release_obligation = obligation.filter(|_| flow == "release-run");
 
     let placement_error = if spec.host.home_id != *placed_home {
         Some(format!(
@@ -621,11 +662,13 @@ pub fn record_cron_preflight_failure(
     receipt.finished_at = Some(Utc::now().timestamp());
     receipt.outcome = CronOutcome::Failed;
     receipt.error = Some(format!("Home placement preflight failed: {error}"));
-    if flow == "release-run" {
+    if matches!(flow, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, flow))?;
         let id = accounting::observe(&spec, prior.activated_at, receipt.started_at, &zone)?;
-        accounting::preflight_failure(&spec.host.lf_home, &id, &receipt)?;
+        if flow == "release-run" {
+            accounting::preflight_failure(&spec.host.lf_home, &id, &receipt)?;
+        }
     }
     write_receipt(&root, &receipt)?;
     Ok(receipt)
@@ -1731,6 +1774,53 @@ mod tests {
         assert!(daily_time_of("0 0 9 * * MON-FRI *").is_err());
         assert!(daily_time_of("0 0 9 1 * * *").is_err());
         assert!(daily_time_of("not a schedule").is_err());
+    }
+
+    #[test]
+    fn telemetry_installation_retains_legacy_replacement_move_and_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents = temp.path().join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        let launchctl = FakeLaunchctl::default();
+        let mut telemetry = named_spec(
+            temp.path(),
+            Path::new("/usr/bin/true"),
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        // A pre-cutover plist has no retained segment yet.
+        let path = plist_path(&agents, &telemetry.wave, &telemetry.flow);
+        fs::write(&path, render_plist(&telemetry, 0)).unwrap();
+        telemetry.schedule = parse_schedule("0 0 8 * * *").unwrap();
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        let rows = accounting::read(&telemetry.host.lf_home).unwrap();
+        assert_eq!(rows.len(), 2);
+        let old = rows.iter().find(|r| r.schedule == "0 0 9 * * *").unwrap();
+        assert_eq!(old.activated_at, 0);
+        assert!(old.observed_at > old.activated_at);
+        assert!(old.closed_at.is_some());
+        let current = rows.iter().find(|r| r.closed_at.is_none()).unwrap();
+        assert_eq!(current.replaces.as_ref(), Some(&old.id));
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        assert_eq!(accounting::read(&telemetry.host.lf_home).unwrap(), rows);
+
+        let old_home = telemetry.host.lf_home.clone();
+        telemetry.host.lf_home = temp.path().join("other-home");
+        telemetry.host.home_id = HomeId::new();
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        assert!(accounting::read(&old_home)
+            .unwrap()
+            .iter()
+            .all(|s| s.closed_at.is_some()));
+        remove_cron(&agents, &telemetry.wave, &telemetry.flow, &launchctl).unwrap();
+        let moved = accounting::read(&telemetry.host.lf_home).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].home_id, telemetry.host.home_id);
+        assert!(moved[0].closed_at.is_some());
+        assert!(moved[0].opportunities.is_empty());
+        assert!(!path.exists());
     }
 
     #[test]

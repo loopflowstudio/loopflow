@@ -22,7 +22,7 @@ pub(crate) struct CronExecution {
 
 pub(crate) fn validate_execution(
     home: &Path,
-    context: &ReleaseObligation,
+    context: &ObligationSegment,
     execution: &CronExecution,
 ) -> OpsResult<()> {
     use std::os::fd::FromRawFd;
@@ -145,8 +145,9 @@ pub(crate) fn consume_trigger(spec: &CronSpec, receipt: &CronReceipt) -> OpsResu
     Ok(found)
 }
 
+/// One observed calendar/placement segment; only release jobs own opportunities.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReleaseObligation {
+pub struct ObligationSegment {
     pub schema_version: u32,
     pub id: String,
     pub repo: PathBuf,
@@ -192,6 +193,7 @@ pub struct ReleaseAttempt {
     pub source: CronSource,
     pub covered: Vec<String>,
     pub selection: Option<ReleaseSelection>,
+    pub replacement: Option<CandidateReplacement>,
     pub target: Option<String>,
     pub telemetry: Option<TelemetryPrerequisite>,
     pub verification: Vec<VerificationEvidence>,
@@ -214,6 +216,7 @@ pub struct TelemetryPrerequisite {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelemetryDue {
     pub opportunity_id: String,
+    pub obligation_id: Option<String>,
     pub due_at: Option<i64>,
     pub uncertainty: Option<String>,
     pub receipts: Vec<CronReceiptId>,
@@ -224,6 +227,13 @@ pub struct ReleaseIntervention {
     pub recorded_at: i64,
     pub target: String,
     pub operation: String,
+}
+
+/// Exact rejected source and affirmative unpublished evidence authorizing one successor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateReplacement {
+    pub rejected: ReleaseSelection,
+    pub inspection: VerificationEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +290,15 @@ impl ReleaseOpportunity {
     }
 }
 
+impl ObligationSegment {
+    /// Unfinished execution owners retain repair obligations after their schedule closes.
+    pub fn closed_unsettled(&self) -> impl Iterator<Item = &ReleaseOpportunity> {
+        self.opportunities
+            .iter()
+            .filter(|o| self.closed_at.is_some() && o.coalesced_into.is_none() && !o.settled())
+    }
+}
+
 fn failure(message: impl Into<String>) -> OpsError {
     OpsError::Message(message.into())
 }
@@ -332,12 +351,14 @@ pub(crate) fn record_overlap(
         .flat_map(|o| &o.attempts)
         .find(|a| a.finished_at.is_none())
         .map(|a| a.receipt_id.to_string());
-    if let Some(latest) = record
+    if let Some(index) = record
         .opportunities
-        .iter_mut()
-        .rev()
-        .find(|o| o.coalesced_into.is_none() && o.attempts.is_empty())
+        .iter()
+        .rposition(|o| o.coalesced_into.is_none() && o.attempts.is_empty())
     {
+        let continuation =
+            retry_continuation(&record, &record.opportunities[index].id, receipt.started_at)?;
+        let latest = &mut record.opportunities[index];
         latest.attempts.push(ReleaseAttempt {
             receipt_id: receipt.id.clone(),
             started_at: receipt.started_at,
@@ -345,6 +366,7 @@ pub(crate) fn record_overlap(
             source: receipt.source,
             covered: vec![latest.id.clone()],
             selection: None,
+            replacement: None,
             target: None,
             telemetry: None,
             verification: Vec::new(),
@@ -353,7 +375,7 @@ pub(crate) fn record_overlap(
                     "release execution active: {}",
                     active.as_deref().unwrap_or("owner holds execution lock")
                 ),
-                continuation: "next configured firing".into(),
+                continuation,
             },
         });
     }
@@ -394,6 +416,7 @@ pub(crate) fn preflight_failure(
                 source: receipt.source,
                 covered: vec![due.id.clone()],
                 selection: due.attempts.last().and_then(|a| a.selection.clone()),
+                replacement: None,
                 target: due.attempts.last().and_then(|a| a.target.clone()),
                 telemetry: None,
                 verification: Vec::new(),
@@ -422,7 +445,7 @@ pub(super) fn lock(home: &Path) -> OpsResult<File> {
     Ok(file)
 }
 
-fn save(home: &Path, obligation: &ReleaseObligation) -> OpsResult<()> {
+fn save(home: &Path, obligation: &ObligationSegment) -> OpsResult<()> {
     let dir = directory(home);
     let bytes = serde_json::to_vec_pretty(obligation).map_err(|e| failure(e.to_string()))?;
     let mut pending = tempfile::NamedTempFile::new_in(&dir)?;
@@ -430,12 +453,12 @@ fn save(home: &Path, obligation: &ReleaseObligation) -> OpsResult<()> {
     pending.as_file().sync_all()?;
     pending
         .persist(dir.join(format!("{}.json", obligation.id)))
-        .map_err(|e| failure(format!("persist release obligation: {e}")))?;
+        .map_err(|e| failure(format!("persist cron obligation: {e}")))?;
     File::open(dir)?.sync_all()?;
     Ok(())
 }
 
-pub(super) fn read(home: &Path) -> OpsResult<Vec<ReleaseObligation>> {
+pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
     let dir = directory(home);
     if !dir.exists() {
         return Ok(Vec::new());
@@ -446,17 +469,13 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ReleaseObligation>> {
         if path.extension().is_none_or(|e| e != "json") {
             continue;
         }
-        let record: ReleaseObligation = serde_json::from_slice(&fs::read(&path)?).map_err(|e| {
-            failure(format!(
-                "invalid release obligation {}: {e}",
-                path.display()
-            ))
-        })?;
+        let record: ObligationSegment = serde_json::from_slice(&fs::read(&path)?)
+            .map_err(|e| failure(format!("invalid cron obligation {}: {e}", path.display())))?;
         if record.schema_version != 1
             || path.file_stem().and_then(|s| s.to_str()) != Some(record.id.as_str())
         {
             return Err(failure(format!(
-                "unsupported or mismatched release obligation {}",
+                "unsupported or mismatched cron obligation {}",
                 path.display()
             )));
         }
@@ -495,7 +514,7 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ReleaseObligation>> {
     Ok(result)
 }
 
-fn validate(record: &ReleaseObligation) -> OpsResult<()> {
+fn validate(record: &ObligationSegment) -> OpsResult<()> {
     let mut seen = std::collections::HashSet::new();
     for opportunity in &record.opportunities {
         if !seen.insert(&opportunity.id) {
@@ -528,7 +547,10 @@ fn validate(record: &ReleaseObligation) -> OpsResult<()> {
     Ok(())
 }
 
-fn materialize(record: &mut ReleaseObligation, now: i64) -> OpsResult<()> {
+pub(super) fn materialize(record: &mut ObligationSegment, now: i64) -> OpsResult<()> {
+    if record.flow != "release-run" {
+        return Ok(());
+    }
     let zone: Tz = record
         .timezone
         .parse()
@@ -617,7 +639,7 @@ pub(crate) fn observe(
         timezone,
         &replaces,
     ))?;
-    let record = ReleaseObligation {
+    let record = ObligationSegment {
         schema_version: 1,
         id: id.clone(),
         repo,
@@ -669,7 +691,7 @@ pub fn history(
     repo: &Path,
     wave: &str,
     now: i64,
-) -> OpsResult<Vec<ReleaseObligation>> {
+) -> OpsResult<Vec<ObligationSegment>> {
     let repo = repo.canonicalize()?;
     let mut records = read(home)?;
     records.retain(|r| r.repo == repo && r.wave == wave);
@@ -677,6 +699,75 @@ pub fn history(
         materialize(record, now)?;
     }
     Ok(records)
+}
+
+/// Bind original release dues to observed telemetry segments, never today's schedule.
+pub(crate) fn telemetry_due(
+    segments: &[ObligationSegment],
+    context: &ObligationSegment,
+    opportunity: &ReleaseOpportunity,
+    receipts: &[CronReceipt],
+) -> OpsResult<TelemetryDue> {
+    let mut result = TelemetryDue {
+        opportunity_id: opportunity.id.clone(),
+        obligation_id: None,
+        due_at: None,
+        uncertainty: Some(format!(
+            "no retained telemetry obligation on Home {} at original release due {}",
+            context.home_id, opportunity.due_at
+        )),
+        receipts: Vec::new(),
+    };
+    let Some(segment) = segments.iter().find(|s| {
+        s.repo == context.repo
+            && s.wave == context.wave
+            && s.flow == "telemetry-daily"
+            && s.home_id == context.home_id
+            && s.activated_at <= opportunity.due_at
+            && s.closed_at.is_none_or(|end| opportunity.due_at < end)
+    }) else {
+        return Ok(result);
+    };
+    result.obligation_id = Some(segment.id.clone());
+    let zone: Tz = segment
+        .timezone
+        .parse()
+        .map_err(|e| failure(format!("invalid timezone: {e}")))?;
+    let (hour, minute) = super::daily_time_of(&segment.schedule)?;
+    let due = calendar::at_or_before(&zone, opportunity.due_at, hour, minute)
+        .ok_or_else(|| failure("cannot identify original telemetry interval"))?;
+    if due < segment.activated_at {
+        result.uncertainty =
+            Some("original release precedes this telemetry segment's first due".into());
+        return Ok(result);
+    }
+    if due < segment.observed_at {
+        result.uncertainty = Some(
+            "telemetry schedule or timezone was not observed for this original due time".into(),
+        );
+        return Ok(result);
+    }
+    let end = calendar::after(&zone, due, hour, minute)
+        .ok_or_else(|| failure("cannot identify telemetry interval end"))?;
+    let end = segment.closed_at.map_or(end, |closed| end.min(closed));
+    result.due_at = Some(due);
+    result.uncertainty = None;
+    result.receipts = receipts
+        .iter()
+        .filter(|r| {
+            (r.repo == segment.repo || r.repo.canonicalize().ok().as_ref() == Some(&segment.repo))
+                && r.home_id == segment.home_id
+                && r.wave == segment.wave
+                && r.flow == segment.flow
+                && r.schedule == segment.schedule
+                && r.source == CronSource::Scheduled
+                && r.target_kind == super::CronTargetKind::Flow
+                && r.started_at >= due
+                && r.started_at < end
+        })
+        .map(|r| r.id.clone())
+        .collect();
+    Ok(result)
 }
 
 pub(crate) fn begin(
@@ -795,6 +886,7 @@ pub(crate) fn begin(
         source: receipt.source,
         covered,
         selection,
+        replacement: None,
         target,
         telemetry: None,
         verification: Vec::new(),
@@ -957,7 +1049,7 @@ pub(crate) fn receipt_context(
     home: &Path,
     repo: &Path,
     receipt_id: &str,
-) -> OpsResult<ReleaseObligation> {
+) -> OpsResult<ObligationSegment> {
     let repo = repo.canonicalize()?;
     let record = read(home)?
         .into_iter()
@@ -980,6 +1072,46 @@ pub(crate) fn receipt_context(
         ));
     }
     Ok(record)
+}
+
+pub(crate) fn overlap_continuation(home: &Path, receipt_id: &str, now: i64) -> OpsResult<String> {
+    for record in read(home)? {
+        if let Some(opportunity) = record.opportunities.iter().find(|o| {
+            o.coalesced_into.is_none()
+                && !o.settled()
+                && o.attempts
+                    .last()
+                    .is_some_and(|a| a.receipt_id.as_str() == receipt_id)
+        }) {
+            return retry_continuation(&record, &opportunity.id, now);
+        }
+    }
+    Err(failure("release attempt no longer owns the opportunity"))
+}
+
+fn retry_continuation(
+    record: &ObligationSegment,
+    opportunity: &str,
+    now: i64,
+) -> OpsResult<String> {
+    if let Some(closed) = record.closed_at {
+        return Ok(format!(
+            "obligation {} closed at {closed}; no future firing on original Home {}; record repair there: lf cron disposition {opportunity} --wave {} --owner <task-work-id> --reason <repair-plan>",
+            record.id, record.home_id, record.wave
+        ));
+    }
+    let zone: Tz = record
+        .timezone
+        .parse()
+        .map_err(|e| failure(format!("invalid timezone: {e}")))?;
+    let (hour, minute) = super::daily_time_of(&record.schedule)?;
+    let next = calendar::at_or_before(&zone, now, hour, minute)
+        .and_then(|due| calendar::after(&zone, due, hour, minute))
+        .ok_or_else(|| failure("cannot compute next configured release firing"))?;
+    Ok(format!(
+        "next configured release due {next}; obligation {}; Home {}; observed at {now}",
+        record.id, record.home_id
+    ))
 }
 
 pub(crate) fn record_target(home: &Path, receipt_id: &str, target: &str) -> OpsResult<()> {
@@ -1086,6 +1218,41 @@ pub(crate) fn record_intervention(
     Ok(())
 }
 
+pub(crate) fn authorize_replacement(
+    home: &Path,
+    receipt_id: &str,
+    rejected: &ReleaseSelection,
+    inspection: VerificationEvidence,
+) -> OpsResult<()> {
+    let _lock = lock(home)?;
+    for mut record in read(home)? {
+        let Some(opportunity) = record.opportunities.iter_mut().find(|o| {
+            o.attempts
+                .last()
+                .is_some_and(|a| a.receipt_id.as_str() == receipt_id)
+        }) else {
+            continue;
+        };
+        let attempt = opportunity.attempts.last_mut().expect("matched attempt");
+        if opportunity.coalesced_into.is_some()
+            || !matches!(attempt.outcome, ScheduledReleaseOutcome::Running)
+            || attempt.selection.as_ref() != Some(rejected)
+            || attempt.replacement.is_some()
+        {
+            return Err(failure(
+                "release replacement no longer owns the exact running candidate",
+            ));
+        }
+        attempt.replacement = Some(CandidateReplacement {
+            rejected: rejected.clone(),
+            inspection,
+        });
+        save(home, &record)?;
+        return Ok(());
+    }
+    Err(failure("release attempt no longer owns the opportunity"))
+}
+
 pub(crate) fn select(home: &Path, receipt_id: &str, selection: ReleaseSelection) -> OpsResult<()> {
     let _lock = lock(home)?;
     for mut record in read(home)? {
@@ -1102,15 +1269,20 @@ pub(crate) fn select(home: &Path, receipt_id: &str, selection: ReleaseSelection)
             ));
         }
         let attempt = opportunity.attempts.last_mut().expect("matched attempt");
-        if attempt.outcome.settled() {
-            return Err(failure("cannot change settled release selection"));
+        if !matches!(attempt.outcome, ScheduledReleaseOutcome::Running) {
+            return Err(failure("cannot change a finished release selection"));
         }
         let mut selection = selection;
         if let Some(prior) = &attempt.selection {
             if prior.tag != selection.tag || prior.commit != selection.commit {
-                return Err(failure("cannot replace the saved exact release candidate"));
-            }
-            if selection.workflow_run_id.is_none() {
+                if !attempt
+                    .replacement
+                    .as_ref()
+                    .is_some_and(|r| &r.rejected == prior)
+                {
+                    return Err(failure("cannot replace the saved exact release candidate"));
+                }
+            } else if selection.workflow_run_id.is_none() {
                 selection.workflow_run_id = prior.workflow_run_id;
             }
         }
@@ -1174,6 +1346,294 @@ mod tests {
     }
 
     #[test]
+    fn overlap_continuation_uses_current_calendar_and_preserves_closed_ownership() {
+        let temp = tempfile::tempdir().unwrap();
+        let job = spec(temp.path());
+        let home = &job.host.lf_home;
+        let id = observe(&job, 0, 0, "UTC").unwrap();
+        let wake = receipt(&job, 36000);
+        let owner = begin(home, &id, &wake).unwrap().unwrap();
+        let original = read(home).unwrap().remove(0).opportunities;
+        for (now, next) in [(36000, 122400), (120000, 122400), (208800, 295200)] {
+            let continuation = super::overlap_continuation(home, wake.id.as_str(), now).unwrap();
+            assert!(
+                continuation.contains(&format!("next configured release due {next}")),
+                "{continuation}"
+            );
+            assert!(continuation.contains(job.host.home_id.as_str()));
+        }
+        let blocked = receipt(&job, 122400);
+        super::record_overlap(home, &id, &blocked).unwrap();
+        let record = read(home).unwrap().remove(0);
+        assert_eq!(record.opportunities[0], original[0]);
+        let ScheduledReleaseOutcome::Deferred {
+            reason,
+            continuation,
+        } = &record.opportunities[1].attempts[0].outcome
+        else {
+            panic!("overlap did not defer");
+        };
+        assert!(reason.contains(wake.id.as_str()));
+        assert!(continuation.contains("next configured release due 208800"));
+        close(&job, 122401).unwrap();
+        let continuation = super::overlap_continuation(home, wake.id.as_str(), 300000).unwrap();
+        assert!(continuation.contains("closed at 122401"));
+        assert!(continuation.contains(&format!("lf cron disposition {owner}")));
+        assert!(continuation.contains(job.host.home_id.as_str()));
+        assert!(!continuation.contains("next configured release due"));
+        assert_eq!(read(home).unwrap()[0].opportunities[0], original[0]);
+    }
+
+    #[test]
+    fn overlap_continuation_uses_retained_timezone_across_dst() {
+        use chrono::TimeZone;
+        use chrono_tz::America::Los_Angeles;
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut job = spec(temp.path());
+        job.schedule = parse_schedule("0 30 2 * * *").unwrap();
+        let now = Los_Angeles
+            .with_ymd_and_hms(2026, 3, 7, 2, 30, 0)
+            .unwrap()
+            .timestamp();
+        let next = Los_Angeles
+            .with_ymd_and_hms(2026, 3, 9, 2, 30, 0)
+            .unwrap()
+            .timestamp();
+        let id = observe(&job, now, now, "America/Los_Angeles").unwrap();
+        let wake = receipt(&job, now);
+        begin(&job.host.lf_home, &id, &wake).unwrap();
+        let continuation =
+            super::overlap_continuation(&job.host.lf_home, wake.id.as_str(), now).unwrap();
+        assert!(
+            continuation.contains(&format!("next configured release due {next}")),
+            "{continuation}"
+        );
+    }
+
+    #[test]
+    fn closed_release_owners_retain_evidence_and_accept_dated_repair() {
+        use crate::durable::TaskId;
+        use crate::ops::cron::history::{disposition, release_history};
+
+        for change in ["remove", "schedule", "timezone", "home"] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut job = spec(temp.path());
+            let home = job.host.lf_home.clone();
+            let original_home = job.host.home_id.clone();
+            let id = observe(&job, 0, 0, "UTC").unwrap();
+            let wake = receipt(&job, 86400 + 36000);
+            let owner = begin(&home, &id, &wake).unwrap().unwrap();
+            let candidate = ReleaseSelection {
+                tag: "v1.2.3".into(),
+                commit: "exact-candidate".into(),
+                workflow_run_id: Some(42),
+            };
+            select(&home, wake.id.as_str(), candidate).unwrap();
+            let original = read(&home).unwrap().remove(0);
+            let closed = 2 * 86400 + 36001;
+            match change {
+                "remove" => close(&job, closed).unwrap(),
+                "schedule" => {
+                    job.schedule = parse_schedule("0 0 11 * * *").unwrap();
+                    observe(&job, closed, closed, "UTC").unwrap();
+                    // The successor is durable, but the predecessor rewrite was interrupted.
+                    super::save(&home, &original).unwrap();
+                }
+                "timezone" => {
+                    observe(&job, 0, closed, "America/New_York").unwrap();
+                }
+                "home" => {
+                    close(&job, closed).unwrap();
+                    job.host.home_id = HomeId::new();
+                    job.host.lf_home = temp.path().join("other-home");
+                    observe(&job, closed, closed, "UTC").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            // The third missed due has no attempt; the first two share one owner.
+            let now = closed + 2 * 86400;
+            let report = release_history(&home, temp.path(), &job.wave, 1, now).unwrap();
+            let retained = report.obligations.iter().find(|r| r.id == id).unwrap();
+            assert_eq!(retained.home_id, original_home);
+            assert_eq!(&retained.opportunities[..2], &original.opportunities);
+            let missed = retained.opportunities[2].id.clone();
+            assert!(retained.opportunities[2].attempts.is_empty());
+            assert_eq!(
+                report.summary.closed_unsettled,
+                vec![owner.clone(), missed.clone()]
+            );
+            for subject in [&owner, &missed] {
+                assert!(
+                    report.summary.undispositioned_failures.contains(subject),
+                    "{change}: {report:?}"
+                );
+                disposition(
+                    &home,
+                    &job.wave,
+                    subject,
+                    TaskId::new(),
+                    "reconcile retained candidate on original Home",
+                    now,
+                )
+                .unwrap();
+                disposition(
+                    &home,
+                    &job.wave,
+                    subject,
+                    TaskId::new(),
+                    "repair remains assigned",
+                    now + 1,
+                )
+                .unwrap();
+            }
+            let after = release_history(&home, temp.path(), &job.wave, 1, now + 1).unwrap();
+            assert_eq!(after.dispositions.len(), 4);
+            assert!(after.summary.late_dispositions.contains(&owner));
+            assert!(after.summary.late_dispositions.contains(&missed));
+            assert!(!after.summary.undispositioned_failures.contains(&owner));
+            assert!(after.summary.qualifying_pairs.is_empty());
+            assert_eq!(
+                after.obligations.iter().find(|r| r.id == id).unwrap(),
+                retained
+            );
+            if change == "home" {
+                assert!(disposition(
+                    &job.host.lf_home,
+                    &job.wave,
+                    &owner,
+                    TaskId::new(),
+                    "cannot transfer ownership",
+                    now
+                )
+                .is_err());
+            }
+            // An operation already executing still owns its exact final write.
+            settle(
+                &home,
+                wake.id.as_str(),
+                ScheduledReleaseOutcome::Published {
+                    tag: "v1.2.3".into(),
+                    commit: "exact-candidate".into(),
+                    workflow_run_id: 42,
+                },
+                &[],
+                now + 2,
+            )
+            .unwrap();
+            assert!(disposition(
+                &home,
+                &job.wave,
+                &owner,
+                TaskId::new(),
+                "not a closed blocker anymore",
+                now + 3
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn telemetry_segments_preserve_original_schedule_timezone_and_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let release = spec(temp.path());
+        let release_id = observe(&release, 0, 0, "UTC").unwrap();
+        let mut telemetry = release.clone();
+        telemetry.flow = "telemetry-daily".into();
+        telemetry.schedule = parse_schedule("0 0 9 * * *").unwrap();
+        let first = observe(&telemetry, 0, 0, "UTC").unwrap();
+        let mut failed = receipt(&telemetry, 32401);
+        failed.outcome = CronOutcome::Failed;
+        let failure_bytes = serde_json::to_vec(&failed).unwrap();
+        telemetry.schedule = parse_schedule("0 0 8 * * *").unwrap();
+        let second = observe(&telemetry, 86400, 86400, "UTC").unwrap();
+        let recovered = receipt(&telemetry, 86400 + 28801);
+        let third = observe(&telemetry, 86400, 2 * 86400, "America/New_York").unwrap();
+        let eastern = receipt(&telemetry, 2 * 86400 + 46801);
+        // A receipt on the new Home cannot stand in for the old Home's check.
+        telemetry.host.home_id = HomeId::new();
+        let fourth = observe(&telemetry, 3 * 86400, 3 * 86400, "UTC").unwrap();
+        let mut wrong_home = receipt(&telemetry, failed.started_at);
+        wrong_home.schedule = failed.schedule.clone();
+        super::close(&telemetry, 4 * 86400).unwrap();
+        let receipts = vec![
+            failed.clone(),
+            recovered.clone(),
+            eastern.clone(),
+            wrong_home,
+        ];
+        let wake = receipt(&release, 4 * 86400 + 50400);
+        begin(&release.host.lf_home, &release_id, &wake).unwrap();
+        let segments = history(
+            &release.host.lf_home,
+            temp.path(),
+            &release.wave,
+            wake.started_at,
+        )
+        .unwrap();
+        let context = segments.iter().find(|s| s.id == release_id).unwrap();
+        let mut dues = context.opportunities.clone();
+        // The release follows 08:00 Eastern (13:00 UTC) on the third date.
+        dues[2].due_at = 2 * 86400 + 50400;
+        let original: Vec<_> = dues
+            .iter()
+            .map(|o| super::telemetry_due(&segments, context, o, &receipts).unwrap())
+            .collect();
+        assert_eq!(original[0].obligation_id.as_ref(), Some(&first));
+        assert_eq!(original[0].due_at, Some(32400));
+        assert_eq!(original[0].receipts, vec![failed.id]);
+        assert_eq!(original[1].obligation_id.as_ref(), Some(&second));
+        assert_eq!(original[1].due_at, Some(86400 + 28800));
+        assert_eq!(original[1].receipts, vec![recovered.id]);
+        assert_eq!(original[2].obligation_id.as_ref(), Some(&third));
+        assert_eq!(original[2].due_at, Some(2 * 86400 + 46800));
+        assert_eq!(original[2].receipts, vec![eastern.id]);
+        assert!(original[3..]
+            .iter()
+            .all(|d| d.due_at.is_none() && d.uncertainty.is_some()));
+        let moved = segments.iter().find(|s| s.id == fourth).unwrap();
+        assert_eq!(moved.closed_at, Some(4 * 86400));
+        assert!(segments
+            .iter()
+            .filter(|s| s.flow == "telemetry-daily")
+            .all(|s| s.opportunities.is_empty()));
+        assert_eq!(serde_json::to_vec(&receipts[0]).unwrap(), failure_bytes);
+    }
+
+    #[test]
+    fn telemetry_cutover_does_not_invent_historical_timezone_or_cross_closure() {
+        let temp = tempfile::tempdir().unwrap();
+        let release = spec(temp.path());
+        let release_id = observe(&release, 0, 0, "UTC").unwrap();
+        let mut telemetry = release.clone();
+        telemetry.flow = "telemetry-daily".into();
+        telemetry.schedule = parse_schedule("0 0 9 * * *").unwrap();
+        let id = observe(&telemetry, 0, 86400, "UTC").unwrap();
+        super::close(&telemetry, 86400 + 40000).unwrap();
+        let before = receipt(&telemetry, 86400 + 32401);
+        let after = receipt(&telemetry, 86400 + 40001);
+        let segments = history(
+            &release.host.lf_home,
+            temp.path(),
+            &release.wave,
+            2 * 86400 + 36000,
+        )
+        .unwrap();
+        let context = segments.iter().find(|s| s.id == release_id).unwrap();
+        let receipts = vec![before.clone(), after];
+        let original: Vec<_> = context
+            .opportunities
+            .iter()
+            .map(|o| super::telemetry_due(&segments, context, o, &receipts).unwrap())
+            .collect();
+        assert_eq!(original[0].obligation_id.as_ref(), Some(&id));
+        assert!(original[0].due_at.is_none());
+        assert_eq!(original[1].receipts, vec![before.id]);
+        assert!(original[2].obligation_id.is_none());
+        assert!(original[2].uncertainty.is_some());
+    }
+
+    #[test]
     fn telemetry_reservation_survives_retry_and_rejects_replacement_or_late_writer() {
         let temp = tempfile::tempdir().unwrap();
         let spec = spec(temp.path());
@@ -1187,6 +1647,7 @@ mod tests {
             observed_at: 36001,
             original: vec![super::TelemetryDue {
                 opportunity_id: owner,
+                obligation_id: None,
                 due_at: Some(32400),
                 uncertainty: None,
                 receipts: vec![CronReceiptId::new()],
@@ -1213,6 +1674,73 @@ mod tests {
         let attempts = &after[0].opportunities[0].attempts;
         assert_eq!(attempts[0].telemetry.as_ref(), Some(&prerequisite));
         assert!(attempts[1].telemetry.is_none());
+    }
+
+    #[test]
+    fn candidate_replacement_preserves_failure_and_owner_across_interruption() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = spec(temp.path());
+        let home = &spec.host.lf_home;
+        let id = observe(&spec, 0, 0, "UTC").unwrap();
+        let first = receipt(&spec, 36001);
+        let owner = begin(home, &id, &first).unwrap().unwrap();
+        let rejected = ReleaseSelection {
+            tag: "v1.0.1".into(),
+            commit: "rejected".into(),
+            workflow_run_id: Some(7),
+        };
+        let successor = ReleaseSelection {
+            tag: "v1.0.2".into(),
+            commit: "prepared".into(),
+            workflow_run_id: None,
+        };
+        select(home, first.id.as_str(), rejected.clone()).unwrap();
+        settle(
+            home,
+            first.id.as_str(),
+            ScheduledReleaseOutcome::Failed {
+                cause: "packaged preflight rejected".into(),
+            },
+            &[],
+            36002,
+        )
+        .unwrap();
+        let failed = read(home).unwrap()[0].opportunities[0].attempts[0].clone();
+        let retry = receipt(&spec, 36003);
+        assert_eq!(begin(home, &id, &retry).unwrap(), Some(owner.clone()));
+        assert!(select(home, retry.id.as_str(), successor.clone()).is_err());
+        let proof = super::VerificationEvidence {
+            name: "release-source-inspection".into(),
+            subject: "rejected".into(),
+            passed: true,
+            evidence_path: temp.path().join("inspection"),
+            sha256: "digest".into(),
+        };
+        super::authorize_replacement(home, retry.id.as_str(), &rejected, proof.clone()).unwrap();
+        // Interrupted after authorization, before successor selection: still resume the old owner.
+        let next = receipt(&spec, 122401);
+        assert_eq!(begin(home, &id, &next).unwrap(), Some(owner));
+        assert!(
+            super::authorize_replacement(home, retry.id.as_str(), &rejected, proof.clone())
+                .is_err()
+        );
+        assert!(select(home, retry.id.as_str(), successor.clone()).is_err());
+        assert!(select(home, next.id.as_str(), successor.clone()).is_err());
+        super::authorize_replacement(home, next.id.as_str(), &rejected, proof).unwrap();
+        select(home, next.id.as_str(), successor.clone()).unwrap();
+        assert!(select(home, next.id.as_str(), rejected).is_err());
+        let record = read(home).unwrap().remove(0);
+        let attempts = &record.opportunities[0].attempts;
+        assert_eq!(attempts[0], failed);
+        assert_eq!(attempts[2].selection.as_ref(), Some(&successor));
+        assert_eq!(
+            attempts[2].selection.as_ref().unwrap().workflow_run_id,
+            None
+        );
+        assert_eq!(
+            record.opportunities[1].coalesced_into,
+            Some(record.opportunities[0].id.clone())
+        );
     }
 
     #[test]

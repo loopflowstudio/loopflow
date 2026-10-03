@@ -149,6 +149,47 @@ exit 0
 }
 
 #[test]
+fn surviving_source_inspector_excludes_replacement_after_controller_death() {
+    let state = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::new(&[("gh", "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'release view') exit 1;; esac\nexit 91\n")]);
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "release:\n  targets:\n    default:\n      publisher: [sh, '{repo}/publisher.sh']\n",
+    );
+    repo.create_file(
+        "publisher.sh",
+        &format!(
+            "#!/bin/sh\n[ \"$1\" != check ] || exit 0\n[ \"$1\" = inspect ] || exit 91\n{}",
+            blocking_mutation(state.path(), ":")
+        ),
+    );
+    repo.stage_all();
+    repo.commit("Inspector fixture");
+    repo.push();
+    release_tag(repo.path(), "0.9.1", None).unwrap();
+    repo.create_file("README.md", "caller bytes\n");
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
+    let head = repo.head_sha();
+    let mut parent = start(&repo, state.path(), &["release", "run", "patch"]);
+    parent.child.kill().unwrap();
+    parent.child.wait().unwrap();
+    assert!(matches!(
+        release_tag(repo.path(), "0.9.2", None),
+        Err(OpsError::ReleaseDeferred { .. })
+    ));
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("README.md")).unwrap(),
+        "caller bytes\n"
+    );
+    fs::write(state.path().join("allow"), "").unwrap();
+    wait_for(&state.path().join("completed"));
+    wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
+}
+
+#[test]
 fn surviving_tag_push_excludes_release_after_controller_death() {
     let repo = TestRepo::new();
     let state = tempfile::tempdir().unwrap();
@@ -267,6 +308,7 @@ if [ "$1" = '{stage}' ]; then
 fi
 case "$1" in
   check) exit 0;;
+  inspect) echo '{{"preparation_required":[],"publications":null}}';;
   prepare)
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --output ]; then
@@ -438,6 +480,7 @@ case "$1 $2" in
     echo '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null}}'
     exit 0;;
   'api graphql')
+    case "$*" in *LoopflowPrMerge*) echo '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}'; exit 0;; esac
     if [ '{phase}' = disable ] && [ -f '{state}/queried' ]; then
       echo true
     else
@@ -1247,7 +1290,7 @@ case "$1 $2" in
         else echo '[]'; fi;;
       *) echo '[]';;
     esac;;
-  'pr view') echo '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null}}';;
+  'api graphql') echo '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
   *) exit 91;;
 esac
 "#,

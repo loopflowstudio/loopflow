@@ -168,7 +168,7 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                 println!("{} failed telemetry targets, {} undispositioned failures, {} late dispositions; {} qualifying consecutive pairs",
                     history.summary.failed_verifications, history.summary.undispositioned_failures.len(),
                     history.summary.late_dispositions.len(), history.summary.qualifying_pairs.len());
-                if history.obligations.is_empty() {
+                if history.observation_frontier.is_none() {
                     println!("Opportunity coverage unknown: no retained release obligation; sync the configured cron to begin observation. Historical receipts below remain evidence.");
                 }
                 for obligation in &history.obligations {
@@ -176,6 +176,30 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                         "{}/{} on {} ({})",
                         obligation.wave, obligation.flow, obligation.home_id, obligation.timezone
                     );
+                    for owner in obligation.closed_unsettled() {
+                        println!(
+                            "blocked {}: obligation {} closed at {}; no future firing on original Home {}. Retained candidate: {}",
+                            owner.id,
+                            obligation.id,
+                            obligation.closed_at.expect("closed owner has a closure timestamp"),
+                            obligation.home_id,
+                            owner.attempts.iter().rev().find_map(|a| a.selection.as_ref())
+                                .map(|s| format!("{} at {}", s.tag, s.commit))
+                                .unwrap_or_else(|| "none recorded".into())
+                        );
+                        if let Some(disposition) = history
+                            .dispositions
+                            .iter()
+                            .rev()
+                            .find(|d| d.subject == owner.id)
+                        {
+                            println!(
+                                "  repair owner {} at {}: {}",
+                                disposition.owner, disposition.recorded_at, disposition.reason
+                            );
+                        }
+                        println!("  Record repair on that Home: lf cron disposition {} --wave {} --owner <task-work-id> --reason <repair-plan>", owner.id, obligation.wave);
+                    }
                     for opportunity in obligation
                         .opportunities
                         .iter()
@@ -193,11 +217,20 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                             owner
                                 .attempts
                                 .last()
-                                .map(|a| format!("{:?}", a.outcome))
-                                .or_else(|| owner.wait.as_ref().map(|wait| format!(
-                                    "deferred: {}; next firing {}",
-                                    wait.reason, wait.retry_at
-                                )))
+                                .map(|a| format!("last attempt: {:?}", a.outcome))
+                                .or_else(|| owner.wait.as_ref().map(|wait| {
+                                    if obligation.closed_at.is_some() {
+                                        format!(
+                                            "last wait: {}; previously expected firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    } else {
+                                        format!(
+                                            "deferred: {}; next firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    }
+                                }))
                                 .unwrap_or_else(|| "pending; no execution recorded".into()),
                             opportunity
                                 .coalesced_into
@@ -1322,7 +1355,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 reason,
                 chrono::Utc::now().timestamp(),
             )?;
-            println!("recorded repair disposition for {subject}; failed evidence retained");
+            println!("recorded repair disposition for {subject}; original evidence retained");
         }
         CronCommand::Add {
             wave,

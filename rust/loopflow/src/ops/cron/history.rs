@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::accounting::{self, ReleaseObligation, ReleaseOpportunity, ScheduledReleaseOutcome};
+use super::accounting::{self, ObligationSegment, ReleaseOpportunity, ScheduledReleaseOutcome};
 use super::{read_receipts, receipt_root, CronOutcome, CronReceipt, CronSource};
 use crate::durable::TaskId;
 use crate::ops::{OpsError, OpsResult};
@@ -24,7 +24,7 @@ pub struct ReleaseHistory {
     pub window_start: i64,
     pub observed_at: i64,
     pub observation_frontier: Option<i64>,
-    pub obligations: Vec<ReleaseObligation>,
+    pub obligations: Vec<ObligationSegment>,
     pub receipts: Vec<CronReceipt>,
     pub dispositions: Vec<FailureDisposition>,
     pub summary: ReleaseSummary,
@@ -42,6 +42,7 @@ pub struct ReleaseSummary {
     pub published: usize,
     pub no_change: usize,
     pub unresolved: usize,
+    pub closed_unsettled: Vec<String>,
     pub failed_verifications: usize,
     pub undispositioned_failures: Vec<String>,
     pub late_dispositions: Vec<String>,
@@ -98,7 +99,19 @@ pub fn disposition(
     let receipt_failed = read_receipts(&receipt_root(home), wave, None)?
         .iter()
         .any(|r| r.id.as_str() == subject && r.outcome == CronOutcome::Failed);
-    let opportunity_failed = accounting::read(home)?
+    let mut obligations = accounting::read(home)?;
+    for record in obligations
+        .iter_mut()
+        .filter(|r| r.wave == wave && r.closed_at.is_some())
+    {
+        accounting::materialize(record, now)?;
+    }
+    let closed_unsettled = obligations
+        .iter()
+        .filter(|r| r.wave == wave)
+        .flat_map(|r| r.closed_unsettled())
+        .any(|o| o.id == subject);
+    let opportunity_failed = obligations
         .iter()
         .filter(|r| r.wave == wave)
         .flat_map(|r| &r.opportunities)
@@ -112,9 +125,9 @@ pub fn disposition(
                     )
             })
         });
-    if !receipt_failed && !opportunity_failed {
+    if !receipt_failed && !opportunity_failed && !closed_unsettled {
         return Err(OpsError::Message(format!(
-            "{subject} does not name retained failure evidence for {wave}"
+            "{subject} does not name retained failure evidence or a closed unsettled opportunity for {wave}"
         )));
     }
     let mut rows: Vec<_> = read_dispositions(home)?
@@ -174,7 +187,11 @@ pub fn release_history(
     Ok(ReleaseHistory {
         window_start,
         observed_at: now,
-        observation_frontier: obligations.iter().map(|o| o.observed_at).min(),
+        observation_frontier: obligations
+            .iter()
+            .filter(|o| o.flow == "release-run")
+            .map(|o| o.observed_at)
+            .min(),
         obligations,
         receipts,
         dispositions,
@@ -183,7 +200,7 @@ pub fn release_history(
 }
 
 fn summarize(
-    obligations: &[ReleaseObligation],
+    obligations: &[ObligationSegment],
     receipts: &[CronReceipt],
     dispositions: &[FailureDisposition],
     since: i64,
@@ -199,6 +216,7 @@ fn summarize(
         published: 0,
         no_change: 0,
         unresolved: 0,
+        closed_unsettled: Vec::new(),
         failed_verifications: 0,
         undispositioned_failures: Vec::new(),
         late_dispositions: Vec::new(),
@@ -207,6 +225,20 @@ fn summarize(
     let mut published = std::collections::HashSet::new();
     let mut counted_owners = std::collections::HashSet::new();
     for record in obligations {
+        // Closure has no future wake. Keep its repair obligation visible beyond
+        // the reporting window without inventing an attempt or a process exit.
+        for owner in record.closed_unsettled() {
+            summary.closed_unsettled.push(owner.id.clone());
+            record_failure(
+                &mut summary,
+                dispositions,
+                &owner.id,
+                None,
+                record
+                    .closed_at
+                    .expect("closed owner has a closure timestamp"),
+            );
+        }
         summary.executions += record
             .opportunities
             .iter()
@@ -228,7 +260,9 @@ fn summarize(
                 .as_ref()
                 .and_then(|id| record.opportunities.iter().find(|o| &o.id == id))
                 .unwrap_or(opportunity);
-            summary.accounted += usize::from(!owner.attempts.is_empty() || owner.wait.is_some());
+            summary.accounted += usize::from(
+                !owner.attempts.is_empty() || owner.wait.is_some() || record.closed_at.is_some(),
+            );
             if let Some(first) = record
                 .opportunities
                 .iter()
@@ -324,7 +358,7 @@ fn summarize(
 }
 
 fn qualifying<'a>(
-    record: &'a ReleaseObligation,
+    record: &'a ObligationSegment,
     opportunity: &'a ReleaseOpportunity,
 ) -> Option<&'a ScheduledReleaseOutcome> {
     if opportunity.historical_timezone_unknown

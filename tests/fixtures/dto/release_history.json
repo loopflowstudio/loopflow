@@ -45,6 +45,7 @@
                 "original": [
                   {
                     "opportunity_id": "opportunity_0",
+                    "obligation_id": "telemetry-fixture",
                     "due_at": 32400,
                     "uncertainty": null,
                     "receipts": [
@@ -94,7 +95,8 @@
                 "commit": "abc",
                 "workflow_run_id": 42
               },
-              "target": "default"
+              "target": "default",
+              "replacement": null
             }
           ],
           "overlapping_receipts": [],
@@ -154,7 +156,8 @@
                 "previous_tag": "v1.2.3",
                 "origin_commit": "abc"
               },
-              "target": "default"
+              "target": "default",
+              "replacement": null
             }
           ],
           "overlapping_receipts": [],
@@ -163,6 +166,22 @@
         }
       ],
       "replaces": null
+    },
+    {
+      "schema_version": 1,
+      "id": "telemetry-fixture",
+      "repo": "/repo",
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "telemetry-daily",
+      "schedule": "0 0 9 * * *",
+      "timezone": "UTC",
+      "installation_activated_at": 0,
+      "activated_at": 0,
+      "observed_at": 0,
+      "closed_at": null,
+      "replaces": null,
+      "opportunities": []
     }
   ],
   "receipts": [
@@ -224,6 +243,7 @@
     "published": 1,
     "no_change": 1,
     "unresolved": 0,
+    "closed_unsettled": [],
     "failed_verifications": 1,
     "undispositioned_failures": [],
     "late_dispositions": [

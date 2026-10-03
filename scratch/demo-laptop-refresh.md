@@ -1,5 +1,10 @@
 # LOO-292 demonstration — 2026-09-23
 
+Historical evidence; superseded requirements and blockers below are retained as
+dated observations. The [current plan](make-laptop-refresh-and-lf-installed-schedule-proof.md)
+and [latest readback](demo-published-install-20261002.md) govern remaining proof.
+
+
 ## Finish line
 
 The human can refresh main, repeat the command, and create a sibling from current

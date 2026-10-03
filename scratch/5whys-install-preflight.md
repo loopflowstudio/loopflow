@@ -1,5 +1,10 @@
 # 5 Whys: published candidate cannot inspect itself
 
+Historical evidence; superseded requirements and blockers below are retained as
+dated observations. The [current plan](make-laptop-refresh-and-lf-installed-schedule-proof.md)
+and [latest readback](demo-published-install-20261002.md) govern remaining proof.
+
+
 ## The Problem
 
 The laptop's published-release install fails before promotion can obtain valid
@@ -44,26 +49,11 @@ All can pass together while the actual preflight executable is unreachable.
 The missing proof is candidate inspection under a retained machine selection,
 with ordinary execution still refused.
 
-## Unanswered Whys
+## Retained prevention obligation
 
-| Branch point | Unexplored question | Priority |
-|---|---|---|
-| Why 4 | Which historical change omitted standard preflight, and was that deliberate? Current and published source establish the bug, not author intent. | Low; not needed to choose the repair |
-| After restoration | Will published promotion pass migration/executable compatibility and preserve all active Sessions once JSON is reachable? | High; must observe, never assume |
-| Publication | When will an independently authorized release contain #1273 and the repair? Current latest remains v0.12.19. | Blocking live acceptance; no release launched here |
-
-## Fixes
-
-| Level | Fix | Prevents |
-|---|---|---|
-| Immediate | Make standard candidate preflight reach its existing read-only dispatcher; deliver through an authorized published release. | Exact inspection failure; restoration still needs the configured demo |
-| Structural | Preserve runtime authorization while exempting candidate inspection at the existing CLI boundary. | Confusing inspection with activation |
-| Verification | Run actual candidate/child startup with retained published and active development state in an isolated OS account; retain incompatible-JSON and ordinary-command refusals. | Green component tests hiding a broken composition |
-
-## Changes to Implement
-
-- [ ] Correct standard preflight startup routing, without weakening runtime checks.
-- [ ] Add real process-boundary regression and unchanged-state assertions.
-- [ ] Preserve actionable child failure diagnostics; never manufacture JSON success.
-- [ ] After publication, restore configured install and repeat; inspect Sessions/history.
-- [ ] Complete outstanding actual scheduled and explicit catch-up proof on this Task.
+The original proposed fixes and questions are preserved at
+`4295ef22ce204f3edf3fc8d8916721a91318b7b4:scratch/5whys-install-preflight.md`.
+Current active preflight succeeds; it does not prove the retained-candidate
+process regression. The current plan retains actual child inspection,
+incompatible-store rejection, ordinary-command refusal and unchanged-state
+proof, plus published-path restoration and scheduled catch-up evidence.

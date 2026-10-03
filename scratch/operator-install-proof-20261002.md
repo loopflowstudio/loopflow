@@ -1,5 +1,10 @@
 # Unbound installation and schedule proof
 
+Historical evidence; superseded requirements and blockers below are retained as
+dated observations. The [current plan](make-laptop-refresh-and-lf-installed-schedule-proof.md)
+and [latest readback](demo-published-install-20261002.md) govern remaining proof.
+
+
 Jack requested shepherding LOO-292 to its next human decision. The coordinating
 conversation performed these supported operations outside Task-bound authority
 on 2026-10-02, after the Task contribution verified the installed app signature,

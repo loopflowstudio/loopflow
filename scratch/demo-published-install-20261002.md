@@ -3,7 +3,7 @@
 ## Current contract
 
 The latest supplied Task direction supersedes the package/checkout refresh and
-hourly-default requirements in the [older design](make-laptop-refresh-and-lf-installed-schedule-proof.md).
+hourly-default requirements in the [current plan](make-laptop-refresh-and-lf-installed-schedule-proof.md).
 `lf install` updates published machine artifacts only; `lf rebase` owns preserving
 checkout updates. Scheduling is opt-in login plus weekly (Monday 09:00 local),
 with positional daily/hourly/5min alternatives. Jack requested this bounded
@@ -94,48 +94,47 @@ predates executable invocation storage (previous step 4).” No restart,
 replacement, completion, or repair of that Flow was attempted. Historical
 presence does not prove that every pre-upgrade record was preserved or resumable.
 
-## Operator actions and remaining proof
+## Gate readback — 2026-10-03 04:08 UTC (October 2 local)
 
-The plist and loaded job remain absent. The unbound coordinating conversation
-can perform the already-requested activation using the installed CLI:
+Installed CLI, app metadata and bundled helper report 0.12.31. Read-only
+`lf install preflight --json` returns published revision
+`a278d6bc1bd4373f78f27027b8ae249100ef14d3`, exact production frontier
+`0.12.31.001_release`, 33 compatible executable references and verdict promote.
+The active selection is published and selects `/Users/jack/.lf/loopflow.db`.
+All three installed executable hashes match that receipt:
 
-```sh
-/Users/jack/.local/bin/lf install schedule
-/Users/jack/.local/bin/lf install schedule
-plutil -p ~/Library/LaunchAgents/com.loopflow.refresh.plist
-launchctl print gui/501/com.loopflow.refresh
-tail -n 80 ~/Library/Logs/Loopflow/refresh.log
-```
+| Role | SHA256 |
+|---|---|
+| CLI | `ae80e6c730bd1adaa19aa5e39e80aab7de0abd0b39a73ea0824859608cf5ef75` |
+| App | `11cb980867e14cd39b18a26ed9a90d2a973079d13fd46e5da7fcbc8a572546c6` |
+| App helper | `8ecf8ee6aa8350597a1162ab8a929c268c3e01f2ea7105919ef69809e9df398d` |
 
-The second invocation should report already scheduled without reloading.
-Verify `ProgramArguments` points to the installed `lf` followed by `install`,
-`RunAtLoad=true`, and the weekly calendar is Weekday 1, Hour 9, Minute 0.
-Check preserved `LF_INSTALL_DIR`, no source WorkingDirectory or Python, and
-both output paths pointing to `~/Library/Logs/Loopflow/refresh.log`.
-`weekly` is an equivalent explicit positional argument; do not use `--every`.
+`codesign --verify --deep --strict --verbose=2 /Applications/Loopflow.app`
+passes. This is current artifact integrity, not interactive acceptance or a
+before/after migration comparison. Jack's latest steer separately reports the
+coordinating Wave's successful published upgrade and main-Home migration.
+That October 2 migration memory is not present in this checkout's Wave memory;
+its contents are not independently reconstructed here.
 
-Record activation time, launchd run count/last exit, and new log output. A run
-caused by bootstrap is RunAtLoad evidence, not proof of a later login or wake.
-Observe a natural login, Monday 09:00 local calendar firing, or wake after a
-missed calendar opportunity; correlate new runs and successful installer output.
-Manual kickstart remains manual evidence. Do not force sleep/logout or damage
-artifacts. Installation scheduling no longer updates main or packages.
+The [operator activation](operator-install-proof-20261002.md) supersedes the
+22:07 absent-job observation. `plutil -p` now confirms installed lf plus `install`,
+RunAtLoad, Weekday 1 / Hour 9 / Minute 0, LF_INSTALL_DIR, both refresh.log paths,
+and no WorkingDirectory or Python. `launchctl print gui/501/com.loopflow.refresh`
+still reports one run, last exit 0, currently not running. The log still contains
+only the v0.12.29 already-installed success. No additional natural login, calendar
+firing or wake execution is established. Schedule help accepts the four positional
+cadences; its usage renders the newer `lf home install schedule` spelling.
 
-An additional unbound `lf install` can establish repeat/no-op execution and
-explicit recovery from the previously absent automatic opportunity. Preserve
-before/after artifact and history baselines; this does not manufacture proof
-of an upgrade or repair. Fresh-account public bootstrap, actual upgrade/repair,
-populated-history preservation across a change, interactive Mac app acceptance,
-and natural scheduled/login/wake execution remain unproven here.
+Current `lf task status task_1b419970ebf8419cad62475186c529c1 --json` reads
+successfully and identifies gate running. The old restart failure above remains
+a historical observation. No Flow restart or review completion was performed
+by this gate.
 
-Original checkout proofs remain in the [September 23 note](demo-laptop-refresh.md).
-None were rerun or upgraded from fixture evidence. No other checkout, installed
-artifact, schedule, or saved Flow was changed in this contribution. LOO-292 stays open.
+## Remaining operator proof and human judgment
 
-## Human decisions
-
-No new product decision is needed for weekly schedule activation or read-only
-inspection. Jack's supplied correction removes the daemon requirement; it does
-not accept the remaining demo or authorize restarting the saved Flow. App
-experience acceptance requires actual observation. The separate Flow continuity
-repair remains with its existing owner; this demo does not select Stop & restart.
+The [current plan](make-laptop-refresh-and-lf-installed-schedule-proof.md) retains
+public-channel fresh install/repair, populated-history preservation, installed
+checkout catch-up and natural login/scheduled/wake proof. Initial job success
+cannot substitute for these outcomes. Jack's app experience acceptance and the
+authored demo review remain separate from that operator work. No new product
+decision is needed to gather the outstanding evidence. LOO-292 stays open.

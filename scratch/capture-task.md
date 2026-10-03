@@ -453,6 +453,13 @@ headless build and production-control test do not establish those results. No
 provider or external Task was started to manufacture acceptance. The authored
 pursue demo boundary remains for review.
 
-Check: `scripts/test_desktop.sh --filter TaskCaptureTests` — Desktop built and six tests passed; configured `lf list --json` returned 58 skills (capture-tasks included, nine namespaced); `git diff --check` passed; native interaction/provider launch and visual acceptance remain for gate/demo.
+Compression reuses `PodiumReading` for the picker catalog instead of independent
+catalog/loading/error state. Loading and failed reads expose no selectable stale
+entries. Repository and explicit Wave launches now share one scope constructor.
+The obsolete fixed-skill launch and callbacks are absent; no further deletion
+targets remain. Source review retained separate general-conversation and skill
+launch values because their prompts, binding and checkout behavior differ.
+
+Check: `scripts/test_desktop.sh --filter TaskCaptureTests` — Desktop rebuilt and six tests passed after compression; `git diff --check` passed; prior configured discovery returned 58 skills; native interaction/provider launch and visual acceptance remain for gate/demo.
 
 Check: 2026-10-03 sync onto main — `scripts/test_desktop.sh --filter TaskCaptureTests` passed all six tests after reconciling Home-qualified workspaces with retained capture presentation; native demo remains pending.

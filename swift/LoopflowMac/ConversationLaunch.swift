@@ -78,15 +78,12 @@ struct SessionSkillLaunch: Equatable {
 
 extension PodiumModel {
     var sessionSkillLaunch: SessionSkillLaunch? {
-        guard navigation.content != .overview, let selection else {
-            return repoPath.map { SessionSkillLaunch(repoPath: $0, wave: nil, skill: selectedSessionSkill) }
-        }
-        return sessionSkillLaunch(wave: selection)
+        sessionSkillLaunch(for: navigation.content == .overview ? nil : selection)
     }
 
-    func sessionSkillLaunch(wave work: WorkReference) -> SessionSkillLaunch? {
+    func sessionSkillLaunch(for work: WorkReference?) -> SessionSkillLaunch? {
         guard let repoPath else { return nil }
-        let name = waveId(for: work).flatMap { id in
+        let name = work.flatMap { waveId(for: $0) }.flatMap { id in
             wave(id: id)?.wave.name ?? rosterWave(id: id)?.api.name
         }
         return SessionSkillLaunch(repoPath: repoPath, wave: name, skill: selectedSessionSkill)

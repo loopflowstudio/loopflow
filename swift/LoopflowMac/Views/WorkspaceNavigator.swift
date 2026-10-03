@@ -337,7 +337,7 @@ struct WorkspaceNavigator: View {
     private var orphans: [SessionRecord] { model.visibleWorkspace.orphanSessions(search: model.navigation.search) }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
-        if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(wave: work) {
+        if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
             Button("New Session · \(title)") { onNewSession(launch) }
                 .accessibilityIdentifier("workspace-capture-wave-\(work.id)")
         }

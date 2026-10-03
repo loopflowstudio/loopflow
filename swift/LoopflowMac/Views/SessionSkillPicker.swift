@@ -7,14 +7,12 @@ struct SessionSkillPicker: View {
     let dismiss: () -> Void
     @Environment(\.palette) private var palette
     @FocusState private var searching: Bool
-    @State private var skills: [DiscoveryEntry] = []
+    @State private var skills: PodiumReading<[DiscoveryEntry]> = .loading
     @State private var search = ""
     @State private var active: String?
-    @State private var loading = true
-    @State private var error: String?
 
     private var matches: [DiscoveryEntry] {
-        skills.filter {
+        (skills.value ?? []).filter {
             search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
                 || $0.description.localizedCaseInsensitiveContains(search)
         }
@@ -31,9 +29,9 @@ struct SessionSkillPicker: View {
                 .onKeyPress(.downArrow) { move(1); return .handled }
                 .onKeyPress(.upArrow) { move(-1); return .handled }
             Divider()
-            if loading {
+            if skills.isLoading {
                 ProgressView().frame(maxWidth: .infinity)
-            } else if let error {
+            } else if let error = skills.errorMessage {
                 Text(error).foregroundStyle(palette.textSecondary)
                 Button("Retry") { Task { await load() } }
             } else if matches.isEmpty {
@@ -91,18 +89,16 @@ struct SessionSkillPicker: View {
     }
 
     private func load() async {
-        loading = true
-        error = nil
+        skills = .loading
         do {
             let result = try await model.sessionSkills(repo: repo)
             guard !Task.isCancelled else { return }
-            skills = result
+            skills = .available(result)
             active = matches.first(where: { $0.name == model.selectedSessionSkill })?.name ?? matches.first?.name
         } catch {
             guard !Task.isCancelled else { return }
-            self.error = error.localizedDescription
+            skills = .unavailable(lastGood: nil, reason: error.localizedDescription)
         }
-        loading = false
     }
 
     private func move(_ offset: Int) {

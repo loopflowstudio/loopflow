@@ -93,7 +93,7 @@ struct TaskCaptureTests {
         let wave = try #require(model.visibleRoadmaps.first)
         let task = try #require(wave.tasks.items.first)
         model.select(.task(id: task.id))
-        let launch = model.sessionSkillLaunch(wave: .wave(id: wave.wave.id))
+        let launch = model.sessionSkillLaunch(for: .wave(id: wave.wave.id))
         #expect(launch == SessionSkillLaunch(repoPath: "/src/loopflow", wave: wave.wave.name, skill: "capture-tasks"))
         #expect(model.selection == .task(id: task.id))
     }

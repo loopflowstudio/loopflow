@@ -16,7 +16,7 @@ from scripts import deploy_website, publish_release
 
 def _native_artifacts(directory: Path) -> None:
     binaries = []
-    for name in ("lf", "lfd"):
+    for name in ("lf",):
         binary = directory / name
         binary.write_bytes(f"loopflow release {name}".encode())
         binaries.append(binary)
@@ -43,10 +43,10 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binaries((archive,), tmp_path)
+        publish_release._extract_arm_binary((archive,), tmp_path)
 
 
-def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
+def test_publisher_extracts_the_arm_cli(tmp_path: Path):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     _native_artifacts(artifacts)
@@ -54,12 +54,10 @@ def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
     output = tmp_path / "extracted"
     output.mkdir()
 
-    cli, daemon = publish_release._extract_arm_binaries(archives, output)
+    cli = publish_release._extract_arm_binary(archives, output)
 
     assert cli.read_bytes() == b"loopflow release lf"
-    assert daemon.read_bytes() == b"loopflow release lfd"
     assert cli.stat().st_mode & 0o111
-    assert daemon.stat().st_mode & 0o111
 
 
 def test_publisher_rejects_validation_only_control_plane(
@@ -235,7 +233,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     artifacts.mkdir()
     for target in publish_release.TARGETS:
         with tarfile.open(artifacts / f"lf-{target}.tar.gz", "w:gz") as package:
-            for name in ("lf", "lfd"):
+            for name in ("lf",):
                 body = f"#!/bin/sh\necho '{name} 1.2.3'\n".encode()
                 info = tarfile.TarInfo(name)
                 info.mode = 0o755
@@ -243,7 +241,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
     (artifacts / "install.sh").write_text(
-        '#!/bin/sh\nmkdir -p "$LF_INSTALL_DIR"\ncp native/lf native/lfd "$LF_INSTALL_DIR/"\n'
+        '#!/bin/sh\nmkdir -p "$LF_INSTALL_DIR"\ncp native/lf "$LF_INSTALL_DIR/"\n'
     )
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
@@ -364,7 +362,7 @@ def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     result = publish_release.verify_release("v1.2.3", repair=True)
     assert remote == expected
     assert result.artifact_sha256 == hashes
-    assert result.smoke_versions == {"lf": "lf 1.2.3", "lfd": "lfd 1.2.3"}
+    assert result.smoke_versions == {"lf": "lf 1.2.3"}
     assert {
         "crate_published",
         "versioned_dmg_uploaded",

@@ -1,2 +1,2 @@
 - gate
-- op: pr land
+- cmd: task pr land

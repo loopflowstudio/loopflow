@@ -1,8 +1,7 @@
-//! Fixed machine authority for installed artifact/store selection.
+//! Machine authority for published artifact installation.
 //!
-//! This state lives outside every Loopflow Home. A development Home cannot
-//! select the reliable store by changing `LF_HOME`, and a published Home cannot
-//! hide an interrupted cross-store switch by selecting another database.
+//! Release receipts live outside the data directory. Ordinary commands share
+//! the main Home; explicit experiments never change installed artifact selection.
 
 use std::collections::HashSet;
 #[cfg(unix)]
@@ -37,7 +36,9 @@ static AUTHORIZED_CURRENT: OnceLock<Option<InstallSelection>> = OnceLock::new();
 #[non_exhaustive]
 pub enum ArtifactRole {
     Cli,
-    Daemon,
+    /// Decoding and digest verification of retained pre-cutover artifact sets only.
+    #[serde(rename = "daemon")]
+    RetiredDaemon,
     App,
     AppHelper(String),
 }
@@ -125,13 +126,13 @@ impl ArtifactSet {
             .artifact(&ArtifactRole::Cli)
             .expect("validated artifact set has a CLI");
         let daemon = self
-            .artifact(&ArtifactRole::Daemon)
-            .expect("validated artifact set has a daemon");
+            .artifact(&ArtifactRole::RetiredDaemon)
+            .map(|artifact| artifact.path.as_path());
         let app = self
             .artifact(&ArtifactRole::App)
             .map(|artifact| app_bundle_for_executable(&artifact.path))
             .transpose()?;
-        let actual = artifact_set_sha256(&cli.path, &daemon.path, app)?;
+        let actual = artifact_set_sha256(&cli.path, daemon, app)?;
         if actual != self.content_sha256 {
             return Err(anyhow!(
                 "install artifact set {} content digest mismatch: expected {}, got {}",
@@ -183,14 +184,12 @@ impl ArtifactSet {
                 ));
             }
         }
-        for role in [ArtifactRole::Cli, ArtifactRole::Daemon] {
-            if !roles.contains(&role) {
-                return Err(anyhow!(
-                    "install artifact set {} is missing role {:?}",
-                    self.id,
-                    role
-                ));
-            }
+        if !roles.contains(&ArtifactRole::Cli) {
+            return Err(anyhow!(
+                "install artifact set {} is missing role {:?}",
+                self.id,
+                ArtifactRole::Cli
+            ));
         }
         Ok(roles)
     }
@@ -334,20 +333,20 @@ pub enum RecoveryOwner {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ActivationTargets {
     pub cli: PathBuf,
-    pub daemon: PathBuf,
+    /// Retained receipt input; never activated by this executable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon: Option<PathBuf>,
     pub app: Option<PathBuf>,
     pub legacy_app: Option<PathBuf>,
 }
 
 impl ActivationTargets {
     fn validate(&self) -> Result<()> {
-        for path in [&self.cli, &self.daemon] {
-            if !path.is_absolute() {
-                return Err(anyhow!(
-                    "install activation target {} is not absolute",
-                    path.display()
-                ));
-            }
+        if !self.cli.is_absolute() {
+            return Err(anyhow!(
+                "install activation target {} is not absolute",
+                self.cli.display()
+            ));
         }
         for path in [self.app.as_deref(), self.legacy_app.as_deref()]
             .into_iter()
@@ -373,9 +372,9 @@ impl ActivationTargets {
 pub struct SwitchReceipt {
     pub schema_version: u32,
     pub id: String,
-    pub prior: InstallSelection,
+    pub prior: Option<InstallSelection>,
     pub target: InstallSelection,
-    pub published_fallback: ArtifactSet,
+    pub published_fallback: Option<ArtifactSet>,
     pub target_published_fallback: Option<ArtifactSet>,
     pub phase: SwitchPhase,
     pub recovery_owner: RecoveryOwner,
@@ -395,12 +394,31 @@ impl SwitchReceipt {
         if self.id.is_empty() {
             return Err(anyhow!("install switch id is empty"));
         }
-        self.prior.validate()?;
-        self.target.validate()?;
-        if self.published_fallback.source != InstallSource::Published {
-            return Err(anyhow!("install switch fallback is not published"));
+        if let Some(prior) = &self.prior {
+            prior.validate()?;
         }
-        self.published_fallback.validate_structure()?;
+        self.target.validate()?;
+        if let Some(fallback) = &self.published_fallback {
+            if fallback.source != InstallSource::Published {
+                return Err(anyhow!("install switch fallback is not published"));
+            }
+            fallback.validate_structure()?;
+        } else if self.prior.is_some() || self.target.source != InstallSource::Published {
+            return Err(anyhow!(
+                "an existing installation requires a published fallback"
+            ));
+        }
+        if self.prior.is_none() && self.target.source != InstallSource::Published {
+            return Err(anyhow!("first installation must be published"));
+        }
+        if self.prior.is_none()
+            && self.published_fallback.is_some()
+            && self.phase != SwitchPhase::Settled
+        {
+            return Err(anyhow!(
+                "first installation has no prior published fallback"
+            ));
+        }
         match (&self.target.source, &self.target_published_fallback) {
             (InstallSource::Published, Some(fallback)) => {
                 if fallback.source != InstallSource::Published {
@@ -434,19 +452,19 @@ impl SwitchReceipt {
             }
             (InstallSource::Development, None) => {}
         }
-        let prior_cli = self
-            .prior
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .ok_or_else(|| anyhow!("install switch {} prior set has no CLI", self.id))?;
         let target_cli = self
             .target
             .artifact_set
             .artifact(&ArtifactRole::Cli)
             .ok_or_else(|| anyhow!("install switch {} target set has no CLI", self.id))?;
-        let candidate_owned_bootstrap =
-            self.target.source == InstallSource::Development && self.coordinator == *target_cli;
-        if self.coordinator != *prior_cli && !candidate_owned_bootstrap {
+        let prior_cli = self
+            .prior
+            .as_ref()
+            .and_then(|prior| prior.artifact_set.artifact(&ArtifactRole::Cli));
+        let candidate_owned_bootstrap = (self.prior.is_none()
+            || self.target.source == InstallSource::Development)
+            && self.coordinator == *target_cli;
+        if prior_cli != Some(&self.coordinator) && !candidate_owned_bootstrap {
             return Err(anyhow!(
                 "install switch {} coordinator matches neither the prior CLI nor its candidate-owned bootstrap",
                 self.id
@@ -461,7 +479,10 @@ impl SwitchReceipt {
         self.activation.validate()?;
         if self.disposable_store_owned
             && (self.target.source != InstallSource::Development
-                || self.target.store == self.prior.store)
+                || self
+                    .prior
+                    .as_ref()
+                    .is_some_and(|prior| self.target.store == prior.store))
         {
             return Err(anyhow!(
                 "install switch {} claims a disposable store it did not create",
@@ -529,8 +550,14 @@ impl SwitchReceipt {
             || self.target.artifact_set.content_sha256 != prior.target.artifact_set.content_sha256
             || self.target.artifact_set.artifact(&ArtifactRole::Cli)
                 != prior.target.artifact_set.artifact(&ArtifactRole::Cli)
-            || self.target.artifact_set.artifact(&ArtifactRole::Daemon)
-                != prior.target.artifact_set.artifact(&ArtifactRole::Daemon)
+            || self
+                .target
+                .artifact_set
+                .artifact(&ArtifactRole::RetiredDaemon)
+                != prior
+                    .target
+                    .artifact_set
+                    .artifact(&ArtifactRole::RetiredDaemon)
             || self.target_published_fallback != prior.target_published_fallback;
         if identity_changed {
             return Err(anyhow!(
@@ -553,7 +580,7 @@ impl SwitchReceipt {
         if self.published_fallback != prior.published_fallback
             && !(self.phase == SwitchPhase::Settled
                 && self.target.source == InstallSource::Published
-                && self.target_published_fallback.as_ref() == Some(&self.published_fallback))
+                && self.target_published_fallback == self.published_fallback)
         {
             return Err(anyhow!(
                 "install switch {} changed its published fallback before settlement",
@@ -672,7 +699,6 @@ pub fn root() -> Result<PathBuf> {
 pub fn entry_gate_path(root: &Path, role: &ArtifactRole) -> Result<PathBuf> {
     let name = match role {
         ArtifactRole::Cli => "lf",
-        ArtifactRole::Daemon => "lfd",
         other => return Err(anyhow!("artifact role {other:?} has no machine entry gate")),
     };
     Ok(root.join(GATE_DIRECTORY).join(name))
@@ -718,23 +744,51 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
     Ok(target)
 }
 
-fn _switch_capability(role: &ArtifactRole) -> Option<String> {
-    if let Some(capability) = std::env::var(INSTALL_SWITCH_ENV)
+fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
+    std::env::var(INSTALL_SWITCH_ENV)
         .ok()
         .filter(|value| !value.is_empty())
-    {
-        return Some(capability);
+}
+
+/// Run ordinary commands through the installed CLI before opening any Home state.
+pub fn dispatch_default_cli() -> Result<()> {
+    if crate::store::custom_home_selected() {
+        let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
+        std::env::set_var("LF_HOME", home);
+        return Ok(());
     }
-    if role != &ArtifactRole::Daemon {
-        return None;
-    }
-    let mut arguments = std::env::args_os();
-    while let Some(argument) = arguments.next() {
-        if argument == "--install-switch" {
-            return arguments.next().and_then(|value| value.into_string().ok());
+    let current = fs::canonicalize(std::env::current_exe()?)?;
+    let destination = if let Some(cli) = installed_cli(&root()?)? {
+        cli.verify()?;
+        cli.path
+    } else {
+        let installed = account_home()?.join(".local/bin/lf");
+        match fs::canonicalize(&installed) {
+            Ok(path) => path,
+            Err(error) if error.kind() == ErrorKind::NotFound && crate::build_info::provenance().is_release() => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(anyhow!(
+                "no installed lf; install a published release or select an explicit disposable LF_HOME for this build"
+            )),
+            Err(error) => return Err(error.into()),
         }
+    };
+    if current == destination {
+        return Ok(());
     }
-    None
+    let main_home = account_home()?.join(".lf");
+    let mut command = Command::new(&destination);
+    command
+        .args(std::env::args_os().skip(1))
+        .env("LF_HOME", &main_home)
+        .env("LF_BIN", &destination);
+    #[cfg(unix)]
+    {
+        Err(command.exec()).context("run installed lf")
+    }
+    #[cfg(not(unix))]
+    {
+        std::process::exit(command.status()?.code().unwrap_or(1));
+    }
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -772,7 +826,7 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         // A switch this process is not driving (typically one that failed or was
         // abandoned mid-flight) must not brick ordinary startup: dispatch through
         // the last good install instead of refusing.
-        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt),
+        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
         MachineInstallState::Settled(active) => active.selection,
     };
     let artifact = selection
@@ -836,30 +890,61 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
     Ok(MachineInstallState::Legacy)
 }
 
+/// Ordinary launches use published artifacts even if an old development
+/// installation is still selected. Its store never participates in routing.
+pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
+    let active = match read_state(root)? {
+        MachineInstallState::Legacy => return Ok(None),
+        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
+    };
+    let artifacts = match active.selection.source {
+        InstallSource::Published => active.selection.artifact_set,
+        InstallSource::Development => active.published_fallback,
+    };
+    artifacts
+        .artifact(&ArtifactRole::Cli)
+        .cloned()
+        .map(Some)
+        .context("installed CLI is missing")
+}
+
 /// The install selection ordinary startup should use while a switch receipt is
 /// present but this process is not the one driving that switch. A committed
 /// switch has already made its target the active install; anything earlier —
 /// including a switch that failed or was abandoned mid-flight — falls back to
 /// the prior settled selection. This keeps ordinary `lf` running the last good
 /// install instead of refusing every command until the switch is recovered: a
-/// failed promotion must never brick the CLI.
-fn startup_selection_during_switch(receipt: &SwitchReceipt) -> InstallSelection {
+/// failed promotion must never brick an existing CLI. First installation has
+/// no prior selection: ordinary startup waits for candidate-owned recovery.
+fn startup_selection_during_switch(receipt: &SwitchReceipt) -> Result<InstallSelection> {
     if receipt.active_selection_committed {
-        receipt.target.clone()
+        Ok(receipt.target.clone())
     } else {
-        receipt.prior.clone()
+        receipt.prior.clone().ok_or_else(|| {
+            anyhow!(
+                "first installation is unfinished; run {} install recover-switch --switch {}",
+                receipt.candidate.path.display(),
+                receipt.id
+            )
+        })
     }
 }
 
 /// The same fallback expressed as an `ActiveInstall`, for the authorization
 /// paths that resolve the running executable against a full install.
-fn startup_active_during_switch(receipt: &SwitchReceipt) -> ActiveInstall {
-    ActiveInstall {
+fn startup_active_during_switch(receipt: &SwitchReceipt) -> Result<ActiveInstall> {
+    let selection = startup_selection_during_switch(receipt)?;
+    let fallback = receipt
+        .published_fallback
+        .clone()
+        .context("settled installation has no published fallback")?;
+    Ok(ActiveInstall {
         schema_version: receipt.schema_version,
-        selection: startup_selection_during_switch(receipt),
-        published_fallback: receipt.published_fallback.clone(),
-        retained_published_sets: vec![receipt.published_fallback.clone()],
-    }
+        selection,
+        published_fallback: fallback.clone(),
+        retained_published_sets: vec![fallback],
+    })
 }
 
 pub fn write_switch(root: &Path, receipt: &SwitchReceipt) -> Result<()> {
@@ -1018,7 +1103,7 @@ fn authorize_for_switch(
             }
             // Not the switch this process drives: authorize against the last good
             // install so a failed or in-flight switch cannot brick ordinary startup.
-            startup_active_during_switch(&receipt)
+            startup_active_during_switch(&receipt)?
         }
         MachineInstallState::Settled(active) => *active,
     };
@@ -1062,10 +1147,6 @@ fn artifact_matches_runtime_role(artifact: &ArtifactRole, runtime: &ArtifactRole
             (artifact, runtime),
             (ArtifactRole::AppHelper(name), ArtifactRole::Cli) if name == "lf"
         )
-        || matches!(
-            (artifact, runtime),
-            (ArtifactRole::AppHelper(name), ArtifactRole::Daemon) if name == "lfd"
-        )
 }
 
 pub fn authorize_current(role: &ArtifactRole) -> Result<Option<InstallSelection>> {
@@ -1102,7 +1183,7 @@ pub fn selection_for_executable(
         MachineInstallState::Legacy => return Ok(None),
         // A failed or in-flight switch resolves through the last good install so
         // ordinary startup keeps working instead of refusing every command.
-        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt),
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
         MachineInstallState::Settled(active) => *active,
     };
     let actual = fs::canonicalize(executable)
@@ -1157,7 +1238,7 @@ fn file_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
+pub(crate) fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
     path.parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
@@ -1217,10 +1298,16 @@ pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(digest.finalize()))
 }
 
-pub(crate) fn artifact_set_sha256(cli: &Path, daemon: &Path, app: Option<&Path>) -> Result<String> {
+pub(crate) fn artifact_set_sha256(
+    cli: &Path,
+    daemon: Option<&Path>,
+    app: Option<&Path>,
+) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(file_sha256(cli)?.as_bytes());
-    digest.update(file_sha256(daemon)?.as_bytes());
+    if let Some(daemon) = daemon {
+        digest.update(file_sha256(daemon)?.as_bytes());
+    }
     if let Some(app) = app {
         digest.update(tree_sha256(app)?.as_bytes());
     }
@@ -1352,10 +1439,10 @@ mod tests {
             source,
             source_revision: format!("revision-{id}"),
             source_identity: format!("identity-{id}"),
-            content_sha256: artifact_set_sha256(&cli, &daemon, None).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), None).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
             ],
         }
     }
@@ -1392,9 +1479,9 @@ mod tests {
         SwitchReceipt {
             schema_version: SCHEMA_VERSION,
             id: "switch-test".to_string(),
-            prior: prior.clone(),
+            prior: Some(prior.clone()),
             target: target.clone(),
-            published_fallback,
+            published_fallback: Some(published_fallback),
             target_published_fallback: (target.source == InstallSource::Published)
                 .then(|| target.artifact_set.clone()),
             phase: SwitchPhase::Planned,
@@ -1414,7 +1501,7 @@ mod tests {
                 .clone(),
             activation: ActivationTargets {
                 cli: directory.join("active-lf"),
-                daemon: directory.join("active-lfd"),
+                daemon: Some(directory.join("active-lfd")),
                 app: None,
                 legacy_app: None,
             },
@@ -1433,6 +1520,67 @@ mod tests {
     }
 
     #[test]
+    fn first_installation_can_cancel_without_inventing_a_prior_install() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let target = selection(directory.path(), "published", InstallSource::Published);
+        let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
+        receipt.prior = None;
+        receipt.published_fallback = None;
+        write_switch(&root, &receipt).unwrap();
+        let error = authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("first installation is unfinished"));
+        assert!(error.to_string().contains("recover-switch"));
+        assert!(!root.join(ACTIVE_FILE).exists());
+        clear_switch(&root, &receipt.id).unwrap();
+        assert!(matches!(
+            read_state(&root).unwrap(),
+            MachineInstallState::Legacy
+        ));
+        assert!(!target.store.exists());
+    }
+
+    #[test]
+    fn first_installation_handoff_requires_candidate_recovery_until_settlement() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let target = selection(directory.path(), "published", InstallSource::Published);
+        let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
+        receipt.prior = None;
+        receipt.published_fallback = None;
+        receipt.phase = SwitchPhase::Advancing;
+        receipt.recovery_owner = RecoveryOwner::Candidate;
+        receipt.target_store_advance_started = true;
+        write_switch(&root, &receipt).unwrap();
+        assert!(clear_switch(&root, &receipt.id).is_err());
+        assert_eq!(
+            authorize_for_switch(
+                &root,
+                &receipt.candidate.path,
+                &ArtifactRole::Cli,
+                Some(&receipt.id)
+            )
+            .unwrap(),
+            Some(target.clone())
+        );
+        assert!(authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).is_err());
+        receipt.target_store_advanced = true;
+        receipt.phase = SwitchPhase::Settled;
+        receipt.active_selection_committed = true;
+        receipt.published_fallback = Some(target.artifact_set.clone());
+        write_switch(&root, &receipt).unwrap();
+        let active = active(target.clone(), target.artifact_set.clone());
+        settle_switch(&root, &receipt, &active).unwrap();
+        assert_eq!(
+            authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).unwrap(),
+            Some(target)
+        );
+        assert!(!root.join(SWITCH_FILE).exists());
+    }
+
+    #[test]
     fn artifact_identity_detects_replaced_bytes() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("lf");
@@ -1446,6 +1594,31 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
+    }
+
+    #[test]
+    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        assert!(super::installed_cli(&root).unwrap().is_none());
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
+        for selected in [published.clone(), development.clone()] {
+            let active = active(selected, published.artifact_set.clone());
+            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+            assert_eq!(
+                super::installed_cli(&root).unwrap().as_ref(),
+                Some(expected)
+            );
+        }
+        let next = selection(directory.path(), "next", InstallSource::Published);
+        let receipt = switch(development, next, published.artifact_set.clone());
+        write_switch(&root, &receipt).unwrap();
+        assert_eq!(
+            super::installed_cli(&root).unwrap().as_ref(),
+            Some(expected)
+        );
     }
 
     #[test]
@@ -1520,10 +1693,10 @@ mod tests {
             source: InstallSource::Published,
             source_revision: "revision".to_string(),
             source_identity: "release".to_string(),
-            content_sha256: artifact_set_sha256(&cli, &daemon, Some(&app)).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), Some(&app)).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
                 ArtifactIdentity::capture(ArtifactRole::App, &app_executable).unwrap(),
             ],
         };
@@ -1739,10 +1912,12 @@ mod tests {
 
     #[test]
     fn settlement_commits_target_then_archives_immutable_receipt() {
+        let _lock = crate::journal::test_env_lock();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
+        fs::write(&development.store, b"retained chapter and Task history").unwrap();
         let mut receipt = switch(
             published.clone(),
             development.clone(),
@@ -1754,10 +1929,11 @@ mod tests {
         receipt.target_store_advance_started = true;
         receipt.target_store_advanced = true;
         receipt.active_selection_committed = true;
-        let active = active(development.clone(), published.artifact_set);
+        let active_state = active(development.clone(), published.artifact_set);
 
         write_switch(&root, &receipt).unwrap();
-        settle_switch(&root, &receipt, &active).unwrap();
+        settle_switch(&root, &receipt, &active_state).unwrap();
+
         assert!(matches!(
             read_state(&root).unwrap(),
             MachineInstallState::Settled(found) if found.selection == development
@@ -1765,7 +1941,7 @@ mod tests {
         assert!(!root.join(SWITCH_FILE).exists());
         assert!(root.join("receipts/switch-test.json").is_file());
 
-        settle_switch(&root, &receipt, &active).unwrap();
+        settle_switch(&root, &receipt, &active_state).unwrap();
     }
 
     #[test]
@@ -1823,7 +1999,11 @@ mod tests {
             published.artifact_set.clone(),
         );
         write_switch(&root, &first).unwrap();
-        let mut second = switch(published, development, first.published_fallback.clone());
+        let mut second = switch(
+            published,
+            development,
+            first.published_fallback.clone().unwrap(),
+        );
         second.id = "switch-other".to_string();
 
         assert!(write_switch(&root, &second)

@@ -86,7 +86,7 @@ def _run(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    print(f"$ {shlex.join(cmd)}", flush=True)
+    print(f"$ {shlex.join(cmd)}", file=sys.stderr, flush=True)
     return subprocess.run(
         cmd,
         cwd=cwd,
@@ -163,16 +163,16 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple[Path, Path]:
+def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if sorted(member.name for member in members) != ["lf", "lfd"] or not all(
+        if sorted(member.name for member in members) != ["lf"] or not all(
             member.isfile() for member in members
         ):
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
         binaries = []
-        for name in ("lf", "lfd"):
+        for name in ("lf",):
             member = next(member for member in members if member.name == name)
             source = package.extractfile(member)
             if source is None:
@@ -182,7 +182,7 @@ def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple
                 shutil.copyfileobj(source, destination)
             binary.chmod(0o755)
             binaries.append(binary)
-    return binaries[0], binaries[1]
+    return binaries[0]
 
 
 def _validate_release_candidate(binary: Path, scratch: Path) -> None:
@@ -259,7 +259,7 @@ def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[st
 def _validate_archives(artifact_dir: Path) -> None:
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        binary, _ = _extract_arm_binaries(_find_native_archives(artifact_dir), scratch)
+        binary = _extract_arm_binary(_find_native_archives(artifact_dir), scratch)
         _validate_release_candidate(binary, scratch)
 
 
@@ -440,11 +440,12 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
         try:
             receipt = _read_candidate_receipt(output_dir)
             _verify_candidate_receipt(receipt, output_dir, tag, source_commit)
+        except RuntimeError as error:
+            print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
+        else:
             _validate_archives(output_dir)
             _write_receipt(receipt, ".candidate")
             return receipt
-        except RuntimeError as error:
-            print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
 
     archives = _find_native_archives(artifact_dir)
     installer = ROOT / "release" / "install.sh"
@@ -454,7 +455,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
     stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
+        arm_binary = _extract_arm_binary(archives, scratch)
         _validate_release_candidate(arm_binary, scratch)
         _run(["sh", "-n", str(installer)])
         stages.append(CANDIDATE_STAGES[1])
@@ -714,7 +715,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                 raise RuntimeError("publication repair did not pass public read-back")
         native = scratch / "native"
         native.mkdir()
-        expected_binaries = _extract_arm_binaries(_find_native_archives(scratch), native)
+        expected_binaries = (_extract_arm_binary(_find_native_archives(scratch), native),)
         home = scratch / "home"
         home.mkdir()
         install_dir = home / "bin"
@@ -741,7 +742,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             if reported != f"{name} {version}":
                 raise RuntimeError(f"public {name} reported {reported!r}, expected {version}")
             _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
-        _run([str(install_dir / "lf"), "--list"], cwd=scratch, env=smoke_env, capture=True)
+        _run([str(install_dir / "lf"), "catalog", "--json"], cwd=scratch, env=smoke_env, capture=True)
     verified = PublicReleaseReceipt(
         verified_at=int(time.time()),
         asset_urls={asset["name"]: asset["url"] for asset in release["assets"]},
@@ -803,6 +804,17 @@ def main() -> None:
 
     if args.command == "check":
         check_release_host()
+        return
+    if args.command == "inspect":
+        print(
+            json.dumps(
+                inspect_source(
+                    args.commit,
+                    args.tag,
+                    check_publication=args.check_publication,
+                )
+            )
+        )
         return
 
     if "LF_RELEASE_LOCK_FD" not in os.environ or not _release_fds():

@@ -27,8 +27,8 @@ impl Store {
         .await
     }
 
-    /// Claim one unsettled incident for the current landing generation.
-    pub async fn claim_ci_incident(
+    /// Record a response by the supervisor; incidents do not admit repairs.
+    pub async fn record_ci_response(
         &self,
         identity: &str,
         landing_id: &PrLandingId,
@@ -38,33 +38,7 @@ impl Store {
         let identity = identity.to_string();
         let landing_id = landing_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_ci_incident(&identity, &landing_id, generation, responded_at)
-        })
-        .await
-    }
-
-    /// Record the head a ci-fix body shipped for this incident. First-write only,
-    /// so the head that originally settled the incident survives a retry or a
-    /// later push.
-    pub async fn mark_ci_incident_repaired(
-        &self,
-        identity: &str,
-        landing_id: &PrLandingId,
-        generation: u64,
-        repaired_head_sha: &str,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let identity = identity.to_string();
-        let landing_id = landing_id.clone();
-        let repaired_head_sha = repaired_head_sha.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incident_repaired(
-                &identity,
-                &landing_id,
-                generation,
-                &repaired_head_sha,
-                updated_at,
-            )
+            store.record_ci_response(&identity, &landing_id, generation, responded_at)
         })
         .await
     }

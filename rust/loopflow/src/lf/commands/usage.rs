@@ -1,40 +1,54 @@
-//! `lf usage` — direct provider-authored usage from Home-local Run records.
+//! `lf usage` — direct provider-authored usage from recorded Session inputs.
 
-use std::path::Path;
-
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use time::OffsetDateTime;
 
-use crate::controller::wave::journal::short_id;
+use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::run_record::RunSnapshot;
+use crate::session_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;
-const RUN_WIDTH: usize = 22;
+const SESSION_WIDTH: usize = 22;
 const NUM_WIDTH: usize = 12;
 
-/// Print recent direct usage evidence. JSON is the same ordered Run projection
-/// used by `lf runs`; it does not invent interval completeness or provider
-/// finality.
+/// Print Session input usage without inventing completeness or provider finality.
 pub fn run(
+    context: bool,
     json: bool,
     days: u32,
     wave: Option<&str>,
     project: Option<&str>,
     task: Option<&str>,
+    parent: Option<&str>,
 ) -> Result<()> {
-    let since = since_days(days);
-    let runs = collect_since_at(
-        &crate::store::observability_home_dir(),
-        since,
+    let days = if parent.is_some() { 0 } else { days };
+    let runs = crate::lf::commands::runs::collect_history(
         WorkFilter {
             wave,
             project,
             task,
         },
+        parent,
+        since_days(days),
     )?;
+    if context {
+        // Oldest first: a Task's steps read in the order they ran.
+        let home = crate::store::lf_home_dir();
+        let report = crate::context_usage::ContextReport::new(
+            runs.iter()
+                .rev()
+                .map(|run| crate::context_usage::step_context(&home, run))
+                .collect(),
+        );
+        if json {
+            println!("{}", serde_json::to_string(&report)?);
+        } else {
+            println!("{}", crate::context_usage::render_report(&report));
+        }
+        return Ok(());
+    }
     if json {
         println!("{}", serde_json::to_string(&runs)?);
         return Ok(());
@@ -51,43 +65,27 @@ fn since_days(days: u32) -> i64 {
     }
 }
 
-fn collect_since_at(home: &Path, since: i64, filter: WorkFilter<'_>) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(home, since)
-        .map_err(|error| anyhow!("Run records unavailable: {error}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| {
-                    filter.matches(
-                        run.subject("wave"),
-                        run.subject("project"),
-                        run.subject("task"),
-                    )
-                })
-                .collect()
-        })
-}
-
-fn print_report(runs: &[RunSnapshot], days: u32) {
+fn print_report(runs: &[SessionHistory], days: u32) {
     let window = if days == 0 {
         "all time".to_string()
     } else {
         format!("last {days} days")
     };
     if runs.is_empty() {
-        println!("No direct Run usage recorded ({window}).");
+        println!("No provider usage recorded ({window}).");
         return;
     }
 
     let colors = Colors::default();
-    println!("{}DIRECT RUN USAGE ({window}){}", colors.bold, colors.reset);
+    println!("{}SESSION USAGE ({window}){}", colors.bold, colors.reset);
     println!(
-        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  RUN{reset}",
+        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  INPUT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         work = "WORK",
-        run = "RUN",
+        run = "SESSION",
         input = "INPUT",
         output = "OUTPUT",
         cache = "CACHE READ",
@@ -97,11 +95,11 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
     );
     for run in runs {
         println!(
-            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
-            time = format_time(run.started),
+            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
+            time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
-            work = truncate(&display_work(run), WORK_WIDTH),
-            run = truncate(run.label(), RUN_WIDTH),
+            work = truncate(&run.work_label(), WORK_WIDTH),
+            run = truncate(run.label(), SESSION_WIDTH),
             input = format_optional(run.usage.input_tokens),
             output = format_optional(run.usage.output_tokens),
             cache = format_optional(run.usage.cache_read_tokens),
@@ -112,18 +110,9 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
                 .unwrap_or_else(|| "-".to_string()),
             finality = format!("{}/{}", run.usage.final_streams, run.usage.streams),
             gaps = run.evidence_gaps,
-            id = short_id(&run.id),
+            id = short_id(run.selector()),
         );
     }
-}
-
-fn display_work(run: &RunSnapshot) -> String {
-    for kind in ["task", "project", "wave"] {
-        if let Some(subject) = run.subject(kind) {
-            return format!("{kind}/{subject}");
-        }
-    }
-    "-".to_string()
 }
 
 fn format_optional(value: Option<i64>) -> String {
@@ -134,7 +123,7 @@ fn format_optional(value: Option<i64>) -> String {
 }
 
 fn display_repo(repo: Option<&str>) -> String {
-    repo.and_then(|value| Path::new(value).file_name())
+    repo.and_then(|value| std::path::Path::new(value).file_name())
         .and_then(|value| value.to_str())
         .unwrap_or("-")
         .to_string()
@@ -148,67 +137,4 @@ fn format_time(unix: i64) -> String {
                 .to_string()
         })
         .unwrap_or_else(|| unix.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{collect_since_at, display_work};
-    use crate::engine::stream::StreamEvent;
-    use crate::lf::commands::WorkFilter;
-    use crate::run_record::{CaptureHandle, RunSpec, SubjectAttribution};
-
-    #[test]
-    fn usage_reads_direct_bundle_evidence_without_a_sql_ledger() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(
-            home.path(),
-            RunSpec {
-                harness: "codex".to_string(),
-                model: Some("gpt".to_string()),
-                surface: "headless".to_string(),
-                cwd: home.path().to_path_buf(),
-                repo: Some(home.path().to_path_buf()),
-                worktree: Some(home.path().to_path_buf()),
-                skill: Some("implement".to_string()),
-                subjects: vec![SubjectAttribution::declared("task:LOO-265".to_string())],
-            },
-        )
-        .unwrap();
-        capture.record_stream_event(&StreamEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: None,
-            cache_read_tokens: Some(4),
-        });
-        capture.finish("completed").unwrap();
-
-        let runs = collect_since_at(
-            home.path(),
-            0,
-            WorkFilter {
-                wave: None,
-                project: None,
-                task: Some("LOO-265"),
-            },
-        )
-        .unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(display_work(&runs[0]), "task/LOO-265");
-        assert_eq!(runs[0].usage.input_tokens, Some(12));
-        assert_eq!(runs[0].usage.output_tokens, None);
-        assert_eq!(runs[0].usage.cache_read_tokens, Some(4));
-        assert_eq!(runs[0].usage.final_streams, 0);
-        assert_eq!(runs[0].usage.gaps, 0);
-
-        let excluded = collect_since_at(
-            home.path(),
-            0,
-            WorkFilter {
-                wave: None,
-                project: None,
-                task: Some("LOO-999"),
-            },
-        )
-        .unwrap();
-        assert!(excluded.is_empty());
-    }
 }

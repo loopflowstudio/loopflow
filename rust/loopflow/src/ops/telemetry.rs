@@ -1,5 +1,5 @@
 //! Local ops telemetry — the single owned source of truth for the path and
-//! writer that records operational metrics (`lf rebase`, `lf wt create`, …).
+//! writer that records operational metrics (`lf sync`, `lf task wt create`, …).
 //!
 //! Telemetry lives under the git-ignored `.lf/tmp/metrics/ops.jsonl` tree so
 //! read-only operations never dirty a tracked worktree. The previous design
@@ -137,7 +137,7 @@ mod tests {
         let dir = clean_fixture();
         let repo = dir.path();
 
-        record_ops_metric(repo, serde_json::json!({ "op": "rebase", "class": "noop" }));
+        record_ops_metric(repo, serde_json::json!({ "op": "sync", "class": "noop" }));
 
         // Telemetry is not disabled: the record lands on disk...
         let path = ops_metrics_path(repo);
@@ -148,7 +148,7 @@ mod tests {
             "telemetry path {} must be git-ignored",
             path.display()
         );
-        // ...so the checkout stays clean and dispatch/rebase/status never refuse.
+        // ...so the checkout stays clean and dispatch/sync/status never refuse.
         assert_eq!(
             porcelain(repo),
             "",

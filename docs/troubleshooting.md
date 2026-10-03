@@ -3,19 +3,50 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave is not running
-
-**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
-listener.
-
-**Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf start`, or a cron wake.
+## Doctor reports a failure
 
 ```bash
-lf status <wave> --json    # current registry + runtime evidence
-lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on this machine
+lf doctor
+lf cron list
+lf cron history --wave infrastructure --flow telemetry-daily --days 2
+lf cron sync --wave infrastructure
 ```
+
+Doctor checks installation selection, store compatibility, Exec integrity and
+scheduled receipts separately. Machine commands can have no repository; a
+recorded repository must be an absolute path. Missing scheduled receipts remain
+failures even when ordinary commands work. A receipt proves invocation, not
+successful completion of its Flow or Skill.
+
+For a missing receipt, inspect the executable and log path Doctor prints. Jobs
+installed before the stable entry gate may pin an inactive retained binary and
+fail before recording a receipt. After installing a release with this repair,
+run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
+use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+follow the selected machine installation across promotions. Existing Sessions
+retain their runtime ownership.
+
+Doctor reads storage without initializing it or applying migrations. An incompatible
+store still reports readable Exec evidence, scheduler obligations and installation
+selection.
+
+Binary freshness compares against locally cached `origin/main`, without fetching.
+That reference may be stale, and merged source may be newer than the latest
+published release. `lf install` installs that published release; Doctor
+itself installs nothing.
+
+## A Wave has no active conversation
+
+Wave operations are finite. Read its plan and invoke the next pass explicitly,
+or inspect its cron schedule:
+
+```bash
+lf wave status <wave> --json
+lf --wave <wave> wave/operate
+lf cron list
+```
+
+A quiet Wave needs no service restart.
 
 ## Task Work stops advancing
 
@@ -26,26 +57,41 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
+lf usage --days 0 --task INF-123 --json
 lf session list
 ```
+
+`ready` means the Task is nonterminal. Status reports `execution` separately:
+starting, running, waiting for review, blocked, idle, or unknown. Read its
+reason and selected execution before recovery. Wave status and roadmap use that same
+execution evidence for their recommendations. Dirty files under a live worker
+are ongoing progress.
+
+Task execution history includes independent helpers, whether recorded with the public
+issue identifier or internal Task ID. An idle Task Flow does not prove those
+helpers are idle; a completed launcher does not prove its interactive Session
+is closed. Inspect Sessions separately. Recover advancement through Task
+controls; reserve bound helper conversations for distinct contributions.
+
+Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
+Inspect an exact Run ID for older evidence; an empty recent list does not prove
+that no worker or Session remains active.
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf session open <session-id>
-lf session complete <interactive-or-ask-id>
-lf session approve <flowstep-id> "Verified summary"
-lf session iterate <flowstep-id> "Narrow the design"
-lf task steer INF-123 "address the latest feedback"
-lf task interrupt INF-123
-lf task resume INF-123
-lf task resume INF-123 --reason "provider credentials repaired"
+lf session connect <session-id>
+lf session complete <session-id>       # return saved review feedback
+lf comment INF-123 "address the latest feedback"
+lf interrupt INF-123
+lf --task INF-123 flow start
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+`flow start` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
-is a durable Work comment; the active Task worker receives new comments when
+is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
@@ -70,12 +116,11 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --reason "provider credentials repaired"
-lf project run project-slug
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+for another planning pass; it has no resident Project process to resume.
 
 Other options:
 
@@ -91,53 +136,50 @@ List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
-lf wt prune --dry-run    # show clean terminal or week-stale worktrees
-lf wt prune              # remove those worktrees and their branches
+lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
+lf wt prune                            # remove those worktrees and their branches
 ```
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
-
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf rebase
+lf task sync
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+Refreshes the local default branch, preserving its unpublished commits and edits,
+then merges it into the feature branch. Stacked Tasks merge their live parent
+until it lands, then merge the default branch using their recorded fork.
 
 ## Status says `ready`, but the Task is waiting
 
 **Symptom:** Project or Task Work is `ready`, while its condition says it is
-waiting on a child, human FlowStep, CI, or merge.
+waiting on a child, review FlowStep, CI, or merge.
 
 Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
-condition summarizes process liveness, human FlowStep, child progress, CI, and
-merge evidence; unresolved human conversations appear under Sessions.
+condition summarizes process liveness, review FlowStep, child progress, CI, and
+merge evidence; unresolved conversations appear under Sessions.
 Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
-lf status <wave> --json
-lf project status <project-id> --json
+lf wave status <wave> --json
 lf task status INF-123 --json
 ```
 
-Resolve the named fact: open the human session, inspect the child, repair CI, merge, or
+Resolve the named fact: open the session, inspect the child, repair CI, merge, or
 resume the provider. There is no Run slot or PR-limit counter to clear.
 
 ## Context too large
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
-lf qa --no-loopflow         # skip LOOPFLOW.md
-lf qa --docs src/small/     # limit --docs to a narrower path or glob
+lf qa --no-loopflow                    # skip LOOPFLOW.md
+lf qa --docs src/small/                # limit --docs to a narrower path or glob
 ```
 
 `--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
@@ -148,15 +190,18 @@ See [Configuration](config.md) for context options.
 
 ## Claude Code not found
 
-**Symptom:** `lf` fails with "claude not found" or similar.
+**Symptom:** `lf` fails with "'claude' is not installed" or similar.
 
-Run the setup wizard:
+Loopflow drives an AI coding tool and needs one installed. The error names
+the install command. For Claude Code:
 
 ```bash
-lf init
+npm install -g @anthropic-ai/claude-code
+lf account connect claude
 ```
 
-If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
+With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and
+OpenCode it finds, so installing any one of them is enough.
 
 ## See Also
 

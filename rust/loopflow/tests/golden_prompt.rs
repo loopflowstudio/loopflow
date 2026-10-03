@@ -12,7 +12,6 @@ struct GoldenCase {
     repo: String,
     skill: Option<String>,
     surface: Option<Surface>,
-    directions: Vec<String>,
     docs: Vec<String>,
     diff_files: bool,
     diff: bool,
@@ -55,6 +54,7 @@ fn golden_prompts_match_python() {
     // test process (workers run this suite) must not leak ambient Wave context
     // into them. Safe to set here — this binary runs exactly one test.
     std::env::remove_var("LF_WAVE_ID");
+    std::env::set_var("LF_USER_NAME", "Fixture Participant");
 
     let root = repo_root();
     for case_path in load_cases() {
@@ -62,29 +62,23 @@ fn golden_prompts_match_python() {
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
         let repo = root.join(&case.repo);
-        let wave_memory = case
-            .wave
-            .as_deref()
-            .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&repo, wave));
         let opts = GatherContextOpts {
             repo_root: repo.clone(),
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
             surface: case.surface.unwrap_or_default(),
-            directions: case.directions.clone(),
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,
             include_diff_files: case.diff_files,
             include_clipboard: case.clipboard,
             wave: case.wave.clone(),
-            wave_memory,
             related_repos: Vec::new(),
         };
 
-        let gathered = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
+        let components = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");

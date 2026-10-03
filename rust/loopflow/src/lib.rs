@@ -1,15 +1,17 @@
 pub mod build_info;
 pub mod chat;
 pub mod child;
+pub mod context_usage;
 pub mod controller;
 pub mod durable;
 pub mod engine;
+pub mod exec;
 pub mod harness;
 pub mod id;
 pub mod journal;
 pub mod lf;
-pub mod lfd;
 pub mod machine_install;
+pub mod task_work;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;
@@ -23,11 +25,14 @@ pub mod provider_account;
 pub mod provider_auth;
 pub mod repo;
 pub mod repository;
-pub(crate) mod run_record;
 pub mod security;
+pub mod session;
+pub(crate) mod session_record;
 pub mod store;
 pub mod subscription;
 pub mod trace;
-pub(crate) mod wave_host;
-pub mod webhook;
 pub mod work;
+
+#[cfg(test)]
+#[path = "../tests/support/ambient.rs"]
+pub(crate) mod test_ambient;

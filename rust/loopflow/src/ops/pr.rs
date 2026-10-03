@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, rev_parse};
 use crate::engine::load_skill;
@@ -13,12 +13,15 @@ use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
+use crate::work::task::AfterMerge;
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
     pub title: Option<String>,
     pub body: Option<String>,
     pub agent: Option<String>,
+    /// Create drafts and preserve existing readiness instead of marking ready.
+    pub draft: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -34,16 +37,26 @@ pub struct PrInfo {
     pub state: String,
     pub branch: String,
     pub merge_commit: Option<String>,
-    /// GitHub's authoritative merge instant from the single-PR REST response.
+    /// GitHub's authoritative merge instant from the PR response.
     pub merged_at: Option<String>,
     /// The PR's current head commit (`headRefOid`), when GitHub reports one.
     pub head_sha: Option<String>,
+    /// GitHub's mergeability classification, when observed.
+    pub merge_state: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PrCopy {
     pub title: String,
     pub body: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishedPrCopy {
+    #[serde(rename = "headRefOid")]
+    head_sha: String,
+    #[serde(flatten)]
+    copy: PrCopy,
 }
 
 const GITHUB_PR_TITLE_MAX_CHARS: usize = 256;
@@ -52,6 +65,7 @@ const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TaskPrCopyLifecycle {
+    Draft,
     Published,
     Continues { next_slug: Option<String> },
     Completes,
@@ -84,20 +98,24 @@ pub fn create_or_update_pr(
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    let task_context = crate::ops::task::task_pr_context(repo)?;
+    crate::ops::task::task_pr_context(repo)?;
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let stack = crate::ops::task::task_stack(repo)?;
-    let base_branch = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
-        Some(parent) => parent,
-        None if stack.is_some() => default_branch.clone(),
-        None => pr_target(repo, &main_repo, &default_branch)?,
+    let publication_base = || -> OpsResult<(bool, String)> {
+        let stack = crate::ops::task::task_stack(repo)?;
+        let base = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
+            Some(parent) => parent,
+            None if stack.is_some() => default_branch.clone(),
+            None => pr_target(repo, &main_repo, &default_branch)?,
+        };
+        Ok((stack.is_some(), base))
     };
+    let (stacked, base_branch) = publication_base()?;
 
-    // Prove the Task PR range without healing integration metadata before the
-    // first remote side effect. No-op for non-Task worktrees.
-    crate::ops::task::verify_task_pr_range_without_healing(repo)?;
+    // Record the ancestry already present in Git before the first remote effect.
+    // This recognizes completed merges without integrating or rewriting history.
+    crate::ops::task::verify_task_pr_range(repo)?;
 
     // Gate output is an in-worktree handoff, never published content. Consume
     // valid cached copy before deleting the gate-owned files so the commit and
@@ -110,23 +128,19 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: false,
-        message: Some("lf pr open: prepare branch".to_string()),
+        message: Some("lf task pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress, &|_| {})?;
-    crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
-    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
+    crate::ops::task::require_task_pr_range_nonempty(repo)?;
+    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
     crate::ops::commit::push_with_upstream_if_needed(repo, &|_| {})?;
 
-    let copy = normalize_task_pr_copy(
-        resolve_pr_copy(repo, options, cached_copy, progress)?,
-        task_context.as_ref(),
-        &TaskPrCopyLifecycle::Published,
-    )?;
+    let copy = resolve_pr_copy(repo, options, cached_copy, progress)?;
     let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
     if current_branch_state.as_deref() != Some(branch.as_str()) || current_head != published_head {
@@ -138,6 +152,9 @@ pub fn create_or_update_pr(
     // Keep publication and its durable GitHub projection atomic with respect
     // to later Loopflow pushes and shipping requests in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    // Preparation may have selected a parent while copy generation was running.
+    let (stacked, base_branch) = publication_base()?;
+    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let locked_branch = current_branch(repo)?;
     let locked_head = rev_parse(repo, "HEAD")?;
     if locked_branch.as_deref() != Some(branch.as_str()) || locked_head != published_head {
@@ -146,49 +163,75 @@ pub fn create_or_update_pr(
         )));
     }
     crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
+    // A same-head refresh preserves an armed request. Read it under the mutation
+    // lock, after pushing has revoked any request for a superseded head.
+    let task_context = crate::ops::task::task_pr_context(repo)?;
+    let existing_pr = find_open_pr(repo)?;
+    let draft = options.draft && existing_pr.as_ref().is_none_or(|pr| pr.is_draft);
+    let lifecycle = match task_context
+        .as_ref()
+        .and_then(|context| context.merge_request.as_ref())
+        .filter(|request| request.head_sha == published_head)
+    {
+        Some(request) if request.after_merge == AfterMerge::CompleteTask => {
+            TaskPrCopyLifecycle::Completes
+        }
+        Some(request) => TaskPrCopyLifecycle::Continues {
+            next_slug: request.next_slug.clone(),
+        },
+        None if draft => TaskPrCopyLifecycle::Draft,
+        None => TaskPrCopyLifecycle::Published,
+    };
+    let copy = normalize_task_pr_copy(copy, task_context.as_ref(), &lifecycle)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
-    crate::ops::task::request_task_pr_publication(repo, title, body)?;
-
-    let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
+    if let Some(mut pr) = existing_pr {
+        let info = pr_info(&branch, &pr);
+        crate::ops::task::attach_task_github_pr(repo, Some(&info), &|_| {})?;
+        if !draft {
+            mark_pr_ready(repo, &mut pr)?;
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
+        }
+        crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Updating PR...");
-        update_pr(repo, pr.number, title, body, &base_branch)?;
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
-        }
-        let info = pr_info(&branch, pr);
-        (
-            PrResult {
-                url: info.url.clone(),
-                created: false,
-            },
-            Some(info),
-        )
+        update_pr(repo, info.number, title, body, &base_branch)?;
+        Ok(PrResult {
+            url: info.url,
+            created: false,
+        })
     } else {
+        crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Creating PR...");
-        let url = create_pr(repo, title, body, &base_branch, &|_| {})?;
-        let visible = find_open_pr(repo)?;
-        if let Some(pr) = &visible {
-            if pr.is_draft {
-                mark_pr_ready(repo, pr.number)?;
-            }
+        let url = create_pr(repo, title, body, &base_branch, draft, &|_| {})?;
+        let acknowledged = pr_number_from_url(&url).map(|number| PrInfo {
+            number,
+            url: url.clone(),
+            state: if draft { "draft" } else { "open" }.to_string(),
+            branch: branch.clone(),
+            merge_commit: None,
+            merged_at: None,
+            head_sha: None,
+            merge_state: None,
+        });
+        // Creation identity survives a later read, readiness or linking failure.
+        if let Some(info) = acknowledged.as_ref() {
+            crate::ops::task::attach_task_github_pr(repo, Some(info), &|_| {})?;
         }
-        let info = match visible {
-            Some(pr) => Some(pr_info(&branch, pr)),
-            None => pr_number_from_url(&url).map(|number| PrInfo {
-                number,
-                url: url.clone(),
-                state: "open".to_string(),
-                branch: branch.clone(),
-                merge_commit: None,
-                merged_at: None,
-                head_sha: None,
-            }),
-        };
-        (PrResult { url, created: true }, info)
-    };
-    crate::ops::task::attach_task_github_pr(repo, pr.as_ref(), &|_| {})?;
-    Ok(result)
+        if let Some(mut pr) = find_open_pr(repo)? {
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
+            if !draft {
+                mark_pr_ready(repo, &mut pr)?;
+                crate::ops::task::attach_task_github_pr(
+                    repo,
+                    Some(&pr_info(&branch, &pr)),
+                    &|_| {},
+                )?;
+            }
+        } else if acknowledged.is_none() {
+            crate::ops::task::attach_task_github_pr(repo, None, &|_| {})?;
+        }
+        Ok(PrResult { url, created: true })
+    }
 }
 
 pub(crate) fn normalize_task_pr_copy(
@@ -212,15 +255,19 @@ pub(crate) fn normalize_task_pr_copy(
         ));
     }
 
-    let title = context.pr_title();
+    let title = copy.title;
     if title.chars().count() > GITHUB_PR_TITLE_MAX_CHARS {
         return Err(OpsError::Message(format!(
-            "Task identifier and name exceed GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
+            "PR title exceeds GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
         )));
     }
 
     let task_link = context.task_link();
     let pr_lifecycle = match lifecycle {
+        TaskPrCopyLifecycle::Draft => format!(
+            "PR {} is a draft; no Task settlement is requested.",
+            context.sequence
+        ),
         TaskPrCopyLifecycle::Published => format!(
             "PR {} is published for review; no Task settlement is requested.",
             context.sequence
@@ -247,7 +294,25 @@ pub(crate) fn normalize_task_pr_copy(
     let body = if reviewer_context.is_empty() {
         managed
     } else {
-        format!("{managed}\n\n{reviewer_context}")
+        // The authored opening paragraph is the summary; keep it ahead of metadata.
+        let summary_end = reviewer_context
+            .split_inclusive('\n')
+            .take_while(|line| !line.trim().is_empty())
+            .map(str::len)
+            .sum();
+        let (summary, rest) = reviewer_context.split_at(summary_end);
+        let separator_len: usize = rest
+            .split_inclusive('\n')
+            .take_while(|line| line.trim().is_empty())
+            .map(str::len)
+            .sum();
+        let summary = summary.trim_end_matches('\n');
+        let details = &rest[separator_len..];
+        if details.is_empty() {
+            format!("{summary}\n\n{managed}")
+        } else {
+            format!("{summary}\n\n{managed}\n\n{details}")
+        }
     };
     Ok(PrCopy { title, body })
 }
@@ -257,16 +322,18 @@ fn _markdown_code(value: &str) -> String {
 }
 
 fn _strip_managed_task_context(body: &str) -> String {
-    let without_block = match (
-        body.find(TASK_PR_CONTEXT_START),
-        body.find(TASK_PR_CONTEXT_END),
-    ) {
-        (Some(start), Some(end)) if start < end => {
-            let after = end + TASK_PR_CONTEXT_END.len();
-            format!("{}\n{}", &body[..start], &body[after..])
-        }
-        _ => body.to_string(),
-    };
+    let mut without_block = body.to_string();
+    while let Some(start) = without_block.find(TASK_PR_CONTEXT_START) {
+        let Some(end) = without_block[start..].find(TASK_PR_CONTEXT_END) else {
+            break;
+        };
+        let after = start + end + TASK_PR_CONTEXT_END.len();
+        without_block = format!(
+            "{}\n\n{}",
+            without_block[..start].trim_end(),
+            without_block[after..].trim_start_matches(['\r', '\n'])
+        );
+    }
     without_block
         .lines()
         .filter(|line| !line.trim_start().starts_with("Linear Task:"))
@@ -276,9 +343,9 @@ fn _strip_managed_task_context(body: &str) -> String {
         .to_string()
 }
 
-fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
+fn pr_info(branch: &str, pr: &GhPr) -> PrInfo {
     PrInfo {
-        url: pr.url,
+        url: pr.url.clone(),
         number: pr.number,
         state: if pr.is_draft {
             "draft".to_string()
@@ -286,9 +353,10 @@ fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
             pr.state.to_ascii_lowercase()
         },
         branch: branch.to_string(),
-        merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        merge_commit: pr.merge_commit.as_ref().map(|commit| commit.oid.clone()),
         merged_at: None,
-        head_sha: pr.head_ref_oid,
+        head_sha: pr.head_ref_oid.clone(),
+        merge_state: None,
     }
 }
 
@@ -304,7 +372,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let branch = current_branch(repo)?;
     if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
+            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf --task <issue-id> flow start`"
                 .to_string(),
         ));
     }
@@ -345,30 +413,16 @@ fn resolve_pr_copy(
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
     let scratch = repo.join("scratch");
-    if !scratch.exists() {
-        return Ok(cached);
-    }
-
     let mut removed = false;
-    for entry in std::fs::read_dir(&scratch)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let gate_owned = matches!(
-            name.as_ref(),
-            ".pr-copy-ref" | "pr-title.txt" | "pr-body.md"
-        ) || name.ends_with("-review.md");
-        if gate_owned {
+    for name in [".pr-copy-ref", "pr-title.txt", "pr-body.md"] {
+        let path = scratch.join(name);
+        if path.is_file() {
             std::fs::remove_file(path)?;
             removed = true;
         }
     }
     if removed {
-        progress.status("Removing task-gate artifacts before publication");
+        progress.status("Removing gate artifacts before publication");
     }
     Ok(cached)
 }
@@ -424,6 +478,37 @@ fn is_recent_ancestor(repo: &Path, commit: &str, max_ahead: u32) -> OpsResult<bo
     Ok(ahead <= max_ahead)
 }
 
+/// Read before pushing: a push can advance the PR head without updating its copy.
+pub(crate) fn published_pr_copy(repo: &Path, head: &str) -> OpsResult<Option<PrCopy>> {
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            &branch,
+            "--state",
+            "open",
+            "--json",
+            "headRefOid,title,body",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr list --head {branch}"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    let copies: Vec<PublishedPrCopy> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Message(format!("failed to read published PR copy: {error}")))?;
+    Ok(copies
+        .into_iter()
+        .find(|published| published.head_sha == head)
+        .map(|published| published.copy))
+}
+
 pub fn generate_pr_copy(
     repo: &Path,
     progress: &impl Progress,
@@ -476,7 +561,7 @@ pub fn generate_pr_copy(
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&launch, &process, &capabilities)
+    let result = exec_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(
@@ -535,35 +620,31 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     if !gh_available() {
         return Ok(None);
     }
-
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    Ok(find_open_branch_pr(repo, &branch)?.map(|pr| pr_info(&branch, &pr)))
+}
 
-    if let Some(pr) = find_open_pr(repo)? {
-        let state = if pr.is_draft { "draft" } else { "open" }.to_string();
-        return Ok(Some(PrInfo {
-            url: pr.url,
-            number: pr.number,
-            state,
-            branch,
-            merge_commit: pr.merge_commit.map(|commit| commit.oid),
-            merged_at: None,
-            head_sha: pr.head_ref_oid,
-        }));
+pub(crate) fn branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<PrInfo>> {
+    if !gh_available() {
+        return Ok(None);
     }
+    Ok(find_open_branch_pr(repo, branch)?.map(|pr| pr_info(branch, &pr)))
+}
 
-    Ok(None)
+pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
+    Ok(observe_merge_request(repo, number)?.is_some())
 }
 
 #[derive(Debug)]
 pub(crate) enum MergeRequest {
     Auto,
     AwaitingQueue,
-    Queued,
+    Queued(String),
 }
 
 pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&MergeRequest>) -> bool {
-    if matches!(request, Some(MergeRequest::Queued)) {
+    if matches!(request, Some(MergeRequest::Queued(_))) {
         return false;
     }
     state.is_some_and(|state| {
@@ -576,13 +657,13 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
 #[derive(Debug)]
 pub(crate) struct PrMergeObservation {
     pub pr: PrInfo,
-    pub merge_state: String,
     pub request: Option<MergeRequest>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhPrMerge {
+    id: String,
     number: u64,
     url: String,
     state: String,
@@ -654,7 +735,7 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
         state => return Err(OpsError::Parse(format!("unknown PR state: {state}"))),
     };
     let request = if !pr.merge_queue_entry.is_null() {
-        Some(MergeRequest::Queued)
+        Some(MergeRequest::Queued(pr.id))
     } else if pr.auto_merge_request.is_null() {
         None
     } else if pr.is_merge_queue_enabled {
@@ -671,68 +752,52 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
             merge_commit: pr.merge_commit.map(|commit| commit.oid),
             merged_at: pr.merged_at,
             head_sha: Some(pr.head_ref_oid),
+            merge_state: Some(pr.merge_state_status.to_ascii_lowercase()),
         },
-        merge_state: pr.merge_state_status.to_ascii_lowercase(),
         request,
     })
 }
 
-pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
-    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
-    let observation = Command::new("gh")
-        .args([
-            "api",
-            "graphql",
-            "-F",
-            "owner={owner}",
-            "-F",
-            "name={repo}",
-            "-F",
-            &format!("number={number}"),
-            "-f",
-            &format!("query={query}"),
-            "--jq",
-            ".data.repository.pullRequest | (.autoMergeRequest != null) or (.mergeQueueEntry != null)",
-        ])
-        .current_dir(repo)
-        .output()?;
-    if !observation.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh api graphql [pull request #{number} merge request]"),
-            stderr: stderr_from_output(&observation),
-        });
-    }
-    match String::from_utf8_lossy(&observation.stdout).trim() {
-        "false" => Ok(false),
-        "true" => Ok(true),
-        value => Err(OpsError::Message(format!(
-            "could not determine whether pull request #{number} has auto-merge enabled: {value:?}"
-        ))),
-    }
+pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
+    Ok(observe_pr_merge(repo, number)?.request)
 }
 
-/// Revoke GitHub auto-merge for one PR before a stored request can be cleared.
+/// Revoke GitHub auto-merge or queue membership before a stored request is cleared.
 /// The read makes replay idempotent after a prior disable succeeded.
-/// The caller supplies inheritance for capabilities held across the mutation.
 pub(crate) fn disable_auto_merge(
     repo: &Path,
     number: u32,
     inherit: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
-    if !auto_merge_enabled(repo, u64::from(number))? {
+    let Some(request) = observe_merge_request(repo, u64::from(number))? else {
         return Ok(());
-    }
+    };
     let mut command = Command::new("gh");
     inherit(&mut command);
-    let output = command
-        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
-        .current_dir(repo)
-        .output()?;
+    let description = match request {
+        MergeRequest::Auto | MergeRequest::AwaitingQueue => {
+            command.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
+            format!("gh pr merge {number} --disable-auto")
+        }
+        MergeRequest::Queued(id) => {
+            // gh pr merge returns success without acting on an already queued PR.
+            command.args([
+                "api",
+                "graphql",
+                "-f",
+                "query=mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}",
+                "-f",
+                &format!("id={id}"),
+            ]);
+            format!("gh api graphql [dequeue pull request #{number}]")
+        }
+    };
+    let output = command.current_dir(repo).output()?;
     if output.status.success() {
         return Ok(());
     }
     Err(OpsError::CommandFailed {
-        command: format!("gh pr merge {number} --disable-auto"),
+        command: description,
         stderr: stderr_from_output(&output),
     })
 }
@@ -741,8 +806,7 @@ pub(crate) fn disable_auto_merge(
 pub(crate) fn enable_auto_merge(
     repo: &Path,
     number: u64,
-    title: Option<&str>,
-    body: Option<&str>,
+    copy: Option<&PrCopy>,
     head_sha: &str,
     inherit: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
@@ -767,11 +831,11 @@ pub(crate) fn enable_auto_merge(
         .arg("--auto")
         .arg("--match-head-commit")
         .arg(head_sha);
-    if let Some(title) = title {
-        command.arg("--subject").arg(title);
-    }
-    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
-        command.arg("--body").arg(body);
+    if let Some(copy) = copy {
+        command.arg("--subject").arg(&copy.title);
+        if !copy.body.trim().is_empty() {
+            command.arg("--body").arg(&copy.body);
+        }
     }
     let output = command.current_dir(repo).output()?;
     if output.status.success() {
@@ -794,7 +858,7 @@ pub(crate) enum PrObservation {
     /// The PR number 404s — its ref was deleted remotely. The caller keeps its
     /// cached settled/working state; the merge (if any) is already persisted.
     NotFound,
-    /// A quota, network, or GitHub failure. `reason` is human-facing; the caller
+    /// A quota, network, or GitHub failure. `reason` is user-facing; the caller
     /// preserves its cached state and surfaces the reason as degraded freshness.
     Degraded { reason: String },
 }
@@ -876,7 +940,7 @@ fn is_missing_pr(stderr: &str) -> bool {
     lower.contains("http 404")
 }
 
-/// Turn a failed `gh api` read into a concise, human-facing degraded reason. The
+/// Turn a failed `gh api` read into a concise, user-facing degraded reason. The
 /// quota case is called out by name because exhausted API budgets are a
 /// recurring dogfood failure.
 fn classify_pr_read_failure(number: u32, stderr: &str) -> String {
@@ -902,6 +966,7 @@ fn classify_pr_read_failure(number: u32, stderr: &str) -> String {
 /// deserializes an external API response, mirroring the tolerance of `GhPr`.
 #[derive(Debug, Deserialize)]
 struct GhRestPr {
+    mergeable_state: Option<String>,
     #[serde(default)]
     merged: bool,
     state: String,
@@ -947,79 +1012,239 @@ impl GhRestPr {
             },
             merged_at: if self.merged { self.merged_at } else { None },
             head_sha: self.head.sha,
+            merge_state: self.mergeable_state,
         }
     }
 }
 
-/// Read the required-check state for `branch`'s open PR from GitHub.
-///
-/// Read the merge-gate state for `branch`'s head. `gh pr checks` exits non-zero
-/// while checks are pending or failing, so valid JSON outranks the exit status.
-/// A missing required-check set is distinct from an unreadable one: callers may
-/// wait on the former, while watched landing must surface or back off the latter.
-///
-/// Branch protection frequently requires only an aggregate roll-up check (e.g.
-/// `tests-result`) whose own job link points at the aggregation step, not the
-/// leaf job that actually failed. So the gate state (failing/pending/passing) is
-/// read from `--required` — the authoritative merge gate — while the failing
-/// checks handed to a ci-fix turn are the actionable *leaves* read from the full
-/// check set. Seeding a ci-fix turn with the aggregate gives the skill nothing
-/// to act on; seeding the leaves points it at the broken job.
-pub(crate) fn merge_gate_state(repo: &Path, branch: &str) -> OpsResult<Option<MergeGateReading>> {
-    if !gh_available() {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
+/// Read one complete check set for the observed head. Required checks decide
+/// the gate; the same snapshot's leaf failures supply repair details.
+pub(crate) fn merge_gate_state(
+    repo: &Path,
+    number: u64,
+    head_sha: &str,
+) -> OpsResult<Option<MergeGateReading>> {
+    let mut cursor = None;
+    let mut cursors = std::collections::HashSet::new();
+    let mut checks = Vec::new();
+    loop {
+        let page = read_check_page(repo, number, cursor.as_deref())?;
+        if page.head != head_sha || page.commit.as_deref() != Some(head_sha) {
+            return Ok(None);
+        }
+        let Some(contexts) = page.contexts else {
+            return Ok(None);
+        };
+        checks.extend(contexts.nodes);
+        if !contexts.page_info.has_next_page {
+            return Ok(project_checks(checks));
+        }
+        let next = contexts.page_info.end_cursor.ok_or_else(|| {
+            OpsError::Message(format!(
+                "GitHub check page for PR #{number} has no next cursor"
+            ))
+        })?;
+        if !cursors.insert(next.clone()) {
+            return Err(OpsError::Message(format!(
+                "GitHub check pagination repeated a cursor for PR #{number}"
+            )));
+        }
+        cursor = Some(next);
     }
-    let required = read_check_set(repo, branch, true)?;
-    if required.is_empty() {
-        return Ok(None);
-    }
-    let full = read_check_set(repo, branch, false)?;
-    Ok(Some(MergeGateReading::from_checks(required, full)))
 }
 
-fn read_check_set(repo: &Path, branch: &str, required: bool) -> OpsResult<Vec<GhCheck>> {
+const CHECKS_QUERY: &str = r#"query LoopflowPrChecks($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+  repository(owner:$owner,name:$name) {
+    pullRequest(number:$number) {
+      headRefOid
+      commits(last:1) { nodes { commit {
+        oid
+        statusCheckRollup { contexts(first:100,after:$endCursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            __typename
+            ... on CheckRun {
+              name status conclusion detailsUrl startedAt
+              isRequired(pullRequestNumber:$number)
+              checkSuite { workflowRun { event workflow { name } } }
+            }
+            ... on StatusContext {
+              context state targetUrl
+              isRequired(pullRequestNumber:$number)
+            }
+          }
+        } }
+      } } }
+    }
+  }
+}"#;
+
+fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<GhCheckPage> {
     let mut command = Command::new("gh");
-    command.arg("pr").arg("checks").arg(branch);
-    if required {
-        command.arg("--required");
+    command.args([
+        "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+        "-F", &format!("number={number}"), "-f", &format!("query={CHECKS_QUERY}"),
+        "--jq", ".data.repository.pullRequest | {head: .headRefOid, commit: .commits.nodes[0].commit.oid, contexts: .commits.nodes[0].commit.statusCheckRollup.contexts}",
+    ]);
+    if let Some(cursor) = cursor {
+        command.args(["-f", &format!("endCursor={cursor}")]);
     }
-    let output = command
-        .arg("--json")
-        .arg("name,bucket,link")
-        .current_dir(repo)
-        .output()?;
-    parse_check_set_output(
-        branch,
-        required,
-        output.status.success(),
-        &output.stdout,
-        &stderr_from_output(&output),
-    )
-}
-
-fn parse_check_set_output(
-    branch: &str,
-    required: bool,
-    succeeded: bool,
-    stdout: &[u8],
-    stderr: &str,
-) -> OpsResult<Vec<GhCheck>> {
-    if let Ok(checks) = serde_json::from_slice(stdout) {
-        return Ok(checks);
-    }
-    if required && stderr.to_ascii_lowercase().contains("no required checks") {
-        return Ok(Vec::new());
-    }
-    if !succeeded {
-        let required_flag = if required { " --required" } else { "" };
+    let output = command.current_dir(repo).output()?;
+    // gh api fails on GraphQL errors even when the response has partial data.
+    if !output.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!("gh pr checks {branch}{required_flag}"),
-            stderr: stderr.to_string(),
+            command: format!("gh api graphql [PR #{number} checks]"),
+            stderr: stderr_from_output(&output),
         });
     }
-    Err(OpsError::Message(format!(
-        "could not parse GitHub check state for branch {branch}"
-    )))
+    serde_json::from_slice(&output.stdout).map_err(|error| {
+        OpsError::Parse(format!(
+            "could not parse GitHub checks for PR #{number}: {error}"
+        ))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckPage {
+    head: String,
+    commit: Option<String>,
+    contexts: Option<GhCheckContexts>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckContexts {
+    nodes: Vec<GhCheckContext>,
+    page_info: GhCheckPageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckPageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "__typename", rename_all_fields = "camelCase")]
+enum GhCheckContext {
+    CheckRun {
+        name: String,
+        status: String,
+        conclusion: Option<String>,
+        details_url: Option<String>,
+        is_required: bool,
+        #[serde(with = "time::serde::rfc3339::option")]
+        started_at: Option<time::OffsetDateTime>,
+        check_suite: GhCheckSuite,
+    },
+    StatusContext {
+        context: String,
+        state: String,
+        target_url: Option<String>,
+        is_required: bool,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckSuite {
+    workflow_run: Option<GhCheckWorkflowRun>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckWorkflowRun {
+    event: String,
+    workflow: Option<GhCheckWorkflow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckWorkflow {
+    name: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum GhCheckIdentity {
+    Run(String, Option<String>, Option<String>),
+    Status(String),
+}
+
+fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading> {
+    contexts.sort_by_key(|context| {
+        std::cmp::Reverse(match context {
+            GhCheckContext::CheckRun { started_at, .. } => *started_at,
+            GhCheckContext::StatusContext { .. } => None,
+        })
+    });
+    let mut seen = std::collections::HashSet::new();
+    let mut attempts = Vec::new();
+    let mut required = Vec::new();
+    let mut full = Vec::new();
+    for context in contexts {
+        let attempt = match &context {
+            GhCheckContext::CheckRun {
+                name,
+                started_at,
+                details_url,
+                ..
+            } => format!("{name}:{started_at:?}:{details_url:?}"),
+            GhCheckContext::StatusContext {
+                context,
+                target_url,
+                ..
+            } => format!("{context}:{target_url:?}"),
+        };
+        let (identity, name, state, link, is_required) = match context {
+            GhCheckContext::CheckRun {
+                name,
+                status,
+                conclusion,
+                details_url,
+                is_required,
+                check_suite,
+                ..
+            } => {
+                let (workflow, event) = match check_suite.workflow_run {
+                    Some(run) => (run.workflow.map(|workflow| workflow.name), Some(run.event)),
+                    None => (None, None),
+                };
+                let identity = GhCheckIdentity::Run(name.clone(), workflow, event);
+                let state = if status == "COMPLETED" {
+                    conclusion.unwrap_or_default()
+                } else {
+                    status
+                };
+                (identity, name, state, details_url, is_required)
+            }
+            GhCheckContext::StatusContext {
+                context,
+                state,
+                target_url,
+                is_required,
+            } => (
+                GhCheckIdentity::Status(context.clone()),
+                context,
+                state,
+                target_url,
+                is_required,
+            ),
+        };
+        if !seen.insert(identity) {
+            continue;
+        }
+        attempts.push(attempt);
+        let check = GhCheck::new(name, &state, link);
+        if is_required {
+            required.push(check.clone());
+        }
+        full.push(check);
+    }
+    (!required.is_empty()).then(|| {
+        let mut reading = MergeGateReading::from_checks(required, full);
+        attempts.sort();
+        reading.attempt = attempts.join("\n");
+        reading
+    })
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -1029,10 +1254,11 @@ pub struct MergeGateReading {
     pub failing: bool,
     pub pending: bool,
     pub failing_leaves: Vec<GhFailingCheck>,
+    pub attempt: String,
 }
 
 impl MergeGateReading {
-    fn from_checks(required: Vec<GhCheck>, full: Vec<GhCheck>) -> Self {
+    pub(crate) fn from_checks(required: Vec<GhCheck>, full: Vec<GhCheck>) -> Self {
         let gate = RequiredChecks::from_checks(required);
         let required_names: std::collections::HashSet<&str> = gate
             .failing_checks
@@ -1069,6 +1295,7 @@ impl MergeGateReading {
             failing: gate.failing,
             pending: gate.pending,
             failing_leaves,
+            attempt: String::new(),
         }
     }
 }
@@ -1116,24 +1343,47 @@ impl RequiredChecks {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct GhCheck {
-    #[serde(default)]
+#[derive(Debug, Clone)]
+pub(crate) struct GhCheck {
     name: String,
-    #[serde(default)]
     bucket: String,
-    #[serde(default)]
     link: Option<String>,
+}
+
+impl GhCheck {
+    /// Classify one check from GitHub's upper-case state or conclusion.
+    pub(crate) fn new(name: String, state: &str, link: Option<String>) -> Self {
+        let bucket = match state {
+            "SUCCESS" => "pass",
+            "SKIPPED" | "NEUTRAL" => "skipping",
+            "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => "fail",
+            "CANCELLED" => "cancel",
+            _ => "pending",
+        };
+        Self {
+            name,
+            bucket: bucket.to_string(),
+            link,
+        }
+    }
+
+    pub(crate) fn failed(&self) -> bool {
+        matches!(self.bucket.as_str(), "fail" | "cancel")
+    }
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    find_open_branch_pr(repo, &branch)
+}
+
+fn find_open_branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhPr>> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("list")
         .arg("--head")
-        .arg(&branch)
+        .arg(branch)
         .arg("--json")
         .arg("url,state,isDraft,number,mergeCommit,headRefOid")
         .current_dir(repo)
@@ -1203,11 +1453,14 @@ pub(crate) fn retarget_open_pr(
     Ok(())
 }
 
-fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
+fn mark_pr_ready(repo: &Path, pr: &mut GhPr) -> OpsResult<()> {
+    if !pr.is_draft {
+        return Ok(());
+    }
     let output = Command::new("gh")
         .arg("pr")
         .arg("ready")
-        .arg(number.to_string())
+        .arg(pr.number.to_string())
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -1216,6 +1469,7 @@ fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
             stderr: stderr_from_output(&output),
         });
     }
+    pr.is_draft = false;
     Ok(())
 }
 
@@ -1224,6 +1478,7 @@ fn create_pr(
     title: &str,
     body: &str,
     base: &str,
+    draft: bool,
     inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
@@ -1236,6 +1491,9 @@ fn create_pr(
         .arg("--base")
         .arg(base);
     inherit_pr(&mut cmd);
+    if draft {
+        cmd.arg("--draft");
+    }
     let output = cmd.current_dir(repo).output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
@@ -1255,7 +1513,7 @@ pub(crate) fn create_pr_from_pushed_branch(
     base: &str,
     inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<PrInfo> {
-    let url = create_pr(repo, title, body, base, inherit_pr)?;
+    let url = create_pr(repo, title, body, base, false, inherit_pr)?;
     let number = pr_number_from_url(&url).ok_or_else(|| {
         OpsError::Message(format!("could not read PR number from created URL {url}"))
     })?;
@@ -1269,6 +1527,7 @@ pub(crate) fn create_pr_from_pushed_branch(
         merge_commit: None,
         merged_at: None,
         head_sha: Some(rev_parse(repo, "HEAD")?),
+        merge_state: None,
     })
 }
 
@@ -1322,12 +1581,6 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
     Ok(base_branch.to_string())
 }
 
-#[derive(Debug, Deserialize)]
-struct GeneratedPrCopy {
-    title: String,
-    body: String,
-}
-
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
     parse_json_copy(raw)
         .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
@@ -1343,15 +1596,12 @@ fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
 }
 
 fn parse_json_copy(raw: &str) -> Option<PrCopy> {
-    let parsed: GeneratedPrCopy = serde_json::from_str(raw.trim()).ok()?;
-    let title = parsed.title.trim().to_string();
-    if title.is_empty() || is_placeholder_pr_copy(&title, &parsed.body) {
+    let mut copy: PrCopy = serde_json::from_str(raw.trim()).ok()?;
+    copy.title = copy.title.trim().to_string();
+    if copy.title.is_empty() || is_placeholder_pr_copy(&copy.title, &copy.body) {
         return None;
     }
-    Some(PrCopy {
-        title,
-        body: parsed.body,
-    })
+    Some(copy)
 }
 
 fn parse_labeled_copy(raw: &str) -> Option<PrCopy> {
@@ -1632,6 +1882,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
     #[test]
     fn release_merge_observation_respects_queue_membership() {
         for (entry, auto, queue_enabled, behind, dirty) in [
@@ -1683,11 +1935,330 @@ mod tests {
     }
 
     use super::{
-        classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_check_set_output,
-        parse_generated_pr_copy, pr_number_from_url, GhCheck, GhRestHead, GhRestPr,
-        MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
+        classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
+        merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
+        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks, GhCheck,
+        GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy, RequiredChecks,
+        TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
+    use serde_json::{json, Value};
+
+    struct CheckFixture {
+        directory: tempfile::TempDir,
+        path: Option<OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CheckFixture {
+        fn new(first: Value, second: Value) -> Self {
+            let lock = crate::journal::test_env_lock();
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(directory.path().join("first.json"), first.to_string()).unwrap();
+            std::fs::write(directory.path().join("second.json"), second.to_string()).unwrap();
+            let script = directory.path().join("gh");
+            std::fs::write(
+                &script,
+                r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  *endCursor=*)
+    cat "$fixture/second.json"
+    if [ -f "$fixture/fail" ]; then echo 'GitHub unavailable' >&2; exit 1; fi ;;
+  *) cat "$fixture/first.json" ;;
+esac
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = std::env::var_os("PATH");
+            let paths = std::iter::once(directory.path().to_path_buf())
+                .chain(std::env::split_paths(path.as_deref().unwrap_or_default()));
+            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+            Self {
+                directory,
+                path,
+                _lock: lock,
+            }
+        }
+
+        fn read(&self) -> crate::ops::error::OpsResult<Option<MergeGateReading>> {
+            merge_gate_state(self.directory.path(), 1325, "head-1")
+        }
+    }
+
+    impl Drop for CheckFixture {
+        fn drop(&mut self) {
+            match &self.path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    fn page(head: &str, nodes: Vec<Value>, next: Option<&str>) -> Value {
+        json!({"head":head,"commit":head,"contexts":{
+            "nodes":nodes,"pageInfo":{"hasNextPage":next.is_some(),"endCursor":next}
+        }})
+    }
+
+    fn run(name: &str, conclusion: &str, required: bool, started: &str) -> Value {
+        json!({"__typename":"CheckRun", "name":name,"status":"COMPLETED",
+            "conclusion":conclusion,"isRequired":required,"startedAt":started,
+            "detailsUrl":format!("https://ci/{name}"),
+            "checkSuite":{"workflowRun":{"event":"pull_request","workflow":{"name":"CI"}}}
+        })
+    }
+
+    #[test]
+    fn queue_requests_integrate_advancing_bases_but_not_prequeue_conflicts() {
+        for (request, behind, dirty) in [
+            (None, true, true),
+            (Some(MergeRequest::Auto), true, true),
+            (Some(MergeRequest::AwaitingQueue), false, true),
+            (
+                Some(MergeRequest::Queued("pr-id".to_string())),
+                false,
+                false,
+            ),
+        ] {
+            assert_eq!(
+                merge_needs_integration(Some("BEHIND"), request.as_ref()),
+                behind
+            );
+            assert_eq!(
+                merge_needs_integration(Some("dirty"), request.as_ref()),
+                dirty
+            );
+            assert!(!merge_needs_integration(Some("clean"), request.as_ref()));
+            assert!(!merge_needs_integration(None, request.as_ref()));
+        }
+    }
+
+    fn merge_response(state: &str, request: Value, queue: Value) -> Value {
+        json!({"data":{"repository":{"pullRequest":{
+            "id":"PR_fixture", "number":1329, "url":"https://example.com/pr/1329",
+            "state":state, "isDraft":false, "headRefName":"feature", "headRefOid":"head-1",
+            "mergedAt":"2026-09-29T05:02:15Z", "mergeCommit":{"oid":"merge-1"},
+            "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":true,
+            "autoMergeRequest":request, "mergeQueueEntry":queue
+        }}}})
+    }
+
+    #[test]
+    fn merged_observation_retains_evidence_after_auto_merge_is_removed() {
+        let response = merge_response("MERGED", Value::Null, Value::Null);
+        let result = parse_pr_merge(&serde_json::to_vec(&response).unwrap()).unwrap();
+        assert_eq!(result.pr.state, "merged");
+        assert_eq!(result.pr.merge_commit.as_deref(), Some("merge-1"));
+        assert_eq!(result.pr.merged_at.as_deref(), Some("2026-09-29T05:02:15Z"));
+        assert!(result.request.is_none());
+    }
+
+    #[test]
+    fn partial_merge_observations_never_authorize_landing_decisions() {
+        let complete = merge_response("OPEN", Value::Null, Value::Null);
+        let mut partial = complete.clone();
+        partial["errors"] = json!([{"message":"Rate limit exceeded"}]);
+        let mut missing_request = complete.clone();
+        missing_request["data"]["repository"]["pullRequest"]
+            .as_object_mut()
+            .unwrap()
+            .remove("autoMergeRequest");
+        for response in [
+            json!(null),
+            json!({"data":{"repository":{"pullRequest":null}}}),
+            partial,
+            missing_request,
+            merge_response("UNKNOWN", Value::Null, Value::Null),
+            merge_response("OPEN", json!(false), Value::Null),
+            merge_response("OPEN", Value::Null, json!([])),
+        ] {
+            assert!(
+                parse_pr_merge(&serde_json::to_vec(&response).unwrap()).is_err(),
+                "accepted {response}"
+            );
+        }
+    }
+
+    #[test]
+    fn queued_observation_keeps_the_pull_request_id_for_cancellation() {
+        let response = merge_response("OPEN", Value::Null, json!({"id":"QUEUE_entry"}));
+        let result = parse_pr_merge(&serde_json::to_vec(&response).unwrap()).unwrap();
+        assert!(matches!(result.request, Some(MergeRequest::Queued(id)) if id == "PR_fixture"));
+    }
+
+    #[test]
+    fn waiting_for_queue_is_an_active_request_that_can_be_revoked() {
+        let fixture = CheckFixture::new(
+            merge_response(
+                "OPEN",
+                json!({"enabledAt":"2026-09-29T00:00:00Z"}),
+                Value::Null,
+            ),
+            merge_response("OPEN", Value::Null, Value::Null),
+        );
+        std::fs::write(fixture.directory.path().join("armed"), "").unwrap();
+        std::fs::write(
+            fixture.directory.path().join("gh"),
+            r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  *--disable-auto*) rm "$fixture/armed" ;;
+  *) if [ -f "$fixture/armed" ]; then cat "$fixture/first.json"; else cat "$fixture/second.json"; fi ;;
+esac
+"#,
+        )
+        .unwrap();
+        let repo = fixture.directory.path();
+        assert!(matches!(
+            observe_merge_request(repo, 1329).unwrap(),
+            Some(MergeRequest::AwaitingQueue)
+        ));
+        disable_auto_merge(repo, 1329, &|_| {}).unwrap();
+        assert!(observe_merge_request(repo, 1329).unwrap().is_none());
+    }
+
+    #[test]
+    fn check_read_includes_required_failures_on_later_pages() {
+        let server = CheckFixture::new(
+            page(
+                "head-1",
+                vec![run("lint", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+                Some("next"),
+            ),
+            page(
+                "head-1",
+                vec![run("test", "FAILURE", true, "2026-09-29T00:00:00Z")],
+                None,
+            ),
+        );
+        let reading = server.read().unwrap().unwrap();
+        assert!(reading.failing);
+        assert_eq!(reading.failing_leaves[0].name, "test");
+    }
+
+    #[test]
+    fn changed_head_and_failed_pages_cannot_reuse_partial_green_checks() {
+        let green = page(
+            "head-1",
+            vec![run("test", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+            Some("next"),
+        );
+        let mut changed_commit = page("head-1", vec![], None);
+        changed_commit["commit"] = json!("head-2");
+        for second in [page("head-2", vec![], None), changed_commit] {
+            let server = CheckFixture::new(green.clone(), second);
+            assert!(server.read().unwrap().is_none());
+        }
+        let server = CheckFixture::new(green, page("head-1", vec![], None));
+        std::fs::write(server.directory.path().join("fail"), "").unwrap();
+        assert!(server
+            .read()
+            .unwrap_err()
+            .to_string()
+            .contains("GitHub unavailable"));
+    }
+
+    #[test]
+    fn missing_checks_and_unreadable_or_incomplete_pages_remain_distinct() {
+        for first in [
+            page("head-1", vec![], None),
+            json!({"head":"head-1","commit":"head-1","contexts":null}),
+        ] {
+            let server = CheckFixture::new(first, Value::Null);
+            assert!(server.read().unwrap().is_none());
+        }
+        for first in [
+            json!("invalid response"),
+            json!({"head":"head-1","commit":"head-1","contexts":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}),
+        ] {
+            let server = CheckFixture::new(first, Value::Null);
+            assert!(server.read().is_err());
+        }
+        let repeated = page("head-1", vec![], Some("same-cursor"));
+        let server = CheckFixture::new(repeated.clone(), repeated);
+        assert!(server
+            .read()
+            .unwrap_err()
+            .to_string()
+            .contains("repeated a cursor"));
+    }
+
+    #[test]
+    fn check_reruns_keep_the_latest_result_without_merging_workflows_or_events() {
+        let old = run("test", "FAILURE", true, "2026-09-28T00:00:00Z");
+        let new = run("test", "SUCCESS", true, "2026-09-29T00:00:00Z");
+        let mut other_workflow = old.clone();
+        other_workflow["isRequired"] = json!(false);
+        other_workflow["checkSuite"]["workflowRun"]["workflow"]["name"] = json!("Other");
+        other_workflow["detailsUrl"] = json!("https://ci/other");
+        let mut other_event = other_workflow.clone();
+        other_event["checkSuite"]["workflowRun"]["workflow"]["name"] = json!("CI");
+        other_event["checkSuite"]["workflowRun"]["event"] = json!("push");
+        other_event["detailsUrl"] = json!("https://ci/push");
+        let contexts =
+            serde_json::from_value(json!([old, new, other_workflow, other_event])).unwrap();
+        let reading = project_checks(contexts).unwrap();
+        assert!(!reading.failing);
+        let urls: Vec<_> = reading
+            .failing_leaves
+            .iter()
+            .map(|c| c.url.as_deref())
+            .collect();
+        assert_eq!(
+            urls,
+            vec![Some("https://ci/other"), Some("https://ci/push")]
+        );
+    }
+
+    #[test]
+    fn context_states_preserve_gate_and_optional_failure_meanings() {
+        for (state, failing, pending) in [
+            ("SUCCESS", false, false),
+            ("SKIPPED", false, false),
+            ("NEUTRAL", false, false),
+            ("CANCELLED", true, false),
+            ("ACTION_REQUIRED", true, false),
+            ("TIMED_OUT", true, false),
+            ("FAILURE", true, false),
+            ("FUTURE_STATE", false, true),
+        ] {
+            let required = run("required", state, true, "2026-09-29T00:00:00Z");
+            let optional = run("optional", "FAILURE", false, "2026-09-29T00:00:00Z");
+            let reading =
+                project_checks(serde_json::from_value(json!([required, optional])).unwrap())
+                    .unwrap();
+            assert_eq!(
+                (reading.failing, reading.pending),
+                (failing, pending),
+                "{state}"
+            );
+            assert_eq!(reading.failing_leaves[0].name, "optional");
+        }
+        let mut pending = run("required", "FAILURE", true, "2026-09-29T00:00:00Z");
+        pending["status"] = json!("IN_PROGRESS");
+        let reading = project_checks(serde_json::from_value(json!([pending])).unwrap()).unwrap();
+        assert!(!reading.failing);
+        assert!(reading.pending);
+    }
+
+    #[test]
+    fn legacy_status_contexts_are_distinct_from_same_named_check_runs() {
+        let contexts = json!([
+            run("test", "SUCCESS", false, "2026-09-29T00:00:00Z"),
+            {"__typename":"StatusContext","context":"test","state":"ERROR",
+             "targetUrl":"https://legacy/test","isRequired":true},
+            {"__typename":"StatusContext","context":"test","state":"SUCCESS",
+             "targetUrl":"https://legacy/older","isRequired":true}
+        ]);
+        let reading = project_checks(serde_json::from_value(contexts).unwrap()).unwrap();
+        assert!(reading.failing);
+        assert_eq!(
+            reading.failing_leaves[0].url.as_deref(),
+            Some("https://legacy/test")
+        );
+    }
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1699,6 +2270,7 @@ mod tests {
 
     fn rest_pr(state: &str, merged: bool, draft: bool) -> GhRestPr {
         GhRestPr {
+            mergeable_state: None,
             merged,
             state: state.to_string(),
             draft,
@@ -1799,29 +2371,6 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_required_checks_remain_an_error() {
-        let error = parse_check_set_output(
-            "jack/task",
-            true,
-            false,
-            b"",
-            "HTTP 403: authentication required",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("authentication required"));
-
-        assert!(parse_check_set_output(
-            "jack/task",
-            true,
-            false,
-            b"",
-            "no required checks reported on branch",
-        )
-        .unwrap()
-        .is_empty());
-    }
-
-    #[test]
     fn merge_gate_seeds_actionable_leaves_not_the_required_aggregate() {
         // Branch protection requires only the `tests-result` roll-up; the real
         // failure is the `rust-test` leaf. The gate is failing, and the ci-fix
@@ -1899,69 +2448,171 @@ mod tests {
             identifier: "LOO-249".to_string(),
             url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),
             sequence: 1,
+            merge_request: None,
         }
     }
 
     #[test]
-    fn fix_task_pr_copy_uses_one_canonical_title_and_durable_context() {
+    fn task_pr_copy_preserves_title_and_summary_before_durable_context() {
         let copy = normalize_task_pr_copy(
             PrCopy {
-                title: "pr copy: explain the review contract".to_string(),
-                body: "## Evaluate\n\n`cargo test -p loopflow task_pr_copy`".to_string(),
+                title: "Understand what merging this PR will do".to_string(),
+                body: "Reviewers can see what work remains.\nThe summary can wrap.\n\n## Evaluate\n\nRecorded proof.".to_string(),
             },
             Some(&task_pr_context()),
             &TaskPrCopyLifecycle::Completes,
         )
         .expect("normalize Task PR copy");
 
-        assert_eq!(
-            copy.title,
-            "LOO-249: Make Task PR copy explain intent and lifecycle"
-        );
+        assert_eq!(copy.title, "Understand what merging this PR will do");
         assert_eq!(
             copy.body,
-            "<!-- loopflow:task-pr-context:start -->\n\
+            "Reviewers can see what work remains.\nThe summary can wrap.\n\n\
+<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
-> **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
+> **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
 > **PR lifecycle:** Merging PR 1 completes the Task.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
-## Evaluate\n\n`cargo test -p loopflow task_pr_copy`"
+## Evaluate\n\nRecorded proof."
         );
     }
 
     #[test]
-    fn feature_task_pr_copy_refreshes_lifecycle_without_duplicating_context() {
-        let published = normalize_task_pr_copy(
+    fn task_pr_copy_recognizes_whitespace_only_paragraph_separators() {
+        let render = |separator: &str| {
+            normalize_task_pr_copy(
+                PrCopy {
+                    title: "Keep review context readable".to_string(),
+                    body: format!(
+                        "Summary.{separator}    indented example\n\n## Evaluate\n\nProof."
+                    ),
+                },
+                Some(&task_pr_context()),
+                &TaskPrCopyLifecycle::Published,
+            )
+            .unwrap()
+        };
+        let expected = render("\n\n");
+        for separator in ["\n \t\n", "\r\n \r\n\r\n"] {
+            let copy = render(separator);
+            assert_eq!(copy, expected);
+            assert_eq!(
+                normalize_task_pr_copy(
+                    copy.clone(),
+                    Some(&task_pr_context()),
+                    &TaskPrCopyLifecycle::Published
+                )
+                .unwrap(),
+                copy
+            );
+        }
+    }
+
+    #[test]
+    fn task_pr_copy_refreshes_lifecycle_and_scope_without_accumulating_context() {
+        let mut context = task_pr_context();
+        let mut copy = PrCopy {
+            title: "Understand what merging this PR will do".to_string(),
+            body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewers can see what work remains.\n\n\n    lf wave status example\n\n## Evaluate\n\nRecorded proof.".to_string(),
+        };
+        for (lifecycle, expected) in [
+            (
+                TaskPrCopyLifecycle::Draft,
+                "is a draft; no Task settlement is requested.",
+            ),
+            (
+                TaskPrCopyLifecycle::Published,
+                "no Task settlement is requested.",
+            ),
+            (
+                TaskPrCopyLifecycle::Continues {
+                    next_slug: Some("follow-up-proof".to_string()),
+                },
+                "names `follow-up-proof` as the next serial PR.",
+            ),
+            (
+                TaskPrCopyLifecycle::Continues { next_slug: None },
+                "leaves the Task open for another serial PR.",
+            ),
+            (TaskPrCopyLifecycle::Completes, "completes the Task."),
+        ] {
+            copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
+            assert!(copy
+                .body
+                .starts_with("Reviewers can see what work remains.\n\n<!--"));
+            assert!(copy
+                .body
+                .ends_with("    lf wave status example\n\n## Evaluate\n\nRecorded proof."));
+            assert_eq!(
+                copy.body.matches("loopflow:task-pr-context:start").count(),
+                1
+            );
+            assert!(copy.body.contains(expected));
+            assert!(!copy.body.contains("Linear Task: [OLD-1]"));
+            assert_eq!(
+                normalize_task_pr_copy(copy.clone(), Some(&context), &lifecycle).unwrap(),
+                copy
+            );
+        }
+
+        context.sequence = 2;
+        context.title = "Find the next useful review action".to_string();
+        copy.title = "Find the remaining proof after a partial delivery".to_string();
+        copy.body = copy.body.replace(
+            "Reviewers can see what work remains.",
+            "Reviewers can find the proof still needed.",
+        );
+        let revised =
+            normalize_task_pr_copy(copy, Some(&context), &TaskPrCopyLifecycle::Published).unwrap();
+        assert_eq!(
+            revised.title,
+            "Find the remaining proof after a partial delivery"
+        );
+        assert!(revised
+            .body
+            .starts_with("Reviewers can find the proof still needed.\n\n<!--"));
+        assert!(revised
+            .body
+            .contains("Find the next useful review action · LOO-249"));
+        assert!(revised
+            .body
+            .contains("PR 2 is published for review; no Task settlement is requested."));
+        assert!(!revised.body.contains("completes the Task"));
+        assert!(!revised.body.contains("Make Task PR copy explain intent"));
+    }
+
+    #[test]
+    fn task_pr_copy_moves_existing_top_block_and_handles_summary_only() {
+        let context = task_pr_context();
+        let empty = normalize_task_pr_copy(
             PrCopy {
-                title: "ignored".to_string(),
-                body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewer proof."
-                    .to_string(),
+                title: "A specific change".to_string(),
+                body: String::new(),
             },
-            Some(&task_pr_context()),
+            Some(&context),
             &TaskPrCopyLifecycle::Published,
         )
-        .expect("publish Task PR copy");
-        let continued = normalize_task_pr_copy(
-            published,
-            Some(&task_pr_context()),
-            &TaskPrCopyLifecycle::Continues {
-                next_slug: Some("follow-up-proof".to_string()),
-            },
-        )
-        .expect("refresh Task PR copy");
-
+        .unwrap();
+        let legacy = PrCopy {
+            title: empty.title,
+            body: format!("{}\n\n{}\n\nSummary only.", empty.body, empty.body),
+        };
+        let moved = normalize_task_pr_copy(legacy, Some(&context), &TaskPrCopyLifecycle::Completes)
+            .unwrap();
+        assert!(moved.body.starts_with("Summary only.\n\n<!--"));
         assert_eq!(
-            continued
-                .body
-                .matches("loopflow:task-pr-context:start")
-                .count(),
+            moved.body.matches("loopflow:task-pr-context:start").count(),
             1
         );
-        assert!(continued.body.contains(
-            "Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
-        ));
-        assert!(continued.body.ends_with("Reviewer proof."));
-        assert!(!continued.body.contains("Linear Task: [OLD-1]"));
+        assert_eq!(
+            normalize_task_pr_copy(
+                moved.clone(),
+                Some(&context),
+                &TaskPrCopyLifecycle::Completes
+            )
+            .unwrap(),
+            moved
+        );
     }
 
     #[test]
@@ -2025,13 +2676,13 @@ Body:
 ## Usage
 
 ```bash
-lf pm init
+lf repo connect
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf pm init\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf repo connect\n```".to_string(),
             })
         );
     }
@@ -2095,13 +2746,14 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf pr open" after gating to open or update the PR."}"###;
+Use "lf task pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
-                    .to_string(),
+                body:
+                    "## Summary\n\nUse \"lf task pr open\" after gating to open or update the PR."
+                        .to_string(),
             })
         );
     }

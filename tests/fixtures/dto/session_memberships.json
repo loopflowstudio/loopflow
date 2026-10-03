@@ -1,0 +1,432 @@
+[
+  {
+    "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
+    "kind": "flow",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Simplify cross-Work questions",
+    "title_source": "human",
+    "detail": "review-design",
+    "provider": "codex",
+    "cwd": "/src/loopflow.task",
+    "state": "active",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Complete the review and return feedback to the next Flow step",
+        "unavailable_reason": "The session agent has not marked this ready"
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "task-design",
+      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
+      "step": "review-design",
+      "occurrence": "current",
+      "node": 1,
+      "iterations": [
+        []
+      ]
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": "review"
+  },
+  {
+    "id": "run_00000000000000000000000000000002",
+    "kind": "conversation",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Release outcomes",
+    "title_source": "generated",
+    "detail": "claude",
+    "provider": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "run_00000000000000000000000000000002"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "feature",
+      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
+      "step": "implement",
+      "occurrence": "earlier",
+      "node": 6,
+      "iterations": [
+        [
+          2,
+          1
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
+  },
+  {
+    "id": "run_00000000000000000000000000000003",
+    "kind": "conversation",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Verification cases",
+    "title_source": "human",
+    "detail": "claude",
+    "provider": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "active",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "run_00000000000000000000000000000003"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+      },
+      {
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Stop the other client and resume here; unsent text there is lost",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "independent"
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
+  },
+  {
+    "id": "run_00000000000000000000000000000004",
+    "kind": "conversation",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "lyric-cadenza",
+    "title_source": "generated",
+    "detail": "claude",
+    "provider": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "run_00000000000000000000000000000004"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "unknown",
+      "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
+  },
+  {
+    "id": "run_00000000000000000000000000000006",
+    "kind": "conversation",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Before restart",
+    "title_source": "generated",
+    "detail": "claude",
+    "provider": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "run_00000000000000000000000000000006"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "feature",
+      "invocation_id": "00000000-0000-0000-0000-0000000000f1",
+      "step": "implement",
+      "occurrence": "past",
+      "node": 2,
+      "iterations": [
+        [
+          2,
+          1
+        ]
+      ]
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
+  },
+  {
+    "id": "run_00000000000000000000000000000007",
+    "kind": "conversation",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Older capture",
+    "title_source": "generated",
+    "detail": "claude",
+    "provider": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "run_00000000000000000000000000000007"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "feature",
+      "invocation_id": "00000000-0000-0000-0000-0000000000f0",
+      "step": "implement",
+      "occurrence": "past",
+      "node": null,
+      "iterations": null
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": null
+  },
+  {
+    "id": "task_00000000000000000000000000000001:feature:demo:0",
+    "kind": "flow",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "demo",
+    "title_source": "unavailable",
+    "detail": "demo",
+    "provider": null,
+    "cwd": "/src/loopflow.task",
+    "state": "waiting",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "ssh",
+      "home_remote",
+      "session",
+      "connect",
+      "task_00000000000000000000000000000001:feature:demo:0"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Complete the review and return feedback to the next Flow step",
+        "unavailable_reason": "The session agent has not marked this ready"
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "feature",
+      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
+      "step": "demo",
+      "occurrence": "current",
+      "node": 9,
+      "iterations": [
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    "workspace": {
+      "home_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": "review"
+  }
+]

@@ -1,0 +1,335 @@
+[
+  {
+    "name": "feature",
+    "graph": {
+      "name": "feature",
+      "steps": [
+        {
+          "key": 0,
+          "id": "design",
+          "label": "task-design",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "sources": [
+            "feature"
+          ],
+          "paths": []
+        },
+        {
+          "key": 1,
+          "id": "implement",
+          "label": "implement",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "sources": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": 2,
+          "id": null,
+          "label": "realign",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "sources": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": 3,
+          "id": "decide",
+          "label": "loop-decide",
+          "kind": "skill",
+          "human": false,
+          "returns_to": 1,
+          "sources": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": 4,
+          "id": "demo",
+          "label": "demo",
+          "kind": "skill",
+          "human": true,
+          "returns_to": null,
+          "sources": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": 5,
+          "id": "decide_delivery",
+          "label": "loop-decide",
+          "kind": "skill",
+          "human": false,
+          "returns_to": 1,
+          "sources": [
+            "feature",
+            "pursue"
+          ],
+          "paths": []
+        },
+        {
+          "key": 6,
+          "id": null,
+          "label": "xor-route",
+          "kind": "xor",
+          "human": false,
+          "returns_to": null,
+          "sources": [
+            "feature"
+          ],
+          "paths": [
+            {
+              "name": "fix",
+              "description": "Repair the failing check",
+              "steps": [
+                {
+                  "key": 7,
+                  "id": "patch",
+                  "label": "patch",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "sources": [],
+                  "paths": []
+                }
+              ]
+            },
+            {
+              "name": "skip",
+              "description": "Nothing to repair",
+              "steps": []
+            }
+          ]
+        },
+        {
+          "key": 8,
+          "id": null,
+          "label": "pr land -c",
+          "kind": "op",
+          "human": false,
+          "returns_to": null,
+          "sources": [
+            "feature",
+            "queue"
+          ],
+          "paths": []
+        }
+      ],
+      "interactions": {
+        "stages": [
+          "4"
+        ],
+        "transitions": [
+          {
+            "from": "@start",
+            "to": "4",
+            "nodes": [
+              "0",
+              "1",
+              "2",
+              "3"
+            ],
+            "routes": [
+              {
+                "from": "@start",
+                "to": "0",
+                "condition": null
+              },
+              {
+                "from": "0",
+                "to": "1",
+                "condition": null
+              },
+              {
+                "from": "1",
+                "to": "2",
+                "condition": null
+              },
+              {
+                "from": "2",
+                "to": "3",
+                "condition": null
+              },
+              {
+                "from": "3",
+                "to": "4",
+                "condition": "advance"
+              },
+              {
+                "from": "3",
+                "to": "1",
+                "condition": "repeat"
+              }
+            ]
+          },
+          {
+            "from": "4",
+            "to": "4",
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "5"
+            ],
+            "routes": [
+              {
+                "from": "4",
+                "to": "5",
+                "condition": null
+              },
+              {
+                "from": "5",
+                "to": "1",
+                "condition": "repeat"
+              },
+              {
+                "from": "1",
+                "to": "2",
+                "condition": null
+              },
+              {
+                "from": "2",
+                "to": "3",
+                "condition": null
+              },
+              {
+                "from": "3",
+                "to": "4",
+                "condition": "advance"
+              },
+              {
+                "from": "3",
+                "to": "1",
+                "condition": "repeat"
+              }
+            ]
+          },
+          {
+            "from": "4",
+            "to": "@end",
+            "nodes": [
+              "5",
+              "6",
+              "7",
+              "8"
+            ],
+            "routes": [
+              {
+                "from": "4",
+                "to": "5",
+                "condition": null
+              },
+              {
+                "from": "5",
+                "to": "6",
+                "condition": "advance"
+              },
+              {
+                "from": "6",
+                "to": "7",
+                "condition": "fix"
+              },
+              {
+                "from": "6",
+                "to": "8",
+                "condition": "skip"
+              },
+              {
+                "from": "8",
+                "to": "@end",
+                "condition": null
+              },
+              {
+                "from": "7",
+                "to": "8",
+                "condition": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "unavailable": null,
+    "template": {
+      "revision": "fixture-feature-composition",
+      "items": [
+        {
+          "kind": "node",
+          "key": 0,
+          "paths": {}
+        },
+        {
+          "kind": "group",
+          "id": "group-0",
+          "name": "pursue",
+          "items": [
+            {
+              "kind": "node",
+              "key": 1,
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": 2,
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": 3,
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": 4,
+              "paths": {}
+            },
+            {
+              "kind": "node",
+              "key": 5,
+              "paths": {}
+            }
+          ]
+        },
+        {
+          "kind": "node",
+          "key": 6,
+          "paths": {
+            "fix": [
+              {
+                "kind": "node",
+                "key": 7,
+                "paths": {}
+              }
+            ],
+            "skip": []
+          }
+        },
+        {
+          "kind": "node",
+          "key": 8,
+          "paths": {}
+        }
+      ]
+    }
+  },
+  {
+    "name": "broken",
+    "graph": null,
+    "unavailable": "failed to load skill \"missing\": not found",
+    "template": null
+  }
+]

@@ -1,4 +1,4 @@
-//! `lf ci` — machine-wide evidence for failed-CI recovery.
+//! `lf repo ci` — machine-wide evidence for failed-CI recovery.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -312,7 +312,7 @@ fn print_report(report: &CiReportDto) {
     let summary = &report.summary;
     println!();
     println!(
-        "{} incidents across {} PRs · {} unresolved · {} autonomous · {} human-assisted",
+        "{} incidents across {} PRs · {} unresolved · {} autonomous · {} assisted",
         summary.incidents,
         summary.pull_requests,
         summary.unresolved,
@@ -371,7 +371,7 @@ mod tests {
     }
 
     /// `repaired_head_sha` is the operator-facing half of the settlement-race fix
-    /// (W2-320): `lf ci --json` must carry the head a ci-fix body shipped, beside
+    /// (W2-320): `lf repo ci --json` must carry the head a ci-fix body shipped, beside
     /// the head it failed on, or the attribution is invisible.
     #[test]
     fn repaired_head_is_exposed_on_the_json_surface() {
@@ -382,7 +382,7 @@ mod tests {
             json.get("repaired_head_sha")
                 .and_then(|value| value.as_str()),
             Some("02527e29"),
-            "lf ci --json carries the repaired head beside failed_head_sha"
+            "lf repo ci --json carries the repaired head beside failed_head_sha"
         );
 
         dto.repaired_head_sha = None;
@@ -415,7 +415,7 @@ mod tests {
         );
     }
 
-    /// A serviced wake still does not own a repair a human was in the loop for.
+    /// A serviced wake still does not own an interactively reviewed repair.
     #[test]
     fn a_human_assisted_green_is_not_autonomous() {
         let mut incident = green_incident(Some("cc_1018"), Some("2026-07-16T00:05:00Z"));

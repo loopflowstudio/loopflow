@@ -1,6 +1,5 @@
 """The release cut: drafts become one ordered, release-scoped batch."""
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -15,7 +14,7 @@ SCRIPT = ROOT / "scripts/canonicalize_migrations.py"
 MANIFEST_FIXTURE = ROOT / "tests/fixtures/migrations/draft_manifest.json"
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 DRAFTS = MIGRATIONS / "drafts"
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 
 REGISTRY = """const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -43,36 +42,12 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _token(name: str) -> str:
-    # Deterministic per name so re-run/two-repo tests build identical draft files.
-    # 128-bit (32 hex chars), matching the immutable id new_migration.py mints.
-    import hashlib
-
-    return hashlib.sha256(name.encode()).hexdigest()[:32]
-
-
-def draft(
-    repo: Path,
-    name: str,
-    depends_on: str = "",
-    body: str = "SELECT 1;\n",
-    token: str | None = None,
-) -> None:
-    token = token or _token(name)
-    (repo / DRAFTS / f"{name}__{token}.sql").write_text(
-        f"-- name: {name}\n-- id: {token}\n-- depends_on: {depends_on}\n{body}"
-    )
+def draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
+    (repo / DRAFTS / f"{name}.sql").write_text(f"-- depends_on: {depends_on}\n{body}")
 
 
 def draft_names(repo: Path) -> set[str]:
-    import re
-
-    pattern = re.compile(r"^([a-z][a-z0-9_]*)__[0-9a-f]{32}\.sql$")
-    return {
-        match.group(1)
-        for path in (repo / DRAFTS).glob("*.sql")
-        if (match := pattern.match(path.name))
-    }
+    return {path.stem for path in (repo / DRAFTS).glob("*.sql")}
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -118,11 +93,9 @@ def test_draft_manifest_matches_shared_golden_cases(
         ordered = canonicalize_migrations._order(canonicalize_migrations._read_drafts())
         actual = [
             {
-                "id": draft.filename.rsplit("__", 1)[1].removesuffix(".sql"),
                 "name": draft.name,
                 "dependencies": draft.depends_on,
                 "sql": draft.sql,
-                "checksum": hashlib.sha256(draft.sql.encode()).hexdigest(),
             }
             for draft in ordered
         ]
@@ -181,7 +154,6 @@ def test_the_canonical_file_carries_the_body_without_the_header(repo: Path) -> N
 
     written = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
     assert written == ("-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n")
-    assert "-- name:" not in written
 
 
 def test_a_minor_release_uses_its_full_package_version(repo: Path) -> None:
@@ -346,20 +318,6 @@ def test_a_draft_cannot_forge_release_provenance(repo: Path) -> None:
     assert result.returncode == 1
     assert "reserved `-- draft:`" in result.stderr
     assert draft_names(repo) == {"add_wave_colour"}
-
-
-def test_two_drafts_sharing_a_readable_name_fail(repo: Path) -> None:
-    # Distinct tokens keep the files distinct at authoring; a shared readable
-    # name only ever surfaces as one release-cut failure, never a merge conflict.
-    draft(repo, "dup", token="a" * 32)
-    draft(repo, "dup", token="b" * 32)
-    before = (repo / MIGRATIONS_RS).read_text()
-
-    result = run(repo, "0.11.30")
-
-    assert result.returncode == 1
-    assert "share the readable name" in result.stderr
-    assert (repo / MIGRATIONS_RS).read_text() == before
 
 
 def test_a_write_failure_leaves_the_tree_byte_identical(repo: Path) -> None:

@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use loopflow::engine::git::{
-    commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, rebase,
+    commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, merge,
     sync_main,
 };
 use loopflow_test_support::TestRepo;
@@ -129,21 +129,21 @@ fn is_ancestor_same_commit() {
 }
 
 // =============================================================================
-// Rebase operations
+// Sync operations
 // =============================================================================
 
 #[test]
-fn rebase_onto_same_branch_succeeds() {
+fn sync_onto_same_branch_succeeds() {
     let repo = TestRepo::new();
 
     let default = get_default_branch(repo.path()).unwrap();
-    let result = rebase(repo.path(), &default, None).unwrap();
+    let result = merge(repo.path(), &default, None).unwrap();
 
     assert!(result.success);
 }
 
 #[test]
-fn rebase_feature_onto_main() {
+fn sync_feature_onto_main() {
     let repo = TestRepo::new();
 
     let default = get_default_branch(repo.path()).unwrap();
@@ -162,10 +162,10 @@ fn rebase_feature_onto_main() {
     repo.commit("main work");
     let main_sha = repo.head_sha();
 
-    // Back to feature and rebase
+    // Back to feature and sync
     repo.checkout("feature");
 
-    let result = rebase(repo.path(), &default, None).unwrap();
+    let result = merge(repo.path(), &default, None).unwrap();
     assert!(result.success);
 
     // Feature should now be based on main's latest

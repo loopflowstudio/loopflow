@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the user mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -10,13 +10,13 @@ description: Operate a repository through loopflow (`lf`) — persistent Wave, P
      that file changes. Agents launched BY loopflow receive the contract
      automatically; this skill teaches agents that arrived on their own. -->
 
-Loopflow is one binary, `lf`: the command humans type and the API agents call
+Loopflow is one binary, `lf`: the CLI for daily work and the API agents call
 to launch, steer, and observe other agents. It owns git, worktrees,
 delegation, and release plumbing in repos that use it. Route those operations
 through `lf`, not around it — doing them by hand breaks worktree placement,
-release state, and Run authority.
+release state, and execution authority.
 
-Check availability; install only if the human asks:
+Check availability; install only if the user asks:
 
 ```bash
 lf --version || echo "not installed"
@@ -26,29 +26,32 @@ lf --version || echo "not installed"
 ## Caller Authority
 
 An external harness opened by a person acts as a Loopflow **User**. It may read
-status and use `lf chat` when the human asks it to inspect or steer a Wave. It
+status and start a Session when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
-receives `LOOPFLOW.md` automatically, writes through its exact Work/Run
+receives `LOOPFLOW.md` automatically, writes through its exact Work and execution
 authority, and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
 
 ```bash
-lf commit -m "message" -p            # commit and push
+lf commit -m "message"               # local checkpoint
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                         # done; a human clicks merge
-lf pr land                           # done; loopflow lands it hands-off
-lf pr land -c                        # land and complete the owning Task
-lf rebase --plan                     # show strategy; bare `lf rebase` applies it
-lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
+lf submit                            # done; the user clicks merge
+lf arm                               # request auto-merge; return
+lf land                              # watch CI, repair, and finish merged
+lf land -c                           # complete the Task after merge
+lf task sync --plan                  # show strategy; bare `lf task sync` applies it
+lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 
-Three commitment levels: **publish** (work in flight — the default "make a
-PR" verb), **submit** (done, a human lands it), **land** (done, loopflow
-lands it). `lf pr open` opens a browser — only when a human asked to see the
-PR.
+**Publish** makes a PR ready for review without opening a browser. **Submit**
+prepares it for the user's merge click; **arm** requests auto-merge, and **land**
+watches CI and repairs failures until merge.
+`lf pr open` creates or updates a draft and opens its page when a person asks
+to see it. Existing ready PRs stay ready; opening a draft does not publish it.
+Publish/submit/arm/land make drafts ready.
 
 Stay in the worktree loopflow placed for this run. Never use raw
 `git worktree`; the sibling naming convention (`<repo>.<name>`) is
@@ -63,16 +66,16 @@ Delegation must make the problem smaller: delegate only a strict subset that
 can finish independently; never hand off the whole seed or the one blocker
 between you and completion.
 
-Use `lf task`, `lf project`, `lf wave`, and `lf pm` only when the active skill
-or the human explicitly asks for orchestration. Do not inspect planning state,
+Use `lf task`, `lf wave`, and `lf repo` only when the active skill
+or the user explicitly asks for orchestration. Do not inspect planning state,
 guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                       # durable Task Work, own worktree
-lf task steer <issue-id> "smaller approach"  # redirect its active turn
-lf task status <issue-id> --json             # inspect durable state
-lf task wait <issue-id> --until terminal
+lf --task <issue-id> flow start                 # durable Task Work, own worktree
+lf comment <issue-id> "smaller approach" # post direction for the Task advancer
+lf task status <issue-id> --json       # inspect durable state
+lf wait <issue-id> --until terminal
 ```
 
 When work feels slow or stuck, run `lf top` before guessing — it shows
@@ -80,16 +83,16 @@ last-hour provider throughput and live processes.
 
 ## Inspect
 
-When the human asks about Loopflow state, read the shared surfaces instead of
+When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
+lf wave list --json              # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json   # one Wave's Work hierarchy, Sessions, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
-These are read surfaces. `lf status` is the focused operational view;
+These are read surfaces. `lf wave status` is the focused operational view;
 `lf roadmap` is the planning overlay, not a second runtime model.
 
 ## Place And Run
@@ -99,11 +102,10 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # only while no Run is live
-lf start <wave>                                 # start it on this machine
-lf stop <wave>                                  # stop it on this machine
+lf wave place <wave-id> <home-id>          # only while no execution is live
+lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
-lf ssh <home-id> start <wave>                   # start it on that Home
+lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
@@ -114,14 +116,19 @@ on their machine.
 
 ## Speak
 
-Answer a human message in turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+Use names in persisted Tasks, PRs, docs, memory, and summaries; use “you” in
+session conversation. Stored transcripts keep their conversational wording;
+summaries extracted from them use names. Use known preferred names and preserve
+unknown attribution instead of guessing who made a request.
 
-`lf chat` is the User surface. Work Steer is the live correction path. When the
+Answer the user's message in turn text. Tasks, Projects, and Waves communicate
+through durable Task facts and targeted Ask Sessions.
+
+Sessions are the conversation surface. Work Steer is the live correction path. When the
 active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
 through the ordinary repository workflow. Keep it curated rather than appending
-a transcript. `update-wave` owns deliberate end-of-work memory curation; no
-live Wave is required.
+a transcript. `realign` reconciles memory with the plan and code; no live Wave
+is required.
 
 ## Where To Write
 

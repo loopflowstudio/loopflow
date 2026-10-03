@@ -4,28 +4,40 @@ use std::process::{Command, Output};
 
 use chrono::{Local, Timelike};
 use loopflow::durable::{CronReceiptId, HomeId};
+use loopflow::exec::Exec;
+use loopflow::id::WaveId;
 use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::RunEventRow;
+use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
+use loopflow_test_support::TestRepo;
+
 fn run_lf(home: &Path, args: &[&str]) -> Output {
+    let binary_dir = Path::new(env!("CARGO_BIN_EXE_lf")).parent().unwrap();
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(args)
         .current_dir(home)
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("NO_COLOR", "1")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                binary_dir.display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
+        // Doctor prefers the compiled source root; scope even git -C there to
+        // this fixture so freshness checks cannot fetch into a shared checkout.
+        .env("GIT_DIR", home.join(".git"))
+        .env("GIT_WORK_TREE", home)
+        .env("GIT_ALLOW_PROTOCOL", "file")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_RUN_ID")
-        .env_remove("LF_RUN_CONTEXT")
-        .env_remove("LF_RUN_LEASE")
-        .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .unwrap()
 }
@@ -41,23 +53,23 @@ fn continuity_check(output: &Output) -> serde_json::Value {
         .clone()
 }
 
-fn insert_run_event(store: &SqliteStore, id: &str, ts: i64) {
+fn insert_exec(store: &SqliteStore, _id: &str, ts: i64) {
     store
-        .insert_run_event(&RunEventRow {
-            run_id: id.to_string(),
-            process_id: id.to_string(),
-            parent_process_id: None,
-            seq: 0,
-            ts,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: Some("/src/loopflow".to_string()),
-            wave: Some("infrastructure".to_string()),
-            node: "run".to_string(),
-            event: "completed".to_string(),
-            command: Some(r#"["lf","flow","telemetry-daily"]"#.to_string()),
-            flow: Some("telemetry-daily".to_string()),
-            skill: None,
-            step_index: None,
+        .record_exec(&Exec {
+            id: loopflow::id::ExecId::new(),
+            trace_id: loopflow::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: Some(false),
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
+            repo: Some("/src/loopflow".into()),
+            cwd: None,
+            started_at: ts,
+            completed_at: Some(ts),
+            outcome: Some("succeeded".into()),
+            exit_code: Some(0),
+            signal: None,
             error: None,
         })
         .unwrap();
@@ -84,13 +96,11 @@ fn install_current_telemetry_obligation(home: &Path) {
 <key>LoopflowRepo</key><string>{repo}</string>
 <key>LoopflowLfPath</key><string>/usr/local/bin/lf</string>
 <key>LoopflowLfHome</key><string>{lf_home}</string>
-<key>LoopflowDbPath</key><string>{database}</string>
 <key>LoopflowPath</key><string>/usr/bin:/bin</string>
 </dict></plist>
 "#,
             repo = home.display(),
             lf_home = home.display(),
-            database = home.join("loopflow.db").display(),
         ),
     )
     .unwrap();
@@ -125,7 +135,10 @@ fn install_current_telemetry_obligation(home: &Path) {
 
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
-    let home = tempfile::tempdir().unwrap();
+    let home = TestRepo::new();
+    SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let fetch_head = home.path().join(".git/FETCH_HEAD");
+    let before = fs::read(&fetch_head).ok();
     let output = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         output.status.success(),
@@ -133,6 +146,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    assert_eq!(fs::read(fetch_head).ok(), before);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         report["store"]["build_source_revision"],
@@ -147,9 +161,9 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 
 #[test]
 fn copied_production_history_does_not_block_the_telemetry_scorecard() {
-    let home = tempfile::tempdir().unwrap();
+    let home = TestRepo::new();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    insert_run_event(
+    insert_exec(
         &store,
         "august-03",
         OffsetDateTime::parse(
@@ -168,30 +182,37 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     .unix_timestamp();
     let mut ordinal = 12;
     while timestamp <= now {
-        insert_run_event(&store, &format!("after-gap-{ordinal}"), timestamp);
+        insert_exec(&store, &format!("after-gap-{ordinal}"), timestamp);
         timestamp += 86_400;
         ordinal += 1;
     }
-    let original_events = store.list_run_events_since(0).unwrap();
+    let original_events = store.execs_since(0).unwrap();
     install_current_telemetry_obligation(home.path());
     fs::create_dir_all(home.path().join(".lf/flows")).unwrap();
     fs::create_dir_all(home.path().join("scripts")).unwrap();
     fs::write(
         home.path().join(".lf/flows/telemetry-daily.yaml"),
-        "- op: doctor\n- op: __telemetry-scorecard\n",
+        "- cmd: doctor\n- cmd: __telemetry-scorecard\n",
     )
     .unwrap();
+    fs::create_dir_all(home.path().join("performance")).unwrap();
+    fs::create_dir_all(home.path().join("wave/product/metrics")).unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for file in ["scripts/lifecycle_scorecard.py", "performance/budgets.json"] {
+        fs::copy(source.join(file), home.path().join(file)).unwrap();
+    }
     fs::write(
-        home.path().join("scripts/lifecycle_scorecard.py"),
-        r#"import json
-import pathlib
-import sys
-
-pathlib.Path(sys.argv[2]).joinpath("scorecard-ran").write_text("reached")
-print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard reached\n"}))
-"#,
+        home.path().join("wave/product/metrics/task-loop-trust.md"),
+        "---\nschema: 1\nid: task-loop-trust\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
     )
     .unwrap();
+    store
+        .create_wave(&Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            home.path().display().to_string(),
+        ))
+        .unwrap();
 
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
@@ -208,19 +229,123 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         assert!(detail.contains(&format!("2026-08-{day:02}")), "{detail}");
     }
 
-    let telemetry = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
+    let telemetry = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
     assert!(
         telemetry.status.success(),
         "telemetry-daily failed: {}{}",
         String::from_utf8_lossy(&telemetry.stdout),
         String::from_utf8_lossy(&telemetry.stderr)
     );
-    assert_eq!(
-        fs::read_to_string(home.path().join("scorecard-ran")).unwrap(),
-        "reached"
-    );
-    let events_after_telemetry = store.list_run_events_since(0).unwrap();
+    let report = String::from_utf8_lossy(&telemetry.stdout);
+    assert!(report.contains("Lifecycle scorecard"), "{report}");
+    assert!(report.contains("Recorded input elapsed"), "{report}");
+    assert!(report.contains("Land request → merge"), "{report}");
+    let events_after_telemetry = store.execs_since(0).unwrap();
     for original in original_events {
         assert!(events_after_telemetry.contains(&original));
     }
+}
+
+#[test]
+fn doctor_accepts_machine_commands_without_a_repository() {
+    let home = TestRepo::new();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    insert_exec(
+        &store,
+        "machine-command",
+        OffsetDateTime::now_utc().unix_timestamp(),
+    );
+    let mut event = store.execs_since(0).unwrap().pop().unwrap();
+    event.id = loopflow::id::ExecId::new();
+    event.repo = None;
+    event.command = Some("lf help".to_string());
+    store.record_exec(&event).unwrap();
+
+    let output = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let identity = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"] == "identity")
+        .unwrap();
+    assert_eq!(identity["status"], "ok");
+    assert!(identity["detail"]
+        .as_str()
+        .unwrap()
+        .contains("2 Exec(s) without repository scope"));
+}
+
+#[test]
+fn doctor_does_not_initialize_a_missing_database() {
+    let home = TestRepo::new();
+    let output = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(!output.status.success());
+    assert!(!home.path().join("loopflow.db").exists());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"]
+        .as_str()
+        .unwrap()
+        .contains("does not exist"));
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "install-selection"));
+}
+
+#[test]
+fn doctor_reports_execs_and_scheduler_despite_an_unknown_migration() {
+    let home = TestRepo::new();
+    let path = home.path().join("loopflow.db");
+    let store = SqliteStore::new(&path).unwrap();
+    insert_exec(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
+    let output = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"]
+        .as_str()
+        .unwrap()
+        .contains("9.0.001_future"));
+    assert!(report["rows"].as_u64().unwrap() >= 1);
+    assert_eq!(continuity_check(&output)["status"], "ok");
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "attribution" && check["status"] == "ok"));
+    let latest: String = connection
+        .query_row(
+            "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(latest, "9.0.001_future");
+}
+
+#[test]
+fn doctor_keeps_reporting_when_the_database_is_corrupt() {
+    let home = TestRepo::new();
+    let path = home.path().join("loopflow.db");
+    fs::write(&path, b"not a sqlite database").unwrap();
+    let output = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"].is_string());
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "execs" && check["status"] == "fail"));
+    assert_eq!(continuity_check(&output)["status"], "ok");
+    assert_eq!(fs::read(path).unwrap(), b"not a sqlite database");
 }

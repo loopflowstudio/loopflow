@@ -23,22 +23,20 @@ step() { printf '\n== %s ==\n' "$1"; }
 
 step "placed Home"
 local_home="$(lf home id)"
-placed_home="$(lf status "$wave" --json | jq -er '.wave.home.id')"
+placed_home="$(lf wave status "$wave" --json | jq -er '.wave.home.id')"
 if [ "$local_home" != "$placed_home" ]; then
   printf 'Wave %s is not placed on this Home\n' "$wave" >&2
   exit 1
 fi
 printf 'Wave %s is placed on this Home\n' "$wave"
 
-lf_home="${LF_CONTROL_HOME:-${LF_HOME:-$HOME/.lf}}"
-lf_db_path="${LF_CONTROL_DB_PATH:-${LF_DB_PATH:-$lf_home/loopflow.db}}"
+lf_home="${LF_HOME:-$HOME/.lf}"
 minimal_env=(
   env -i
   "HOME=$HOME"
   "USER=${USER:-}"
   "PATH=$PATH"
   "LF_HOME=$lf_home"
-  "LF_DB_PATH=$lf_db_path"
   "TMPDIR=${TMPDIR:-/tmp}"
   "LANG=${LANG:-C}"
 )
@@ -63,9 +61,9 @@ step "unattended tool path"
   exit "$missing"
 '
 step "host-local provider authority"
-auth_status="$("${minimal_env[@]}" lf auth accounts --verify)"
+auth_status="$("${minimal_env[@]}" lf account --json)"
 printf '%s\n' "$auth_status"
-if ! grep -q 'live active' <<<"$auth_status"; then
+if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
   printf 'no managed provider account verified live from the Home store\n' >&2
   exit 1
 fi

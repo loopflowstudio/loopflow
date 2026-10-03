@@ -3,17 +3,86 @@
 //! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
 //! Repo config overrides global. Additive keys (docs, context, exclude, summaries) combine.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(test))]
+use crate::engine::agent::check_cli_available;
+use crate::engine::context_budget::BudgetKey;
 use crate::engine::error::LoadError;
 
-/// Agent used when neither the caller, config, nor skill chooses one.
+/// Request participant carried across foreground launches, including SSH.
+/// Only a non-empty value overrides personal configuration and Git.
+pub const USER_NAME_ENV: &str = "LF_USER_NAME";
+
+#[derive(Debug, Deserialize)]
+struct UserConfig {
+    name: Option<String>,
+}
+
+/// Resolve a display name from personal Loopflow configuration or Git's user.name.
+pub fn load_user_name() -> Result<Option<String>, LoadError> {
+    if let Some(config) = load_yaml_file(&global_config_path())? {
+        if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
+            let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
+                LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+            })?;
+            if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
+                return Ok(Some(name));
+            }
+        }
+    }
+    let Some(output) = Command::new("git")
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+    else {
+        return Ok(None);
+    };
+    Ok(std::str::from_utf8(&output.stdout)
+        .ok()
+        .and_then(normalize_user_name))
+}
+
+/// Resolve a direct invocation's participant before execution moves Homes.
+pub fn participant_name() -> Result<Option<String>, LoadError> {
+    match std::env::var(USER_NAME_ENV) {
+        Ok(name) => match normalize_user_name(&name) {
+            Some(name) => Ok(Some(name)),
+            None => load_user_name(),
+        },
+        Err(std::env::VarError::NotPresent) => load_user_name(),
+        Err(error) => Err(LoadError::InvalidFlow(format!(
+            "Invalid {USER_NAME_ENV}: {error}"
+        ))),
+    }
+}
+
+pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Agents Loopflow can drive, in the order it prefers them.
+const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
+
+/// Agent used when neither the caller, config, nor skill chooses one: the
+/// first known agent installed on this machine.
 pub fn default_agent() -> &'static str {
-    "codex"
+    #[cfg(test)]
+    let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
+    #[cfg(not(test))]
+    let is_installed = check_cli_available;
+    installed_agent(is_installed).unwrap_or(KNOWN_AGENTS[0])
+}
+
+fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
+    KNOWN_AGENTS.into_iter().find(|agent| is_installed(agent))
 }
 
 /// Keys that combine lists from global + repo config.
@@ -39,70 +108,10 @@ fn default_summary_agent() -> String {
     default_agent().to_string()
 }
 
-/// Autoprune configuration.
-#[derive(Debug, Clone, Serialize)]
-pub struct AutopruneConfig {
-    #[serde(default = "default_autoprune_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_poll_interval")]
-    pub poll_interval_seconds: u64,
-}
-
-fn default_autoprune_enabled() -> bool {
-    true
-}
-
-fn default_poll_interval() -> u64 {
-    900
-}
-
-impl Default for AutopruneConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_autoprune_enabled(),
-            poll_interval_seconds: default_poll_interval(),
-        }
-    }
-}
-
-/// Intermediate representation for deserializing `autoprune: true` or `autoprune: { ... }`.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum AutopruneRaw {
-    Bool(bool),
-    Config {
-        #[serde(default = "default_autoprune_enabled")]
-        enabled: bool,
-        #[serde(default = "default_poll_interval")]
-        poll_interval_seconds: u64,
-    },
-}
-
-impl<'de> Deserialize<'de> for AutopruneConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        match AutopruneRaw::deserialize(deserializer)? {
-            AutopruneRaw::Bool(enabled) => Ok(Self {
-                enabled,
-                poll_interval_seconds: default_poll_interval(),
-            }),
-            AutopruneRaw::Config {
-                enabled,
-                poll_interval_seconds,
-            } => Ok(Self {
-                enabled,
-                poll_interval_seconds,
-            }),
-        }
-    }
-}
-
 /// Where interactive sessions launch.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum LaunchTarget {
+pub enum ExecTarget {
     #[default]
     Tui,
     Ide,
@@ -112,8 +121,8 @@ pub enum LaunchTarget {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionConfig {
     #[serde(default)]
-    pub launch: LaunchTarget,
-    /// Home-local terminal application used to present detached human sessions.
+    pub launch: ExecTarget,
+    /// Home-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
 }
@@ -174,6 +183,12 @@ pub struct PmConfig {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub automation: AutomationConfig,
+    #[serde(default)]
+    pub context_budgets: BTreeMap<BudgetKey, usize>,
+    #[serde(skip)]
+    pub context_budget_sources: BTreeMap<BudgetKey, String>,
     /// Agent in format harness:model (e.g., claude:opus, codex)
     #[serde(default)]
     pub agent: Option<String>,
@@ -226,10 +241,6 @@ pub struct Config {
     #[serde(default)]
     pub paste: bool,
 
-    /// Default directions for all tasks
-    #[serde(default)]
-    pub direction: Option<Vec<String>>,
-
     /// Summaries to include
     #[serde(default)]
     pub summaries: Vec<SummaryConfig>,
@@ -239,8 +250,6 @@ pub struct Config {
     pub summary_tokens: usize,
 
     /// Autoprune configuration
-    #[serde(default)]
-    pub autoprune: AutopruneConfig,
 
     /// Release targets and scoping rules.
     #[serde(default)]
@@ -263,9 +272,29 @@ fn default_summary_tokens() -> usize {
     5000
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutomationConfig {
+    pub enroll_new_tasks: bool,
+    pub retries: u32,
+    pub timeout_reruns: u32,
+}
+
+impl Default for AutomationConfig {
+    fn default() -> Self {
+        Self {
+            enroll_new_tasks: true,
+            retries: 1,
+            timeout_reruns: 1,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
+            context_budgets: Default::default(),
+            context_budget_sources: Default::default(),
             agent: None,
             supported_harnesses: Vec::new(),
             yolo: false,
@@ -275,14 +304,13 @@ impl Default for Config {
             context: Vec::new(),
             exclude: Vec::new(),
             session: SessionConfig::default(),
+            automation: AutomationConfig::default(),
             docs: Vec::new(),
             diff: false,
             diff_files: false,
             paste: false,
-            direction: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
-            autoprune: AutopruneConfig::default(),
             release: ReleaseConfig::default(),
             linear: LinearConfig::default(),
             pm: None,
@@ -353,6 +381,9 @@ fn merge_config_values(
                     } else {
                         global_map.insert(key, value);
                     }
+                } else if key_str == "context_budgets" {
+                    let previous = global_map.remove(&key);
+                    global_map.insert(key, merge_config_values(previous, Some(value)));
                 } else {
                     // Repo overrides
                     global_map.insert(key, value);
@@ -381,11 +412,30 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
         return Ok(None);
     }
 
+    let mut sources = BTreeMap::new();
+    for (data, path) in [
+        (&global_data, Some(&global_path)),
+        (&repo_data, repo_path.as_ref()),
+    ] {
+        if let (Some(data), Some(path)) = (data, path) {
+            if let Some(budgets) = data.get("context_budgets") {
+                let budgets: BTreeMap<BudgetKey, usize> =
+                    serde_yaml_ng::from_value(budgets.clone()).map_err(|e| {
+                        LoadError::InvalidFlow(format!(
+                            "Invalid context_budgets in {}: {e}",
+                            path.display()
+                        ))
+                    })?;
+                sources.extend(budgets.keys().map(|key| (*key, path.display().to_string())));
+            }
+        }
+    }
     let merged = merge_config_values(global_data, repo_data);
 
-    let config: Config = serde_yaml_ng::from_value(merged)
+    let mut config: Config = serde_yaml_ng::from_value(merged)
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
+    config.context_budget_sources = sources;
     Ok(Some(config))
 }
 
@@ -400,13 +450,7 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
 }
 
 fn global_config_path() -> PathBuf {
-    if let Ok(home) = std::env::var("LF_HOME") {
-        PathBuf::from(home).join("config.yaml")
-    } else {
-        dirs::home_dir()
-            .map(|home| home.join(".lf/config.yaml"))
-            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
-    }
+    crate::store::lf_home_dir().join("config.yaml")
 }
 
 /// Load only the repository-owned config, without inheriting user-global values.
@@ -430,6 +474,13 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_agent_is_the_one_installed() {
+        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(installed_agent(|_| true), Some("codex"));
+        assert_eq!(installed_agent(|_| false), None);
+    }
 
     // ==========================================================================
     // parse_agent tests
@@ -512,31 +563,14 @@ linear:
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
-        assert_eq!(config.session.launch, LaunchTarget::Tui);
-        assert!(config.direction.is_none());
+        assert_eq!(config.session.launch, ExecTarget::Tui);
         assert!(config.release.targets.is_empty());
     }
 
     #[test]
     fn default_session_config() {
         let session = SessionConfig::default();
-        assert_eq!(session.launch, LaunchTarget::Tui);
-    }
-
-    #[test]
-    fn default_autoprune_config() {
-        let autoprune = AutopruneConfig::default();
-        assert!(autoprune.enabled);
-        assert_eq!(autoprune.poll_interval_seconds, 900);
-    }
-
-    #[test]
-    fn autoprune_config_from_empty_yaml() {
-        // When deserialized from YAML, gets proper defaults
-        let yaml = "autoprune: {}\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
-        assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 900);
+        assert_eq!(session.launch, ExecTarget::Tui);
     }
 
     // ==========================================================================
@@ -603,27 +637,13 @@ exclude:
     }
 
     #[test]
-    fn config_from_yaml_direction_as_list() {
-        let yaml = r#"
-direction:
-  - architect
-  - concise
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(
-            config.direction,
-            Some(vec!["architect".to_string(), "concise".to_string()])
-        );
-    }
-
-    #[test]
     fn config_from_yaml_session_launch_tui() {
         let yaml = r#"
 session:
   launch: tui
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, LaunchTarget::Tui);
+        assert_eq!(config.session.launch, ExecTarget::Tui);
     }
 
     #[test]
@@ -633,7 +653,7 @@ session:
   launch: ide
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, LaunchTarget::Ide);
+        assert_eq!(config.session.launch, ExecTarget::Ide);
     }
 
     #[test]
@@ -644,44 +664,6 @@ session:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.session.terminal.as_deref(), Some("Ghostty"));
-    }
-
-    #[test]
-    fn config_from_yaml_autoprune_bool_true() {
-        let yaml = "autoprune: true\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 900);
-    }
-
-    #[test]
-    fn config_from_yaml_autoprune_bool_false() {
-        let yaml = "autoprune: false\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(!config.autoprune.enabled);
-    }
-
-    #[test]
-    fn config_from_yaml_autoprune_object() {
-        let yaml = r#"
-autoprune:
-  enabled: true
-  poll_interval_seconds: 120
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 120);
-    }
-
-    #[test]
-    fn config_from_yaml_autoprune_object_partial() {
-        let yaml = r#"
-autoprune:
-  enabled: true
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 900);
     }
 
     #[test]

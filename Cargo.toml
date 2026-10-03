@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.12.19"
+version = "0.12.31"
 edition = "2021"
 license = "MIT"
 
@@ -28,6 +28,14 @@ opt-level = 3
 
 [profile.test.package.sha2]
 opt-level = 3
+
+# Schema setup and validation run in every CLI test process. Optimize SQLite's
+# C engine while keeping application code in the ordinary debug profile.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 2
+
+[profile.test.package.libsqlite3-sys]
+opt-level = 2
 
 [workspace.metadata.dist]
 cargo-dist-version = "0.27.0"

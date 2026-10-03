@@ -1,0 +1,97 @@
+{
+  "session_id": "conversation-a",
+  "task_pr_id": null,
+  "repo": "/repo",
+  "worktree": "/repo.task",
+  "task_id": "task_22222222222222222222222222222222",
+  "wave_id": null,
+  "task_identifier": "W2-1",
+  "wave_name": null,
+  "skill": "implement",
+  "first_provider_attempt_at": 11,
+  "usage": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "total_input_tokens": null,
+    "peak_input_tokens": null,
+    "context_window_tokens": null,
+    "reasoning_tokens": null,
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
+    "cost_usd": null,
+    "streams": 0,
+    "final_streams": 0,
+    "gaps": 0
+  },
+  "evidence_gaps": 0,
+  "harness": "codex",
+  "model": null,
+  "surface": "headless",
+  "providers": [
+    {
+      "reference": {
+        "kind": "native_turn",
+        "thread": "thread-a",
+        "turn": "turn-0",
+        "start_seq": 1,
+        "completion_seq": 3
+      },
+      "exec_id": null,
+      "task_id": null,
+      "wave_id": null,
+      "started_at": 11,
+      "completed_at": 13,
+      "outcome": "failed",
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_input_tokens": null,
+        "peak_input_tokens": null,
+        "context_window_tokens": null,
+        "reasoning_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null,
+        "streams": 0,
+        "final_streams": 0,
+        "gaps": 0
+      }
+    },
+    {
+      "reference": {
+        "kind": "native_turn",
+        "thread": "thread-a",
+        "turn": "turn-1",
+        "start_seq": 4,
+        "completion_seq": 6
+      },
+      "exec_id": "22222222-2222-4222-8222-222222222222",
+      "task_id": "task_22222222222222222222222222222222",
+      "wave_id": null,
+      "started_at": 16,
+      "completed_at": 18,
+      "outcome": "completed",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": null,
+        "total_input_tokens": null,
+        "peak_input_tokens": null,
+        "context_window_tokens": null,
+        "reasoning_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null,
+        "cost_usd": null,
+        "streams": 1,
+        "final_streams": 0,
+        "gaps": 1
+      }
+    }
+  ],
+  "work_source": null,
+  "artifact_key": "run_00000000000000000000000000000001",
+  "captured": 12,
+  "caller_artifact_key": null,
+  "observed_at": 10,
+  "recorded_outcome": "completed",
+  "recorded_at": 24
+}

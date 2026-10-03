@@ -23,7 +23,8 @@ enum RoadmapTaskAction: Equatable {
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     guard task.runtime != nil else {
-        return task.task.completed ? nil : .run
+        guard let start = task.flow.control(.start), start.unavailable == nil else { return nil }
+        return .run
     }
     switch task.actions.recommended {
     case .resume: return .resume
@@ -44,7 +45,7 @@ private struct RoadmapTaskSelection: Identifiable {
 
 /// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
 /// re-shapes it into a flat, cross-wave, condition-grouped list; ROADMAP keeps
-/// the Wave › Project › Task tree.
+/// the Wave › Task tree.
 enum WorkLens: String, CaseIterable, Identifiable {
     case now
     case roadmap
@@ -72,16 +73,11 @@ struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    // Externally-owned singleton: observe it, don't @StateObject-own it (see
-    // WaveDetailPane) — the create-and-own lifecycle fires the publisher during
-    // the first body pass and logs an AttributeGraph cycle at cold launch.
-    @ObservedObject private var terminalStore = TaskTerminalStore.shared
     @State private var model: PodiumModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
-    @State private var workspaceSelection: RoadmapTaskSelection?
 
     init(
         repoPath: String?,
@@ -114,22 +110,8 @@ struct RoadmapView: View {
         return model.rosterWave(id: selection.id)?.api
     }
 
-    private var selectedProject: (wave: WaveRoadmap, project: RoadmapProject)? {
-        guard let selection else { return nil }
-        switch selection.kind {
-        case .project:
-            return model.project(id: selection.id)
-        case .task:
-            guard let task = model.task(id: selection.id) else { return nil }
-            return (task.wave, task.project)
-        case .wave:
-            return nil
-        }
-    }
-
     private var selectedTask: (
         wave: WaveRoadmap,
-        project: RoadmapProject,
         task: RoadmapTask
     )? {
         guard let selection, selection.kind == .task else { return nil }
@@ -159,16 +141,6 @@ struct RoadmapView: View {
                 if Task.isCancelled { return }
                 await refresh()
             }
-        }
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
         }
     }
 
@@ -228,12 +200,6 @@ struct RoadmapView: View {
                     .buttonStyle(.plain)
                     .disabled(selection == .wave(id: waveId))
             }
-            if let project = selectedProject?.project {
-                breadcrumbSeparator
-                Button(project.project.name) { selection = .project(id: project.id) }
-                    .buttonStyle(.plain)
-                    .disabled(selection == .project(id: project.id))
-            }
             if let task = selectedTask?.task {
                 breadcrumbSeparator
                 Text(task.task.identifier)
@@ -259,7 +225,7 @@ struct RoadmapView: View {
             case .wave:
                 selectedWaveRoadmap?.wave.name ?? selectedRosterWave?.name ?? "Wave"
             case .project:
-                selectedProject?.project.project.name ?? "Project"
+                selectedWaveRoadmap?.wave.name ?? "Wave"
             case .task:
                 selectedTask?.task.task.name ?? "Task"
             }
@@ -275,7 +241,7 @@ struct RoadmapView: View {
             case .wave:
                 selectedWaveRoadmap?.wave.goal ?? "No readable plan for this Wave"
             case .project:
-                selectedProject?.project.project.definition ?? "Project unavailable"
+                selectedWaveRoadmap?.wave.goal ?? "Wave unavailable"
             case .task:
                 selectedTask?.task.condition.reason ?? "Task unavailable"
             }
@@ -299,7 +265,7 @@ struct RoadmapView: View {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Waves without readable Projects remain in the Waves sidebar.")
+                description: Text("Waves without readable chapters remain in the Waves sidebar.")
             )
             .accessibilityIdentifier("podium-work-empty")
         } else {
@@ -326,13 +292,8 @@ struct RoadmapView: View {
                 missingFocus("No planned Work for this Wave")
             }
         case .project:
-            if let selectedProject {
-                focusedScroll {
-                    projectCard(selectedProject.project, wave: selectedProject.wave.wave)
-                }
-            } else {
-                missingFocus("Project unavailable")
-            }
+            if let roadmap = selectedWaveRoadmap { focusedScroll { waveCard(roadmap) } }
+            else { missingFocus("Chapter unavailable") }
         case .task:
             if let selectedTask {
                 focusedScroll {
@@ -429,28 +390,9 @@ struct RoadmapView: View {
                 openWave(roadmap.wave)
             },
             onRefresh: { await refresh() },
-            onSetPaused: { paused in
-                try await model.setWavePaused(
-                    waveId: roadmap.wave.id,
-                    paused: paused
-                )
-            },
             onError: { controlError = $0 },
             onTaskAction: { task, action in
                 perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
-            },
-            onOpenWorktree: openWorktree
-        )
-    }
-
-    private func projectCard(_ project: RoadmapProject, wave: WaveSnapshot) -> some View {
-        RoadmapProjectCard(
-            project: project,
-            selection: selection,
-            activeControlId: activeControlId,
-            onSelect: { selected in selection = selected },
-            onTaskAction: { task, action in
-                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
             },
             onOpenWorktree: openWorktree
         )
@@ -538,7 +480,7 @@ struct RoadmapView: View {
                     case .run:
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     case .resume:
-                        try LocalWaveAgentLauncher.resumeTask(repoPath: repo, issue: issue)
+                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     }
                 }.value
                 await refresh()
@@ -565,152 +507,6 @@ struct RoadmapView: View {
     }
 }
 
-/// A Wave's placed Home on its row: stable identity and current route, plus the
-/// probed liveness and the *one* contextual action the shared `HomeRuntimeDto`
-/// dictates. The app never does SSH — `lf home probe` and `lf start` route by
-/// placement, including to remote Homes. Probed once per
-/// Wave card on appear (local reads are instant; a remote Home costs one routed
-/// probe), never once per row and never on the 15s roadmap poll.
-struct HomeControl: View {
-    let wave: WaveSnapshot
-    let onOpen: () -> Void
-    let onRefresh: () async -> Void
-    let onSetPaused: (Bool) async throws -> Void
-    let onError: (String) -> Void
-
-    @Environment(\.palette) private var palette
-    @State private var runtime: HomeRuntime?
-    @State private var probeError: String?
-    @State private var isProbing = false
-    @State private var isActing = false
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: Spacing.xxs) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "house")
-                    .font(Typography.caption(9))
-                    .foregroundStyle(palette.textSecondary)
-                Text(wave.home.route == "local" ? wave.home.id : wave.home.route)
-                    .font(Typography.caption(10).weight(.medium))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                if isProbing {
-                    ProgressView().controlSize(.small)
-                } else if let runtime {
-                    stateChip(runtime.state)
-                }
-            }
-            HStack(spacing: Spacing.xs) {
-                turnAction
-                homeAction
-            }
-        }
-        .task(id: wave.id) { await probe() }
-    }
-
-    @ViewBuilder
-    private var turnAction: some View {
-        Group {
-            if isActing {
-                ProgressView().controlSize(.small)
-            } else {
-                Button(wave.paused ? "Resume" : "Pause") {
-                    Task { await setPaused(!wave.paused) }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(
-                    wave.paused
-                        ? "Enable new turns for this Wave"
-                        : "Refuse new turns while the listener keeps serving"
-                )
-                .accessibilityIdentifier("wave-turn-control-\(wave.id)")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var homeAction: some View {
-        if !isActing, let runtime {
-            switch runtime.action {
-            case .attach:
-                Button("Open") { onOpen() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .help(runtime.endpoint.map { "Attach to \($0)" } ?? "Open the Wave")
-            case .start(let homeId):
-                Button("Start on \(homeId)") { Task { await start() } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            case .reason(let message):
-                Text(message)
-                    .font(Typography.caption(9))
-                    .foregroundStyle(Color.statusWarning)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
-            }
-        } else if let probeError {
-            Text(probeError)
-                .font(Typography.caption(9))
-                .foregroundStyle(Color.statusError)
-                .lineLimit(2)
-        }
-    }
-
-    private func stateChip(_ state: HomeState) -> some View {
-        let (label, color): (String, Color) = switch state {
-        case .running: ("running", .statusSuccess)
-        case .stopped: ("stopped", .statusNeutral)
-        case .unreachable: ("unreachable", .statusError)
-        case .unknown: ("unknown", .statusWarning)
-        }
-        return Text(label)
-            .font(Typography.caption(9).weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    @MainActor
-    private func probe() async {
-        isProbing = true
-        defer { isProbing = false }
-        do {
-            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
-            probeError = nil
-        } catch {
-            probeError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func start() async {
-        isActing = true
-        defer { isActing = false }
-        do {
-            _ = try await RegistryQueryLocal.shared.start(wave: wave.name, cwd: wave.repo)
-            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
-            await onRefresh()
-            onOpen()
-        } catch {
-            onError(error.localizedDescription)
-        }
-    }
-
-    @MainActor
-    private func setPaused(_ paused: Bool) async {
-        isActing = true
-        defer { isActing = false }
-        do {
-            try await onSetPaused(paused)
-        } catch {
-            onError(error.localizedDescription)
-        }
-    }
-}
-
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
     let selection: WorkReference?
@@ -718,7 +514,6 @@ private struct RoadmapWaveCard: View {
     let onSelect: (WorkReference) -> Void
     let onOpen: () -> Void
     let onRefresh: () async -> Void
-    let onSetPaused: (Bool) async throws -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -730,29 +525,13 @@ private struct RoadmapWaveCard: View {
             HStack(alignment: .top, spacing: Spacing.md) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(spacing: Spacing.sm) {
-                        Circle()
-                            .fill(
-                                roadmap.wave.paused
-                                    ? WaveLensColor.blue.glow
-                                    : roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral
-                            )
-                            .frame(width: 7, height: 7)
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
                             .foregroundStyle(palette.text)
                         Text(roadmap.wave.status.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
-                        if roadmap.wave.paused {
-                            Text("paused")
-                                .font(Typography.caption(9).weight(.semibold))
-                                .foregroundStyle(WaveLensColor.blue.glow)
-                                .padding(.horizontal, Spacing.xs)
-                                .padding(.vertical, 1)
-                                .background(WaveLensColor.blue.glow.opacity(0.12))
-                                .clipShape(Capsule())
-                                .accessibilityIdentifier("wave-paused-\(roadmap.wave.id)")
-                        }
+
                     }
                     if !roadmap.wave.goal.isEmpty {
                         Text(roadmap.wave.goal)
@@ -767,43 +546,27 @@ private struct RoadmapWaveCard: View {
                     selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
-                HomeControl(
-                    wave: roadmap.wave,
-                    onOpen: onOpen,
-                    onRefresh: onRefresh,
-                    onSetPaused: onSetPaused,
-                    onError: onError
-                )
+                Text(roadmap.wave.home.route == "local" ? roadmap.wave.home.id : roadmap.wave.home.route)
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
             }
 
-            switch roadmap.projects {
+            if let chapter = roadmap.currentProject { WaveChapterView(chapter: chapter) }
+            switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle")
-                    .font(Typography.caption(11))
-                    .foregroundStyle(Color.statusWarning)
-                    .textSelection(.enabled)
-            case .available(let projects, let truncated):
-                if projects.isEmpty {
-                    Text("No Project or Task rows in the local plan snapshot.")
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                } else {
-                    ForEach(projects) { project in
-                        RoadmapProjectCard(
-                            project: project,
-                            selection: selection,
-                            activeControlId: activeControlId,
-                            onSelect: onSelect,
-                            onTaskAction: onTaskAction,
-                            onOpenWorktree: onOpenWorktree
-                        )
-                    }
+                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(Color.statusWarning)
+            case .available(let tasks, let truncated):
+                if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                ForEach(tasks) { task in
+                    RoadmapTaskRow(task: task, isSelected: selection == .task(id: task.id),
+                        activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },
+                        onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
-                if truncated {
-                    Text("Older plan rows are truncated.")
-                        .font(Typography.caption(10))
-                        .foregroundStyle(Color.statusWarning)
-                }
+                if truncated { Text("Older Tasks are truncated.").foregroundStyle(Color.statusWarning) }
+            }
+            ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(Color.statusWarning)
             }
         }
         .padding(Spacing.lg)
@@ -821,81 +584,6 @@ private struct RoadmapWaveCard: View {
     }
 }
 
-private struct RoadmapProjectCard: View {
-    let project: RoadmapProject
-    let selection: WorkReference?
-    let activeControlId: String?
-    let onSelect: (WorkReference) -> Void
-    let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(project.project.name)
-                    .font(Typography.sectionTitle(15))
-                    .foregroundStyle(palette.text)
-                sectionBadge(project.section)
-                Spacer()
-                Text(project.nextMove.owner.rawValue)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSelect(.project(id: project.id))
-            }
-            if !project.project.definition.isEmpty {
-                Text(project.project.definition)
-                    .font(Typography.caption(11))
-                    .foregroundStyle(palette.textSecondary)
-                    .lineLimit(2)
-            }
-            if project.tasks.isEmpty {
-                Text(project.nextMove.reason)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-            } else {
-                ForEach(project.tasks) { task in
-                    RoadmapTaskRow(
-                        task: task,
-                        isSelected: selection == .task(id: task.id),
-                        activeControlId: activeControlId,
-                        onSelect: {
-                            onSelect(.task(id: task.id))
-                        },
-                        onAction: { action in onTaskAction(task, action) },
-                        onOpenWorktree: onOpenWorktree
-                    )
-                }
-            }
-        }
-        .padding(Spacing.md)
-        .background(
-            selection == .project(id: project.id)
-                ? Color.loopflowBurgundy.opacity(0.08)
-                : palette.surfaceMuted.opacity(0.6)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .accessibilityAddTraits(
-            selection == .project(id: project.id) ? [.isSelected] : []
-        )
-        .accessibilityIdentifier("podium-project-\(project.id)")
-    }
-
-    private func sectionBadge(_ section: RoadmapSection) -> some View {
-        Text(section.label)
-            .font(Typography.caption(9).weight(.semibold))
-            .foregroundStyle(section.color)
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 2)
-            .background(section.color.opacity(0.12))
-            .clipShape(Capsule())
-    }
-}
-
 struct RoadmapTaskRow: View {
     let task: RoadmapTask
     let isSelected: Bool
@@ -910,9 +598,9 @@ struct RoadmapTaskRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.task.completed ? "checkmark.circle.fill" : "circle")
+            Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.completed ? Color.statusSuccess : task.section.color)
+                .foregroundStyle(task.task.isSuccessful ? Color.statusSuccess : task.section.color)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -970,8 +658,8 @@ struct WorkChannelChips: View {
     var body: some View {
         HStack(spacing: Spacing.xs) {
             channel("Condition", task.condition.state.rawValue, task.condition.state.color)
-            channel("PM", task.task.completed ? "done" : "open",
-                    task.task.completed ? Color.statusSuccess : palette.textSecondary)
+            channel("PM", task.task.terminalLabel ?? "open",
+                    task.task.isSuccessful ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {
@@ -1112,7 +800,7 @@ private struct NowRowView: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                 Spacer()
-                Text("\(row.wave.name) · \(row.projectName)")
+                Text(row.wave.name)
                     .font(Typography.caption(9))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)

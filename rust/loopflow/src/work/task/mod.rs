@@ -57,7 +57,7 @@ impl CiState {
     }
 }
 
-/// The required check `lf pr land` greens itself, by clearing `scratch/`.
+/// The required check `lf task pr land` greens itself, by clearing `scratch/`.
 ///
 /// See [`CiCheck::land_time_precondition`] for what this class means and the one
 /// rule for admitting a name to it. `crate::ops::land::clear_scratch` is the step
@@ -75,17 +75,16 @@ pub struct CiCheck {
 
 impl CiCheck {
     /// Whether this check asserts a *land-time precondition* — a condition
-    /// `lf pr land` establishes itself, so no repair turn can green it.
+    /// `lf task pr land` establishes itself, so no repair turn can green it.
     ///
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
-    /// which is true of every PR carrying its own design doc — i.e. every Task PR
-    /// during first and loop, by construction — and
+    /// which is true of a PR carrying its own design doc before delivery, and
     /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
     /// body woken to "repair" it could only delete the Task's design artifact,
     /// to green a check land greens anyway.
     ///
-    /// A name belongs here only when an `lf pr land` step is what resolves it.
+    /// A name belongs here only when an `lf task pr land` step is what resolves it.
     /// This is not a catalogue of CI jobs, and it is not a mute button for checks
     /// that are merely hard to fix: a check anyone *could* fix by changing the
     /// tree does not belong here, however annoying it is.
@@ -121,19 +120,14 @@ impl CiObservation {
     /// Whether this reading makes a `ci-fix` repair *legal*: the current head is
     /// failing a required check that a repair turn could actually act on.
     ///
-    /// This asks only about legality. Whether a repair has already fired for this
-    /// exact failure is a separate question with a separate owner — the durable
-    /// CI incident, keyed on the incident identity and claimed by one landing
-    /// generation. Those two questions used to be conflated in one mutable JSON
-    /// marker on this struct, which meant the wake was deduplicated by a value
-    /// re-derived on every reconcile and committed only once a body had already
-    /// been born.
+    /// The landing supervisor owns execution; CI incidents record responses
+    /// without limiting how often the current failure can be repaired.
     ///
     /// A head whose failures are *all* land-time preconditions is red and not
     /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
     /// spends a full turn on work whose only successful action is destructive.
     /// The reading still reports the failure — this refuses the wake, it does not
-    /// deny the red — so `lf ci` and `lf task status` are unchanged.
+    /// deny the red — so `lf repo ci` and `lf task status` are unchanged.
     pub fn repair_legal(&self) -> bool {
         if self.state != CiState::Failing {
             return false;
@@ -154,7 +148,7 @@ impl CiObservation {
     /// [`CiCheck::land_time_precondition`] resolves at land.
     ///
     /// This is the dual of [`CiObservation::repair_legal`] within the failing
-    /// state: such a head holds nothing a Task body could repair (`lf pr land`
+    /// state: such a head holds nothing a Task body could repair (`lf task pr land`
     /// greens it by clearing `scratch/`), so it does not belong to CI repair.
     /// The action model and Waves supervision read it to stop recommending a
     /// doomed Resume or labelling settlement preparation as "fixing CI".
@@ -192,7 +186,7 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    /// Landing generation that won repair admission for this exact incident.
+    /// Landing generation that most recently responded to this incident.
     pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
@@ -358,9 +352,10 @@ pub struct TaskPr {
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    /// Another Task's PR this worktree was placed on, or `None` when rooted on
-    /// the default branch. `base_commit` is that parent's exact fork commit; the
-    /// link clears after the parent merges and this PR collapses onto main.
+    /// Selected parent PR, or `None` when rooted on the default branch.
+    /// Selection does not move Git: `base_commit` remains the child's last
+    /// recorded fork until sync succeeds. The link clears after the parent
+    /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
@@ -595,7 +590,7 @@ pub enum PmWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.
@@ -627,6 +622,8 @@ pub struct Task {
     pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
+    /// Explicit choice for every Flow step; None uses the step/config defaults.
+    pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -664,6 +661,11 @@ pub enum TaskEventKind {
         handoff: crate::child::ChildBodyHandoff,
     },
     Progress {
+        summary: String,
+    },
+    FlowFinished {
+        invocation_id: String,
+        flow: String,
         summary: String,
     },
     /// A durable steer: direction handed to the Task. Folded into the run's
@@ -706,23 +708,17 @@ pub enum TaskEventKind {
 }
 
 impl TaskEventKind {
-    /// Whether the event crosses the required Task → Project boundary.
-    pub fn is_project_observable(&self) -> bool {
+    /// Whether the event should wake the owning Wave.
+    pub fn is_wave_observable(&self) -> bool {
         !matches!(
             self,
             Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
+                | Self::FlowFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
         )
-    }
-
-    /// Whether a Project-observable Task event also belongs in the root Wave.
-    /// This currently mirrors the Project boundary; the server-topology design
-    /// must decide whether the duplicate delivery remains necessary.
-    pub fn is_root_wave_observable(&self) -> bool {
-        self.is_project_observable()
     }
 }
 
@@ -734,30 +730,7 @@ pub struct TaskEvent {
     pub created_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskObservation {
-    pub task_id: TaskId,
-    pub issue_identifier: String,
-    pub event_id: i64,
-    pub event: TaskEventKind,
-}
-
-impl TaskObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("task-{}-{}", self.task_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Task observation always serializes to structured JSON");
-        format!(
-            "<task_observation task_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.task_id, self.issue_identifier, self.event_id, payload
-        )
-    }
-}
-
-/// The durable cursor for streaming human Linear edits into one Task.
+/// The durable cursor for streaming Linear edits by participants into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
@@ -790,7 +763,7 @@ pub struct LinearObservationApply {
     pub observed_at: OffsetDateTime,
     /// A title/description edit to persist as one authored Steer.
     pub content_steer: Option<String>,
-    /// Human comments observed this pass, oldest first.
+    /// Participant comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
 }
 
@@ -816,7 +789,7 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskObservation, TaskPr, TaskPrId,
+        TaskId, TaskPr, TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -836,6 +809,7 @@ mod tests {
             project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -849,23 +823,6 @@ mod tests {
         assert_eq!(TaskId::parse(task.as_str()).unwrap(), task);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
-    }
-
-    #[test]
-    fn task_observation_has_a_stable_structured_inbox_identity() {
-        let observation = TaskObservation {
-            task_id: TaskId::from_raw("ts_example"),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 42,
-            event: super::TaskEventKind::Failed {
-                error: "provider stopped".to_string(),
-                resumable: true,
-            },
-        };
-
-        assert_eq!(observation.inbox_id(), "task-ts_example-42");
-        assert!(observation.prompt().contains("<task_observation"));
-        assert!(observation.prompt().contains("\"kind\":\"failed\""));
     }
 
     #[test]
@@ -1142,7 +1099,7 @@ mod tests {
     }
 
     /// A head red *only* on a land-time precondition is not a repair a body can
-    /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
+    /// perform: `lf task pr land` clears `scratch/`, and the only action a woken body
     /// could take is deleting the Task's design doc.
     ///
     /// The direction that matters is the second half. Suppression fires only when
@@ -1161,7 +1118,7 @@ mod tests {
         assert!(failing("h1", &[]).repair_legal());
 
         // The reading stays honest — this refuses the wake, it does not deny the
-        // red. Status and `lf ci` still name the failure.
+        // red. Status and `lf repo ci` still name the failure.
         let obs = failing("h1", &["scratch-clear"]);
         assert_eq!(obs.state, super::CiState::Failing);
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);

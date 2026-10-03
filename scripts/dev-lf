@@ -43,7 +43,8 @@ run_dev_lf() {
         echo "running: $repo/target/debug/lf $*" >&2
 
         exit_code=0
-        LOOPFLOW_DIRECTIVE_FILE="$directive_file" "$repo/target/debug/lf" "$@" || exit_code=$?
+        LF_BIN="$repo/target/debug/lf" LOOPFLOW_DIRECTIVE_FILE="$directive_file" \
+            "$repo/target/debug/lf" "$@" || exit_code=$?
         printf '%s\n' "$exit_code" >"$status_file"
     )
     run_status=$?

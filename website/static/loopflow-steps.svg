@@ -1,0 +1,20 @@
+<svg class="flow-diagram" viewBox="0 0 900 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="flow-steps-title">
+  <title id="flow-steps-title">One task, as you see it</title>
+  <defs>
+    <marker id="arrow-steps" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="flow-arrowhead"/>
+    </marker>
+  </defs>
+  <text x="40" y="75" class="flow-plain" text-anchor="middle">You ask</text>
+  <line x1="80" y1="70" x2="208" y2="70" class="flow-edge" marker-end="url(#arrow-steps)"/>
+  <rect x="210" y="44" width="170" height="52" rx="8" class="flow-person"/>
+  <text x="295" y="75" class="flow-node-label" text-anchor="middle">Make the plan</text>
+  <line x1="380" y1="70" x2="558" y2="70" class="flow-edge" marker-end="url(#arrow-steps)"/>
+  <text x="469" y="58" class="flow-edge-label" text-anchor="middle">builds, checks</text>
+  <rect x="560" y="44" width="170" height="52" rx="8" class="flow-person"/>
+  <text x="645" y="75" class="flow-node-label" text-anchor="middle">Review the demo</text>
+  <line x1="730" y1="70" x2="818" y2="70" class="flow-edge" marker-end="url(#arrow-steps)"/>
+  <text x="860" y="75" class="flow-plain" text-anchor="middle">Done</text>
+  <path d="M690 96 C 690 160, 600 160, 600 98" class="flow-edge flow-back" marker-end="url(#arrow-steps)"/>
+  <text x="645" y="178" class="flow-edge-label" text-anchor="middle">not yet: builds again</text>
+</svg>

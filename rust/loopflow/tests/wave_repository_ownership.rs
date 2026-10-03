@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::controller::wave::journal;
-use loopflow::controller::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -10,6 +8,7 @@ use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow::work::wave::relocate::relocate_wave;
 use loopflow::work::wave::{Wave, WaveLocator};
 use time::OffsetDateTime;
 
@@ -45,9 +44,6 @@ fn author_wave(repo: &Path, slug: &str, marker: &str) {
     let wave = repo.join("wave").join(slug);
     std::fs::create_dir_all(&wave).unwrap();
     std::fs::write(wave.join("GOAL.md"), format!("# {marker}\n")).unwrap();
-    let journal = journal::journal_path(repo, slug);
-    std::fs::create_dir_all(journal.parent().unwrap()).unwrap();
-    std::fs::write(journal, format!("{{\"repository\":\"{marker}\"}}\n")).unwrap();
     commit(repo, &format!("author {slug}"));
 }
 
@@ -60,30 +56,13 @@ fn registered_wave(repo: &Path, slug: &str) -> Wave {
     )
 }
 
-fn apply_status_truth(database: &Path) {
-    let connection = rusqlite::Connection::open(database).unwrap();
-    let has_retirement = connection
-        .prepare("PRAGMA table_info(waves)")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(1))
-        .unwrap()
-        .any(|column| column.is_ok_and(|column| column == "retired_at"));
-    if has_retirement {
-        return;
-    }
-    connection
-        .execute_batch(&loopflow_test_support::migration_sql_for_test(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            "status_truth",
-        ))
-        .unwrap();
-}
-
 fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("project-alpha").unwrap(),
             slug: "architecture".to_string(),
             name: "Architecture".to_string(),
@@ -115,6 +94,7 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         project_id: project.id.clone(),
         worktree: repo.join("task-worktree"),
         workspace_slug: "repository-owned-waves".to_string(),
+        agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -147,9 +127,6 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_RUN_ID")
         .env_remove("LF_ACCOUNT_LEASE")
         .output()
@@ -192,7 +169,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let alpha = registered_wave(&repo_a, "infrastructure");
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
@@ -209,6 +185,20 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             alias.display().to_string(),
         );
         store.create_wave(&legacy).await.unwrap();
+        let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
+        store.create_wave(&sibling).await.unwrap();
+        let snapshot: loopflow::pm::PmSnapshot =
+            serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                wave_id: legacy.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative-infrastructure".into(),
+                synced_at: 1,
+                snapshot: snapshot.clone(),
+            })
+            .await
+            .unwrap();
         let resolved = store
             .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
             .await
@@ -222,6 +212,30 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 .display()
                 .to_string()
         );
+        // Resolving one Wave repairs the repository scope for its sibling too.
+        for wave in [&legacy, &sibling] {
+            assert_eq!(
+                store.get_wave(wave.id()).await.unwrap().unwrap().repo(),
+                resolved.repo()
+            );
+        }
+        assert_eq!(
+            store
+                .pm_snapshot(legacy.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .snapshot,
+            snapshot
+        );
+        let observation = store
+            .pm_task_observation(resolved.repo(), "linear", "LOO-2")
+            .await
+            .unwrap();
+        assert_eq!(observation.state, loopflow::store::PlanningState::Available);
+        let detail = observation.record.unwrap();
+        assert_eq!(detail.item, snapshot.items[0]);
+        assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
     }
 
     let alpha_resolved =
@@ -243,9 +257,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         Err(WaveResolveError::RepositoryMismatch { .. })
     ));
 
-    // `lf ls` is scoped to the invoking repository: from repo_a only alpha's
+    // `lf wave list` is scoped to the invoking repository: from repo_a only alpha's
     // infrastructure Wave is listed, not repo_b's same-named beta.
-    let scoped = lf(&home, &repo_a, &["ls", "--json"]);
+    let scoped = lf(&home, &repo_a, &["wave", "list", "--json"]);
     let scoped_infra: Vec<_> = scoped
         .as_array()
         .unwrap()
@@ -256,7 +270,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(scoped_infra[0]["id"], alpha.id().as_str());
 
     // `--all` restores the machine-wide view: both same-named Waves appear.
-    let all = lf(&home, &repo_a, &["ls", "--all", "--json"]);
+    let all = lf(&home, &repo_a, &["wave", "list", "--all", "--json"]);
     assert_eq!(
         all.as_array()
             .unwrap()
@@ -266,14 +280,23 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         2
     );
     assert_eq!(
-        lf(&home, &repo_a, &["status", "infrastructure", "--json"])["wave"]["id"],
+        lf(
+            &home,
+            &repo_a,
+            &["wave", "status", "infrastructure", "--json"]
+        )["wave"]["id"],
         alpha.id().as_str()
     );
     assert_eq!(
-        lf(&home, &repo_b, &["status", "infrastructure", "--json"])["wave"]["id"],
+        lf(
+            &home,
+            &repo_b,
+            &["wave", "status", "infrastructure", "--json"]
+        )["wave"]["id"],
         beta.id().as_str()
     );
-    let human_list = String::from_utf8(lf_output(&home, &repo_a, &["ls"]).stdout).unwrap();
+    let human_list =
+        String::from_utf8(lf_output(&home, &repo_a, &["wave", "list"]).stdout).unwrap();
     assert!(human_list.contains("REPOSITORY"));
     assert!(human_list
         .lines()
@@ -282,8 +305,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(!human_list
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
-    // `--all` brings beta's repository back into the human listing.
-    let human_all = String::from_utf8(lf_output(&home, &repo_a, &["ls", "--all"]).stdout).unwrap();
+    // `--all` brings beta's repository back into the readable listing.
+    let human_all =
+        String::from_utf8(lf_output(&home, &repo_a, &["wave", "list", "--all"]).stdout).unwrap();
     assert!(human_all
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
@@ -301,9 +325,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         &home,
         &repo_b,
         &[
-            "work",
-            "place",
             "wave",
+            "place",
             alpha.id().as_str(),
             foreign_home.as_str(),
             "--json",
@@ -326,7 +349,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             provider: "linear".to_string(),
             initiative: "initiative-alpha".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();
@@ -364,22 +390,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(team_error.to_string().contains("repository Team"));
 
-    author_wave(&repo_a, "infrastructure/child", "nested");
-    let nested = registered_wave(&repo_a, "infrastructure/child");
-    store.create_wave(&nested).await.unwrap();
-    let nested_error = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
-        .await
-        .unwrap_err();
-    assert!(nested_error
-        .to_string()
-        .contains("contains registered Wave"));
-    assert!(repo_a.join("wave/infrastructure/child/GOAL.md").is_file());
-    store.delete_wave(nested.id()).await.unwrap();
-    std::fs::remove_dir_all(repo_a.join("wave/infrastructure/child")).unwrap();
-
-    author_wave(&repo_a, "infrastructure/child", "chord-child");
-    let child = registered_wave(&repo_a, "infrastructure/child").with_parent(alpha.id().clone());
+    author_wave(&repo_a, "infrastructure/child", "child");
+    let child = registered_wave(&repo_a, "child").with_parent(alpha.id().clone());
     store.create_wave(&child).await.unwrap();
+    author_wave(&repo_a, "infrastructure/child/leaf", "grandchild");
+    let grandchild = registered_wave(&repo_a, "leaf").with_parent(child.id().clone());
+    store.create_wave(&grandchild).await.unwrap();
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
@@ -389,7 +405,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             provider: "linear".to_string(),
             initiative: "initiative-occupied".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();
@@ -407,7 +426,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(divergence.to_string().contains("diverges"));
     assert!(repo_a.join("wave/infrastructure").is_dir());
     std::fs::remove_dir_all(repo_a.join("wave/platform")).unwrap();
-    std::fs::remove_dir_all(repo_a.join(".lf/journal/waves/platform")).unwrap();
     commit(&repo_a, "remove divergent target");
 
     rusqlite::Connection::open(&database)
@@ -423,7 +441,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(injected.to_string().contains("injected relocation failure"));
     assert_eq!(
-        store.get_wave(alpha.id()).await.unwrap().unwrap().name(),
+        store.get_wave(alpha.id()).await.unwrap().unwrap().slug(),
         "infrastructure"
     );
     assert!(repo_a.join("wave/infrastructure").is_dir());
@@ -438,28 +456,30 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         &home,
         &repo_a,
         &[
-            "work",
-            "relocate",
             "wave",
+            "rename",
             alpha.id().as_str(),
             "--name",
             "platform",
             "--json",
         ],
     );
-    assert_eq!(relocation["kind"], "relocated");
     assert_eq!(relocation["wave_id"], alpha.id().as_str());
-    assert_eq!(relocation["waves_moved"], 2);
+    assert_eq!(relocation["waves_moved"], 3);
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
-    assert_eq!(renamed.name(), "platform");
+    assert_eq!(renamed.slug(), "platform");
     assert_eq!(
         std::fs::read_to_string(repo_a.join("wave/platform/GOAL.md")).unwrap(),
         "# alpha\n"
     );
     assert!(!repo_a.join("wave/infrastructure").exists());
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
-    assert_eq!(renamed_child.name(), "platform/child");
+    assert_eq!(renamed_child.slug(), "platform/child");
     assert!(repo_a.join("wave/platform/child/GOAL.md").is_file());
+    let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_a.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
@@ -493,10 +513,15 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .display()
             .to_string()
     );
-    assert_eq!(moved.name(), "platform");
+    assert_eq!(moved.slug(), "platform");
     let moved_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(moved_child.repo(), moved.repo());
-    assert_eq!(moved_child.name(), "platform/child");
+    assert_eq!(moved_child.slug(), "platform/child");
+    let moved_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(moved_grandchild.repo(), moved.repo());
+    assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_d.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .pm_snapshot(alpha.id())
@@ -526,9 +551,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let preserved_task = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(preserved_task.wave_id, alpha.id().clone());
     assert_eq!(preserved_task.project_id, project.id);
-    assert!(journal::journal_path(&repo_d, "platform").is_file());
 
-    let status = lf(&home, &repo_d, &["status", "platform", "--json"]);
+    let status = lf(&home, &repo_d, &["wave", "status", "platform", "--json"]);
     assert_eq!(status["wave"]["id"], alpha.id().as_str());
 
     let error = relocate_wave(&store, alpha.id(), &repo_b, None, Some("hijacked"))
@@ -536,7 +560,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(error.to_string().contains("invoke relocation from"));
     assert_eq!(
-        store.get_wave(alpha.id()).await.unwrap().unwrap().name(),
+        store.get_wave(alpha.id()).await.unwrap().unwrap().slug(),
         "platform"
     );
     assert_eq!(
@@ -565,26 +589,16 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let wave = registered_wave(&source, "feedback");
     store.create_wave(&wave).await.unwrap();
 
     std::fs::remove_dir_all(&source).unwrap();
-    let disabled = lf(
-        &home,
-        &target,
-        &["work", "disable", "wave", wave.id().as_str(), "--json"],
-    );
-    assert_eq!(disabled["kind"], "disabled");
-    assert!(!disabled["enabled"].as_bool().unwrap());
-
     let relocated = lf(
         &home,
         &target,
         &[
-            "work",
-            "relocate",
             "wave",
+            "rename",
             wave.id().as_str(),
             "--repo",
             target.to_str().unwrap(),
@@ -599,13 +613,6 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
             .unwrap()
             .display()
             .to_string()
-    );
-    assert!(
-        !store
-            .placement(&WorkRef::Wave(wave.id().clone()))
-            .await
-            .unwrap()
-            .enabled
     );
 }
 
@@ -627,7 +634,6 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let identities = ["core", "ear", "theory"].map(|slug| {
         (
             registered_wave(&source, slug),
@@ -650,10 +656,10 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
             .await
             .unwrap();
         assert_eq!(receipt.wave_id, established.id().as_str());
-        commit(&source, &format!("relocate {}", established.name()));
+        commit(&source, &format!("relocate {}", established.slug()));
 
         let active = store
-            .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+            .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -672,13 +678,6 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
                 .unwrap(),
             WorkStatus::Abandoned
         );
-        assert!(
-            !store
-                .placement(&WorkRef::Wave(shadow.id().clone()))
-                .await
-                .unwrap()
-                .enabled
-        );
 
         let historical = resolve_managed_wave(
             Some(&store),
@@ -690,9 +689,10 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
         .unwrap();
         assert_eq!(historical.id(), shadow.id());
         assert!(historical.is_retired());
-        let historical_status =
-            String::from_utf8(lf_output(&home, &target, &["status", shadow.id().as_str()]).stdout)
-                .unwrap();
+        let historical_status = String::from_utf8(
+            lf_output(&home, &target, &["wave", "status", shadow.id().as_str()]).stdout,
+        )
+        .unwrap();
         assert!(historical_status.contains("retired at"));
         assert!(historical_status.contains(established.id().as_str()));
     }
@@ -722,7 +722,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     for (established, _) in &identities {
         assert_eq!(
             reopened
-                .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+                .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
                 .await
                 .unwrap()
                 .unwrap()
@@ -744,7 +744,6 @@ async fn relocation_refuses_meaningful_destination_history() {
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    apply_status_truth(&database);
     let established = registered_wave(&source, "core");
     store.create_wave(&established).await.unwrap();
 
@@ -757,8 +756,7 @@ async fn relocation_refuses_meaningful_destination_history() {
 
     let child_shadow = registered_wave(&target, "with-child");
     store.create_wave(&child_shadow).await.unwrap();
-    let child =
-        registered_wave(&target, "with-child/nested").with_parent(child_shadow.id().clone());
+    let child = registered_wave(&target, "nested").with_parent(child_shadow.id().clone());
     store.create_wave(&child).await.unwrap();
 
     let pm_shadow = registered_wave(&target, "with-pm");
@@ -769,7 +767,10 @@ async fn relocation_refuses_meaningful_destination_history() {
             provider: "linear".to_string(),
             initiative: "initiative-pm".to_string(),
             synced_at: 1,
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .await
         .unwrap();

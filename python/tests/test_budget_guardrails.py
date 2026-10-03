@@ -44,7 +44,7 @@ def test_budget_guardrail_blocks_projected_spend_over_budget(tmp_path: Path):
     assert "actual tracked spend: $55.00" in result.stdout
     assert "projected spend: $110.00" in result.stdout
     assert "verdict: BLOCK" in result.stdout
-    assert "stop and get human approval" in result.stderr
+    assert "stop and ask for approval" in result.stderr
 
 
 def test_budget_guardrail_supports_debit_credit_exports(tmp_path: Path):

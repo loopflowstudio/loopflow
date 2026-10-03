@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use loopflow::engine::{
-    drop_native_instruction_docs, format_prompt, gather_context, GatherContextOpts,
-    PromptFormatMode, Surface,
+    drop_duplicate_docs, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+    Surface,
 };
 
 #[derive(Parser, Debug)]
@@ -26,10 +26,6 @@ struct Args {
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     no_loopflow: bool,
-
-    /// Directions to apply (repeatable)
-    #[arg(long = "direction")]
-    directions: Vec<String>,
 
     /// Docs paths, globs, or directories to include
     #[arg(long = "docs", value_delimiter = ',')]
@@ -57,9 +53,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let wave = args
         .wave
         .or_else(loopflow::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&args.repo, wave));
 
     let opts = GatherContextOpts {
         repo_root: args.repo.clone(),
@@ -67,20 +60,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         message: None,
         operate: !args.no_loopflow,
         surface: args.surface.unwrap_or_default(),
-        directions: args.directions,
         docs: args.docs,
         files: Vec::new(),
         include_diff: args.diff,
         include_diff_files: args.diff_files,
         include_clipboard: args.clipboard,
         wave,
-        wave_memory,
         related_repos: Vec::new(),
     };
 
-    let mut gathered = gather_context(&opts)?;
-    let _ = drop_native_instruction_docs(gathered.components_mut(), &args.repo);
-    let prompt = format_prompt(PromptFormatMode::Full, gathered.components());
+    let mut components = gather_context(&opts)?;
+    let _ = drop_duplicate_docs(&mut components, &args.repo);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     println!("{prompt}");
 
     Ok(())

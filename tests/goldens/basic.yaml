@@ -2,7 +2,6 @@ name: basic
 repo: tests/parity/fixtures/basic
 skill: test
 surface: headless
-directions: []
 docs: []
 diff_files: false
 diff: false

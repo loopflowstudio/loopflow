@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::engine::error::GitError;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RebaseResult {
+pub struct MergeResult {
     pub success: bool,
     pub conflicts: Option<Vec<PathBuf>>,
     pub new_head: Option<String>,
@@ -244,7 +244,7 @@ pub fn checkout_new_branch_from(
     branch: &str,
     start_point: &str,
 ) -> Result<(), GitError> {
-    git_stdout(repo, &["checkout", "-b", branch, start_point])?;
+    git_stdout(repo, &["checkout", "--no-track", "-b", branch, start_point])?;
     Ok(())
 }
 
@@ -926,7 +926,7 @@ pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<()
 /// How to set up the branch when creating a worktree.
 #[derive(Debug)]
 pub enum WorktreeBranch<'a> {
-    /// `git worktree add -b <branch> <path> <start_point>`
+    /// `git worktree add --no-track -b <branch> <path> <start_point>`
     New { start_point: &'a str },
     /// `git worktree add --track -b <branch> <path> <remote>`
     Track { remote: &'a str },
@@ -957,6 +957,7 @@ pub(crate) fn worktree_add_inheriting(
             vec![
                 "worktree",
                 "add",
+                "--no-track",
                 "-b",
                 branch,
                 path_str.as_ref(),
@@ -1067,93 +1068,166 @@ pub fn is_merged_into(repo: &Path, branch: &str, target: &str) -> Result<bool, G
     is_squash_merged(repo, branch, target)
 }
 
-/// Find the fork point for a stacked branch whose parent was squash-merged.
-///
-/// When branch B is stacked on A, and A gets squash-merged into `target`,
-/// a plain rebase replays A's commits (already in target) causing conflicts.
-/// This function finds the last commit whose patch is already in `target`,
-/// so we can `rebase --onto target <fork_point>` to skip them.
-///
-/// Returns `None` if no commits are already in target (normal case).
-pub fn squash_merge_fork_point(repo: &Path, target: &str) -> Result<Option<String>, GitError> {
-    // `git cherry target HEAD` marks commits whose patches are already in target with `-`.
-    // We want the last `-` commit in a leading run — once we hit a `+` commit, stop.
-    let output = run_git(repo, &["cherry", target, "HEAD"])?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut last_absorbed = None;
-    for line in stdout.lines() {
-        if let Some(sha) = line.strip_prefix("- ") {
-            last_absorbed = Some(sha.trim().to_string());
-        } else {
-            // Hit a `+` (not-in-target) commit — stop scanning.
-            break;
-        }
-    }
-    Ok(last_absorbed)
-}
-
-pub fn rebase(
+/// Merge one target tree, retaining branch history. A squash-landed stack uses
+/// its recorded fork as the comparison base without adding synthetic ancestry.
+pub fn merge(
     worktree: &Path,
-    onto: &str,
-    base_commit: Option<&str>,
-) -> Result<RebaseResult, GitError> {
-    rebase_command(worktree, onto, base_commit)
-}
-
-fn rebase_command(
-    worktree: &Path,
-    onto: &str,
-    base_commit: Option<&str>,
-) -> Result<RebaseResult, GitError> {
+    target: &str,
+    fork_base: Option<&str>,
+) -> Result<MergeResult, GitError> {
     if let Some(state) = intervention_state(worktree)? {
         return Err(GitError::CommandFailed {
-            command: "git rebase".to_string(),
-            stderr: format!(
-                "refusing to start a rebase while a {state} operation is already in progress"
-            ),
+            command: "git merge".to_string(),
+            stderr: format!("refusing to merge while a {state} operation is in progress"),
         });
     }
-    let mut args = vec![
-        "-c",
-        "rerere.enabled=true",
-        "-c",
-        "rerere.autoupdate=false",
-        "rebase",
-    ];
-    if let Some(base) = base_commit {
-        args.extend(["--onto", onto, base]);
-    } else {
-        args.push(onto);
-    }
-    let output = run_git(worktree, &args)?;
-    if output.status.success() {
-        let new_head = git_stdout(worktree, &["rev-parse", "HEAD"])?
-            .trim()
-            .to_string();
-        return Ok(RebaseResult {
+    let target_sha = rev_parse(worktree, target)?;
+    let target = target_sha.as_str();
+    if is_ancestor(worktree, target, "HEAD")? {
+        return Ok(MergeResult {
             success: true,
             conflicts: None,
-            new_head: Some(new_head),
+            new_head: Some(rev_parse(worktree, "HEAD")?),
         });
     }
-
+    let comparison = match fork_base {
+        Some(base) if !is_ancestor(worktree, base, target)? => {
+            let tree = rev_parse(worktree, &format!("{target}^{{tree}}"))?;
+            Some(
+                git_stdout(
+                    worktree,
+                    &[
+                        "commit-tree",
+                        &tree,
+                        "-p",
+                        base,
+                        "-m",
+                        "lf sync: stack comparison tree",
+                    ],
+                )?
+                .trim()
+                .to_string(),
+            )
+        }
+        _ => None,
+    };
+    let merge_target = comparison.as_deref().unwrap_or(target);
+    let output = run_git(
+        worktree,
+        &[
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
+            "merge",
+            "--no-ff",
+            "--no-commit",
+            merge_target,
+        ],
+    )?;
+    if intervention_state(worktree)? == Some("merge") {
+        // Git has populated the index/worktree with its normal three-way merge.
+        // Record the real target before either committing or handing off recovery.
+        write_merge_target(worktree, target)?;
+        if fork_base.is_some() {
+            // Scratch belongs to the child, including deletions and cleanly
+            // merged parent additions. Restoring changed scratch paths also resolves
+            // modify/delete conflicts which a text merge driver cannot handle.
+            restore_scratch_from_head(worktree)?;
+        }
+        if output.status.success() || (fork_base.is_some() && list_conflicts(worktree)?.is_empty())
+        {
+            return continue_merge(worktree, None);
+        }
+    } else if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git merge".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
     let conflicts = list_conflicts(worktree)?;
-    Ok(RebaseResult {
-        success: false,
-        conflicts: if conflicts.is_empty() {
-            None
-        } else {
-            Some(conflicts)
-        },
-        new_head: None,
+    Ok(MergeResult {
+        success: output.status.success(),
+        conflicts: (!conflicts.is_empty()).then_some(conflicts),
+        new_head: output
+            .status
+            .success()
+            .then(|| rev_parse(worktree, "HEAD"))
+            .transpose()?,
     })
 }
 
-/// Stage the resolved conflict paths and continue an in-progress rebase.
-pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
+fn restore_scratch_from_head(worktree: &Path) -> Result<(), GitError> {
+    // Restore only paths changed in the merge index. Unrelated working edits
+    // and untracked child notes never enter this path list.
+    let paths = git_stdout(
+        worktree,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            "HEAD",
+            "--",
+            "scratch",
+        ],
+    )?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let child_paths = git_stdout(
+        worktree,
+        &[
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "-z",
+            "HEAD",
+            "--",
+            "scratch",
+        ],
+    )?;
+    let (restore, remove): (Vec<_>, Vec<_>) = paths
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .partition(|path| child_paths.split('\0').any(|child| child == *path));
+    // restore cannot resolve an unmerged path absent from the source tree.
+    for (mut args, paths) in [
+        (vec!["--literal-pathspecs", "rm", "-f", "--"], remove),
+        (
+            vec![
+                "--literal-pathspecs",
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+            ],
+            restore,
+        ),
+    ] {
+        if !paths.is_empty() {
+            args.extend(paths);
+            git_stdout(worktree, &args)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_merge_target(worktree: &Path, target: &str) -> Result<(), GitError> {
+    let directory = absolute_git_dir(worktree)?;
+    fs::write(directory.join("MERGE_HEAD"), format!("{target}\n"))?;
+    fs::write(directory.join("MERGE_MSG"), format!("Merge {target}\n"))?;
+    Ok(())
+}
+
+/// Stage the resolved conflict paths and complete an in-progress merge.
+pub fn continue_merge(worktree: &Path, target: Option<&str>) -> Result<MergeResult, GitError> {
+    if let Some(target) = target {
+        // Also runs after owner death between Git's merge and target replacement.
+        write_merge_target(worktree, target)?;
+    }
     let conflicts = list_conflicts(worktree)?;
     if !conflicts.is_empty() {
         let output = Command::new("git")
@@ -1179,23 +1253,20 @@ pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
             "rerere.autoupdate=false",
             "-c",
             "core.editor=true",
-            "rebase",
-            "--continue",
+            "commit",
+            "--no-edit",
         ],
     )?;
     if output.status.success() {
-        let new_head = git_stdout(worktree, &["rev-parse", "HEAD"])?
-            .trim()
-            .to_string();
-        return Ok(RebaseResult {
+        return Ok(MergeResult {
             success: true,
             conflicts: None,
-            new_head: Some(new_head),
+            new_head: Some(rev_parse(worktree, "HEAD")?),
         });
     }
 
     let conflicts = list_conflicts(worktree)?;
-    Ok(RebaseResult {
+    Ok(MergeResult {
         success: false,
         conflicts: (!conflicts.is_empty()).then_some(conflicts),
         new_head: None,
@@ -1232,9 +1303,9 @@ pub fn rerere_remaining(worktree: &Path) -> Result<Vec<PathBuf>, GitError> {
         .collect())
 }
 
-/// Abort an in-progress rebase and restore its pre-rebase state.
-pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
-    git_stdout(worktree, &["rebase", "--abort"])?;
+/// Abort an in-progress merge and restore its original state.
+pub fn abort_merge(worktree: &Path) -> Result<(), GitError> {
+    git_stdout(worktree, &["merge", "--abort"])?;
     Ok(())
 }
 
@@ -1462,7 +1533,7 @@ mod tests {
     }
 
     #[test]
-    fn git_rebase_succeeds_on_linear_history() {
+    fn git_merge_succeeds_on_linear_history() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");
         create_branch(repo.path(), "feature").expect("create branch");
@@ -1472,13 +1543,13 @@ mod tests {
         commit_file(repo.path(), "main.txt", "main");
 
         git_stdout(repo.path(), &["checkout", "feature"]).expect("checkout feature");
-        let result = rebase(repo.path(), "main", None).expect("rebase");
+        let result = merge(repo.path(), "main", None).expect("merge");
         assert!(result.success);
         assert!(result.new_head.is_some());
     }
 
     #[test]
-    fn git_rebase_can_preserve_and_continue_conflicts() {
+    fn git_merge_can_preserve_and_continue_conflicts() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "base\n");
         create_branch(repo.path(), "feature").expect("create branch");
@@ -1492,13 +1563,13 @@ mod tests {
         git_stdout(repo.path(), &["commit", "-m", "main change"]).expect("commit main");
         git_stdout(repo.path(), &["checkout", "feature"]).expect("checkout feature");
 
-        let conflicted = rebase(repo.path(), "main", None).expect("start manual rebase");
+        let conflicted = merge(repo.path(), "main", None).expect("start manual merge");
         assert!(!conflicted.success);
         assert_eq!(conflicted.conflicts, Some(vec![PathBuf::from("README.md")]));
         assert_eq!(list_conflicts(repo.path()).unwrap().len(), 1);
 
         fs::write(repo.path().join("README.md"), "main\nfeature\n").expect("resolve conflict");
-        let completed = continue_rebase(repo.path()).expect("continue rebase");
+        let completed = continue_merge(repo.path(), None).expect("continue merge");
         assert!(completed.success);
         assert_eq!(
             current_branch(repo.path()).unwrap(),

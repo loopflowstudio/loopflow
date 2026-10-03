@@ -27,7 +27,6 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -50,11 +49,9 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # stays stable across builds and macOS keeps previously granted permissions.
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
-ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
+ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
-MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"
-MACHINE_LF_GATE = Path.home() / ".lf-machine" / "install" / "gates" / "1" / "lf"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
 GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
@@ -62,9 +59,8 @@ GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
 
 def _app_environment(repo: Path) -> dict[str, str]:
     env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
-    for key in ("LF_HOME", "LF_DB_PATH"):
-        if value := os.environ.get(key):
-            env[key] = value
+    if value := os.environ.get("LF_HOME"):
+        env["LF_HOME"] = value
     return env
 
 
@@ -281,13 +277,11 @@ def cmd_run() -> int:
 
 
 def _print_run_debug_checklist() -> None:
-    """Print the manual review path for Wave Chat and work supervision."""
+    """Print the manual review path for Work and Session surfaces."""
     print("Review checklist:")
-    print("  1. Select a Wave: its conversation and work map should agree on identity.")
-    print("  2. Send while idle: Wave Chat should launch or reconnect to `lf wave`.")
-    print("  3. Send while turning: the composer should expose Steer and Interrupt & Send.")
-    print("  4. Verify Projects, Tasks, decisions, and PR delivery refresh from `lf status`.")
-    print("  5. Switch Waves: each conversation should retain its own endpoint and playhead.")
+    print("  1. Select a Wave: inspect its plan, Tasks and Runs.")
+    print("  2. Open a Session under a Task and verify its terminal is retained across navigation.")
+    print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
 
 
 def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
@@ -540,7 +534,7 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
-    _write_dev_control_config(app_dir / "Resources")
+    (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
@@ -558,51 +552,21 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
-def _write_dev_control_config(resources_dir: Path) -> None:
-    """Point the dev UI at the machine-selected Home's stable CLI gate."""
-    try:
-        state = json.loads(MACHINE_INSTALL_STATE.read_text())
-        artifacts = state["selection"]["artifact_set"]["artifacts"]
-        selected_cli = next(
-            artifact
-            for artifact in artifacts
-            if artifact["role"] == {"kind": "cli"}
-        )
-    except (FileNotFoundError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"Cannot resolve the machine-selected lf from {MACHINE_INSTALL_STATE}: {error}"
-        ) from error
-
-    if not MACHINE_LF_GATE.is_file() or not os.access(MACHINE_LF_GATE, os.X_OK):
-        raise RuntimeError(f"Machine lf gate is missing or not executable: {MACHINE_LF_GATE}")
-    with MACHINE_LF_GATE.open("rb") as gate:
-        gate_sha256 = hashlib.file_digest(gate, "sha256").hexdigest()
-    if gate_sha256 != selected_cli["sha256"]:
-        raise RuntimeError(
-            f"Machine lf gate {MACHINE_LF_GATE} does not match the active CLI artifact"
-        )
-
-    config = {"lf_path": str(MACHINE_LF_GATE)}
-    (resources_dir / DEV_CONTROL_CONFIG).write_text(json.dumps(config, indent=2) + "\n")
-
-
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. Compile its bundled control binary against the installed Home,
-    # but never grant it migration authority. Ordinary development binaries
-    # keep their isolated `.lf-dev` stores.
+    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # it has no authority to migrate the main Home.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",
-        "LOOPFLOW_BUILD_PROVENANCE=release",
+        "LOOPFLOW_BUILD_PROVENANCE=development",
         "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
         "cargo",
         "build",
         "--locked",
         "--bin",
         "lf",
-        "--bin",
-        "lfd",
+
         "--target-dir",
         str(target_dir),
     ]
@@ -612,7 +576,7 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
     if result.returncode != 0:
         raise RuntimeError("Failed to build bundled control binaries")
 
-    for binary in ("lf", "lfd"):
+    for binary in ("lf",):
         source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
@@ -692,7 +656,7 @@ def main() -> int:
                 "--output",
                 type=lambda p: Path(p).expanduser().resolve(),
                 required=True,
-                help="Contents/MacOS directory that receives lf and lfd",
+                help="Contents/MacOS directory that receives lf",
             )
     args = parser.parse_args()
 

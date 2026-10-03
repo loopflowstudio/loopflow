@@ -1,11 +1,10 @@
-"""CLI proofs with local remotes; package/release side effects use executables in PATH."""
+"""Checkout update proofs through the CLI with disposable local remotes."""
 
 import json
 import os
 import select
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -49,7 +48,6 @@ def checkout(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         key: value for key, value in os.environ.items() if not key.startswith(("LF_", "LOOPFLOW_"))
     }
     env["LF_HOME"] = str(tmp_path / "lf-home")
-    env["LF_DB_PATH"] = str(tmp_path / "lf-home/store.db")
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     return main, author, env
 
@@ -64,10 +62,20 @@ def test_main_refresh_repeats_and_observes_each_new_upstream(checkout: Checkout)
     main, author, env = checkout
     for name in ["first.txt", "second.txt"]:
         upstream = _advance(author, name)
-        _run(main, str(LF), "rebase", env=env)
+        _run(main, str(LF), "task", "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
-        _run(main, str(LF), "rebase", env=env)
+        _run(main, str(LF), "task", "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
+
+    journals = list((main / ".lf/journal/traces").glob("*/events.jsonl"))
+    assert len(journals) == 4
+    for journal in journals:
+        events = [json.loads(line) for line in journal.read_text().splitlines()]
+        assert events[0]["node"] == "exec"
+        assert all(event["trace_id"] == journal.parent.name for event in events)
+        assert events[0]["command"][-1] == "sync"
+        assert events[0]["event"] == "started"
+        assert events[-1]["event"] == "completed"
 
 
 def test_explicit_main_target_uses_one_refresh_snapshot(checkout: Checkout, tmp_path: Path) -> None:
@@ -101,7 +109,7 @@ def test_explicit_main_target_uses_one_refresh_snapshot(checkout: Checkout, tmp_
     env["FETCH_MARKER"] = str(tmp_path / "published")
     env["PATH"] = f"{binaries}:{env['PATH']}"
     for expected in [first, second]:
-        _run(main, str(LF), "rebase", "origin/main", env=env)
+        _run(main, str(LF), "task", "sync", "origin/main", env=env)
         assert _run(main, "git", "rev-parse", "origin/main") == expected
         for sha in [local, expected]:
             _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
@@ -120,10 +128,10 @@ def test_main_preserves_unpublished_commits_and_index(checkout: Checkout) -> Non
     (main / "local.txt").write_text("working\n")
     (main / "untracked.txt").write_text("untracked\n")
     upstream = _advance(author, "upstream.txt")
-    _run(main, str(LF), "rebase", env=env)
+    _run(main, str(LF), "task", "sync", env=env)
     # The next command must retain main's unpublished history too, including
-    # when upstream advances between the rebase and sibling creation.
-    upstream = _advance(author, "after-rebase.txt")
+    # when upstream advances between the sync and sibling creation.
+    upstream = _advance(author, "after-sync.txt")
     _run(main, str(LF), "wt", "create", "next", env=env)
     sibling = main.with_name("repo.next")
     for repo in [main, sibling]:
@@ -137,7 +145,7 @@ def test_main_preserves_unpublished_commits_and_index(checkout: Checkout) -> Non
     assert _run(author, "git", "ls-remote", "origin", "refs/heads/main").split()[0] == upstream
 
 
-@pytest.mark.parametrize("command", [("list", "--sync", "--format", "json"), ("prune",)])
+@pytest.mark.parametrize("command", [("list", "--sync", "--json"), ("prune",)])
 def test_worktree_refresh_preserves_local_main(
     checkout: Checkout, command: tuple[str, ...]
 ) -> None:
@@ -148,7 +156,7 @@ def test_worktree_refresh_preserves_local_main(
     (main / "local.txt").write_text("working\n")
     (main / "notes.txt").write_text("untracked\n")
     upstream = _advance(author, "upstream.txt")
-    output = _run(main, str(LF), "wt", *command, env=env)
+    output = _run(main, str(LF), "task", "wt", *command, env=env)
     if command[0] == "list":
         assert isinstance(json.loads(output), list)
     for sha in [local, upstream]:
@@ -169,7 +177,7 @@ def test_worktree_refresh_reports_fetch_failure_then_recovers(
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
     result = subprocess.run(
-        [str(LF), "wt", *command], cwd=main, env=env, capture_output=True, text=True
+        [str(LF), "task", "wt", *command], cwd=main, env=env, capture_output=True, text=True
     )
     assert result.returncode != 0
     assert "fetch" in result.stderr
@@ -177,7 +185,7 @@ def test_worktree_refresh_reports_fetch_failure_then_recovers(
     assert (main / "base.txt").read_text() == "caller edit\n"
     assert not main.with_name("repo.next").exists()
     _run(main, "git", "remote", "set-url", "origin", remote)
-    _run(main, str(LF), "wt", *command, env=env)
+    _run(main, str(LF), "task", "wt", *command, env=env)
     for sha in [before, upstream]:
         _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
     assert (main / "base.txt").read_text() == "caller edit\n"
@@ -197,7 +205,7 @@ def test_worktree_plans_leave_checkout_and_remote_refs_unchanged(
     (main / "notes.txt").write_text("untracked\n")
     refs = _run(main, "git", "show-ref")
     for command in [("create", "next", "--plan"), ("prune", "--dry-run")]:
-        _run(main, str(LF), "wt", *command, env=env)
+        _run(main, str(LF), "task", "wt", *command, env=env)
         assert _run(main, "git", "show-ref") == refs
         assert _run(main, "git", "branch", "--show-current") == "main"
         assert _run(main, "git", "show", ":base.txt") == "staged"
@@ -216,7 +224,7 @@ def test_worktree_refresh_conflict_preserves_main_and_stops(
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
     result = subprocess.run(
-        [str(LF), "wt", *command], cwd=main, env=env, capture_output=True, text=True
+        [str(LF), "task", "wt", *command], cwd=main, env=env, capture_output=True, text=True
     )
     assert result.returncode != 0
     assert "could not update main" in result.stderr
@@ -229,7 +237,7 @@ def test_worktree_refresh_conflict_preserves_main_and_stops(
 
 def test_feature_refreshes_main_then_integrates_and_creates_sibling(checkout: Checkout) -> None:
     main, author, env = checkout
-    _run(main, str(LF), "wt", "create", "feature", env=env)
+    _run(main, str(LF), "task", "wt", "create", "feature", env=env)
     feature = main.with_name("repo.feature")
     _commit(feature, "feature.txt", "feature\n")
     (feature / "feature.txt").write_text("staged\n")
@@ -237,20 +245,20 @@ def test_feature_refreshes_main_then_integrates_and_creates_sibling(checkout: Ch
     (feature / "feature.txt").write_text("working\n")
     for name in ["first.txt", "second.txt"]:
         upstream = _advance(author, name)
-        _run(feature, str(LF), "rebase", env=env)
+        _run(feature, str(LF), "task", "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
         _run(feature, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
         assert _run(feature, "git", "show", ":feature.txt") == "staged"
         assert (feature / "feature.txt").read_text() == "working\n"
     # A behind caller must still integrate when main was refreshed elsewhere.
     upstream = _advance(author, "main-first.txt")
-    _run(main, str(LF), "rebase", env=env)
-    _run(feature, str(LF), "rebase", env=env)
+    _run(main, str(LF), "task", "sync", env=env)
+    _run(feature, str(LF), "task", "sync", env=env)
     _run(feature, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
-    _run(main, str(LF), "wt", "create", "next", env=env)
+    _run(main, str(LF), "task", "wt", "create", "next", env=env)
     sibling = main.with_name("repo.next")
     assert _run(sibling, "git", "rev-parse", "HEAD") == upstream
-    _run(feature, str(LF), "rebase", env=env)
+    _run(feature, str(LF), "task", "sync", env=env)
     assert (feature / "feature.txt").read_text() == "working\n"
 
 
@@ -289,7 +297,7 @@ def test_worktree_background_push_survives_cli_exit(checkout: Checkout, tmp_path
     gate_fd = os.open(gate, os.O_RDWR)
     done_fd = os.open(done, os.O_RDWR)
     process = subprocess.Popen(
-        [str(LF), "wt", "create", "delayed"],
+        [str(LF), "task", "wt", "create", "delayed"],
         cwd=main,
         env=delayed_env,
         stdout=subprocess.PIPE,
@@ -322,7 +330,7 @@ def test_worktree_background_push_survives_cli_exit(checkout: Checkout, tmp_path
     )
     _commit(feature, "feature.txt", "feature\n")
     upstream = _advance(author, "upstream.txt")
-    _run(feature, str(LF), "rebase", env=env)
+    _run(feature, str(LF), "task", "sync", env=env)
     _run(feature, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
     assert _run(feature, "git", "rev-parse", "@{upstream}") == _run(
         feature, "git", "rev-parse", "HEAD"
@@ -336,59 +344,18 @@ def test_fetch_failure_preserves_state_and_later_invocation_catches_up(checkout:
     (main / "base.txt").write_text("caller edit\n")
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
-    result = subprocess.run([str(LF), "rebase"], cwd=main, env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(LF), "task", "sync"], cwd=main, env=env, capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert "fetch" in result.stderr
     assert _run(main, "git", "rev-parse", "HEAD") == before
     assert (main / "base.txt").read_text() == "caller edit\n"
 
     _run(main, "git", "remote", "set-url", "origin", remote)
-    _run(main, str(LF), "rebase", env=env)
+    _run(main, str(LF), "task", "sync", env=env)
     assert _run(main, "git", "rev-parse", "HEAD") == upstream
     assert (main / "base.txt").read_text() == "caller edit\n"
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Homebrew refresh is macOS-only")
-def test_install_from_worktree_retries_packages_after_main_updated(
-    checkout: Checkout, tmp_path: Path
-) -> None:
-    main, author, env = checkout
-    _run(main, str(LF), "wt", "create", "installer", env=env)
-    caller = main.with_name("repo.installer")
-    upstream = _advance(author, "new-required-package.txt")
-    binaries = tmp_path / "bin"
-    binaries.mkdir()
-    state = tmp_path / "install-state"
-    state.mkdir()
-    # Executable fakes model external installation, not Loopflow's orchestration.
-    for name, source in {
-        "brew": '#!/bin/sh\ncat > "$INSTALL_STATE/required"\n'
-        'test ! -e "$INSTALL_STATE/offline" || exit 7\n'
-        'touch "$INSTALL_STATE/packages-ready"\n',
-        "uv": '#!/bin/sh\ntest -e "$INSTALL_STATE/packages-ready" || exit 8\n'
-        'case "$1" in\nsync) touch "$INSTALL_STATE/environment-ready";;\n'
-        'run) test -e "$INSTALL_STATE/environment-ready" || exit 9\n'
-        'touch "$INSTALL_STATE/release-ready";;\nesac\n',
-    }.items():
-        path = binaries / name
-        path.write_text(source)
-        path.chmod(0o755)
-    env["PATH"] = f"{binaries}:{env['PATH']}"
-    env["INSTALL_STATE"] = str(state)
-    (state / "offline").touch()
-    result = subprocess.run(
-        [str(LF), "install"], cwd=caller, env=env, capture_output=True, text=True
-    )
-    assert result.returncode != 0
-    assert "package refresh failed" in result.stderr
-    assert _run(main, "git", "rev-parse", "HEAD") == upstream
-    assert not (state / "release-ready").exists()
-    (state / "offline").unlink()
-    _run(caller, str(LF), "install", env=env)
-    assert (state / "release-ready").exists()
-    assert 'brew "uv"' in (state / "required").read_text()
-    _run(caller, str(LF), "install", env=env)
-    assert _run(main, "git", "rev-parse", "HEAD") == upstream
 
 
 def test_main_merge_conflict_restores_original_history_and_edits(checkout: Checkout) -> None:
@@ -397,7 +364,9 @@ def test_main_merge_conflict_restores_original_history_and_edits(checkout: Check
     _commit(author, "base.txt", "upstream conflict\n")
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
-    result = subprocess.run([str(LF), "rebase"], cwd=main, env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(LF), "task", "sync"], cwd=main, env=env, capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert _run(main, "git", "rev-parse", "HEAD") == before
     assert (main / "base.txt").read_text() == "local commit\n"
@@ -411,18 +380,18 @@ def test_unchecked_main_retains_unpublished_history(checkout: Checkout) -> None:
     _run(main, "git", "checkout", "-b", "feature")
     _commit(main, "feature.txt", "feature\n")
     upstream = _advance(author, "upstream.txt")
-    _run(main, str(LF), "rebase", env=env)
+    _run(main, str(LF), "task", "sync", env=env)
     assert _run(main, "git", "branch", "--show-current") == "feature"
     for sha in [local, upstream]:
         _run(main, "git", "merge-base", "--is-ancestor", sha, "main")
         _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
 
 
-def test_sibling_rebases_share_main_update_without_rejecting_each_other(checkout: Checkout) -> None:
+def test_sibling_syncs_share_main_update_without_rejecting_each_other(checkout: Checkout) -> None:
     main, author, env = checkout
     callers = []
     for name in ["one", "two"]:
-        _run(main, str(LF), "wt", "create", name, env=env)
+        _run(main, str(LF), "task", "wt", "create", name, env=env)
         caller = main.with_name(f"repo.{name}")
         _commit(caller, f"{name}.txt", name)
         (caller / f"{name}.txt").write_text(f"{name} staged")
@@ -432,7 +401,7 @@ def test_sibling_rebases_share_main_update_without_rejecting_each_other(checkout
     upstream = _advance(author, "upstream.txt")
     processes = [
         subprocess.Popen(
-            [str(LF), "rebase"],
+            [str(LF), "task", "sync"],
             cwd=caller,
             env=env,
             stdout=subprocess.PIPE,

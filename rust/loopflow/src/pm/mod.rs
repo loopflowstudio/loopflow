@@ -62,34 +62,55 @@ pub struct PmKr {
     pub holds: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectFlowPlan {
-    pub recommended: Option<String>,
+/// Linear's Project status category, independent of the team's display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Backlog,
+    Planned,
+    Started,
+    Paused,
+    Completed,
+    Canceled,
 }
 
-impl ProjectFlowPlan {
-    pub fn empty() -> Self {
-        Self { recommended: None }
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Planned => "planned",
+            Self::Started => "started",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChapterMetricTarget {
+    pub metric_id: String,
+    pub target: crate::work::wave::metrics::MetricTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectContent {
-    pub definition: String,
-    pub flows: ProjectFlowPlan,
+    pub metric_targets: Vec<ChapterMetricTarget>,
+    pub flow: String,
     pub krs: Vec<PmKr>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PmProject {
     pub id: String,
+    pub revision: Option<String>,
     pub slug: String,
     pub name: String,
     pub summary: String,
-    pub definition: String,
-    /// `None` means this provider snapshot predates Project flow configuration.
-    /// Fresh provider reads always resolve it to `Some`, including an empty plan.
-    pub flows: Option<ProjectFlowPlan>,
+    pub metric_targets: Vec<ChapterMetricTarget>,
+    pub flow: String,
+    pub status: ProjectStatus,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
@@ -106,8 +127,12 @@ pub struct PmWave {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItem {
+    /// Provider revision; absent only in historical planning.
+    pub revision: Option<String>,
     pub id: String,
     pub identifier: String,
+    /// Provider branch name used to find existing Git work.
+    pub branch_name: Option<String>,
     /// Provider-owned issue URL captured during PM sync. `None` stays explicit
     /// when the provider did not return one; status and roadmap reads never
     /// fetch it on demand.
@@ -116,20 +141,39 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
+    pub completed_at: Option<String>,
+    /// Provider workflow category; absent in historical snapshots.
+    pub state: Option<String>,
     /// Stable owning Project id. Task-to-Wave resolution follows this edge.
-    pub project_id: String,
+    pub project_id: Option<String>,
     /// Canonical Project slug for display only.
-    pub project: String,
+    pub project: Option<String>,
     /// Stable owning repository Team id.
     pub team_id: String,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PmSnapshot {
-    pub(crate) projects: Vec<PmProject>,
-    pub(crate) items: Vec<PmItem>,
+impl PmItem {
+    pub fn terminal_reason(&self) -> Option<&'static str> {
+        terminal_reason(self.state.as_deref(), self.completed)
+    }
+}
+
+pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static str> {
+    match state {
+        Some("canceled") => Some("Linear Task is canceled"),
+        Some("duplicate") => Some("Linear Task is duplicate"),
+        Some("completed") => Some("Linear Task is complete"),
+        None if completed => Some("Linear Task is complete"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PmSnapshot {
+    pub projects: Vec<PmProject>,
+    pub items: Vec<PmItem>,
 }
 
 /// Validates provider ownership across cached Wave snapshots presented together.
@@ -211,17 +255,19 @@ fn validate_snapshot_ownership(
                 item.identifier
             )));
         }
-        let project = projects_by_id
-            .get(item.project_id.as_str())
+        let project = item
+            .project_id
+            .as_deref()
+            .and_then(|id| projects_by_id.get(id))
             .ok_or_else(|| {
                 PmError::Message(format!(
-                    "Linear task {} in wave/{wave} points to missing Project {}",
+                    "Linear task {} in wave/{wave} points to missing Project {:?}",
                     item.identifier, item.project_id
                 ))
             })?;
-        if item.project != project.slug {
+        if item.project.as_deref() != Some(project.slug.as_str()) {
             return Err(PmError::Message(format!(
-                "Linear task {} in wave/{wave} names Project slug `{}`, but Project {} has slug `{}`",
+                "Linear task {} in wave/{wave} names Project slug `{:?}`, but Project {} has slug `{}`",
                 item.identifier, item.project, project.id, project.slug
             )));
         }
@@ -286,7 +332,7 @@ pub struct PmItemUpdate {
     pub description: Option<String>,
 }
 
-/// A read of one issue's human-editable content plus its comments, taken to
+/// A read of one issue's editable content plus its comments, taken to
 /// stream Linear edits into a Task. `revision` is the provider's
 /// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
 /// compared — not trusted as identity — so out-of-order responses never move
@@ -299,15 +345,20 @@ pub struct IssueObservation {
     pub comments: Vec<IssueComment>,
 }
 
-/// One issue comment, with just enough authorship to tell a human's direction
+/// One issue comment, with just enough authorship to distinguish participant direction
 /// from Loopflow's own writeback. `author_id` is the provider user id; `None`
 /// for an integration/bot actor with no backing user, which is never treated
-/// as human direction.
+/// as participant direction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssueComment {
     pub id: String,
+    /// Provider creation time; display order. `revision` orders direction.
+    pub created_at: Option<String>,
+    pub revision: Option<String>,
     pub body: String,
     pub author_id: Option<String>,
+    /// Provider display name for attribution, independent of the provider user ID.
+    pub author_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,27 +405,31 @@ pub fn project_slug(name: &str) -> String {
     slug
 }
 
-pub fn parse_project_content(content: &str) -> ProjectContent {
+pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     enum Section {
         None,
-        Definition,
+        Targets,
         Flows,
         Krs,
     }
 
     let mut section = Section::None;
-    let mut definition = Vec::new();
-    let mut flows = ProjectFlowPlan::empty();
+    let mut targets = Vec::new();
+    let mut flow = String::new();
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
         let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("flow:") {
+            flow = value.trim().to_string();
+            continue;
+        }
         match trimmed {
-            "## Definition" => {
+            "## Metric targets" => {
                 if let Some(kr) = current_kr.take() {
                     krs.push(kr);
                 }
-                section = Section::Definition;
+                section = Section::Targets;
                 continue;
             }
             "## KRs" => {
@@ -394,26 +449,26 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
             _ => {}
         }
 
-        if matches!(section, Section::None)
-            && trimmed.starts_with("# ")
-            && !trimmed.starts_with("## ")
-        {
-            section = Section::Definition;
+        if trimmed.starts_with('#') {
+            if let Some(kr) = current_kr.take() {
+                krs.push(kr);
+            }
+            section = Section::None;
             continue;
         }
 
         match section {
-            Section::Definition => definition.push(line),
+            Section::Targets => {
+                if !trimmed.starts_with("```") {
+                    targets.push(line);
+                }
+            }
             Section::Flows => {
                 let Some((name, value)) = trimmed.split_once(':') else {
                     continue;
                 };
-                let value = match value.trim() {
-                    "" => None,
-                    value => Some(value.to_string()),
-                };
-                if name.trim() == "recommended" {
-                    flows.recommended = value;
+                if name.trim() == "flow" {
+                    flow = value.trim().to_string();
                 }
             }
             Section::Krs => {
@@ -451,21 +506,46 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
         krs.push(kr);
     }
 
-    ProjectContent {
-        definition: definition.join("\n").trim().to_string(),
-        flows,
+    let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
+        Vec::new()
+    } else {
+        serde_json::from_str(&targets.join("\n"))
+            .map_err(|error| PmError::Message(format!("invalid chapter metric targets: {error}")))?
+    };
+    let content = ProjectContent {
+        metric_targets,
+        flow,
         krs,
+    };
+    content.validate()?;
+    Ok(content)
+}
+
+impl ProjectContent {
+    pub fn validate(&self) -> PmResult<()> {
+        let mut ids = std::collections::BTreeSet::new();
+        for metric in &self.metric_targets {
+            if metric.metric_id.trim().is_empty()
+                || !metric.target.value().is_finite()
+                || !ids.insert(&metric.metric_id)
+            {
+                return Err(PmError::Message(
+                    "chapter metric targets require unique nonempty metric IDs and finite values"
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
 pub fn render_project_content(project: &ProjectContent) -> String {
-    let mut content = format!("## Definition\n\n{}", project.definition.trim());
-    if project.flows != ProjectFlowPlan::empty() {
-        content.push_str("\n\n## Flows\n");
-        if let Some(flow) = &project.flows.recommended {
-            content.push_str(&format!("\nrecommended: {}", flow.trim()));
-        }
-    }
+    let mut content = format!(
+        "## Metric targets\n\n```json\n{}\n```",
+        serde_json::to_string_pretty(&project.metric_targets)
+            .expect("validated metric targets serialize")
+    );
+    content.push_str(&format!("\n\nflow: {}", project.flow.trim()));
     content.push_str("\n\n## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
@@ -663,22 +743,19 @@ mod tests {
     }
 
     #[test]
-    fn project_snapshot_without_flows_remains_readable() {
-        let project: PmProject = serde_json::from_str(
-            r#"{
-                "id":"project-1",
-                "slug":"incident-management",
-                "name":"Incident Management",
-                "summary":"Restore service and prevent recurrence.",
-                "definition":"Incidents are resolved at every causal layer.",
-                "krs":[],
-                "initiative_ids":["initiative-1"],
-                "team_ids":["team-1"]
-            }"#,
-        )
-        .expect("legacy project snapshot");
+    fn project_snapshot_requires_flow_and_status() {
+        let value = serde_json::json!({
+            "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
+            "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
+        });
+        assert!(serde_json::from_value::<PmProject>(value).is_err());
+    }
 
-        assert_eq!(project.flows, None);
+    #[test]
+    fn missing_flow_is_visible_without_changing_existing_project_content() {
+        let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
+        assert!(content.flow.is_empty());
+        assert_eq!(content.krs[0].text, "Keep this proof");
     }
 
     #[test]
@@ -694,26 +771,45 @@ mod tests {
             },
         ];
         let project = ProjectContent {
-            definition: "A measured bet.".to_string(),
-            flows: ProjectFlowPlan {
-                recommended: Some("task-design".to_string()),
-            },
+            metric_targets: vec![ChapterMetricTarget {
+                metric_id: "throughput".into(),
+                target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
+            }],
+
+            flow: "feature".to_string(),
             krs: krs.clone(),
         };
         let rendered = render_project_content(&project);
-        assert_eq!(parse_project_content(&rendered), project);
+        assert_eq!(parse_project_content(&rendered).unwrap(), project);
 
         let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
         assert_eq!(
-            parse_project_content(local),
+            parse_project_content(local).unwrap(),
             ProjectContent {
-                definition: "A measured bet.".to_string(),
-                flows: ProjectFlowPlan::empty(),
+                metric_targets: Vec::new(),
+                flow: String::new(),
                 krs: vec![PmKr {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,
                 }],
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod chapter_content_tests {
+    use super::{parse_project_content, ProjectContent};
+    #[test]
+    fn chapter_content_rejects_ambiguous_targets_and_separate_objectives() {
+        let duplicate = r##"## Metric targets
+```json
+[{"metric_id":"rate","target":{"kind":"at_least","value":0.9}},
+ {"metric_id":"rate","target":{"kind":"at_most","value":0.1}}]
+```
+"##;
+        assert!(parse_project_content(duplicate).is_err());
+        assert!(parse_project_content("## Metric targets\nnot JSON").is_err());
+        assert!(serde_json::from_str::<ProjectContent>(r#"{"definition":"Second objective","metric_targets":[],"flows":{"recommended":null},"krs":[]}"#).is_err());
     }
 }

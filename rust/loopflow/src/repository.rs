@@ -44,8 +44,10 @@ impl CanonicalRepo {
 
     /// The repository scope of the current working directory, or `None` when the
     /// cwd is outside any git checkout (nothing to scope to).
-    pub fn current() -> Option<Self> {
-        Self::discover(&std::env::current_dir().ok()?).ok()
+    pub fn current() -> anyhow::Result<Option<Self>> {
+        crate::repo::discover_repo_root(&std::env::current_dir()?)?
+            .map(|root| Self::discover(&root).map_err(Into::into))
+            .transpose()
     }
 
     /// Whether `path` resolves to this same repository, collapsing worktrees to

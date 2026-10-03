@@ -4,7 +4,7 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
     commit, current_branch, is_clean, push, push_with_upstream, rev_parse, stage_all,
@@ -21,7 +21,7 @@ pub struct CommitOptions {
     pub push: bool,
     pub create_draft_pr: bool,
     pub task: String,
-    pub flow_parents: Vec<String>,
+    pub sources: Vec<String>,
     pub message: Option<String>,
     pub agent: Option<String>,
 }
@@ -33,7 +33,7 @@ impl CommitOptions {
             push: false,
             create_draft_pr: false,
             task: task.into(),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
             message: None,
             agent: None,
         }
@@ -54,7 +54,7 @@ pub(crate) async fn checkpoint_task_worktree(
             push: true,
             create_draft_pr: false,
             task: task_identifier,
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
             message: Some(message),
             agent: None,
         };
@@ -76,7 +76,7 @@ pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) ->
         push: false,
         create_draft_pr: false,
         task: task_identifier.to_string(),
-        flow_parents: Vec::new(),
+        sources: Vec::new(),
         message: Some(format!("checkpoint: restart {task_identifier}")),
         agent: None,
     };
@@ -145,7 +145,7 @@ pub fn commit_workflow(
         let generated = generate_commit_message(repo, options.agent.as_deref());
         format_commit_message(
             &options.task,
-            &options.flow_parents,
+            &options.sources,
             generated.as_ref().map(|m| m.title.as_str()).ok(),
         )
     };
@@ -173,11 +173,11 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
     Ok(!output.success())
 }
 
-fn format_commit_message(task: &str, flow_parents: &[String], title: Option<&str>) -> String {
-    let prefix = if flow_parents.is_empty() {
+fn format_commit_message(task: &str, sources: &[String], title: Option<&str>) -> String {
+    let prefix = if sources.is_empty() {
         format!("lf {task}")
     } else {
-        format!("lf {} {task}", flow_parents.join(" "))
+        format!("lf {} {task}", sources.join(" "))
     };
 
     match title {
@@ -228,7 +228,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&launch, &process, &capabilities)
+    let result = exec_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(
@@ -434,11 +434,7 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         message.to_string()
     } else {
         tracer.trace("commit:generate_message");
-        format_commit_message(
-            &options.task,
-            &options.flow_parents,
-            Some("generated title"),
-        )
+        format_commit_message(&options.task, &options.sources, Some("generated title"))
     };
 
     // Commit

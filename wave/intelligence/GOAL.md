@@ -8,7 +8,7 @@ pm:
 
 ## Objective
 
-Human-selected work is explainable from durable local context and Run evidence.
+Explicitly selected work is explainable from durable local context and Run evidence.
 Intelligence makes initiating intent, exact submitted context, provider activity,
 usage, outcomes, and observed consequences inspectable, with missing evidence
 stated honestly. That evidence supports execution diagnosis and justified prompting
@@ -44,8 +44,8 @@ reconstruction. Vendor-unavailable measurements stay explicitly unavailable.
 Include attempts that fail before a Run exists and retain causal identities.
 
 Infrastructure owns execution repair and control authority. Product judges the
-usefulness of human-selected external workflows and presents shared evidence.
-Intelligence improves context and readers, without a second monitoring authority or inferred human
+usefulness of explicitly selected external workflows and presents shared evidence.
+Intelligence improves context and readers, without a second monitoring authority or inferred
 priorities. Use one serial implementation slot: capture, population accounting,
 then usable reconstruction. Collect real proof windows without inventing activity,
 backdating budgets, or shortening the accepted interval.

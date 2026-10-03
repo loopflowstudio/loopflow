@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 
 use loopflow::id::WaveId;
 use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
+use loopflow::pm::PmSnapshot;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::{Wave, WaveLocator};
@@ -48,15 +49,15 @@ fn snapshot(
     issue_id: &str,
     identifier: &str,
     completed: bool,
-) -> String {
-    serde_json::json!({
+) -> PmSnapshot {
+    serde_json::from_value(serde_json::json!({
         "projects": [{
             "id": project_id,
             "slug": project_slug,
             "name": project_name,
             "summary": "Fixture project",
-            "definition": "A measured bet.",
-            "flows": { "recommended": null },
+            "metric_targets": [],
+            "flow": "feature", "status": "started",
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
@@ -74,11 +75,17 @@ fn snapshot(
             "team_id": "team-loo",
             "assignee": null
         }]
-    })
-    .to_string()
+    }))
+    .unwrap()
 }
 
-fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, payload: String) {
+fn put_snapshot(
+    store: &SqliteStore,
+    repo: &Path,
+    wave: &str,
+    initiative: &str,
+    snapshot: PmSnapshot,
+) {
     let registered = store
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
@@ -89,7 +96,7 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload,
+            snapshot,
         })
         .unwrap();
 }
@@ -100,24 +107,13 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_CONTROL_HOME", home)
         .env("HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID");
     command
 }
 
 fn run_lf(home: &Path, repo: &Path, args: &[&str]) -> Output {
     lf_command(home, repo, args).output().expect("run lf")
-}
-
-fn run_project_control(home: &Path, repo: &Path, project: &str) -> Output {
-    lf_command(home, repo, &["project", "run", project])
-        .env("LF_BIN", repo.join("missing-lf"))
-        .env_remove("LF_CONTROL_BIN")
-        .output()
-        .expect("run project control")
 }
 
 fn assert_success(output: &Output, command: &str) -> String {
@@ -179,7 +175,7 @@ fn repository_team_matrix() {
     );
     let infrastructure = Wave::new(
         WaveId::new(),
-        "survival/infrastructure".to_string(),
+        "infrastructure".to_string(),
         repo_locator.repo().to_string(),
     )
     .with_parent(survival.id().clone());
@@ -250,7 +246,15 @@ fn repository_team_matrix() {
         foreign_repo.path(),
         "intelligence",
         "initiative-intelligence",
-        r#"{"projects":[],"items":[{"id":"stale"}]}"#.to_string(),
+        snapshot(
+            "initiative-intelligence",
+            "project-foreign",
+            "foreign",
+            "Foreign",
+            "issue-foreign",
+            "OTHER-1",
+            false,
+        ),
     );
     drop(store);
 
@@ -260,16 +264,10 @@ fn repository_team_matrix() {
         ["intelligence", "survival", "survival/infrastructure"]
     );
     let old_home = std::env::var_os("LF_HOME");
-    let old_db = std::env::var_os("LF_DB_PATH");
-    let old_control_home = std::env::var_os("LF_CONTROL_HOME");
-    let old_control_db = std::env::var_os("LF_CONTROL_DB_PATH");
     // SAFETY: this integration binary contains one test; no sibling thread can
     // observe the temporary storage selection.
     unsafe {
         std::env::set_var("LF_HOME", &home);
-        std::env::set_var("LF_CONTROL_HOME", &home);
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
     }
     assert_eq!(
         canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
@@ -285,145 +283,72 @@ fn repository_team_matrix() {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
         }
-        match old_db {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
-        match old_control_home {
-            Some(value) => std::env::set_var("LF_CONTROL_HOME", value),
-            None => std::env::remove_var("LF_CONTROL_HOME"),
-        }
-        match old_control_db {
-            Some(value) => std::env::set_var("LF_CONTROL_DB_PATH", value),
-            None => std::env::remove_var("LF_CONTROL_DB_PATH"),
-        }
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(
-            &home,
-            &repo,
-            &["pm", "show", "--wave", wave, "--no-sync", "--json"],
-        );
-        let stdout = assert_success(&show, "pm show");
+        let show = run_lf(&home, &repo, &["wave", "status", wave, "--json"]);
+        let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
-        let run = run_lf(&home, &repo, &["task", "run", issue]);
-        let error = String::from_utf8_lossy(&run.stderr);
-        assert!(!run.status.success());
+        let checkout = run_lf(&home, &repo, &["task", "checkout", issue]);
+        let error = String::from_utf8_lossy(&checkout.stderr);
+        assert!(!checkout.status.success());
         assert!(
-            error.contains("already complete"),
+            error.contains("terminal and cannot start execution"),
             "unexpected task result: {error}"
         );
     }
-    let status = assert_success(&run_lf(&home, &repo, &["pm", "status"]), "pm status");
+    let status = assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
-    // An unreadable snapshot remains visible as unavailable evidence for its
-    // Wave without blanking readable Work from another repository.
+    // Another repository's same-named Wave does not hide this repository's work.
     let roadmap = assert_success(&run_lf(&home, &repo, &["roadmap", "--json"]), "roadmap");
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));
-
-    // Project controls resolve each stable Project id to its own Wave before
-    // the deliberately missing worker binary stops the fixture from launching.
-    let control_home = fixture.path().join("project-control-home");
-    std::fs::create_dir_all(&control_home).unwrap();
-    let control_store = SqliteStore::new(&control_home.join("loopflow.db")).unwrap();
-    let control_survival = Wave::new(
-        WaveId::new(),
-        "survival".to_string(),
-        repo_locator.repo().to_string(),
-    );
-    let control_infrastructure = Wave::new(
-        WaveId::new(),
-        "survival/infrastructure".to_string(),
-        repo_locator.repo().to_string(),
-    )
-    .with_parent(control_survival.id().clone());
-    control_store.create_wave(&control_survival).unwrap();
-    control_store.create_wave(&control_infrastructure).unwrap();
-    put_snapshot(
-        &control_store,
-        &repo,
-        "survival",
-        "initiative-survival",
-        snapshot(
-            "initiative-survival",
-            "project-survival",
-            "a-real-task",
-            "A real task reaches done",
-            "issue-survival",
-            "LOO-1",
-            true,
-        ),
-    );
-    put_snapshot(
-        &control_store,
-        &repo,
-        "survival/infrastructure",
-        "initiative-infrastructure",
-        snapshot(
-            "initiative-infrastructure",
-            "project-gmail",
-            "gmail",
-            "Gmail",
-            "issue-gmail",
-            "LOO-2",
-            true,
-        ),
-    );
-    drop(control_store);
-    for (project_id, wave_id) in [
-        ("project-survival", control_survival.id()),
-        ("project-gmail", control_infrastructure.id()),
-    ] {
-        let output = run_project_control(&control_home, &repo, project_id);
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success());
-        assert!(
-            error.contains("failed to start Project operation")
-                && error.contains("missing-lf does not exist"),
-            "{error}"
-        );
-        let control_store = SqliteStore::new(&control_home.join("loopflow.db")).unwrap();
-        let project = control_store
-            .project_by_project(project_id)
-            .unwrap()
-            .expect("Project control reserved the resolved Project");
-        assert_eq!(&project.wave_id, wave_id);
-    }
 
     // Reopening the store preserves the local ancestry and foreign collision.
     let reopened = SqliteStore::new(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
-    // A duplicated Project/Issue association fails before Work or worktree creation.
-    put_snapshot(
-        &reopened,
-        &repo,
-        "survival/infrastructure",
+    // Acquire a Project with ambiguous ownership. Changing a known relationship
+    // would instead invalidate that Project before these readers see it.
+    let mut ambiguous = snapshot(
         "initiative-infrastructure",
-        snapshot(
-            "initiative-infrastructure",
-            "project-survival",
-            "a-real-task",
-            "A real task reaches done",
-            "issue-survival",
-            "LOO-1",
-            false,
-        ),
+        "project-ambiguous",
+        "a-real-task",
+        "A real task reaches done",
+        "issue-ambiguous",
+        "LOO-4",
+        false,
     );
+    ambiguous.projects[0]
+        .initiative_ids
+        .push("initiative-survival".into());
+    let survival = reopened
+        .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
+        .unwrap()
+        .unwrap();
+    let mut planning = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
+    planning.snapshot.projects.extend(ambiguous.projects);
+    planning.snapshot.items.extend(ambiguous.items);
+    reopened.put_pm_snapshot(&planning).unwrap();
     drop(reopened);
-    let duplicate = run_lf(&home, &repo, &["task", "run", "LOO-1"]);
-    let error = String::from_utf8_lossy(&duplicate.stderr);
-    assert!(error.contains("belongs to both"), "{error}");
+    let ambiguous = run_lf(&home, &repo, &["task", "checkout", "LOO-4"]);
+    let error = String::from_utf8_lossy(&ambiguous.stderr);
+    assert!(!ambiguous.status.success());
+    assert!(error.contains("belongs to 2 Initiatives"), "{error}");
+    // Registry discovery remains available; planning reads reject ambiguity.
+    assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     for args in [
-        &["pm", "status"][..],
-        &["status", "survival", "--json"][..],
+        &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
-        &["project", "run", "project-survival"][..],
     ] {
         let output = run_lf(&home, &repo, args);
         let error = String::from_utf8_lossy(&output.stderr);
@@ -433,7 +358,7 @@ fn repository_team_matrix() {
             args.join(" ")
         );
         assert!(
-            error.contains("belongs to both") || error.contains("belongs to 2"),
+            error.contains("belongs to Initiatives"),
             "{} returned an unrelated error: {error}",
             args.join(" ")
         );
@@ -502,30 +427,18 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["pm", "show", "--wave", "product", "--no-sync", "--json"],
+            &["wave", "status", "product", "--json"],
         ),
         "legacy cached read",
     );
     let blocked = run_lf(
         &home,
         &legacy_repo,
-        &[
-            "pm",
-            "project",
-            "create",
-            "--wave",
-            "product",
-            "--title",
-            "Blocked",
-            "--definition",
-            "No side effects",
-            "--kr",
-            "Nothing changed",
-        ],
+        &["task", "create", "--wave", "product", "--title", "Blocked"],
     );
     let error = String::from_utf8_lossy(&blocked.stderr);
     assert!(!blocked.status.success());
-    assert!(error.contains("lf pm reteam --apply"), "{error}");
+    assert!(error.contains("lf repo reteam --apply"), "{error}");
     assert!(error.contains("PRD-44"), "{error}");
 
     // PRD-44 leaves the repository Team as the sole PM authority after the

@@ -17,7 +17,7 @@ struct MockWaveFixtureTests {
         #expect(AppTestMode.emptyWorkspaces.bypassesRegistry)
     }
 
-    @Test("the stable list carries one Wave per lens state, plus a child")
+    @Test("the stable list preserves active work and Wave ancestry")
     func listLensStates() {
         let byName = Dictionary(uniqueKeysWithValues: MockWaveFixture.waves.map { ($0.name, $0) })
 
@@ -25,10 +25,10 @@ struct MockWaveFixtureTests {
             WaveViewModel(api: byName[name]!, isRegistered: true).lens
         }
 
-        #expect(lens("infrastructure").color == .green)   // a live body
-        #expect(lens("intelligence").color == .red)       // stopped with active work
+        #expect(lens("infrastructure").color == .unknown)
+        #expect(lens("intelligence").color == .unknown)
         #expect(lens("feedback").color == .black)          // off and clean
-        #expect(lens("cadenza").color == .green)
+        #expect(lens("cadenza").color == .black)
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }
 
@@ -38,13 +38,12 @@ struct MockWaveFixtureTests {
         let workMap = detail.workMap
 
         #expect(workMap.objective == "Make releases boring.")
-        let project = try #require(workMap.projects.first)
-        #expect(project.project.krs.count == 1)
-        #expect(project.tasks.filter { !$0.task.completed }.count == 2)
-        #expect(project.runtime?.lastFailure?.message.contains("credential") == true)
+        let chapter = try #require(workMap.currentProject)
+        let tasks = workMap.tasks.items
+        #expect(chapter.krs.count == 1)
+        #expect(tasks.filter { !$0.task.completed }.count == 2)
         let metric = try #require(detail.metricPortfolio.metrics.first)
         #expect(metric.name == "Task loops earn trust")
-        #expect(metric.projectId == project.project.id)
         #expect(metric.evidence == .met(
             value: 1,
             sourceWindowStart: "2026-08-13T18:00:00Z",
@@ -56,10 +55,10 @@ struct MockWaveFixtureTests {
         #expect(detail.metricPortfolio.contractIssues.count == 1)
 
         // Project row lens folds Task conditions: waiting outranks clear.
-        #expect(WaveLens.forProject(tasks: project.tasks).color == .blue)
+        #expect(WaveLens.forTasks(tasks: tasks).color == .blue)
 
         // Task rows: the shared condition verbatim.
-        let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })
+        let byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.task.identifier, $0) })
         #expect(WaveLens.forTask(try #require(byId["INF-123"]).condition).color == .blue)
         #expect(WaveLens.forTask(try #require(byId["INF-124"]).condition).color == .black)
     }

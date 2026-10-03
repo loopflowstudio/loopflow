@@ -1,8 +1,11 @@
 ---
-requires: restored incident and recorded evidence
-produces: scratch/<branch>.md
+requires: a failure and available evidence
+produces: supported causal analysis and proposed prevention
 ---
-Perform root cause analysis on a bug fix. What systemic issues allowed this bug to exist?
+Investigate why a failure happened and what would prevent it recurring.
+
+Use the report and evidence already available, whether the failure is repaired
+or still open. Keep recovery status explicit; analysis alone does not repair it.
 
 ## Orientation
 
@@ -14,14 +17,16 @@ Before starting, orient yourself in this branch:
 - Read wave/PM context only when the seed names the exact wave, task, project,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
 ## Philosophy
 
-**Keep asking why until you feel resistance.** That resistance—"we'd have to change how we think about this"—is where the real fix lives.
+**Follow causes beyond the first patch.** Ask what made the failure possible
+and whether changing that condition would prevent it. Depth comes from evidence,
+not a required number of answers.
 
 **Investigate before you document.** Read the code. Run the commands. Trace the actual execution. The chain should reflect what you discovered, not what you guessed.
 
@@ -34,59 +39,22 @@ re-derive what these already record.
 1. Understand the symptom thoroughly—read errors, logs, code
 2. Ask "why did this happen?" and trace the answer (don't guess)
 3. Take that answer and ask "why?" again
-4. Keep asking until you hit something systemic
+4. Follow the chain while evidence supports it; identify systemic causes when present
 5. Look back: what questions did you skip? What branches unexplored?
 6. For each level, ask: what change to prompts, process, migrations, code, or tests would have prevented this?
 
-## Output format
+## Output
 
-Write to `scratch/<branch>.md` (use current branch name):
+Update the existing incident analysis, or write a topic-named note under
+`scratch/`. Preserve the working design and original observations. Include:
 
-```markdown
-# 5 Whys: <Problem>
+- What failed, who it affected, and the observed recovery status.
+- The causal chain, with evidence supporting each link. Follow useful branches;
+  do not invent a fifth cause or force every failure into a systemic explanation.
+- Unanswered questions and evidence that contradicts the leading explanation.
+- Proportionate prevention, why it would address the cause, and how to prove it.
+  Distinguish proposed changes from fixes already made and accepted decisions.
 
-## The Problem
-<One sentence: what went wrong>
-
-## Chain
-
-Problem → Cause 1 → Cause 2 → Cause 3 → Root Cause
-
-**Problem**: <observable symptom>
-
-**Why 1**: <answer>
-↳ *Could we have caught this earlier?*
-
-**Why 2**: <answer>
-↳ *What process allowed this?*
-
-**Why 3**: <answer>
-↳ *What assumption was wrong?*
-
-**Why 4**: <answer>
-↳ *Why was that assumption encoded?*
-
-**Why 5 (Root)**: <systemic cause>
-
-## Unanswered Whys
-
-| Branch Point | Unexplored Question | Priority |
-|--------------|---------------------|----------|
-| Why 2 | Why didn't tests catch this? | High |
-| Why 3 | Why did we choose X over Y? | Low |
-
-## Fixes
-
-| Level | Fix | Prevents |
-|-------|-----|----------|
-| Immediate | <quick unblock> | This specific instance |
-| Structural | <code/process change> | This class of bugs |
-| Systemic | <prompt/tooling/architecture> | Future similar issues |
-
-## Changes to Implement
-
-- [ ] <specific change 1>
-- [ ] <specific change 2>
-```
-
-The Task worker implements these changes one coherent prevention at a time.
+Stop where the evidence stops. If no further change is worthwhile, say why.
+Leave the analysis path and the useful next action in the summary so planning
+can use the findings without treating every proposal as approved work.

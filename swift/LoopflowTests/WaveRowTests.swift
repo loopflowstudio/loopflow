@@ -12,9 +12,7 @@ struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
         status: WorkStatus = .ready,
-        live: Bool = false,
-        activeTasks: Int = 0,
-        activeProjects: Int = 0
+        activeTasks: Int = 0
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -22,9 +20,7 @@ struct WaveRowViewTests {
                 name: name,
                 repo: "/tmp/repo",
                 status: status,
-                live: live,
-                activeTasks: activeTasks,
-                activeProjects: activeProjects
+                activeTasks: activeTasks
             )
         )
     }
@@ -49,17 +45,17 @@ struct WaveRowViewTests {
         let row = makeRow(wave: wave)
 
         let nameText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-name").text()
-        #expect(try nameText.string() == "aurora-melody")
+        #expect(try nameText.string() == "Aurora Melody")
     }
 
     @Test("Row renders an operational lens")
     func showsLens() throws {
-        let wave = makeWave(status: .ready, live: true)
+        let wave = makeWave(status: .ready)
         let row = makeRow(wave: wave)
 
         // The lens is present, and its accessibility names the reason.
         let lens = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-lens")
-        #expect(try lens.accessibilityLabel().string().contains("listener answered"))
+        #expect(try lens.accessibilityLabel().string().contains("No active Tasks"))
     }
 
     @Test("Row shows open-task count only when nonzero")

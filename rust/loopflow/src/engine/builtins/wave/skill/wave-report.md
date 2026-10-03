@@ -14,7 +14,7 @@ Before starting, orient yourself in this branch:
 - Read wave/PM context only when the seed names the exact wave, task, project,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
@@ -26,10 +26,10 @@ gradients, electrical impulses, mechanical pressure. The brain integrates
 millions of these signals into a felt sense of what needs attention.
 
 This step reads five signal types across all waves and produces a
-health report. The report tells a human which waves need their thinking,
+health report. The report shows which waves need the reader's thinking,
 which can run autonomously, and which are silently failing.
 
-Success: a human reads the report and knows where to spend their next
+Success: the reader opens the report and knows where to spend their next
 hour. Not a status update — a triage.
 
 ## Signals
@@ -71,9 +71,9 @@ roll-up is useful for the report, but the actual dependency lives
 between items.
 
 Three sources write `needs:`:
-- Humans, when they know the dependency up front
+- Users, when they know the dependency up front
 - Build agents, when they hit a wall during implementation
-- The garden, when it keeps rediscovering the same blocking pattern
+- Wave or repository operation, when it keeps rediscovering the same blocking pattern
 
 Gather:
 - `**Needs:**` declarations on wave items — the primary signal
@@ -91,7 +91,7 @@ Interpret:
   under more pressure than one with zero downstream blockers.
 - Area overlap without explicit triggers or `needs:` means
   uncoordinated coupling — potential merge conflict territory.
-- When the garden discovers a dependency that isn't declared, propose
+- When Wave or repository operation discovers a dependency that isn't declared, propose
   adding `needs:` to the item. Sensed first, declared when confirmed.
 
 ### 3. Design debt
@@ -146,14 +146,14 @@ Are the items in a wave pulling in the same direction, or has the wave
 become a dumping ground?
 
 Gather:
-- Read the PM snapshot's Projects, KRs, and tasks for the wave
+- Read the Wave's current chapter, KRs, and Tasks for the wave
 - Read the wave `GOAL.md` and `MEMORY.md`
-- Check area overlap between projects within the same wave
+- Check whether the chapter outcomes and Tasks fit the Wave mandate
 
 Interpret:
-- Projects and tasks should serve the wave's stated objective. A task in the `pm` wave
+- Chapter outcomes and Tasks should serve the Wave's stated objective. A task in the `pm` wave
   that's really about Loopflow UI belongs in `macos`.
-- Projects at the same priority tier should be independent enough to work
+- Tasks at the same priority tier should be independent enough to work
   in parallel. If item 2a blocks item 2b, that's a sequencing issue the
   report should surface.
 - A wave with items spanning 4 different subsystems may need to be split.
@@ -177,7 +177,7 @@ Interpret:
    |-------|---------|
    | quiet | No signal. Healthy silence or irrelevant dimension. |
    | warm | Something worth noting. Not urgent. |
-   | hot | Needs human attention. Will get worse if ignored. |
+   | hot | Needs <name>'s attention. Will get worse if ignored. |
 
 4. **Write the report.** Organize by signal intensity, not by wave.
    Hot signals first. A wave that's quiet on all five dimensions gets
@@ -186,21 +186,26 @@ Interpret:
 ## Task references
 
 When the report names more than one Task, read `lf roadmap --wave <wave>
---json` for plan-wide rows and `lf status <wave> --json` for live execution.
-Render every Task with the shared reference:
+--json` for plan-wide rows and `lf wave status <wave> --json` for live execution.
+Render operational Task lists with the shared reference:
 
 ```markdown
-[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+[identifier · Task title](provider URL) — status; next action/owner
 ```
 
-Fill the link from `task.identifier` and `reference.issue_url`. Use
-`active_pr.slug` from roadmap; for status, match `active_pr` to `prs[].id` and
-use that PR's `slug`. Fall back to `reference.workspace.slug`. Take status from
-`runtime.status`, or from the roadmap `section` when runtime is absent;
-`next_move.owner` supplies next owner. Never reconstruct a provider URL, branch,
-or slug from an identifier, title, worktree, or naming convention. Omit only a
-link or slug whose snapshot evidence is explicitly absent; keep the Task and
-its available status/next owner.
+Use this ID-first form in operational lists. In prose, use
+`[Task title · identifier](provider URL)` on first mention; shorten later
+references when unambiguous.
+
+Fill the link from `task.identifier` and `reference.issue_url`, and the readable
+title from `task.title`. Take status from `runtime.status` or the roadmap
+`section`, and next owner from `next_move.owner`. State the next action only
+when supported by current evidence; leave unknown state unknown. Include an
+active PR/workspace slug only when navigating that workspace is the job. In
+roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+URL, branch, or slug from a title or identifier. If a link is absent, keep the
+readable title and available status without inventing a URL.
 
 ## Output
 

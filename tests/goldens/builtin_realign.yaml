@@ -1,0 +1,9 @@
+name: builtin_realign
+repo: tests/parity/fixtures/basic
+skill: realign
+surface: headless
+docs: []
+diff_files: false
+diff: false
+clipboard: false
+wave: null

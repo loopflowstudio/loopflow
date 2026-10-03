@@ -2,7 +2,6 @@
   "wave": "survival/infrastructure",
   "provider": "linear",
   "initiative": "initiative-infrastructure",
-  "project": null,
   "synced_at": 1784592000,
   "projects": [
     {
@@ -10,10 +9,6 @@
       "slug": "gmail",
       "name": "Gmail",
       "summary": "Keep mail flowing.",
-      "definition": "Keep mail flowing.",
-      "flows": {
-        "recommended": null
-      },
       "krs": [
         {
           "text": "Mail processing survives restart",
@@ -25,7 +20,10 @@
       ],
       "team_ids": [
         "team-loo"
-      ]
+      ],
+      "metric_targets": [],
+      "flow": "feature",
+      "status": "started"
     }
   ],
   "items": [
@@ -40,7 +38,11 @@
       "project_id": "project-gmail",
       "project": "gmail",
       "team_id": "team-loo",
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "revision": "2026-09-29T12:00:00.123Z",
+      "branch_name": null,
+      "completed_at": null
     }
   ]
 }

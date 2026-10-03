@@ -33,10 +33,46 @@ public enum CornerRadius {
     public static let full: CGFloat = 9999
 }
 
+/// Bundled faces (see `AppFontRegistration`): Cormorant Garamond Regular /
+/// Medium / SemiBold, Lato Regular / Bold, JetBrains Mono Regular. Request only
+/// those weights; `.semibold` or `.medium` on Lato and any weight on the mono
+/// face are synthesized and render heavier than the design.
+///
+/// The workspace ramp has seven steps, serif on three of them and nothing
+/// between 17 and 26 on purpose:
+///
+/// | step        | face          | size |
+/// |-------------|---------------|------|
+/// | display     | Cormorant 500 | 34   |
+/// | title       | Cormorant 500 | 26   |
+/// | lede        | Cormorant 500 | 17   |
+/// | text        | Lato 400      | 13   |
+/// | textStrong  | Lato 700      | 13   |
+/// | meta        | Lato 400      | 11   |
+/// | label       | Lato 700 caps | 11   |
+/// | mono        | JetBrains     | 12   |
 public enum Typography {
     public static let serifFamily = "Cormorant Garamond"
     public static let sansFamily = "Lato"
     public static let monoFamily = "JetBrains Mono"
+
+    /// Wave page title.
+    public static let display = sectionTitle(34)
+    /// Task page title.
+    public static let title = sectionTitle(26)
+    /// Wave objective and other serif reading copy.
+    public static let lede = sectionTitle(17)
+    /// Everything else.
+    public static let text = body(13)
+    /// Row titles when selected, Session names.
+    public static let textStrong = body(13).weight(.bold)
+    /// Meta, ranks, IDs.
+    public static let meta = caption(11)
+    /// Section headings and table heads; callers add `.textCase(.uppercase)`
+    /// and `.tracking(0.66)` (0.06em).
+    public static let label = caption(11).weight(.bold)
+    /// Skill names, IDs, chips, terminal chrome.
+    public static let mono = code(12)
 
     public static func heroTitle(_ size: CGFloat = 32) -> Font {
         .custom(serifFamily, size: size).weight(.semibold)
@@ -59,15 +95,24 @@ public enum Typography {
     }
 }
 
+/// Motion tokens. Reduce-motion zeroes every one of them.
 public enum DesignAnimation {
-    public static func standard(_ reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.2)
-    }
-
+    /// Hover, chip and disclosure chevrons: 100 ms.
     public static func fast(_ reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeOut(duration: 0.1)
     }
 
+    /// Panel open, row selection, pane focus dim: 160 ms.
+    public static func standard(_ reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.16)
+    }
+
+    /// Sidebar collapse and split creation: 240 ms.
+    public static func panel(_ reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.24)
+    }
+
+    /// Pane reorder only.
     public static func spring(_ reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7)
     }

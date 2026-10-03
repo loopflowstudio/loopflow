@@ -1,0 +1,361 @@
+{
+  "00000000-0000-0000-0000-00000000f10w": {
+    "name": "task-design",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ],
+    "interactions": {
+      "stages": [
+        "1"
+      ],
+      "transitions": [
+        {
+          "from": "@start",
+          "to": "1",
+          "nodes": [
+            "0"
+          ],
+          "routes": [
+            {
+              "from": "@start",
+              "to": "0",
+              "condition": null
+            },
+            {
+              "from": "0",
+              "to": "1",
+              "condition": null
+            }
+          ]
+        },
+        {
+          "from": "1",
+          "to": "@end",
+          "nodes": [],
+          "routes": [
+            {
+              "from": "1",
+              "to": "@end",
+              "condition": null
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "00000000-0000-0000-0000-0000000000f1": {
+    "name": "feature",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 2,
+        "id": null,
+        "label": "implement",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ],
+    "interactions": {
+      "stages": [
+        "1"
+      ],
+      "transitions": [
+        {
+          "from": "@start",
+          "to": "1",
+          "nodes": [
+            "0"
+          ],
+          "routes": [
+            {
+              "from": "@start",
+              "to": "0",
+              "condition": null
+            },
+            {
+              "from": "0",
+              "to": "1",
+              "condition": null
+            }
+          ]
+        },
+        {
+          "from": "1",
+          "to": "@end",
+          "nodes": [
+            "2"
+          ],
+          "routes": [
+            {
+              "from": "1",
+              "to": "2",
+              "condition": null
+            },
+            {
+              "from": "2",
+              "to": "@end",
+              "condition": null
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "00000000-0000-0000-0000-0000000000f2": {
+    "name": "feature",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "kickoff",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review-design",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 2,
+        "id": null,
+        "label": "implement",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 3,
+        "id": null,
+        "label": "compress",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 4,
+        "id": null,
+        "label": "route",
+        "kind": "xor",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": [
+          {
+            "name": "fix",
+            "description": "Repair",
+            "steps": [
+              {
+                "key": 5,
+                "id": null,
+                "label": "patch",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [],
+                "paths": []
+              },
+              {
+                "key": 6,
+                "id": null,
+                "label": "implement",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [],
+                "paths": []
+              }
+            ]
+          },
+          {
+            "name": "skip",
+            "description": "Skip",
+            "steps": []
+          }
+        ]
+      },
+      {
+        "key": 7,
+        "id": null,
+        "label": "loop-decide",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 8,
+        "id": null,
+        "label": "pr-publish",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      },
+      {
+        "key": 9,
+        "id": null,
+        "label": "demo",
+        "kind": "skill",
+        "human": true,
+        "returns_to": null,
+        "sources": [],
+        "paths": []
+      }
+    ],
+    "interactions": {
+      "stages": [
+        "1",
+        "9"
+      ],
+      "transitions": [
+        {
+          "from": "@start",
+          "to": "1",
+          "nodes": [
+            "0"
+          ],
+          "routes": [
+            {
+              "from": "@start",
+              "to": "0",
+              "condition": null
+            },
+            {
+              "from": "0",
+              "to": "1",
+              "condition": null
+            }
+          ]
+        },
+        {
+          "from": "1",
+          "to": "9",
+          "nodes": [
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8"
+          ],
+          "routes": [
+            {
+              "from": "1",
+              "to": "2",
+              "condition": null
+            },
+            {
+              "from": "2",
+              "to": "3",
+              "condition": null
+            },
+            {
+              "from": "3",
+              "to": "4",
+              "condition": null
+            },
+            {
+              "from": "4",
+              "to": "5",
+              "condition": "fix"
+            },
+            {
+              "from": "4",
+              "to": "7",
+              "condition": "skip"
+            },
+            {
+              "from": "7",
+              "to": "8",
+              "condition": null
+            },
+            {
+              "from": "8",
+              "to": "9",
+              "condition": null
+            },
+            {
+              "from": "5",
+              "to": "6",
+              "condition": null
+            },
+            {
+              "from": "6",
+              "to": "7",
+              "condition": null
+            }
+          ]
+        },
+        {
+          "from": "9",
+          "to": "@end",
+          "nodes": [],
+          "routes": [
+            {
+              "from": "9",
+              "to": "@end",
+              "condition": null
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

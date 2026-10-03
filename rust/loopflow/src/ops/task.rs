@@ -1,29 +1,38 @@
+mod directory;
+mod lifecycle;
+pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
+mod file_save;
+pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
+pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
+
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
-use crate::durable::{WorkRef, WorkStatus};
+use crate::durable::{FlowSession, WorkRef, WorkStatus};
+use crate::engine::agent::{checkout_execution_boundary, probe_execution_boundary};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
     fetch, get_default_branch, is_ancestor, is_clean, is_materially_clean, merge_base,
-    origin_branch, push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
+    push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::tmux_session_slug;
 use crate::engine::worktrees::{
-    create_from_placement_plan, git_common_dir, plan_placement, PlacementStrategy, WorktreeSegment,
+    create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
+    WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, AgentExecutionBoundary, ConcreteStep};
+use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::pm::PmSnapshot;
-use crate::provider_auth::Provider;
 use crate::store::{
     open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
     SharedStore, Store, StoreError,
@@ -45,7 +54,11 @@ pub enum TaskWaitUntil {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TaskLaunchOptions {
+pub struct TaskExecOptions {
+    pub wave: Option<String>,
+    pub retry: bool,
+    pub reason: Option<String>,
+    pub agent: Option<String>,
     pub name: Option<String>,
     pub flow: Option<String>,
     pub stack_on: Option<String>,
@@ -53,19 +66,25 @@ pub struct TaskLaunchOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TaskPrepareOptions {
+pub struct TaskCheckoutOptions {
     pub name: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
 }
 
+#[derive(Debug)]
+pub enum TaskCreateResult {
+    Created(Box<crate::pm::PmItem>),
+    Started(Box<TaskSnapshot>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskStartInput {
+pub struct TaskCreateInput {
     pub title: String,
     pub report: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskControlResult {
     pub issue_id: String,
     pub task_id: String,
@@ -73,8 +92,9 @@ pub struct TaskControlResult {
     pub observation: Observation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSnapshot {
+    pub home_id: Option<crate::durable::HomeId>,
     pub issue_id: String,
     pub issue_identifier: String,
     pub task_id: String,
@@ -85,9 +105,11 @@ pub struct TaskSnapshot {
     pub wave: String,
     pub project_id: String,
     pub status: WorkStatus,
+    pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
+    pub work: crate::task_work::TaskWork,
     pub worktree: String,
     pub workspace_slug: String,
-    pub agent: String,
+    pub agent: Option<String>,
     pub provider: String,
     pub prs: Vec<TaskPr>,
     pub active_pr: Option<TaskPrId>,
@@ -101,43 +123,60 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskChangedFile {
     pub path: String,
+    pub old_path: Option<String>,
     pub committed: bool,
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskChangesSnapshot {
+    pub recovery_directory: Option<String>,
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
     pub files: Vec<TaskChangedFile>,
+    pub scratch: Vec<String>,
+    pub scratch_truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
+    pub base_commit: String,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskFileState {
+    Text,
+    Binary,
+    UnsupportedEncoding,
+    Truncated,
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskFileSnapshot {
+    pub recoveries: Vec<TaskFileRecovery>,
     pub issue_identifier: String,
     pub task_id: String,
     pub path: String,
     pub content: Option<String>,
-    pub binary: bool,
+    pub state: TaskFileState,
+    pub revision: Option<String>,
+    pub read_only_reason: Option<String>,
     pub size_bytes: u64,
-    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -145,15 +184,32 @@ struct TaskWorkspace<'a> {
     issue_identifier: &'a str,
     task_id: &'a crate::work::task::TaskId,
     worktree: &'a Path,
+}
+
+impl<'a> From<&'a crate::store::sqlite::TaskCheckout> for TaskWorkspace<'a> {
+    fn from(checkout: &'a crate::store::sqlite::TaskCheckout) -> Self {
+        Self {
+            issue_identifier: &checkout.issue_identifier,
+            task_id: &checkout.task_id,
+            worktree: &checkout.worktree,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskComparison<'a> {
+    checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
 }
 
-impl<'a> TaskWorkspace<'a> {
+impl<'a> TaskComparison<'a> {
     fn new(task: &'a Task, pr: &'a TaskPr) -> Self {
         Self {
-            issue_identifier: &task.plan.identifier,
-            task_id: &task.id,
-            worktree: &task.worktree,
+            checkout: TaskWorkspace {
+                issue_identifier: &task.plan.identifier,
+                task_id: &task.id,
+                worktree: &task.worktree,
+            },
             base_commit: &pr.base_commit,
         }
     }
@@ -171,17 +227,85 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
     })
 }
 
-fn task_error(message: impl Into<String>) -> OpsError {
-    OpsError::Message(message.into())
+// File access reads recorded placement without reconciling PR or execution state.
+fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
+    #[cfg(test)]
+    let test_path = super::pm::PM_TEST_CONTEXT
+        .try_with(|context| context.path.clone())
+        .ok();
+    #[cfg(not(test))]
+    let test_path: Option<std::path::PathBuf> = None;
+    let path = match test_path {
+        Some(path) => path,
+        None => {
+            let crate::store::StorageConfig::Sqlite { path } =
+                crate::store::storage_config_from_env().map_err(|error| {
+                    task_error(format!("cannot resolve Task registry: {error}"))
+                })?;
+            path
+        }
+    };
+    crate::store::sqlite::SqliteStore::open_read_only(&path)
+        .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
 }
 
-fn block_on_task<T>(future: impl std::future::Future<Output = OpsResult<T>>) -> OpsResult<T> {
+fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
+    let store = file_store()?;
+    let mut checkouts = store
+        .task_checkouts()
+        .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
+        .into_iter()
+        .filter(|row| {
+            row.task_id.as_str() == issue || row.issue_id == issue || row.issue_identifier == issue
+        });
+    let checkout = checkouts
+        .next()
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    if checkouts.next().is_some() {
+        return Err(task_error(format!(
+            "multiple stable Tasks resolve to {issue:?}"
+        )));
+    }
+    if let Some(home) = &checkout.home_id {
+        if *home != store.local_home().map_err(task_error)?.id {
+            return Err(task_error(format!(
+                "Task checkout belongs to Home {home}; read its files on that Home"
+            )));
+        }
+    }
+    Ok(checkout)
+}
+
+fn comparison_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
+    let store = file_store()?;
+    let task = store
+        .task_by_issue(issue)
+        .map_err(|error| task_error(format!("failed to read Task: {error}")))?
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    let pr = store
+        .active_task_pr(&task.id)
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| task_error("Task has no active PR"))?;
+    Ok((task, pr))
+}
+
+fn task_error(message: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(message.to_string())
+}
+
+pub(super) fn block_on_task<T>(
+    future: impl std::future::Future<Output = OpsResult<T>>,
+) -> OpsResult<T> {
     tokio::runtime::Runtime::new()
         .map_err(|error| task_error(format!("failed to build task runtime: {error}")))?
         .block_on(future)
 }
 
 async fn task_store() -> OpsResult<SharedStore> {
+    #[cfg(test)]
+    if let Ok(store) = super::pm::PM_TEST_CONTEXT.try_with(|context| context.store.clone()) {
+        return Ok(store);
+    }
     open_existing_store().await.map(Arc::new).ok_or_else(|| {
         task_error("no Loopflow registry on this machine; start the owning Wave first")
     })
@@ -189,7 +313,7 @@ async fn task_store() -> OpsResult<SharedStore> {
 
 /// Durable placement for a Task PR forked from another Task's active PR.
 #[derive(Debug, Clone)]
-pub struct StackedRebase {
+pub struct StackedSync {
     pub fork_base: String,
     pub child: TaskPr,
     /// The live parent branch, or `None` once the parent has merged.
@@ -200,17 +324,13 @@ pub struct StackedRebase {
 /// GitHub because an out-of-band parent merge can precede registry reconcile.
 /// A worktree that is not a Task worktree yields `None`; a Task worktree whose
 /// registry is missing/inaccessible/incompatible is refused with an actionable
-/// authority error, so a stacked rebase never silently degrades to generic.
-pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+/// authority error, so a stacked sync never silently degrades to generic.
+pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(worktree).await? else {
             return Ok(None);
         };
-        let Some(active) = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-        else {
+        let Some(active) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
             return Ok(None);
         };
         let Some(parent_id) = active.parent_pr_id.clone() else {
@@ -219,12 +339,12 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
         let parent = store
             .get_task_pr(&parent_id)
             .await
-            .map_err(|error| task_error(error.to_string()))?
+            .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
         let mut parent_task = store
             .get_task(&parent.task_id)
             .await
-            .map_err(|error| task_error(error.to_string()))?
+            .map_err(task_error)?
             .ok_or_else(|| task_error("stack parent Task is missing"))?;
         // Reuse the parent's persisted PR number and observation cache. Stack
         // resolution used to enumerate every PR on the branch independently,
@@ -233,7 +353,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
         let parent = store
             .get_task_pr(&parent_id)
             .await
-            .map_err(|error| task_error(error.to_string()))?
+            .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} disappeared")))?;
         let merged = parent.merge_commit.is_some();
         let closed = parent.abandoned_at.is_some();
@@ -243,7 +363,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
                 parent.branch
             )));
         }
-        Ok(Some(StackedRebase {
+        Ok(Some(StackedSync {
             fork_base: active.base_commit.clone(),
             child: active,
             parent_branch: (!merged).then_some(parent.branch),
@@ -253,7 +373,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
 
 /// Return a stacked child only after its parent has merged. Landing before that
 /// would silently drop a dependency that is not present on the default branch.
-pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
         if let Some(parent) = &stacked.parent_branch {
@@ -265,13 +385,13 @@ pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
     Ok(stacked)
 }
 
-/// Persist the exact base reached by a successful deterministic rebase. Clear
+/// Persist the exact base reached by a successful deterministic sync. Clear
 /// the parent link only when its work is now present on the default branch.
 /// Refuses with an actionable authority error if the registry is not usable, so
-/// a post-rebase base is never silently dropped — the rebase already pushed, so
+/// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
-pub fn record_stack_rebase(
-    stacked: &StackedRebase,
+pub fn record_stack_sync(
+    stacked: &StackedSync,
     new_base: &str,
     clear_parent: bool,
 ) -> OpsResult<()> {
@@ -285,16 +405,16 @@ pub fn record_stack_rebase(
         );
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
-        // collapse only repoints the mutable row to the post-merge truth.
+        // sync only repoints the mutable row to the post-merge truth.
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &pr_id,
                 &new_base,
                 clear_parent,
                 time::OffsetDateTime::now_utc(),
             )
             .await
-            .map_err(|error| task_error(error.to_string()))?;
+            .map_err(task_error)?;
         Ok(())
     })
 }
@@ -307,45 +427,48 @@ async fn owning_wave(store: &SharedStore, task: &Task) -> OpsResult<Wave> {
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", task.wave_id)))
 }
 
-async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
+pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
-        .map_err(|error| task_error(error.to_string()))?;
-    store
-        .work_status(&work)
-        .await
-        .map_err(|error| task_error(error.to_string()))
+        .map_err(task_error)?;
+    store.work_status(&work).await.map_err(task_error)
 }
 
-pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
-    let TaskLaunchOptions {
-        name,
-        flow,
-        stack_on,
-        directive,
-    } = options;
-    prepare_task(repo, issue, name, stack_on, directive, flow, true)
+pub fn task_run(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult<TaskSnapshot> {
+    prepare_task(repo, issue, options, true).and_then(|task| task_snapshot(&task))
 }
 
-pub fn task_prepare(repo: &Path, issue: &str, options: TaskPrepareOptions) -> OpsResult<Task> {
-    let TaskPrepareOptions {
-        name,
-        stack_on,
-        directive,
-    } = options;
-    prepare_task(repo, issue, name, stack_on, directive, None, false)
+pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> OpsResult<Task> {
+    prepare_task(
+        repo,
+        issue,
+        TaskExecOptions {
+            name: options.name,
+            stack_on: options.stack_on,
+            directive: options.directive,
+            ..Default::default()
+        },
+        false,
+    )
 }
 
 fn prepare_task(
     repo: &Path,
     issue: &str,
-    name: Option<String>,
-    stack_on: Option<String>,
-    directive: Option<String>,
-    requested_flow: Option<String>,
+    options: TaskExecOptions,
     launch: bool,
 ) -> OpsResult<Task> {
+    let TaskExecOptions {
+        wave: expected_wave,
+        name,
+        stack_on,
+        directive,
+        flow: requested_flow,
+        agent: requested_agent,
+        reason,
+        retry,
+    } = options;
     let directive = directive
         .map(|directive| {
             let directive = directive.trim().to_string();
@@ -363,6 +486,16 @@ fn prepare_task(
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(task) = &mut existing {
+            if let Some(expected) = &expected_wave {
+                let wave = owning_wave(&store, task).await?;
+                if wave.slug() != expected {
+                    return Err(task_error(format!(
+                        "--wave {expected} does not own Task {} (Wave {})",
+                        task.plan.identifier,
+                        wave.slug()
+                    )));
+                }
+            }
             let status = task_work_status(&store, task).await?;
             match status {
                 WorkStatus::Done => {
@@ -373,9 +506,9 @@ fn prepare_task(
                 }
                 WorkStatus::Abandoned => {
                     return Err(task_error(format!(
-                        "Task {} is abandoned; recover it with `lf task recover {}`",
-                        task.plan.identifier, task.plan.identifier
-                    )))
+                    "Task {} is abandoned; inspect its retained history with `lf task status {}`",
+                    task.plan.identifier, task.plan.identifier
+                )))
                 }
                 WorkStatus::Ready => {}
             }
@@ -388,168 +521,398 @@ fn prepare_task(
                     )));
                 }
             }
-            if let Some(requested) = stack_on.as_deref() {
-                let active = store
-                    .active_task_pr(&task.id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error("existing Task has no active PR"))?;
-                let parent_id = active.parent_pr_id.as_ref().ok_or_else(|| {
-                    task_error(format!(
-                        "Task {} is rooted on main, not stacked on {requested}",
-                        task.plan.identifier
-                    ))
-                })?;
-                let parent = store
-                    .get_task_pr(parent_id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-                let parent_task = store
-                    .get_task(&parent.task_id)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error("stack parent Task is missing"))?;
-                if requested != parent_task.plan.identifier
-                    && requested != parent_task.plan.id.as_str()
-                {
-                    return Err(task_error(format!(
-                        "Task {} is stacked on {}, not {requested}",
-                        task.plan.identifier, parent_task.plan.identifier
-                    )));
-                }
-            }
             if directive.is_some() {
                 return Err(task_error(format!(
-                    "Task {} already exists; use `lf task steer {} <new-direction>`",
+                    "Task {} already exists; use `lf task comment {} <new-direction>`",
                     task.plan.identifier, task.plan.identifier,
                 )));
             }
         }
         Ok(existing)
     })?;
-    if let Some(mut existing) = existing {
+    if let Some(existing) = existing {
+        if let Some(parent) = stack_on.as_deref() {
+            block_on_task(async {
+                stack_existing_task(&task_store().await?, &existing, parent).await
+            })?;
+        }
+        block_on_task(async {
+            let store = task_store().await?;
+            restore_task_checkout(&store, &existing).await
+        })?;
         if !launch {
             return Ok(existing);
         }
-        let flow = select_task_worker_flow(repo, issue, requested_flow.as_deref())?;
-        return block_on_task(async move {
-            let store = task_store().await?;
-            if task_worker_live(&store, &existing).await? {
-                return Ok(existing);
-            }
-            launch_task_process(&store, &mut existing, Some(&flow)).await?;
-            Ok(existing)
-        });
+        return block_on_task(continue_task_async(
+            issue,
+            reason,
+            requested_agent,
+            requested_flow,
+            retry,
+        ));
     }
-    let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
-        .map_err(|error| task_error(error.to_string()))?;
+    let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
-    let selected_flow = launch
-        .then(|| {
-            select_task_worker_flow_from_project(
-                &main_repo,
-                &resolved.project,
-                requested_flow.as_deref(),
-            )
-        })
-        .transpose()?;
-    let segment = match name.as_deref() {
-        Some(name) => parse_workspace_slug(name)?,
-        None => derive_workspace_slug(&resolved.item.name)?,
-    };
-    let workspace_slug = segment.as_str().to_string();
-    let mut plan = plan_placement(&main_repo, segment)
-        .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
-    if plan.strategy != PlacementStrategy::Create {
+    if let Some(expected) = &expected_wave {
+        if &resolved.wave != expected {
+            return Err(task_error(format!(
+                "--wave {expected} does not own Task {} (Wave {})",
+                resolved.item.identifier, resolved.wave
+            )));
+        }
+    }
+    require_startable_issue(&resolved.item)?;
+    let prepared = block_on_task(prepare_new_task(
+        &main_repo,
+        &resolved.item.name,
+        Some(&resolved.item),
+        &resolved.project,
+        &TaskExecOptions {
+            wave: expected_wave,
+            retry,
+            reason,
+            name,
+            stack_on,
+            directive,
+            flow: requested_flow,
+            agent: requested_agent,
+        },
+        launch,
+    ))?;
+    create_prepared_task(main_repo, resolved, prepared)
+}
+
+/// Recover checkout files from retained Task placement without replacing history.
+async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task has no active PR from which to restore its checkout"))?;
+    let wave = owning_wave(store, task).await?;
+    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
+    let _lease =
+        crate::engine::git::acquire_worktree_lease(&repo, &task.worktree, "Task checkout")?;
+    if task.worktree.join(".git").exists() {
+        return finish_task_checkout(store, task, &pr).await;
+    }
+    if task.worktree.symlink_metadata().is_ok() {
         return Err(task_error(format!(
-            "task worktree or branch already exists without a Task: {} ({})",
-            plan.worktree_path.display(),
-            plan.branch
+            "Task checkout path {} is occupied; its contents were preserved",
+            task.worktree.display()
         )));
     }
-    let default_branch =
-        get_default_branch(&main_repo).map_err(|error| task_error(error.to_string()))?;
-    let stack_parent = stack_on
+    let checkouts = crate::engine::worktrees::list_worktrees(&repo)?;
+    let destination = crate::store::canonicalize_with_missing_tail(&task.worktree)?;
+    for other in checkouts
+        .iter()
+        .filter(|entry| entry.branch.as_deref() == Some(&pr.branch))
+    {
+        if crate::store::canonicalize_with_missing_tail(&other.path)? != destination {
+            return Err(task_error(format!(
+                "Task branch {} is registered at {}; preserve that checkout before restoring {}",
+                pr.branch,
+                other.path.display(),
+                task.worktree.display()
+            )));
+        }
+    }
+    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
+    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
+        let driver_may_live = position.claim.as_ref().is_some_and(|claim| {
+            crate::journal::task_worker_owner_evidence(&claim.owner)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        });
+        let step_may_live = store
+            .sqlite
+            .pending_flow_step_exec(position.id())
+            .map_err(task_error)?
+            .is_some_and(|exec| {
+                crate::journal::exec_process_evidence(&store.sqlite, &exec)
+                    != crate::journal::ProcessIdentityEvidence::Dead
+            });
+        if driver_may_live || step_may_live {
+            return Err(task_error("Task worker may still own the missing checkout; stop its execution before restoring it"));
+        }
+    }
+    let mut args = vec!["worktree".to_string(), "add".into(), "--force".into()];
+    // --force replaces only the stale registration at this absent exact path.
+    // A different registered path was rejected above; no branch is reset.
+    if !crate::engine::worktrees::branch_exists(&repo, &pr.branch)? {
+        let remote = format!("refs/remotes/origin/{}", pr.branch);
+        if !ref_exists(&repo, &remote)? && pr.github().is_some() {
+            fetch(&repo, "origin", &pr.branch)?;
+        }
+        let base = if ref_exists(&repo, &remote)? {
+            remote
+        } else {
+            let started = store.task_events_after(&task.id, 0).await.map_err(task_error)?
+                .iter().any(|event| matches!(&event.kind, TaskEventKind::PrStarted { pr_id, .. } if pr_id == &pr.id));
+            if started {
+                return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone", pr.branch)));
+            }
+            pr.base_commit.clone()
+        };
+        args.extend([
+            "--no-track".into(),
+            "-b".into(),
+            pr.branch.clone(),
+            task.worktree.display().to_string(),
+            base,
+        ]);
+    } else {
+        args.extend([task.worktree.display().to_string(), pr.branch.clone()]);
+    }
+    git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    finish_task_checkout(store, task, &pr).await
+}
+
+async fn finish_task_checkout(store: &SharedStore, task: &Task, pr: &TaskPr) -> OpsResult<()> {
+    let events = store
+        .task_events_after(&task.id, 0)
+        .await
+        .map_err(task_error)?;
+    if !events.iter().any(
+        |event| matches!(&event.kind, TaskEventKind::PrStarted { pr_id, .. } if pr_id == &pr.id),
+    ) {
+        // The first child commit owns the deletion. A retry after that commit
+        // but before PrStarted must preserve any notes the child has since made.
+        if pr.parent_pr_id.is_some() && rev_parse(&task.worktree, "HEAD")? == pr.base_commit {
+            git_output_bytes(
+                &task.worktree,
+                &["rm", "-r", "-f", "--ignore-unmatch", "--", "scratch"],
+            )?;
+            git_output_bytes(
+                &task.worktree,
+                &["commit", "--allow-empty", "-m", "Clear inherited scratch"],
+            )?;
+        }
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::PrStarted {
+                    pr_id: pr.id.clone(),
+                    sequence: pr.sequence,
+                    branch: pr.branch.clone(),
+                    base_commit: pr.base_commit.clone(),
+                },
+            )
+            .await
+            .map_err(task_error)?;
+    }
+    Ok(())
+}
+
+async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) -> OpsResult<()> {
+    let active = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error("existing Task has no active PR"))?;
+    let parent_task = store
+        .get_task_by_issue(requested)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
+    // A retry names the retained PR, even if its Task has since opened another PR.
+    let parent = match &active.parent_pr_id {
+        Some(id) => store.get_task_pr(id).await,
+        None => store.active_task_pr(&parent_task.id).await,
+    }
+    .map_err(|error| task_error(error.to_string()))?
+    .ok_or_else(|| task_error("stack parent PR is missing"))?;
+    if parent.task_id != parent_task.id {
+        return Err(task_error(format!(
+            "Task {} already selects parent PR {}; changing an existing dependency requires explicit reparenting",
+            task.plan.identifier, parent.id
+        )));
+    }
+    let _mutation = lock_task_pr_mutation(&task.worktree)?;
+    store
+        .stack_task_pr(&active, &parent.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    eprintln!(
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf task sync` in {} to integrate it.",
+        task.plan.identifier, parent.id, task.worktree.display()
+    );
+    Ok(())
+}
+
+#[derive(Debug)]
+struct PreparedTask {
+    plan: PlacementPlan,
+    workspace_slug: String,
+    stack_parent: Option<TaskPr>,
+    github: Option<GithubPr>,
+    selected_flow: Option<String>,
+    requested_agent: Option<String>,
+    directive: Option<String>,
+}
+
+async fn prepare_new_task(
+    main_repo: &Path,
+    title: &str,
+    item: Option<&crate::pm::PmItem>,
+    project: &crate::pm::PmProject,
+    options: &TaskExecOptions,
+    launch: bool,
+) -> OpsResult<PreparedTask> {
+    let directive = options
+        .directive
         .as_deref()
-        .map(|parent_issue| {
-            block_on_task(async {
-                let store = task_store().await?;
-                let parent_task = store
-                    .get_task_by_issue(parent_issue)
-                    .await
-                    .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
-                    .ok_or_else(|| {
-                        task_error(format!(
-                            "stack parent {parent_issue:?} has no Task; run it first"
-                        ))
-                    })?;
-                if parent_task.plan.id.as_str() == resolved.item.id {
-                    return Err(task_error("a Task cannot stack on itself"));
-                }
-                let parent = store
-                    .active_task_pr(&parent_task.id)
-                    .await
-                    .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-                    .ok_or_else(|| task_error("stack parent has no active PR"))?;
-                if parent.github().is_none() {
-                    return Err(task_error(format!(
-                        "open the parent PR from {} before stacking work on it",
-                        parent_task.worktree.display()
-                    )));
-                }
-                Ok(parent)
-            })
-        })
+        .map(str::trim)
+        .map(str::to_string);
+    if directive.as_deref() == Some("") {
+        return Err(task_error("directive cannot be empty"));
+    }
+    let selected_flow = launch
+        .then(|| select_task_worker_flow_from_project(main_repo, project, options.flow.as_deref()))
         .transpose()?;
-    let (base_ref, base_commit) = match &stack_parent {
+    let segment = match options.name.as_deref() {
+        Some(name) => parse_workspace_slug(name)?,
+        None => derive_workspace_slug(title)?,
+    };
+    let workspace_slug = segment.as_str().to_string();
+    let branch = item
+        .and_then(|item| item.branch_name.as_deref())
+        .filter(|branch| !branch.is_empty());
+    let mut plan = plan_branch_placement(main_repo, segment, branch)
+        .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
+    // Fail before filing an issue; execution checks again after provider work.
+    if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
+        return Err(task_error(format!(
+            "worktree path already exists: {}",
+            plan.worktree_path.display()
+        )));
+    }
+    let stack_parent = if let Some(parent_issue) = options.stack_on.as_deref() {
+        let store = task_store().await?;
+        let parent_task = store
+            .get_task_by_issue(parent_issue)
+            .await
+            .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!(
+                    "stack parent {parent_issue:?} has no Task; run it first"
+                ))
+            })?;
+        if Some(parent_task.plan.id.as_str()) == item.map(|item| item.id.as_str()) {
+            return Err(task_error("a Task cannot stack on itself"));
+        }
+        let parent = store
+            .active_task_pr(&parent_task.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
+            .ok_or_else(|| task_error("stack parent has no active PR"))?;
+        if parent.github().is_none() {
+            return Err(task_error(format!(
+                "open the parent PR from {} before stacking work on it",
+                parent_task.worktree.display()
+            )));
+        }
+        Some(parent)
+    } else {
+        None
+    };
+    let mut base_commit = match &stack_parent {
         Some(parent) => {
-            fetch(&main_repo, "origin", &parent.branch).map_err(|error| {
+            fetch(main_repo, "origin", &parent.branch).map_err(|error| {
                 task_error(format!(
                     "failed to fetch parent branch {}: {error}",
                     parent.branch
                 ))
             })?;
             let base_ref = format!("origin/{}", parent.branch);
-            let base_commit = rev_parse(&main_repo, &base_ref).map_err(|error| {
+            rev_parse(main_repo, &base_ref).map_err(|error| {
                 task_error(format!("failed to resolve task base {base_ref}: {error}"))
-            })?;
-            (base_ref, base_commit)
+            })?
         }
         None => {
-            let (base_ref, base_commit) = resolve_upstream_base(&main_repo, &default_branch)?;
-            if base_ref.starts_with("origin/") {
-                // Placement anchors on fetched origin; stop before contaminating
-                // a new worktree with an ahead-of-upstream canonical main.
-                refuse_if_canonical_ahead(&main_repo, &default_branch)?;
-            }
-            (base_ref, base_commit)
+            let (_, base_commit) = resolve_upstream_base(main_repo, &plan.base_ref)?;
+            base_commit
         }
     };
-    plan.base_ref = base_ref.clone();
-    let project = crate::ops::project::ensure_project_for_task(
+    let github = if branch.is_some() || plan.strategy != PlacementStrategy::Create {
+        super::pr::branch_pr(main_repo, &plan.branch)?
+            .map(|pr| {
+                Ok::<_, OpsError>(GithubPr {
+                    number: u32::try_from(pr.number).map_err(task_error)?,
+                    url: pr.url,
+                    head_sha: pr.head_sha,
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    if plan.strategy == PlacementStrategy::Create && github.is_some() {
+        // A fresh clone may know the PR before fetching its branch.
+        fetch(
+            main_repo,
+            "origin",
+            &format!(
+                "refs/heads/{}:refs/remotes/origin/{}",
+                plan.branch, plan.branch
+            ),
+        )
+        .map_err(task_error)?;
+        plan.strategy = PlacementStrategy::CheckoutExisting;
+    }
+    if plan.strategy != PlacementStrategy::Create {
+        let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
+            format!("refs/heads/{}", plan.branch)
+        } else {
+            format!("refs/remotes/origin/{}", plan.branch)
+        };
+        base_commit = merge_base(main_repo, &base_commit, &branch_ref).map_err(task_error)?;
+    }
+    // Provider creation can yield while another fetch advances the branch.
+    // Place the checkout on the same commit recorded by its first PR.
+    plan.base_ref = base_commit;
+    Ok(PreparedTask {
+        plan,
+        workspace_slug,
+        stack_parent,
+        github,
+        selected_flow,
+        requested_agent: options.agent.clone(),
+        directive,
+    })
+}
+
+fn create_prepared_task(
+    main_repo: PathBuf,
+    resolved: crate::ops::task_pm::ResolvedTask,
+    prepared: PreparedTask,
+) -> OpsResult<Task> {
+    let PreparedTask {
+        plan,
+        workspace_slug,
+        stack_parent,
+        github,
+        selected_flow,
+        requested_agent,
+        directive,
+    } = prepared;
+    let project = block_on_task(crate::ops::project::resolve_project_for_task(
         &main_repo,
-        crate::ops::task_pm::ResolvedProject {
-            snapshot: resolved.snapshot.clone(),
-            project: resolved.project.clone(),
-        },
-    )?;
+        &resolved.wave,
+        &resolved.project.id,
+    ))?;
     let project_id = project.id.clone();
     let wave_id = project.wave_id.clone();
-    let directive = directive.unwrap_or_else(|| {
-        format!(
-            "Complete {}: {}\n\n{}",
-            resolved.item.identifier, resolved.item.name, resolved.item.description
-        )
-    });
 
     block_on_task(async move {
         let store = task_store().await?;
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
-        if let Some(existing) = store
+        if let Some(mut existing) = store
             .get_task_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
@@ -563,11 +926,12 @@ fn prepare_task(
                 }
                 WorkStatus::Abandoned => {
                     return Err(task_error(format!(
-                        "Task {} is abandoned; recover it with `lf task recover {}`",
-                        existing.plan.identifier, existing.plan.identifier
-                    )))
+                    "Task {} is abandoned; inspect its retained history with `lf task status {}`",
+                    existing.plan.identifier, existing.plan.identifier
+                )))
                 }
                 WorkStatus::Ready => {
+                    select_task_agent(&store, &mut existing, requested_agent.as_deref()).await?;
                     return Ok(existing);
                 }
             }
@@ -576,18 +940,18 @@ fn prepare_task(
         let mut task = Task {
             id: crate::work::task::TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new(resolved.item.id.clone())
-                    .map_err(|error| task_error(error.to_string()))?,
+                id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
                 identifier: resolved.item.identifier.clone(),
                 title: resolved.item.name.clone(),
                 description: resolved.item.description.clone(),
-                pm_snapshot_synced_at: resolved.snapshot.synced_at,
+                pm_snapshot_synced_at: resolved.observed_at,
             },
             wave_id,
             project_id,
             pm_writeback: PmWritebackState::Current,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
+            agent: requested_agent,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -599,9 +963,14 @@ fn prepare_task(
             sequence: 1,
             slug: workspace_slug,
             branch: plan.branch.clone(),
-            base_commit,
+            base_commit: plan.base_ref.clone(),
             parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
-            publication: None,
+            publication: github.map(|github| PrPublication {
+                requested_at: now,
+                presentation: None,
+                github: Some(github),
+                merge: None,
+            }),
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
@@ -613,25 +982,33 @@ fn prepare_task(
             updated_at: now,
         };
 
-        let author = task_input_author()?;
-        match store
-            .create_task_with_input(&task, &pr, &author, &directive)
-            .await
-        {
-            Ok(()) => {}
+        let _checkout_lease = crate::engine::git::acquire_worktree_lease(
+            &main_repo,
+            &task.worktree,
+            "Task checkout",
+        )?;
+        match store.create_task_with_worktree(&task, &pr).await {
+            Ok(()) => {
+                if let Some(direction) = directive.as_deref() {
+                    let mut publication_task = task.clone();
+                    publication_task.worktree = main_repo.clone();
+                    super::linear_observe::publish_task_steer(&store, &publication_task, direction)
+                        .await?;
+                }
+            }
             Err(StoreError::Sqlite(_)) => {
-                if let Some(existing) =
-                    store
-                        .get_task_by_issue(&resolved.item.id)
-                        .await
-                        .map_err(|error| {
-                            task_error(format!("failed to recover task reservation: {error}"))
-                        })?
+                if let Some(mut existing) = store
+                    .get_task_by_issue(&resolved.item.id)
+                    .await
+                    .map_err(|error| {
+                        task_error(format!("failed to recover task reservation: {error}"))
+                    })?
                 {
                     if !matches!(
                         task_work_status(&store, &existing).await?,
                         WorkStatus::Done | WorkStatus::Abandoned
                     ) {
+                        select_task_agent(&store, &mut existing, task.agent.as_deref()).await?;
                         return Ok(existing);
                     }
                 }
@@ -658,47 +1035,24 @@ fn prepare_task(
             {
                 tracing::warn!(task = %task.id, %event_error, "worktree creation failed after Task planning state committed; failure event did not persist");
             }
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
+            return Err(task_error(format!("failed to create task wt: {error}")));
         }
 
-        if let Err(error) = store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::PrStarted {
-                    pr_id: pr.id,
-                    sequence: pr.sequence,
-                    branch: pr.branch,
-                    base_commit: pr.base_commit,
-                },
-            )
-            .await
-        {
-            return Err(task_error(error.to_string()));
-        }
+        finish_task_checkout(&store, &task, &pr).await?;
 
         if let Some(flow) = selected_flow.as_deref() {
-            launch_task_process(&store, &mut task, Some(flow)).await?;
-            Ok(task)
-        } else {
-            Ok(task)
+            exec_task_process(&store, &mut task, Some(flow)).await?;
         }
+        Ok(task)
     })
 }
 
 pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
-    let mut context = format!("Definition:\n{}", project.definition.trim());
-    if let Some(flows) = project
-        .flows
-        .as_ref()
-        .filter(|flows| **flows != crate::pm::ProjectFlowPlan::empty())
-    {
-        context.push_str("\n\nProject Task flow:");
-        if let Some(recommended) = &flows.recommended {
-            context.push_str(&format!("\n- recommended: {recommended}"));
-        }
-    }
+    let mut context = format!(
+        "Chapter metric targets:\n{}",
+        serde_json::to_string(&project.metric_targets).expect("metric targets serialize")
+    );
+    context.push_str(&format!("\n\nChapter Task flow: {}", project.flow));
     if !project.krs.is_empty() {
         context.push_str("\n\nKRs:");
         for kr in &project.krs {
@@ -709,68 +1063,136 @@ pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
     context
 }
 
-pub fn task_start(
+pub fn task_create(
     repo: &Path,
-    project_id: &str,
+    wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-    options: TaskLaunchOptions,
-) -> OpsResult<Task> {
-    let input = resolve_task_start_input(title.as_deref(), report.as_deref())?;
-    let main = crate::ops::project::ensure_clean_main(repo, "Task start")
-        .map_err(|error| task_error(error.to_string()))?;
+    options: Option<TaskExecOptions>,
+) -> OpsResult<TaskCreateResult> {
+    let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
+    let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let project =
-        crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    crate::ops::project::require_registered_wave(&main, &project.snapshot.wave)
-        .map_err(|error| task_error(error.to_string()))?;
-    select_task_worker_flow_from_project(&main, &project.project, options.flow.as_deref())?;
-    let config = load_config_or_default(Some(&main));
-    block_on_task(preflight_task_execution(&main, config.agent()))?;
+        crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
-            format!("{}\0{}\0{}", project.project.id, input.title, input.report).as_bytes()
+            format!(
+                "{}\0{}\0{}",
+                project.snapshot.wave, input.title, input.report
+            )
+            .as_bytes()
         ))
     );
-    let created = crate::ops::task_pm::create_and_load_task(
+    let (created, prepared) = block_on_task(crate::ops::task_pm::create_and_load_task(
         &main,
         &project.snapshot.wave,
-        &project.project.slug,
         &input.title,
         &input.report,
         &marker,
-    )?;
-    task_run(&main, &created.item.id, options)
+        |existing, current| async {
+            match &options {
+                Some(options) => {
+                    prepare_task_creation(
+                        &main,
+                        &project.snapshot.wave,
+                        &input.title,
+                        existing,
+                        current,
+                        options,
+                    )
+                    .await
+                }
+                None => Ok(None),
+            }
+        },
+    ))?;
+    let Some(options) = options else {
+        return Ok(TaskCreateResult::Created(Box::new(created.item)));
+    };
+    let issue = created.item.id.clone();
+    let result = match prepared {
+        Some(prepared) => create_prepared_task(main.clone(), created, prepared)
+            .and_then(|task| task_snapshot(&task)),
+        None => task_run(&main, &issue, options),
+    };
+    result.map(|task| TaskCreateResult::Started(Box::new(task))).map_err(|error| task_error(format!(
+        "Linear task {issue} is retained: {error}. Retry `lf --task {issue} flow start`; retrying the same `lf task create --run` also reuses its issue."
+    )))
 }
 
-pub fn resolve_task_start_input(
+async fn prepare_task_creation(
+    repo: &Path,
+    wave: &str,
+    title: &str,
+    existing: Option<crate::pm::PmItem>,
+    project: crate::pm::PmProject,
+    options: &TaskExecOptions,
+) -> OpsResult<Option<PreparedTask>> {
+    if let Some(item) = &existing {
+        require_startable_issue(item)?;
+        let store = task_store().await?;
+        if store
+            .get_task_by_issue(&item.id)
+            .await
+            .map_err(task_error)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+    }
+    crate::ops::project::resolve_project_for_task(repo, wave, &project.id).await?;
+    let prepared = prepare_new_task(
+        repo,
+        existing.as_ref().map_or(title, |item| item.name.as_str()),
+        existing.as_ref(),
+        &project,
+        options,
+        true,
+    )
+    .await?;
+    let flow = prepared
+        .selected_flow
+        .as_deref()
+        .expect("launch preparation selects a Flow");
+    let (_, steps) = load_task_flow(repo, flow)?;
+    let skill = crate::engine::current_skill(&steps, &crate::engine::ExecutionCursor::default());
+    let agent = resolve_task_agent(
+        repo,
+        options.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    preflight_task_execution(repo, &agent).await?;
+    Ok(Some(prepared))
+}
+
+pub fn resolve_task_create_input(
     explicit_title: Option<&str>,
     piped_report: Option<&str>,
-) -> OpsResult<TaskStartInput> {
+) -> OpsResult<TaskCreateInput> {
     let report = piped_report
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let title = explicit_title
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let title = match (title, report) {
-        (Some(title), _) => title.to_string(),
-        (None, Some(report)) => {
-            let first_line = report
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .expect("non-empty report has a meaningful line");
-            truncate_task_title(first_line, 100)
-        }
-        (None, None) => {
-            return Err(task_error(
-                "Task title or piped report is required: `pbpaste | lf task start <project>`",
-            ))
-        }
-    };
+    let title =
+        match (title, report) {
+            (Some(title), _) => title.to_string(),
+            (None, Some(report)) => {
+                let first_line = report
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                    .expect("non-empty report has a meaningful line");
+                truncate_task_title(first_line, 100)
+            }
+            (None, None) => return Err(task_error(
+                "Task title or piped report is required: `pbpaste | lf task create --wave <wave>`",
+            )),
+        };
     let report = report.unwrap_or(&title).to_string();
-    Ok(TaskStartInput { title, report })
+    Ok(TaskCreateInput { title, report })
 }
 
 fn truncate_task_title(value: &str, max_chars: usize) -> String {
@@ -782,42 +1204,67 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
-fn task_agent(task: &Task) -> String {
-    load_config_or_default(Some(&task.worktree))
-        .agent()
-        .to_string()
+pub(crate) fn resolve_task_agent(
+    worktree: &Path,
+    agent: Option<&str>,
+    skill: Option<&crate::engine::Skill>,
+) -> String {
+    crate::engine::exec::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
 }
 
-fn validate_task_launch(task: &Task) -> OpsResult<()> {
-    task_execution_boundary(&task.worktree, &task_agent(task))?;
+async fn select_task_agent(
+    store: &SharedStore,
+    task: &mut Task,
+    agent: Option<&str>,
+) -> OpsResult<()> {
+    if let Some(agent) = agent {
+        checkout_execution_boundary(&task.worktree, agent)
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .set_task_agent(&task.id, agent)
+            .await
+            .map_err(|error| task_error(format!("failed to save Task agent: {error}")))?;
+        task.agent = Some(agent.to_string());
+        crate::ops::human_session::retarget_prepared_task_review(store, task)
+            .await
+            .map_err(task_error)?;
+    }
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task) -> Option<String> {
-    validate_task_launch(task)
-        .err()
-        .map(|error| error.to_string())
+fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>) -> Option<String> {
+    checkout_execution_boundary(
+        &task.worktree,
+        &resolve_task_agent(&task.worktree, task.agent.as_deref(), skill),
+    )
+    .err()
+    .map(|error| error.to_string())
 }
 
-pub(crate) async fn task_launch_refusal(
+pub(crate) async fn task_exec_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
-    if let Some(refusal) = task_configuration_refusal(task) {
+    let position = store.task_flow(&task.id).await?;
+    let skill = position.as_ref().and_then(|position| {
+        crate::engine::current_skill(&position.invocation.steps, &position.cursor)
+    });
+    if let Some(refusal) = task_configuration_refusal(task, skill.as_ref().map(|step| &step.skill))
+    {
         return Ok(Some(refusal));
     }
-    persisted_task_launch_refusal(store, task).await
+    persisted_task_exec_refusal(store, task).await
 }
 
-async fn persisted_task_launch_refusal(
+async fn persisted_task_exec_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
     let event = store.latest_task_event(&task.id).await?;
-    Ok(task_event_launch_refusal(event.as_ref()).map(str::to_string))
+    Ok(task_event_exec_refusal(event.as_ref()).map(str::to_string))
 }
 
-pub(crate) fn task_event_launch_refusal(
+pub(crate) fn task_event_exec_refusal(
     event: Option<&crate::work::task::TaskEvent>,
 ) -> Option<&str> {
     match event.map(|event| &event.kind) {
@@ -829,110 +1276,59 @@ pub(crate) fn task_event_launch_refusal(
     }
 }
 
-pub(crate) fn task_execution_boundary(
+pub(crate) async fn preflight_task_execution(
     repo: &Path,
     agent: &str,
-) -> OpsResult<AgentExecutionBoundary> {
-    let (harness, _) = parse_agent(agent);
-    if !matches!(harness.as_str(), "codex" | "claude") {
-        return Err(task_error(format!(
-            "Task execution cannot converge: agent {agent:?} uses harness {harness:?}, which has no managed account route for the required linked Git, Loopflow control-store, provider credential, and network capabilities; select codex or claude"
-        )));
-    }
-    let common_dir = git_common_dir(repo).map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: failed to resolve linked Git metadata from {}: {error}",
-            repo.display()
-        ))
-    })?;
-    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: Loopflow control-plane authority is unavailable: {error}"
-        ))
-    })?;
-    let control_store = control.db_path.parent().ok_or_else(|| {
-        task_error(format!(
-            "Task execution cannot converge: Loopflow control database {} has no writable parent",
-            control.db_path.display()
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control_store.to_path_buf()];
-    writable_roots.sort();
-    writable_roots.dedup();
-    Ok(AgentExecutionBoundary { writable_roots })
+) -> OpsResult<ProviderAccountId> {
+    let boundary =
+        checkout_execution_boundary(repo, agent).map_err(|error| task_error(error.to_string()))?;
+    probe_execution_boundary(&boundary).map_err(|error| task_error(error.to_string()))?;
+    crate::provider_account::preflight_agent_account(agent)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))
 }
 
-fn probe_task_execution_boundary(boundary: &AgentExecutionBoundary) -> OpsResult<()> {
-    for root in &boundary.writable_roots {
-        let probe = root.join(format!(
-            ".loopflow-task-capability-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let result = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&probe)
-            .and_then(|file| {
-                file.sync_data()?;
-                std::fs::remove_file(&probe)
-            });
-        if let Err(error) = result {
-            let _ = std::fs::remove_file(&probe);
-            return Err(task_error(format!(
-                "Task execution cannot converge: required writable authority for {} is unavailable: {error}. Run the Task from a Loopflow host whose managed execution profile includes linked Git metadata and the Loopflow control store",
-                root.display()
-            )));
-        }
+fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
+    if item.terminal_reason().is_some() {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot start execution",
+            item.identifier
+        )));
     }
     Ok(())
 }
 
-async fn preflight_task_execution(repo: &Path, agent: &str) -> OpsResult<ProviderAccountId> {
-    let boundary = task_execution_boundary(repo, agent)?;
-    probe_task_execution_boundary(&boundary)?;
-    let (harness, _) = parse_agent(agent);
-    let provider = harness.parse::<Provider>().map_err(|_| {
-        task_error(format!(
-            "Task execution cannot converge: agent {agent:?} has no managed provider-account route; select codex or claude"
-        ))
-    })?;
-    let route = crate::provider_account::resolve_provider_account_exact(provider, None, None)
+pub(crate) async fn resolve_managed_task_planning(
+    store: &SharedStore,
+    task: &Task,
+    refresh: crate::ops::pm::PmRefresh,
+) -> OpsResult<crate::ops::task_pm::ResolvedTask> {
+    if task_work_status(store, task).await? != WorkStatus::Ready {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot advance its managed Flow",
+            task.plan.identifier
+        )));
+    }
+    let resolved =
+        crate::ops::task_pm::resolve_task_async(&task.worktree, task.plan.id.as_str(), refresh)
+            .await?;
+    require_startable_issue(&resolved.item)?;
+    let project = store
+        .get_project(&task.project_id)
         .await
-        .map_err(|error| {
-            task_error(format!(
-                "Task execution cannot converge: provider account capability for {harness} is unavailable: {error}. Connect an eligible managed account and retry"
-            ))
-        })?
-        .ok_or_else(|| {
-            task_error(format!(
-                "Task execution cannot converge: provider account capability for {harness} resolved account_id=null. Configure and connect an eligible managed account before retrying"
-            ))
-        })?;
-    route.verify_ready().await.map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: provider credential capability for {}/{} is unavailable: {error}. Reconnect that managed account before retrying",
-            harness,
-            route.account_id()
-        ))
-    })?;
-    Ok(route.account_id().clone())
-}
-
-fn task_input_author() -> OpsResult<crate::durable::Author> {
-    let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) else {
-        return Ok(crate::durable::Author::User);
-    };
-    let run_id = run_id
-        .into_string()
-        .map_err(|_| task_error("LF_RUN_ID is not valid UTF-8"))?;
-    Ok(crate::durable::Author::Run(
-        crate::durable::RunId::parse(&run_id).map_err(|_| task_error("LF_RUN_ID is malformed"))?,
-    ))
-}
-
-fn select_task_worker_flow(repo: &Path, issue: &str, requested: Option<&str>) -> OpsResult<String> {
-    let resolved = crate::ops::task_pm::resolve_task(repo, issue, crate::ops::pm::PmRefresh::Auto)?;
-    select_task_worker_flow_from_project(repo, &resolved.project, requested)
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task Project is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    if resolved.item.id != task.plan.id.as_str()
+        || resolved.project.id != project.plan.id.as_str()
+        || resolved.wave != wave.slug()
+    {
+        return Err(task_error(format!(
+            "Task {} planning no longer matches its managed execution; its saved Flow is preserved",
+            task.plan.identifier
+        )));
+    }
+    Ok(resolved)
 }
 
 fn select_task_worker_flow_from_project(
@@ -940,11 +1336,7 @@ fn select_task_worker_flow_from_project(
     project: &crate::pm::PmProject,
     requested: Option<&str>,
 ) -> OpsResult<String> {
-    let recommended = project
-        .flows
-        .as_ref()
-        .and_then(|flows| flows.recommended.as_deref());
-    let selected = requested.or(recommended).unwrap_or("task-design");
+    let selected = requested.unwrap_or(&project.flow);
     load_task_flow(repo, selected).map(|(name, _)| name)
 }
 
@@ -975,7 +1367,7 @@ pub(crate) async fn task_worktree_blocker(
                 )
             } else {
                 format!(
-                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf task resume {}`; Task identity and PR history are unchanged",
+                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf --task {} flow start`; Task identity and PR history are unchanged",
                     task.plan.identifier, task.plan.identifier
                 )
             };
@@ -999,7 +1391,7 @@ pub(crate) async fn task_worktree_blocker(
     Ok(Some(TaskWorktreeBlocker {
         initializing: false,
         reason: format!(
-            "Task {} worktree {} is missing; restore that exact path{branch} before `lf task resume {}`; Task identity and PR history are unchanged",
+            "Task {} worktree {} is missing; restore that exact path{branch} before `lf --task {} flow start`; Task identity and PR history are unchanged",
             task.plan.identifier,
             task.worktree.display(),
             task.plan.identifier,
@@ -1010,20 +1402,13 @@ pub(crate) async fn task_worktree_blocker(
 fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<ConcreteStep>)> {
     let definition = load_flow(requested, repo)
         .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
-    let steps = expand_flow(&definition, repo).map_err(|error| {
+    let steps = compile_flow(&definition, repo).map_err(|error| {
         task_error(format!("failed to expand Task flow {requested:?}: {error}"))
     })?;
     if steps.is_empty() {
         return Err(task_error(format!("Task flow {requested:?} has no steps")));
     }
-    if let Some(step) = steps
-        .iter()
-        .find(|step| !matches!(step, ConcreteStep::Skill(_) | ConcreteStep::Op(_)))
-    {
-        return Err(task_error(format!(
-            "Task flow {requested:?} contains unsupported step {step:?}"
-        )));
-    }
+
     Ok((definition.name, steps))
 }
 
@@ -1038,7 +1423,7 @@ fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
             "workspace name must be 2-5 lowercase kebab-case words",
         ));
     }
-    WorktreeSegment::parse(value).map_err(|error| task_error(error.to_string()))
+    WorktreeSegment::parse(value).map_err(task_error)
 }
 
 fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
@@ -1075,11 +1460,7 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    let branch = match origin_branch(repo).map_err(OpsError::from)? {
-        Some(branch) => Some(branch),
-        None => current_branch(repo).map_err(OpsError::from)?,
-    };
-    let Some(branch) = branch else {
+    let Some(branch) = current_branch(repo).map_err(OpsError::from)? else {
         return Ok(None);
     };
     store
@@ -1092,19 +1473,15 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
 /// that this worktree is not a Task worktree.
 ///
 /// The PR publication, stacking, submit, and land entry points share this one
-/// resolver so they cannot disagree about Task ownership. A missing
-/// or incompatible registry never collapses to [`ManagedTask::Unmanaged`]
-/// silently: only a registry file that provably does not exist (no tasks have
-/// ever been registered on this machine) and no ambient Task id together prove
-/// "not a Task," which preserves ordinary non-Task PR flows. Everything else
-/// that cannot be opened is a refusal with an actionable authority error, so a
-/// Task entry point never degrades to generic PR behavior.
+/// resolver so they cannot disagree about Task ownership. An absent registry
+/// without an explicit declaration permits ordinary PR work. An unreadable
+/// registry or unresolved declaration reports the missing authority instead.
 #[derive(Debug)]
 enum ManagedTask {
-    /// This checkout does not track a Task branch. Task-specific bookkeeping is an
+    /// This checkout is not on a Task branch. Task-specific bookkeeping is an
     /// explicit no-op; the ordinary PR flow continues unchanged.
     Unmanaged,
-    /// The registry is healthy and the checkout tracks a Task's current branch.
+    /// The registry is healthy and the checkout is on a Task's current branch.
     /// Boxed so the `Unmanaged` no-op variant stays small.
     Managed { store: SharedStore, task: Box<Task> },
 }
@@ -1120,7 +1497,7 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
         ),
         RegistryUnavailable::Unresolved { error } => format!(
             "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_DB_PATH/LF_HOME or run `lf doctor`."
+             Fix LF_HOME or run `lf doctor`."
         ),
         RegistryUnavailable::Incompatible { path, error } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is present but \
@@ -1132,21 +1509,27 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
 
 /// Resolve the managed Task for a PR entry point at `repo`.
 ///
-/// - Registry opens and the checkout tracks a current Task branch → [`ManagedTask::Managed`].
-/// - Registry opens and its tracked branch names no Task → [`ManagedTask::Unmanaged`].
-/// - Registry file missing and no ambient Task id → [`ManagedTask::Unmanaged`]
-///   (no registry means no tasks exist, so this is provably an ordinary PR).
-/// - Registry missing with an ambient Task id, or present but unopenable → refuse.
+/// - Checkout ownership, then an explicit declaration, resolves a Task → [`ManagedTask::Managed`].
+/// - Neither resolves a Task → [`ManagedTask::Unmanaged`].
+/// - Registry file missing without a declaration → [`ManagedTask::Unmanaged`].
+///   Missing records cannot recover checkout ownership or authorize inherited identity.
+/// - Registry present but unopenable → refuse.
 async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
-    let ambient = std::env::var_os(crate::durable::RUN_ID_ENV).is_some();
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
-        Err(RegistryUnavailable::MissingFile { .. }) if !ambient => {
+        Err(RegistryUnavailable::MissingFile { .. })
+            if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none() =>
+        {
             return Ok(ManagedTask::Unmanaged);
         }
         Err(err) => return Err(task_registry_error(err)),
     };
-    match task_for_checkout(&store, repo).await? {
+    let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
+    let task = match binding.map(|binding| binding.work) {
+        Some(crate::durable::WorkRef::Task(id)) => store.get_task(&id).await.map_err(task_error)?,
+        _ => None,
+    };
+    match task {
         Some(task) => Ok(ManagedTask::Managed {
             store,
             task: Box::new(task),
@@ -1199,7 +1582,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
             return Ok(false);
         };
         let context = _task_pr_context_from_store(&store, &task).await?;
-        _validate_task_pr_copy(&context, title, body)?;
+        _validate_task_pr_copy(&context, body)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -1254,18 +1637,15 @@ pub(crate) struct TaskPrContext {
     pub(crate) identifier: String,
     pub(crate) url: String,
     pub(crate) sequence: u32,
+    pub(crate) merge_request: Option<PrMergeRequest>,
 }
 
 impl TaskPrContext {
-    pub(crate) fn pr_title(&self) -> String {
-        format!("{}: {}", self.identifier.trim(), self.title.trim())
-    }
-
     pub(crate) fn task_link(&self) -> String {
         format!(
-            "[{} — {}]({})",
-            _markdown_link_text(self.identifier.trim()),
+            "[{} · {}]({})",
             _markdown_link_text(self.title.trim()),
+            _markdown_link_text(self.identifier.trim()),
             self.url
         )
     }
@@ -1293,24 +1673,18 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         .pm_snapshot(&task.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
-    let snapshot: PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(|error| {
-        task_error(format!(
-            "cached PM snapshot for Wave {:?} is invalid: {error}. Run `lf pm sync --wave {}` before publishing this Task PR",
-            wave.name(),
-            wave.name(),
-        ))
-    })?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
+    let snapshot = snapshot.snapshot;
     let item = snapshot
         .items
         .iter()
         .find(|item| item.id == task.plan.id.as_str())
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let url = item
         .url
         .as_deref()
         .filter(|url| _valid_task_url(url))
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let pr = store
         .active_task_pr(&task.id)
         .await
@@ -1321,6 +1695,13 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         identifier: task.plan.identifier.clone(),
         url: url.to_string(),
         sequence: pr.sequence,
+        merge_request: pr
+            .merge_request()
+            .filter(|request| {
+                pr.github().and_then(|github| github.head_sha.as_deref())
+                    == Some(request.head_sha.as_str())
+            })
+            .cloned(),
     })
 }
 
@@ -1335,18 +1716,12 @@ fn _valid_task_url(value: &str) -> bool {
 
 fn _missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
     task_error(format!(
-        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf pm sync --wave {wave}` before publishing this Task PR",
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf repo refresh {wave}` before publishing this Task PR",
         task.plan.identifier,
     ))
 }
 
-fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> OpsResult<()> {
-    let expected_title = context.pr_title();
-    if title != expected_title {
-        return Err(task_error(format!(
-            "Task PR title must be {expected_title:?}"
-        )));
-    }
+fn _validate_task_pr_copy(context: &TaskPrContext, body: &str) -> OpsResult<()> {
     let anchor = format!("**Task:** {}", context.task_link());
     if !body.lines().any(|line| {
         line.trim()
@@ -1614,29 +1989,6 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
     Ok((base_ref, base_commit))
 }
 
-/// Refuse placement when the canonical `<default>` checkout carries commits its
-/// upstream lacks. A new Task worktree cut from an ahead-of-origin main inherits
-/// the unpushed commit — the control-plane violation behind W2-132/#877 and
-/// W2-130/#882. Requires a prior fetch so `origin/<default>` is current.
-fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()> {
-    if rev_parse(repo, &format!("refs/heads/{default_branch}")).is_err() {
-        // No local default branch checked out (fresh clone / detached) — nothing
-        // can be ahead.
-        return Ok(());
-    }
-    let range = format!("origin/{default_branch}..{default_branch}");
-    let ahead = git_output(repo, &["log", "--oneline", "--no-decorate", &range])?;
-    let ahead = ahead.trim();
-    if !ahead.is_empty() {
-        return Err(task_error(format!(
-            "canonical {default_branch} is ahead of origin/{default_branch}; new Task worktrees \
-             would inherit these unpushed commit(s):\n{ahead}\nThis is a control-plane violation. \
-             Push or reset {default_branch} to origin/{default_branch} before placing Task worktrees."
-        )));
-    }
-    Ok(())
-}
-
 /// Prove the active Task PR's ancestry is uncontaminated before the first push.
 /// A worktree that is provably not a Task worktree is an explicit no-op — plain,
 /// non-Task PRs are unaffected. A Task worktree whose registry is missing,
@@ -1652,16 +2004,16 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
 /// a root PR, or the live parent's branch tip for a stacked child), `H` = HEAD,
 /// and `M = merge-base(O, H)`. The parity invariant is `M == B`, which
 /// guarantees GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
-/// `lf task changes`:
+/// `lf diff --files`:
 /// - `M == B` — parity holds; publish.
 /// - `M` ancestor of `B` — the recorded base itself carries commits absent from
 ///   `O` (inherited foreign ancestry, the #877/#882 shape). Refuse before any
-///   push, naming the foreign commits/files and the safe rebase.
+///   push, naming the foreign commits/files and the safe sync.
 /// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
-///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
+///   heal `base_commit → M` so the durable evidence and `lf diff --files` stay
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
-///   both sides (`M..B` and `B..M`) plus the safe rebase.
+///   both sides (`M..B` and `B..M`) plus the safe sync.
 pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
@@ -1672,20 +2024,7 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Publication proof: require ancestry parity without changing the recorded
-/// fork. Only an explicit integration boundary may advance Task stack/base
-/// metadata.
-pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(&repo).await? else {
-            return Ok(());
-        };
-        verify_task_pr_range_mode(&store, &task, &repo, StaleBaseAction::Refuse, None).await
-    })
-}
-
-/// Prove the post-rebase Task range against the operation's immutable target
+/// Prove the post-sync Task range against the operation's immutable target
 /// without advancing durable metadata before a requested push is verified.
 pub(crate) fn validate_task_pr_range_for_integration(
     repo: &Path,
@@ -1733,7 +2072,7 @@ fn verify_task_pr_range_for_integration(
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
 /// recorded base — an empty PR that must not reach GitHub. Unconditional: an
-/// already-open PR reset or rebased empty is refused just like a first
+/// already-open PR reset or synced empty is refused just like a first
 /// publication. A worktree that is provably not a Task worktree is an explicit
 /// no-op; a Task worktree whose registry is unusable is refused with an
 /// actionable authority error rather than degrading to generic PR behavior.
@@ -1747,25 +2086,13 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Publication's post-commit proof: require a non-empty authoritative range
-/// while leaving integration metadata untouched.
-pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(&repo).await? else {
-            return Ok(());
-        };
-        require_task_pr_range_nonempty_mode(&store, &task, &repo, StaleBaseAction::Refuse).await
-    })
-}
-
 /// Resolve the upstream a Task PR's ancestry should be measured against. A root
 /// PR measures against `origin/<default>` (or local `<default>` without a
 /// remote). A stacked child with a live parent measures against the parent's
 /// branch tip — so the parent's own commits are expected ancestry, not foreign
 /// contamination, and the child's range is `fork_point..HEAD` against the
 /// durable parent boundary. A child whose parent merged (or was abandoned) has
-/// been collapsed onto `<default>` by [`record_stack_rebase`]; it measures
+/// been synced onto `<default>` by [`record_stack_sync`]; it measures
 /// against `origin/<default>` like a root PR.
 async fn resolve_verifier_upstream(
     store: &SharedStore,
@@ -1813,7 +2140,6 @@ pub(crate) async fn verify_task_pr_range_in(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StaleBaseAction {
     Accept,
-    Refuse,
     Heal,
 }
 
@@ -1882,18 +2208,10 @@ async fn verify_task_pr_range_mode(
 
     if crate::engine::git::is_ancestor(repo, &base, &merge_base)? {
         // B < M: the upstream advanced past a stale or squash-merged base.
-        // Heal the recorded base to the true fork point so lf task changes and
+        // Heal the recorded base to the true fork point so lf diff --files and
         // the durable evidence report the minimal M..HEAD range.
-        match stale_base {
-            StaleBaseAction::Accept => return Ok(()),
-            StaleBaseAction::Refuse => {
-                return Err(task_error(format!(
-                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
-                    short(&base),
-                    short(&merge_base),
-                )));
-            }
-            StaleBaseAction::Heal => {}
+        if stale_base == StaleBaseAction::Accept {
+            return Ok(());
         }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
@@ -1938,16 +2256,7 @@ async fn require_task_pr_range_nonempty_in(
     task: &Task,
     repo: &Path,
 ) -> OpsResult<()> {
-    require_task_pr_range_nonempty_mode(store, task, repo, StaleBaseAction::Heal).await
-}
-
-async fn require_task_pr_range_nonempty_mode(
-    store: &SharedStore,
-    task: &Task,
-    repo: &Path,
-    stale_base: StaleBaseAction,
-) -> OpsResult<()> {
-    verify_task_pr_range_mode(store, task, repo, stale_base, None).await?;
+    verify_task_pr_range_in(store, task, repo).await?;
     let pr = store
         .active_task_pr(&task.id)
         .await
@@ -2016,22 +2325,25 @@ pub(crate) fn attach_task_github_pr(
         let opened = pr
             .github()
             .is_none_or(|github| github.number != number || github.url != url);
-        let publication = pr.publication.as_mut().ok_or_else(|| {
-            task_error(format!(
-                "Task {} has no durable PR publication request",
-                task.plan.identifier
-            ))
-        })?;
+        // An existing GitHub PR may predate local publication. Retain its
+        // identity now; reviewer copy is recorded only after promotion succeeds.
+        let publication = pr.publication.get_or_insert_with(|| PrPublication {
+            requested_at: time::OffsetDateTime::now_utc(),
+            presentation: None,
+            github: None,
+            merge: None,
+        });
+        // A known identity can carry a head-pinned merge request. Revoke it
+        // before replacing its head; the previously acknowledged identity
+        // remains stored if that reconciliation fails. First attachment has
+        // no merge request and can be saved immediately.
         invalidate_stale_merge_request(repo, publication, github_pr, inherit_pr)?;
         publication.github = Some(GithubPr {
             number,
             url: url.clone(),
             head_sha: github_pr.head_sha.clone(),
         });
-        // Idempotently link the PR on its owning Linear issue. This never fails
-        // the attach: a degraded writeback is recorded on the PR and retried by
-        // the next publication command.
-        link_pr_to_linear(&store, &task, &mut pr).await;
+        // Persist acknowledged identity before any further provider operation.
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)
@@ -2039,7 +2351,7 @@ pub(crate) fn attach_task_github_pr(
             .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
         if opened {
             let event = TaskEventKind::PrOpened {
-                pr_id: pr.id,
+                pr_id: pr.id.clone(),
                 sequence: pr.sequence,
                 number,
                 url,
@@ -2047,8 +2359,16 @@ pub(crate) fn attach_task_github_pr(
             store
                 .append_task_event(&task.id, &event)
                 .await
-                .map_err(|error| task_error(error.to_string()))?;
+                .map_err(task_error)?;
         }
+        // Linear linkage is idempotent. A failed or interrupted writeback cannot
+        // erase the GitHub identity already committed above.
+        link_pr_to_linear(&store, &task, &mut pr).await;
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&pr)
+            .await
+            .map_err(|error| task_error(format!("failed to record PR linkage: {error}")))?;
         Ok(true)
     })
 }
@@ -2086,159 +2406,192 @@ fn invalidate_stale_merge_request(
     Ok(())
 }
 
-pub(crate) fn abandon_task_pr(
-    repo: &Path,
-    force: bool,
-    progress: &impl crate::ops::progress::Progress,
-) -> OpsResult<bool> {
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
-            return Ok(false);
-        };
-        let _mutation = lock_task_pr_mutation(repo)?;
-        let mut pr = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "Task {} has no active PR to abandon",
-                    task.plan.identifier
-                ))
-            })?;
-        let branch =
-            current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
-        if branch != pr.branch {
-            return Err(task_error(format!(
-                "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
-                task.plan.identifier, pr.branch, branch
-            )));
-        }
-        let dirty = !is_clean(repo)?;
-        if dirty && !force {
-            return Err(task_error("uncommitted changes; use --force"));
-        }
-        if dirty {
-            progress.status("Discarding uncommitted Task PR changes...");
-            for args in [
-                ["reset", "--hard", "HEAD"].as_slice(),
-                ["clean", "-fd"].as_slice(),
-            ] {
-                let output = Command::new("git").args(args).current_dir(repo).output()?;
-                if !output.status.success() {
-                    return Err(task_error(format!(
-                        "failed to discard Task PR changes with `git {}`: {}",
-                        args.join(" "),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )));
-                }
-            }
-        }
-        progress.status("Closing Task PR...");
-        let _ = Command::new("gh")
-            .args(["pr", "close", &branch])
-            .current_dir(repo)
-            .status();
-        let now = time::OffsetDateTime::now_utc();
-        pr.abandoned_at = Some(now);
-        pr.updated_at = now;
-        store
-            .settle_task_pr(&pr, None)
-            .await
-            .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
-        Ok(true)
-    })
-}
-
-/// Start a fresh worker for inactive Task Work.
-pub(crate) async fn relaunch_inactive_process(
-    store: &SharedStore,
-    task: &mut Task,
-) -> OpsResult<()> {
-    launch_task_process(store, task, None).await
-}
-
-pub(crate) async fn resume_inactive_process(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    let Some(_) = ensure_working_pr(store, task).await? else {
-        return Err(task_error(format!(
-            "Task {} is terminal and cannot advance",
-            task.plan.identifier
-        )));
-    };
-    launch_task_process(store, task, None).await
-}
-
 async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     let position = store
-        .flow_position(&task.id)
+        .task_flow(&task.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    Ok(position
-        .and_then(|position| position.claim)
-        .is_some_and(|claim| {
+    position
+        .as_ref()
+        .map_or(Ok(false), |flow| flow_worker_live(store, flow))
+}
+
+fn flow_worker_live(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
+    // A selected step can stay live after its driver's claim is released.
+    let step_live = store
+        .sqlite
+        .pending_flow_step_exec(flow.id())
+        .map_err(task_error)?
+        .is_some_and(|exec| {
+            crate::journal::exec_process_evidence(&store.sqlite, &exec)
+                == crate::journal::ProcessIdentityEvidence::Live
+        });
+    Ok(step_live
+        || flow.claim.as_ref().is_some_and(|claim| {
             crate::journal::task_worker_owner_evidence(&claim.owner)
                 == crate::journal::ProcessIdentityEvidence::Live
         }))
 }
 
-async fn stop_task_worker(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let work = WorkRef::Task(task.id.clone());
-    let Some(claim) = store
-        .flow_position(&task.id)
-        .await
-        .map_err(|error| task_error(error.to_string()))?
-        .and_then(|position| position.claim)
-    else {
-        return Ok(());
-    };
-    if crate::journal::task_worker_owner_evidence(&claim.owner)
-        != crate::journal::ProcessIdentityEvidence::Live
-    {
-        return Ok(());
-    }
-    store
-        .append_interrupt(&work)
+async fn stop_task_worker(store: &SharedStore, task: &Task) -> OpsResult<Option<FlowSession>> {
+    let position = store
+        .task_flow(&task.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let Some(position) = position else {
+        return Ok(None);
+    };
+    let claim = position.claim.as_ref();
+    if flow_worker_live(store, &position)? {
+        store
+            .append_interrupt(&WorkRef::Task(task.id.clone()))
+            .await
+            .map_err(task_error)?;
+    }
+    let graceful_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let termination_deadline = graceful_deadline + Duration::from_secs(3);
+    let mut signaled = std::collections::HashSet::new();
     loop {
         let current = store
-            .flow_position(&task.id)
+            .task_flow(&task.id)
             .await
-            .map_err(|error| task_error(error.to_string()))?
-            .and_then(|position| position.claim);
-        if current.as_ref() != Some(&claim)
-            || crate::journal::task_worker_owner_evidence(&claim.owner)
-                != crate::journal::ProcessIdentityEvidence::Live
-        {
-            return Ok(());
+            .map_err(|error| task_error(error.to_string()))?;
+        let replaced = current.as_ref().is_some_and(|current| {
+            current.id() != position.id()
+                || current
+                    .claim
+                    .as_ref()
+                    .is_some_and(|active| Some(active) != claim)
+        });
+        if replaced {
+            return Err(task_error(format!(
+                "Task {} worker changed while stopping; retry `lf task restart {}`",
+                task.plan.identifier, task.plan.identifier
+            )));
         }
-        if tokio::time::Instant::now() >= deadline {
-            let status = tokio::process::Command::new("kill")
-                .args(["-TERM", &claim.owner.pid.to_string()])
-                .status()
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            if !status.success() {
+        let step = current
+            .as_ref()
+            .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
+            .transpose()
+            .map_err(task_error)?
+            .flatten();
+        let step_evidence = step
+            .as_ref()
+            .map(|exec| crate::journal::exec_process_evidence(&store.sqlite, exec));
+        if step_evidence == Some(crate::journal::ProcessIdentityEvidence::Unknown) {
+            return Err(task_error("cannot confirm the selected Task step process identity; execution remains unresolved"));
+        }
+        let driver_evidence = claim
+            .map_or(crate::journal::ProcessIdentityEvidence::Dead, |claim| {
+                crate::journal::task_worker_owner_evidence(&claim.owner)
+            });
+        match driver_evidence {
+            crate::journal::ProcessIdentityEvidence::Unknown => {
                 return Err(task_error(format!(
-                    "failed to stop Task {} worker {}",
-                    task.plan.identifier, claim.owner.exec_id
+                    "cannot confirm Task {} worker process identity; execution remains unresolved",
+                    task.plan.identifier
                 )));
             }
-            return Ok(());
+            crate::journal::ProcessIdentityEvidence::Dead
+                if step_evidence != Some(crate::journal::ProcessIdentityEvidence::Live) =>
+            {
+                // Release only the captured claim. A concurrent replacement is
+                // rejected by the same transaction used by worker settlement.
+                return if let Some(current) = current.as_ref().filter(|flow| flow.claim.is_some()) {
+                    store
+                        .release_flow(current.id(), current.version, claim)
+                        .await
+                        .map(Some)
+                        .map_err(task_error)
+                } else {
+                    Ok(current)
+                };
+            }
+            crate::journal::ProcessIdentityEvidence::Live
+            | crate::journal::ProcessIdentityEvidence::Dead => {}
         }
+        let now = tokio::time::Instant::now();
+        if now >= termination_deadline {
+            return Err(task_error(format!(
+                "Task {} execution is still live after interruption; retry `lf task restart {}` after it exits",
+                task.plan.identifier, task.plan.identifier
+            )));
+        }
+        if now >= graceful_deadline {
+            let mut owners = Vec::new();
+            if let Some(exec) = step
+                .filter(|_| step_evidence == Some(crate::journal::ProcessIdentityEvidence::Live))
+            {
+                let receipts =
+                    crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+                        .map_err(task_error)?;
+                if let Some(receipt) = receipts
+                    .into_iter()
+                    .find(|receipt| receipt.exec_id == exec.as_str())
+                {
+                    owners.push(crate::durable::TaskWorkerOwner {
+                        trace_id: crate::id::TraceId::parse(&receipt.trace_id)
+                            .map_err(task_error)?,
+                        exec_id: exec,
+                        pid: receipt.pid,
+                        started_at: receipt.started_at,
+                    });
+                }
+                // A step may finish between observations; reread its result on
+                // the next pass instead of treating receipt cleanup as failure.
+            }
+            if let Some(claim) =
+                claim.filter(|_| driver_evidence == crate::journal::ProcessIdentityEvidence::Live)
+            {
+                owners.push(claim.owner.clone());
+            }
+            for owner in owners {
+                if !signaled.contains(&owner.exec_id)
+                    && crate::journal::task_worker_owner_evidence(&owner)
+                        == crate::journal::ProcessIdentityEvidence::Live
+                {
+                    let status = tokio::process::Command::new("kill")
+                        .args(["-TERM", &owner.pid.to_string()])
+                        .status()
+                        .await
+                        .map_err(task_error)?;
+                    if !status.success() {
+                        return Err(task_error(format!(
+                            "failed to stop Task {} Exec {}; termination is unconfirmed",
+                            task.plan.identifier, owner.exec_id
+                        )));
+                    }
+                    signaled.insert(owner.exec_id);
+                }
+            }
+        }
+        // A released claim or successful signal does not establish process death.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-pub(crate) async fn launch_task_process(
+pub(crate) async fn exec_task_process(
     store: &SharedStore,
     task: &mut Task,
     selected_flow: Option<&str>,
 ) -> OpsResult<()> {
+    store
+        .sqlite
+        .set_task_automation(
+            &task.id,
+            crate::engine::config::load_config_or_default(Some(&task.worktree))
+                .automation
+                .enroll_new_tasks,
+            true,
+        )
+        .map_err(task_error)?;
+    let _declaration = crate::lf::commands::flow::EnvVarGuard::set(
+        crate::lf::WORK_DECLARATION_ENV,
+        &format!("task:{}", task.id),
+    );
     let position = crate::controller::task::ensure_flow_position(store, &task.id, selected_flow)
         .await
-        .map_err(|error| task_error(error.to_string()))?;
+        .map_err(task_error)?;
     if let Some(failure) = position.failure.as_ref() {
         return Err(task_error(format!(
             "Task {} advancement is blocked: {}",
@@ -2248,41 +2601,60 @@ pub(crate) async fn launch_task_process(
     if position.is_human() {
         return Ok(());
     }
-    validate_task_launch(task)?;
-    let agent = task_agent(task);
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    let agent = resolve_task_agent(
+        &task.worktree,
+        task.agent.as_deref(),
+        skill.as_ref().map(|step| &step.skill),
+    );
+    checkout_execution_boundary(&task.worktree, &agent)
+        .map_err(|error| task_error(error.to_string()))?;
     let requires_provider = matches!(
         position.current_plan(),
         crate::engine::ConcreteStep::Skill(_)
-    );
+    ) && !position.has_pending_decision();
     let owner = crate::journal::current_process_identity().ok_or_else(|| {
         task_error("Task advancement requires a registered Loopflow process identity")
     })?;
     let claim = match store
         .claim_task_worker(
-            &position.task_id,
+            &task.id,
+            &position.invocation.id,
             position.version,
             &owner,
             time::OffsetDateTime::now_utc(),
         )
         .await
-        .map_err(|error| task_error(error.to_string()))?
+        .map_err(task_error)?
     {
         crate::durable::TaskWorkerClaimOutcome::Claimed(claim) => claim,
         crate::durable::TaskWorkerClaimOutcome::Busy(claim) => {
             match crate::journal::task_worker_owner_evidence(&claim.owner) {
                 crate::journal::ProcessIdentityEvidence::Live => {
-                    wait_until_running(store, &task.id).await?;
+                    wait_until_running(store, &task.id, None).await?;
                     return Ok(());
                 }
-                crate::journal::ProcessIdentityEvidence::Dead => store
-                    .reclaim_task_worker(
-                        &position.task_id,
-                        &claim,
-                        &owner,
-                        time::OffsetDateTime::now_utc(),
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?,
+                crate::journal::ProcessIdentityEvidence::Dead => {
+                    // A child step can outlive its driver. Preserve its claim
+                    // until it records the effect before replacing the driver.
+                    let current = store
+                        .task_flow(&task.id)
+                        .await
+                        .map_err(task_error)?
+                        .ok_or_else(|| task_error("Task Flow disappeared"))?;
+                    crate::lf::commands::flow::wait_for_step(store, &current)
+                        .await
+                        .map_err(task_error)?;
+                    store
+                        .reclaim_task_worker(
+                            &task.id,
+                            &claim,
+                            &owner,
+                            time::OffsetDateTime::now_utc(),
+                        )
+                        .await
+                        .map_err(task_error)?
+                }
                 crate::journal::ProcessIdentityEvidence::Unknown => {
                     return Err(task_error(format!(
                         "Task {} worker {} cannot be proven live or dead",
@@ -2297,38 +2669,40 @@ pub(crate) async fn launch_task_process(
             ))
         }
     };
-    let account_id = if requires_provider {
-        match preflight_task_execution(&task.worktree, &agent).await {
-            Ok(account_id) => Some(account_id),
-            Err(error) => {
-                let reason = error.to_string();
-                let failure = crate::durable::TaskFlowBlocker {
-                    reason: reason.clone(),
-                    restart_required: false,
-                    observed_at: time::OffsetDateTime::now_utc(),
-                };
-                store
-                    .block_task_flow(&task.id, &claim, &failure)
-                    .await
-                    .map_err(|store_error| task_error(store_error.to_string()))?;
-                return Err(task_error(reason));
-            }
+    let accounts = position.invocation.accounts.clone().unwrap_or_default();
+    let _accounts = accounts.activate().map_err(task_error)?;
+    if requires_provider {
+        if let Err(error) = preflight_task_execution(&task.worktree, &agent).await {
+            let reason = error.to_string();
+            let failure = crate::durable::TaskFlowBlocker {
+                captured: None,
+                reason: reason.clone(),
+                restart_required: false,
+                observed_at: time::OffsetDateTime::now_utc(),
+            };
+            store
+                .fail_flow(
+                    &position.invocation.id,
+                    position.version,
+                    Some(&claim),
+                    &failure,
+                )
+                .await
+                .map_err(task_error)?;
+            return Err(task_error(reason));
         }
-    } else {
-        None
-    };
-    let mut environment = Vec::new();
-    if let Some(account_id) = account_id {
-        environment.push((
-            crate::ops::TASK_ACCOUNT_ID_ENV.to_string(),
-            account_id.to_string(),
-        ));
     }
-    environment.push((
-        crate::durable::TASK_WORKER_CLAIM_ENV.to_string(),
-        serde_json::to_string(&claim).map_err(|error| task_error(error.to_string()))?,
-    ));
-    if let Err(error) = crate::ops::launch_task_worker(crate::ops::TaskWorkerLaunch {
+    let environment = vec![
+        (
+            crate::durable::TASK_WORKER_CLAIM_ENV.to_string(),
+            serde_json::to_string(&claim).map_err(task_error)?,
+        ),
+        (
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
+            accounts.env_value().map_err(task_error)?,
+        ),
+    ];
+    if let Err(error) = crate::ops::exec_task_worker(crate::ops::TaskWorkerExec {
         task_id: task.id.clone(),
         wave_id: task.wave_id.clone(),
         cwd: task.worktree.clone(),
@@ -2338,13 +2712,15 @@ pub(crate) async fn launch_task_process(
     .await
     {
         store
-            .release_task_worker(&task.id, &claim)
+            .release_flow(&position.invocation.id, position.version, Some(&claim))
             .await
-            .map_err(|settle_error| task_error(settle_error.to_string()))?;
-        return Err(task_error(error.to_string()));
+            .map_err(task_error)?;
+        return Err(task_error(error));
     }
-    if let Err(error) = wait_until_running(store, &task.id).await {
-        let _ = store.release_task_worker(&task.id, &claim).await;
+    if let Err(error) = wait_until_running(store, &task.id, Some(&claim)).await {
+        let _ = store
+            .release_flow(&position.invocation.id, position.version, Some(&claim))
+            .await;
         return Err(error);
     }
     Ok(())
@@ -2363,6 +2739,7 @@ fn task_boundary_session_name(task: &Task, claim: &crate::durable::TaskWorkerCla
 async fn wait_until_running(
     store: &SharedStore,
     task_id: &crate::work::task::TaskId,
+    launching: Option<&crate::durable::TaskWorkerClaim>,
 ) -> OpsResult<Task> {
     let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
@@ -2372,17 +2749,20 @@ async fn wait_until_running(
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?
             .ok_or_else(|| task_error("task disappeared during startup"))?;
         let position = store
-            .flow_position(&task.id)
+            .task_flow(&task.id)
             .await
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?;
         // A finite Flow may finish and remove its position before the first poll.
         if position.is_none()
             || position.as_ref().is_some_and(|position| {
                 position.is_human()
-                    || position
-                        .claim
-                        .as_ref()
-                        .is_some_and(|claim| claim.worker_run_id.is_some())
+                    || position.claim.as_ref().is_some_and(|claim| {
+                        launching.map_or_else(
+                            || position.review_artifact_key().is_some(),
+                            |initial| initial.owner != claim.owner,
+                        ) && crate::journal::task_worker_owner_evidence(&claim.owner)
+                            == crate::journal::ProcessIdentityEvidence::Live
+                    })
             })
         {
             return Ok(task);
@@ -2432,11 +2812,35 @@ pub(crate) async fn settle_task_landing(
         .await
         .map_err(|error| task_error(format!("failed to read landing Task: {error}")))?
         .ok_or_else(|| task_error(format!("landing Task {task_id} disappeared")))?;
-    let pr =
-        reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
-            .await?
-            .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?;
-    apply_merged_task_landing(store, &mut task, &pr, landing).await
+    // A previous check may have rotated to the next PR before it exited.
+    // Reconcile the delivery's PR, not whichever successor is active now.
+    let settled = store
+        .task_prs(task_id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .into_iter()
+        .find(|pr| {
+            pr.phase() == PrPhase::Merged
+                && pr.github().map(|github| github.number) == Some(landing.pr_number)
+        });
+    let pr = match settled {
+        Some(pr) => pr,
+        None => {
+            reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
+                .await?
+                .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?
+        }
+    };
+    apply_merged_task_landing(store, &mut task, &pr, landing).await?;
+    if landing.after_merge == Some(AfterMerge::CompleteTask) {
+        if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
+            return Err(task_error(format!("Linear completion pending: {error}")));
+        }
+        if task_work_status(store, &task).await? != WorkStatus::Done {
+            return Err(task_error("Task completion gate is not yet satisfied"));
+        }
+    }
+    Ok(())
 }
 
 async fn apply_merged_task_landing(
@@ -2475,12 +2879,12 @@ async fn apply_merged_task_landing(
 /// while others are still pending.
 fn observe_required_checks(
     worktree: &Path,
-    branch: &str,
+    pr_number: u64,
     head_sha: Option<&str>,
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
-    let checks = crate::ops::pr::merge_gate_state(worktree, branch)
+    let checks = crate::ops::pr::merge_gate_state(worktree, pr_number, &head_sha)
         .ok()
         .flatten()?;
     let state = if checks.failing {
@@ -2541,10 +2945,10 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
 }
 
 /// The PR this reconcile answers for: the active row, else the newest published
-/// row GitHub could still contradict.
+/// settlement. Merged evidence remains available to completion retries.
 ///
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
-/// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
+/// deciding it — `lf task pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
 async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
     if let Some(active) = store
@@ -2558,10 +2962,9 @@ async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option
         .task_prs(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-    Ok(prs
-        .into_iter()
-        .next_back()
-        .filter(|pr| pr.phase() == PrPhase::Abandoned && pr.github().is_some()))
+    Ok(prs.into_iter().next_back().filter(|pr| {
+        matches!(pr.phase(), PrPhase::Abandoned | PrPhase::Merged) && pr.github().is_some()
+    }))
 }
 
 async fn reconcile_task_pr_observation(
@@ -2576,6 +2979,10 @@ async fn reconcile_task_pr_observation(
     let Some(mut pr) = reconcile_subject(store, task).await? else {
         return Ok(None);
     };
+    if pr.phase() == PrPhase::Merged {
+        task.observation = Observation::NotRequired;
+        return Ok(Some(pr));
+    }
     // GitHub is a reconciliation input, not the Task's store of record. Read the
     // one persisted PR by number (a single bounded REST call, never `gh pr
     // list`); an unpublished working PR has no number and is not read remotely.
@@ -2614,10 +3021,7 @@ async fn reconcile_task_pr_observation(
                     result: GithubObservationResult::Fresh,
                 });
                 pr.updated_at = now;
-                store
-                    .update_task_pr(&pr)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
+                store.update_task_pr(&pr).await.map_err(task_error)?;
                 task.observation = Observation::Fresh { observed_at: now };
                 return Ok(Some(pr));
             }
@@ -2631,10 +3035,7 @@ async fn reconcile_task_pr_observation(
                 });
                 // `updated_at` remains the time of the cached PR data, not the
                 // failed attempt. Only the observation metadata changes.
-                store
-                    .update_task_pr(&pr)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
+                store.update_task_pr(&pr).await.map_err(task_error)?;
                 task.observation = Observation::Degraded {
                     reason,
                     cached_as_of: pr.updated_at,
@@ -2652,7 +3053,6 @@ async fn reconcile_task_pr_observation(
     let url = github_pr.url.clone();
     let previous_phase = previous.phase();
     let previous_github = previous.github().cloned();
-    let previous_pm_writeback = task.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
         presentation: None,
@@ -2702,20 +3102,6 @@ async fn reconcile_task_pr_observation(
                     });
                 }
             }
-            // Record the merge, but withhold completion while an accepted
-            // directive is unincorporated — an auto-merge armed by `lf pr land`
-            // must not silently erase direction accepted after it was armed — or
-            // while the branch holds follow-up committed past the merged tip,
-            // which another serial PR still owes. The PR is settling in flight and
-            // is not on disk yet, so its range is read from it directly.
-            let completes = pr.after_merge() == AfterMerge::CompleteTask
-                && matches!(
-                    committed_follow_up_range(&task.worktree, &pr)?,
-                    CommittedFollowUp::ProvenEmpty
-                );
-            if completes {
-                reconcile_pm_writeback(store, task, Some(&url)).await;
-            }
             Some(TaskEventKind::PrMerged {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
@@ -2740,7 +3126,7 @@ async fn reconcile_task_pr_observation(
             pr.abandoned_at = None;
             if let Some(ci_observation) = observe_required_checks(
                 &task.worktree,
-                &pr.branch,
+                github_pr.number,
                 github_pr.head_sha.as_deref(),
                 now,
             ) {
@@ -2762,7 +3148,7 @@ async fn reconcile_task_pr_observation(
             let outcome = store
                 .settle_task_pr_merged(&pr, authoritative_merged_at)
                 .await
-                .map_err(|error| task_error(error.to_string()))?;
+                .map_err(task_error)?;
             if let crate::store::TaskPrMergeEvidenceOutcome::Conflict { accepted_at } = outcome {
                 let reason =
                     format!("GitHub merged_at conflicts with first accepted value {accepted_at}");
@@ -2772,22 +3158,10 @@ async fn reconcile_task_pr_observation(
                 });
             }
         } else if pr.is_settled() {
-            store
-                .settle_task_pr(&pr, None)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
+            store.settle_task_pr(&pr, None).await.map_err(task_error)?;
         } else {
-            store
-                .update_task_pr(&pr)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
+            store.update_task_pr(&pr).await.map_err(task_error)?;
         }
-    }
-    if task.pm_writeback != previous_pm_writeback {
-        store
-            .update_task(task)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
     }
     if pr_changed {
         if let Some(event) = pr_event {
@@ -2800,7 +3174,7 @@ async fn reconcile_task_pr_observation(
                 store
                     .append_task_event(&task.id, &event)
                     .await
-                    .map_err(|error| task_error(error.to_string()))?;
+                    .map_err(task_error)?;
             }
         }
     }
@@ -2862,6 +3236,10 @@ pub(crate) async fn task_recovery_adoption(
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &task.worktree;
     let identifier = &task.plan.identifier;
+    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     if !worktree.exists() {
         return Err(task_error(format!(
             "Task {identifier} worktree {} is missing; recovery refused before moving any ownership",
@@ -2938,7 +3316,7 @@ pub(crate) async fn task_recovery_adoption(
     {
         return Err(task_error(format!(
             "Task {identifier} cannot recover between PRs while {} has uncommitted changes; \
-             carry them forward with `lf pr next` or commit before resuming, recovery refused \
+             carry them forward with `lf task pr next` or commit before resuming, recovery refused \
              before moving any ownership",
             worktree.display()
         )));
@@ -2968,7 +3346,7 @@ pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, task: &Task) -
     }
     Err(task_error(format!(
         "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
-         forward with `lf pr next` or commit before resuming",
+         forward with `lf task pr next` or commit before resuming",
         task.plan.identifier,
         task.worktree.display()
     )))
@@ -2982,7 +3360,7 @@ pub(crate) async fn ensure_working_pr(
 }
 
 /// How a serial-PR rotation treats the worktree. Automated settlement rotates
-/// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
+/// only a clean tree (`carry_dirty = false`); the operator's `lf task pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
 /// (`carry_dirty = true`) and may name that branch via `slug_override`.
 #[derive(Debug, Clone, Default)]
@@ -3386,14 +3764,14 @@ async fn ensure_working_pr_with_options(
                     },
                 )
                 .await
-                .map_err(|error| task_error(error.to_string()))?;
+                .map_err(task_error)?;
             Ok(Some(next))
         }
         Err(error) => {
             let recovered = store
                 .task_prs(&task.id)
                 .await
-                .map_err(|read_error| task_error(read_error.to_string()))?
+                .map_err(task_error)?
                 .into_iter()
                 .find(|pr| pr.sequence == sequence);
             match recovered {
@@ -3438,7 +3816,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 .map(|github| format!("#{}", github.number))
                 .unwrap_or_else(|| format!("sequence {}", active.sequence));
             return Err(task_error(format!(
-                "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
+                "current PR {which} is not merged yet; land it or wait for the merge before `lf task pr next`"
             )));
         }
         if matches!(
@@ -3460,30 +3838,82 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
     })
 }
 
-pub fn task_status(issue: &str) -> OpsResult<Task> {
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TaskStatus {
+    pub planning: Option<crate::store::PmTaskRecord>,
+    pub planning_error: Option<String>,
+    pub planning_stale: bool,
+    pub planning_state: crate::store::PlanningState,
+    pub execution: Option<TaskSnapshot>,
+}
+
+pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
+    let task = task_execution_status(repo, issue)?;
+    let selector = task
+        .as_ref()
+        .map(|task| task.plan.id.as_str())
+        .or(issue)
+        .ok_or_else(|| task_error("this checkout has no Task"))?;
+    let read = match crate::ops::pm::inspect_task_planning(
+        repo,
+        selector,
+        crate::ops::pm::PmRefresh::Auto,
+    ) {
+        Ok(read) => read,
+        Err(error) if task.is_some() => crate::ops::pm::TaskPlanningInspection {
+            observation: crate::store::PmTaskObservation {
+                record: None,
+                state: crate::store::PlanningState::Unavailable,
+            },
+            refresh_error: Some(error.to_string()),
+        },
+        Err(error) => return Err(error),
+    };
+    let planning_stale = read.is_stale();
+    let planning_state = read.observation.state;
+    let planning = read.observation.record;
+    let planning_error = read.refresh_error;
+    let execution = task.as_ref().map(task_snapshot).transpose()?;
+    Ok(TaskStatus {
+        planning,
+        planning_error,
+        planning_stale,
+        planning_state,
+        execution,
+    })
+}
+
+fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<Task>> {
     block_on_task(async move {
         let store = task_store().await?;
-        let mut task = store
-            .get_task_by_issue(issue)
+        let task = match issue {
+            Some(issue) => store
+                .get_task_by_issue(issue)
+                .await
+                .map_err(|error| task_error(format!("failed to read task status: {error}")))?,
+            None => task_for_checkout(&store, repo).await?,
+        };
+        let Some(mut task) = task else {
+            return Ok(None);
+        };
+        if store
+            .task_deletion(&task.wave_id, task.plan.id.as_str())
             .await
-            .map_err(|error| task_error(format!("failed to read task status: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let launch_refusal = task_launch_refusal(&store, &task)
+            .map_err(task_error)?
+            .is_some()
+        {
+            return match issue {
+                Some(_) => Ok(Some(task)),
+                None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
+            };
+        }
+        let launch_refusal = task_exec_refusal(&store, &task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
-            let observed = reconcile_task_pr(&store, &mut task).await?;
-            let user_merged = observed.as_ref().is_some_and(|pr| {
-                pr.phase() == PrPhase::Merged
-                    && pr
-                        .merge_request()
-                        .is_some_and(|request| request.mode == PrMergeMode::User)
-            });
-            if user_merged {
-                reconcile_task_completion(&store, &mut task).await?;
-            }
+            reconcile_task_pr(&store, &mut task).await?;
         }
-        Ok(task)
+        Ok(Some(task))
     })
 }
 
@@ -3508,12 +3938,24 @@ pub(crate) fn find_discardable_task_successor(repo: &Path) -> OpsResult<Option<S
     })
 }
 
-pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
+/// Complete planning-only work without allocating execution placement.
+pub fn task_complete(repo: &Path, issue: &str, summary: String) -> OpsResult<Option<Task>> {
     let summary = summary.trim().to_string();
     if summary.is_empty() {
         return Err(task_error("completion summary cannot be empty"));
     }
-    complete_task(issue, summary)
+    let registered = block_on_task(async {
+        task_store()
+            .await?
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)
+    })?;
+    if registered.is_some() {
+        return complete_task(issue, summary).map(Some);
+    }
+    block_on_task(super::pm::complete_planning_task(repo, issue, &summary))?;
+    Ok(None)
 }
 
 fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
@@ -3524,18 +3966,16 @@ fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read Task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr_observation(&store, &mut task, crate::ops::pr::PrReadFreshness::Cached)
-            .await?;
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
-            .map_err(|error| task_error(error.to_string()))?;
-        match store
-            .work_status(&work)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-        {
-            WorkStatus::Done => return Ok(task),
+            .map_err(task_error)?;
+        match store.work_status(&work).await.map_err(task_error)? {
+            WorkStatus::Done => {
+                reconcile_task_completion(&store, &mut task).await?;
+                cleanup_completed_task(&store, &task).await?;
+                return Ok(task);
+            }
             WorkStatus::Abandoned => {
                 return Err(task_error(format!(
                     "Task {} is abandoned and cannot be completed",
@@ -3544,6 +3984,8 @@ fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
             }
             WorkStatus::Ready => {}
         }
+        reconcile_task_pr_observation(&store, &mut task, crate::ops::pr::PrReadFreshness::Cached)
+            .await?;
         if !is_clean(&task.worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
         {
@@ -3560,24 +4002,19 @@ fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
             // provoked.
             return Err(task_error(refusal));
         }
+        reconcile_pm_writeback(&store, &mut task, None).await?;
         store
             .append_task_event(&task.id, &TaskEventKind::Progress { summary })
             .await
-            .map_err(|error| task_error(error.to_string()))?;
+            .map_err(task_error)?;
         // Every other condition is now proven, so the rotation's empty artifact
-        // is dropped as part of completing — one transaction that deletes the row
-        // and writes the terminal status together. There is no instant at which
-        // the successor is gone and the Task is not yet terminal, which is the
-        // only state `ensure_working_pr_with_options` would rotate from.
+        // is retired in the completion transaction. Retaining its branch identity
+        // lets cleanup retry after a crash without guessing what it may delete.
         store
             .complete_task(&task, gate.discardable_successor.as_ref())
             .await
             .map_err(|error| task_error(format!("failed to complete Task: {error}")))?;
-        reconcile_pm_writeback(&store, &mut task, None).await;
-        store
-            .update_task(&task)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+        cleanup_completed_task(&store, &task).await?;
         Ok(task)
     })
 }
@@ -3635,9 +4072,9 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
         body,
     };
     let outcome =
-        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.name(), &request, &prior).await;
+        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.slug(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
-    // reading, but an operator running `lf pr open` should not have to go looking.
+    // reading, but an operator running `lf task pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
         tracing::warn!(
             issue = task.plan.identifier,
@@ -3651,72 +4088,60 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
 }
 
 fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
-    writeback_state_for(PmWritebackOperation::CompleteTask, result)
-}
-
-fn writeback_state_for(operation: PmWritebackOperation, result: OpsResult<()>) -> PmWritebackState {
     match result {
         Ok(()) => PmWritebackState::Current,
         Err(error) => PmWritebackState::Pending {
-            operation,
+            operation: PmWritebackOperation::CompleteTask,
             error: error.to_string(),
         },
     }
 }
 
-pub(crate) async fn reconcile_pm_writeback(
+async fn reconcile_pm_writeback(
     store: &SharedStore,
     task: &mut Task,
     pr_url: Option<&str>,
-) {
-    let Ok(wave) = owning_wave(store, task).await else {
-        task.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: format!("owning Wave {} is not registered", task.wave_id),
-        };
-        return;
-    };
-    task.pm_writeback = writeback_state(
+) -> OpsResult<()> {
+    let result = async {
+        let wave = owning_wave(store, task).await?;
         crate::ops::task_pm::complete_task(
-            &task.worktree,
-            wave.name(),
+            Path::new(wave.repo()),
+            wave.slug(),
             task.plan.id.as_str(),
             pr_url,
         )
-        .await,
-    );
+        .await
+    }
+    .await;
+    // A known conflicting outcome refuses new success. Transport and refresh
+    // failures retain the existing pending writeback contract.
+    if let Err(error @ OpsError::TaskCompletionConflict { .. }) = result {
+        task.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: error.to_string(),
+        };
+        return Err(error);
+    }
+    task.pm_writeback = writeback_state(result);
+    if let Some(refreshed) = store.get_task(&task.id).await.map_err(task_error)? {
+        task.plan = refreshed.plan;
+    }
+    Ok(())
 }
 
-async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) {
-    let Ok(prs) = store.task_prs(&task.id).await else {
-        return;
-    };
+async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
+    let prs = store.task_prs(&task.id).await.map_err(task_error)?;
     let pr_url = prs
         .iter()
         .rev()
         .find_map(|pr| pr.github().map(|github| github.url.as_str()));
-    let Ok(wave) = owning_wave(store, task).await else {
-        task.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: format!("owning Wave {} is not registered", task.wave_id),
-        };
-        return;
-    };
-    task.pm_writeback = {
-        let operation = match &task.pm_writeback {
-            PmWritebackState::Pending { operation, .. } => *operation,
-            PmWritebackState::Current => PmWritebackOperation::CompleteTask,
-        };
-        let result = crate::ops::task_pm::retry_complete_task(
-            &task.worktree,
-            wave.name(),
-            task.plan.id.as_str(),
-            pr_url,
-        )
-        .await;
-        writeback_state_for(operation, result)
-    };
+    // Already-Done history remains Done even if Linear later conflicts.
+    let result = reconcile_pm_writeback(store, task, pr_url).await;
     task.updated_at = time::OffsetDateTime::now_utc();
+    match result {
+        Err(OpsError::TaskCompletionConflict { .. }) => Ok(()),
+        result => result,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3738,7 +4163,7 @@ pub(crate) struct CompletionGate {
     /// block completion; it must not outlive one either.
     ///
     /// Classification only, and exactly one thing acts on it: [`complete_task`]
-    /// passes it as the completion transaction's `skipped_pr`, which drops the
+    /// passes it as the completion transaction's `skipped_pr`, which retires the
     /// row and writes the terminal status together. Discarding it any earlier
     /// would leave a non-terminal Task with no active PR — the state
     /// [`ensure_working_pr_with_options`] rotates another empty PR from.
@@ -3777,12 +4202,18 @@ pub(crate) async fn task_completion_gate(
         blockers: Vec::new(),
         discardable_successor: None,
     };
+    let work_done = task_work_status(store, task).await? == WorkStatus::Done;
+    if work_done && !task.worktree.exists() {
+        return Ok(gate);
+    }
     if let Some(blocker) = task_worktree_blocker(store, task).await? {
         gate.satisfied = false;
         gate.blockers.push(blocker.reason);
         return Ok(gate);
     }
-    let work_done = task_work_status(store, task).await? == WorkStatus::Done;
+
+    gate.blockers
+        .extend(lifecycle::associated_work_blockers(store, task)?);
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -3830,10 +4261,10 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open; merge it or run `lf pr abandon`"
+                "pull request {which} is open; merge it or run `lf task pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
-                "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
+                "pull request {which} is still publishing; wait for it to land or run `lf task pr abandon`"
             )),
             // An unpublished PR means three different things; say which. The
             // classification is inert: a gate that goes on to refuse leaves the
@@ -3843,11 +4274,11 @@ pub(crate) async fn task_completion_gate(
                     gate.discardable_successor = Some(pr.clone());
                 }
                 CommittedFollowUp::ProvenEmpty => gate.blockers.push(format!(
-                    "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
+                    "pull request {which} is unpublished; publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
                     "follow-up work is committed on unpublished pull request {which}; \
-                     publish and merge it or run `lf pr abandon`"
+                     publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove unpublished pull request {which} is empty: {reason}"
@@ -3873,65 +4304,38 @@ async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Opt
         .find(|pr| pr.phase() == PrPhase::Merged && pr.after_merge() == AfterMerge::CompleteTask))
 }
 
-async fn advance_completion_after_gate(store: &SharedStore, task: &mut Task) -> OpsResult<bool> {
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    match store
-        .work_status(&work)
-        .await
-        .map_err(|error| task_error(error.to_string()))?
-    {
-        WorkStatus::Done | WorkStatus::Abandoned => return Ok(false),
-        WorkStatus::Ready => {}
-    }
-    let Some(pr) = merged_completing_pr(store, task).await? else {
-        return Ok(false);
-    };
-    let gate = task_completion_gate(store, task).await?;
-    if !gate.satisfied {
-        return Ok(false);
-    }
-    // This path completes through `complete_task_after_pr`, which settles
-    // the merged PR and has no `skipped_pr`, so it cannot drop a successor in the
-    // same transaction. Rather than complete and leave the row active — a
-    // completed Task still holding an active PR — decline and let `lf task
-    // complete` own this shape. Unreachable on current rows: a `CompleteTask`
-    // merge no longer rotates, so it never has a successor to discard.
-    if gate.discardable_successor.is_some() {
-        return Ok(false);
-    }
-    let url = pr.github().map(|github| github.url.clone());
-    store
-        .complete_task_after_pr(task, &pr)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    reconcile_pm_writeback(store, task, url.as_deref()).await;
-    store
-        .update_task(task)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    Ok(true)
-}
-
 pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
-    let status = task_work_status(store, task).await?;
-    if status == WorkStatus::Done && matches!(task.pm_writeback, PmWritebackState::Pending { .. }) {
-        retry_pm_writeback(store, task).await;
-        store
-            .update_task(task)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+    match task_work_status(store, task).await? {
+        WorkStatus::Done => {
+            if matches!(task.pm_writeback, PmWritebackState::Pending { .. }) {
+                retry_pm_writeback(store, task).await?;
+                store
+                    .update_task_pm_writeback(&task.id, &task.pm_writeback, task.updated_at)
+                    .await
+                    .map_err(task_error)?;
+            }
+            return Ok(());
+        }
+        WorkStatus::Abandoned => return Ok(()),
+        WorkStatus::Ready => {}
+    }
+    let Some(pr) = merged_completing_pr(store, task).await? else {
+        return Ok(());
+    };
+    let gate = task_completion_gate(store, task).await?;
+    // Automatic completion leaves legacy empty successors for explicit
+    // `lf task complete`; current CompleteTask merges do not rotate.
+    if !gate.satisfied || gate.discardable_successor.is_some() {
         return Ok(());
     }
-    if !matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
-        advance_completion_after_gate(store, task).await?;
-    }
-    Ok(())
+    let url = pr.github().map(|github| github.url.as_str());
+    reconcile_pm_writeback(store, task, url).await?;
+    // PR reconciliation already persisted the merge. Completion writes only
+    // Task outcome and writeback facts, never a stale copy of the settled PR.
+    store.complete_task(task, None).await.map_err(task_error)
 }
 
 pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
@@ -3961,52 +4365,97 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         let latest = prs.last();
         let active = prs.iter().find(|pr| pr.is_active());
         let active_pr = active.map(|pr| pr.id.clone());
-        let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
-            Some(parent_id) => store
-                .get_task_pr(parent_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-                .map(|pr| pr.phase()),
-            None => None,
-        };
-        let completion_gate = task_completion_gate(&store, &task).await?;
-        let completion_refusal = completion_gate.refusal(&task.plan.identifier);
-        let worktree_blocker = task_worktree_blocker(&store, &task).await?;
-        let resume_refusal = worktree_blocker
-            .as_ref()
-            .map(|blocker| blocker.reason.clone())
-            .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
         let work_status = store
             .work_status(&work)
             .await
             .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-        let launch_refusal = if worktree_blocker.is_some() {
-            None
+        let position = store
+            .task_flow(&task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let skill = position.as_ref().and_then(|position| {
+            crate::engine::current_skill(&position.invocation.steps, &position.cursor)
+        });
+        let execution = crate::ops::task_execution::task_execution(&store, &task.id)
+            .await
+            .map_err(task_error)?;
+        let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
+        let actions = if store
+            .task_deletion(&task.wave_id, task.plan.id.as_str())
+            .await
+            .map_err(task_error)?
+            .is_some()
+        {
+            TaskActionModel {
+                recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
+                reason: "Task was deleted; retained history is read-only".into(),
+            }
         } else {
-            task_configuration_refusal(&task)
-                .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
+            let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
+                Some(parent_id) => store
+                    .get_task_pr(parent_id)
+                    .await
+                    .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
+                    .map(|pr| pr.phase()),
+                None => None,
+            };
+            let completion_gate = task_completion_gate(&store, &task).await?;
+            let completion_refusal = completion_gate.refusal(&task.plan.identifier);
+            let worktree_blocker = task_worktree_blocker(&store, &task).await?;
+            let resume_refusal = worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.clone())
+                .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
+            let launch_refusal = if worktree_blocker.is_some() {
+                None
+            } else {
+                task_configuration_refusal(&task, skill.as_ref().map(|step| &step.skill))
+                    .or_else(|| task_event_exec_refusal(latest_event.as_ref()).map(str::to_string))
+            };
+            let action_evidence = TaskActionEvidence {
+                status: work_status.clone(),
+                execution: Some(&execution),
+                latest_pr_phase: latest.map(|pr| pr.phase()),
+                latest_pr_after_merge: latest
+                    .filter(|pr| pr.phase() == PrPhase::Merged)
+                    .map(TaskPr::after_merge),
+                latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
+                latest_pr_presentation_current: latest
+                    .filter(|pr| pr.phase() == PrPhase::Open)
+                    .map(|pr| pr.presentation().is_some()),
+                completion_refusal: completion_refusal.as_deref(),
+                resume_refusal: resume_refusal.as_deref(),
+                ci: active.and_then(|pr| pr.fresh_ci()),
+                predecessor_phase,
+                abandon_intent: task.abandon_intent.is_some(),
+                launch_refusal: launch_refusal.as_deref(),
+            };
+            derive_task_actions(&action_evidence)
         };
-        let action_evidence = TaskActionEvidence {
-            status: work_status.clone(),
-            latest_pr_phase: latest.map(|pr| pr.phase()),
-            latest_pr_after_merge: latest
-                .filter(|pr| pr.phase() == PrPhase::Merged)
-                .map(TaskPr::after_merge),
-            latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
-            latest_pr_presentation_current: latest
-                .filter(|pr| pr.phase() == PrPhase::Open)
-                .map(|pr| pr.presentation().is_some()),
-            completion_refusal: completion_refusal.as_deref(),
-            resume_refusal: resume_refusal.as_deref(),
-            ci: active.and_then(|pr| pr.fresh_ci()),
-            predecessor_phase,
-            abandon_intent: task.abandon_intent.is_some(),
-            launch_refusal: launch_refusal.as_deref(),
-        };
-        let actions = derive_task_actions(&action_evidence);
-        let agent = task_agent(&task);
+        let agent = resolve_task_agent(
+            &task.worktree,
+            task.agent.as_deref(),
+            skill.as_ref().map(|step| &step.skill),
+        );
         let (provider, _) = parse_agent(&agent);
+        let home_id = store
+            .task_checkouts()
+            .await
+            .map_err(task_error)?
+            .into_iter()
+            .find(|row| row.task_id == task.id)
+            .and_then(|row| row.home_id);
+        let local_home = store.local_home().await.map_err(task_error)?;
+        let worktree = if home_id.as_ref() == Some(&local_home.id) {
+            crate::engine::git::worktree_root(&task.worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task.worktree.clone())
+        } else {
+            task.worktree.clone()
+        };
         Ok(TaskSnapshot {
+            home_id,
             issue_id: task.plan.id.as_str().to_string(),
             issue_identifier: task.plan.identifier,
             task_id: task.id.to_string(),
@@ -4014,12 +4463,14 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             project: project.plan.slug,
             pm_snapshot_synced_at: task.plan.pm_snapshot_synced_at,
             pm_writeback: task.pm_writeback,
-            wave: wave.name().to_string(),
+            wave: wave.slug().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
-            worktree: task.worktree.display().to_string(),
+            execution,
+            work: work_set,
+            worktree: worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
-            agent,
+            agent: task.agent,
             provider,
             prs,
             active_pr,
@@ -4032,16 +4483,23 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
     })
 }
 
-pub fn task_changes(issue: &str) -> OpsResult<TaskChangesSnapshot> {
-    let task = task_status(issue)?;
-    let pr = active_pr(&task)?;
-    changes_snapshot(TaskWorkspace::new(&task, &pr))
+/// Maximum byte length for Task file content, drafts and returned patches.
+pub const MAX_FILE_BYTES: usize = 1_000_000;
+
+pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
+    let (task, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison::new(&task, &pr);
+    let base = resolve_file_base(workspace, base)?;
+    changes_snapshot(TaskComparison {
+        base_commit: &base,
+        ..workspace
+    })
 }
 
-fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapshot> {
+fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskChangesSnapshot> {
     let mut files = BTreeMap::<String, TaskChangedFile>::new();
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &[
             "diff",
             "--name-only",
@@ -4052,63 +4510,98 @@ fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapsh
         |file| file.committed = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["diff", "--cached", "--name-only", "-z"],
         &mut files,
         |file| file.staged = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["diff", "--name-only", "-z"],
         &mut files,
         |file| file.unstaged = true,
     )?;
     record_changed_paths(
-        workspace.worktree,
+        workspace.checkout.worktree,
         &["ls-files", "--others", "--exclude-standard", "-z"],
         &mut files,
         |file| file.untracked = true,
     )?;
-    let head_commit = git_output(workspace.worktree, &["rev-parse", "HEAD"])?
+    let head_commit = git_output(workspace.checkout.worktree, &["rev-parse", "HEAD"])?
         .trim()
         .to_string();
+    let net = net_changed_paths(workspace)?;
+    files.retain(|path, file| {
+        file.old_path = net.get(path).cloned().flatten();
+        net.contains_key(path) || file.untracked
+    });
+    let (scratch, scratch_truncated) = scratch_paths(workspace.checkout.worktree)?;
+    let recovery = file_save::recovery_directory(workspace.checkout)?;
     Ok(TaskChangesSnapshot {
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
+        recovery_directory: recovery
+            .exists()
+            .then(|| recovery.to_string_lossy().into_owned()),
+        issue_identifier: workspace.checkout.issue_identifier.to_string(),
+        task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         head_commit,
         files: files.into_values().collect(),
+        scratch,
+        scratch_truncated,
     })
 }
 
-pub fn task_diff(issue: &str, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
-    let task = task_status(issue)?;
-    let pr = active_pr(&task)?;
-    diff_snapshot(TaskWorkspace::new(&task, &pr), path)
+pub fn task_diff(
+    issue: &str,
+    path: Option<&str>,
+    base: &str,
+    draft: Option<&str>,
+) -> OpsResult<TaskDiffSnapshot> {
+    let (task, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison::new(&task, &pr);
+    let base = resolve_file_base(workspace, base)?;
+    let workspace = TaskComparison {
+        base_commit: &base,
+        ..workspace
+    };
+    match draft {
+        Some(draft) => draft_snapshot(
+            workspace,
+            path.ok_or_else(|| task_error("Draft diff requires a path"))?,
+            draft,
+        ),
+        None => diff_snapshot(workspace, path),
+    }
 }
 
-fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
-    const MAX_PATCH_BYTES: usize = 1_000_000;
-
+fn diff_snapshot(workspace: TaskComparison<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
     let relative = path.map(validate_task_relative_path).transpose()?;
+    let old_path = match &relative {
+        Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
+        None => None,
+    };
     let mut args = vec![
-        "diff".to_string(),
-        "--no-ext-diff".to_string(),
-        "--no-color".to_string(),
-        workspace.base_commit.to_string(),
-        "--".to_string(),
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        workspace.base_commit,
+        "--",
     ];
-    if let Some(path) = &relative {
-        args.push(path.clone());
+    // Both sides of a rename are needed for Git to preserve its identity.
+    if let Some(old) = &old_path {
+        args.push(old);
     }
-    let mut patch = git_output_owned(workspace.worktree, &args)?;
-    let untracked = untracked_paths(workspace.worktree)?;
+    if let Some(path) = &relative {
+        args.push(path);
+    }
+    let mut patch = git_output_bytes(workspace.checkout.worktree, &args)?;
+    let untracked = untracked_paths(workspace.checkout.worktree)?;
     let include_untracked = untracked
         .into_iter()
         .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
     for path in include_untracked {
         let output = Command::new("git")
-            .current_dir(workspace.worktree)
+            .current_dir(workspace.checkout.worktree)
             .args(["diff", "--no-index", "--no-color", "--", "/dev/null", &path])
             .output()
             .map_err(|error| {
@@ -4122,20 +4615,7 @@ fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<
         }
         patch.extend_from_slice(&output.stdout);
     }
-    let truncated = patch.len() > MAX_PATCH_BYTES;
-    if truncated {
-        patch.truncate(MAX_PATCH_BYTES);
-    }
-    let patch = String::from_utf8_lossy(&patch).into_owned();
-    let binary = patch.contains("Binary files ") || patch.contains("GIT binary patch");
-    Ok(TaskDiffSnapshot {
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
-        path: relative,
-        patch,
-        binary,
-        truncated,
-    })
+    Ok(patch_snapshot(workspace, relative, &patch))
 }
 
 pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<String> {
@@ -4152,7 +4632,7 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
         content_sha256: Option<String>,
     }
 
-    let workspace = TaskWorkspace::new(task, pr);
+    let workspace = TaskComparison::new(task, pr);
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;
     let files = changes
@@ -4189,45 +4669,248 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
     ))
 }
 
-pub fn task_file(issue: &str, path: &str) -> OpsResult<TaskFileSnapshot> {
-    let task = task_status(issue)?;
-    let pr = active_pr(&task)?;
-    file_snapshot(TaskWorkspace::new(&task, &pr), path)
+pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
+    let checkout = file_context(issue)?;
+    let workspace = TaskWorkspace::from(&checkout);
+    let mut file = file_snapshot(workspace, path)?;
+    if inspect_recovery {
+        file.recoveries = file_save::recoveries(workspace, &file.path)?;
+    }
+    Ok(file)
 }
 
 fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFileSnapshot> {
-    const MAX_FILE_BYTES: usize = 1_000_000;
-
     let relative = validate_task_relative_path(path)?;
     let root = workspace
         .worktree
         .canonicalize()
         .map_err(|error| task_error(format!("cannot resolve Task worktree: {error}")))?;
-    let absolute = root
-        .join(&relative)
-        .canonicalize()
-        .map_err(|error| task_error(format!("cannot open Task file {relative:?}: {error}")))?;
+    let mut snapshot = TaskFileSnapshot {
+        recoveries: Vec::new(),
+        issue_identifier: workspace.issue_identifier.to_string(),
+        task_id: workspace.task_id.to_string(),
+        path: relative.clone(),
+        content: None,
+        state: TaskFileState::Missing,
+        revision: None,
+        read_only_reason: None,
+        size_bytes: 0,
+    };
+    let absolute = match root.join(&relative).canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(snapshot),
+        Err(error) => {
+            return Err(task_error(format!(
+                "cannot open Task file {relative:?}: {error}"
+            )))
+        }
+    };
     if !absolute.starts_with(&root) || !absolute.is_file() {
         return Err(task_error(format!(
             "Task file {relative:?} does not resolve to a file inside the Task worktree"
         )));
     }
-    let bytes = std::fs::read(&absolute)
+    let mut component_path = root.clone();
+    for component in Path::new(&relative).components() {
+        component_path.push(component);
+        if std::fs::symlink_metadata(&component_path)?
+            .file_type()
+            .is_symlink()
+        {
+            snapshot.read_only_reason =
+                Some("Files reached through a symlink are read-only.".into());
+            break;
+        }
+    }
+    if Path::new(&relative)
+        .components()
+        .any(|part| part.as_os_str() == ".git")
+    {
+        snapshot.read_only_reason = Some("Git metadata is read-only.".into());
+    }
+    let file = File::open(&absolute)
         .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
-    let size_bytes = bytes.len() as u64;
-    let binary = bytes.iter().take(8_192).any(|byte| *byte == 0);
+    snapshot.size_bytes = file.metadata()?.len();
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    snapshot.state = if bytes.len() > MAX_FILE_BYTES {
+        TaskFileState::Truncated
+    } else if bytes.contains(&0) {
+        TaskFileState::Binary
+    } else if let Ok(content) = String::from_utf8(bytes) {
+        snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));
+        snapshot.content = Some(content);
+        TaskFileState::Text
+    } else {
+        TaskFileState::UnsupportedEncoding
+    };
+    Ok(snapshot)
+}
+
+fn resolve_file_base(workspace: TaskComparison<'_>, selection: &str) -> OpsResult<String> {
+    let reference = match selection {
+        "parent" => workspace.base_commit,
+        "head" => "HEAD",
+        sha if sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) => sha,
+        _ => {
+            return Err(task_error(
+                "Comparison must be parent, head, or a resolved commit SHA",
+            ))
+        }
+    };
+    Ok(git_output(
+        workspace.checkout.worktree,
+        &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
+    )?
+    .trim()
+    .to_string())
+}
+
+fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
+    let output = git_output_bytes(
+        workspace.checkout.worktree,
+        &[
+            "diff",
+            "--name-status",
+            "--no-ext-diff",
+            "--find-renames",
+            "-z",
+            workspace.base_commit,
+            "--",
+        ],
+    )?;
+    let entries = nul_paths(&output);
+    let mut entries = entries.into_iter();
+    let mut paths = BTreeMap::new();
+    while let Some(status) = entries.next() {
+        let source = entries
+            .next()
+            .ok_or_else(|| task_error("Missing Git path"))?;
+        if status.starts_with('R') || status.starts_with('C') {
+            let destination = entries
+                .next()
+                .ok_or_else(|| task_error("Missing Git rename destination"))?;
+            paths.insert(destination, Some(source));
+        } else {
+            paths.insert(source, None);
+        }
+    }
+    Ok(paths)
+}
+
+fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
+    // Bound traversal as well as returned files. Never descend into symlinks.
+    let mut pending = vec![root.join("scratch")];
+    let mut paths = Vec::new();
+    let mut visited = 0;
+    while let Some(directory) = pending.pop() {
+        match std::fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        }
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            visited += 1;
+            if visited > 2_000 {
+                paths.sort();
+                return Ok((paths, true));
+            }
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file() {
+                paths.push(
+                    entry
+                        .path()
+                        .strip_prefix(root)
+                        .expect("scratch is under worktree")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    paths.sort();
+    Ok((paths, false))
+}
+
+fn patch_snapshot(
+    workspace: TaskComparison<'_>,
+    path: Option<String>,
+    bytes: &[u8],
+) -> TaskDiffSnapshot {
     let truncated = bytes.len() > MAX_FILE_BYTES;
-    let visible = &bytes[..bytes.len().min(MAX_FILE_BYTES)];
-    let content = (!binary).then(|| String::from_utf8_lossy(visible).into_owned());
-    Ok(TaskFileSnapshot {
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
-        path: relative,
-        content,
+    let patch = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_FILE_BYTES)]).into_owned();
+    // Git's binary markers start a line; patch content is always prefixed.
+    let binary = patch
+        .lines()
+        .any(|line| line.starts_with("Binary files ") || line == "GIT binary patch");
+    TaskDiffSnapshot {
+        issue_identifier: workspace.checkout.issue_identifier.to_string(),
+        task_id: workspace.checkout.task_id.to_string(),
+        base_commit: workspace.base_commit.to_string(),
+        path,
+        patch,
         binary,
-        size_bytes,
         truncated,
-    })
+    }
+}
+
+fn draft_snapshot(
+    workspace: TaskComparison<'_>,
+    path: &str,
+    draft: &str,
+) -> OpsResult<TaskDiffSnapshot> {
+    if draft.len() > MAX_FILE_BYTES {
+        return Err(task_error("Draft exceeds 1 MB"));
+    }
+    let path = validate_task_relative_path(path)?;
+    let changes = net_changed_paths(workspace)?;
+    let old_path = changes
+        .get(&path)
+        .and_then(Option::as_deref)
+        .unwrap_or(&path);
+    let spec = format!("{}:{old_path}", workspace.base_commit);
+    let exists = !git_output_bytes(
+        workspace.checkout.worktree,
+        &["ls-tree", "-z", workspace.base_commit, "--", old_path],
+    )?
+    .is_empty();
+    let original = if exists {
+        git_output_bytes(workspace.checkout.worktree, &["show", &spec])?
+    } else {
+        Vec::new()
+    };
+    // Private temporary files only: draft comparisons never touch the worktree or index.
+    // The a/ and b/ directories stand in for Git's prefixes so headers name the real paths.
+    let directory = tempfile::tempdir()?;
+    let before = format!("a/{old_path}");
+    let after = format!("b/{path}");
+    for (relative, bytes) in [(&before, original.as_slice()), (&after, draft.as_bytes())] {
+        let file = directory.path().join(relative);
+        std::fs::create_dir_all(file.parent().expect("prefixed path has a parent"))?;
+        std::fs::write(file, bytes)?;
+    }
+    let output = Command::new("git")
+        .current_dir(directory.path())
+        .args([
+            "diff",
+            "--no-index",
+            "--no-ext-diff",
+            "--no-color",
+            "--no-prefix",
+            "--",
+            &before,
+            &after,
+        ])
+        .output()?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(task_error(String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(patch_snapshot(workspace, Some(path), &output.stdout))
 }
 
 fn validate_task_relative_path(path: &str) -> OpsResult<String> {
@@ -4262,13 +4945,16 @@ fn record_changed_paths(
     mark: impl Fn(&mut TaskChangedFile),
 ) -> OpsResult<()> {
     for path in nul_paths(&git_output_bytes(worktree, args)?) {
-        let file = files.entry(path.clone()).or_insert(TaskChangedFile {
-            path,
-            committed: false,
-            staged: false,
-            unstaged: false,
-            untracked: false,
-        });
+        let file = files
+            .entry(path)
+            .or_insert_with_key(|path| TaskChangedFile {
+                path: path.clone(),
+                old_path: None,
+                committed: false,
+                staged: false,
+                unstaged: false,
+                untracked: false,
+            });
         mark(file);
     }
     Ok(())
@@ -4309,51 +4995,46 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
-    let output = Command::new("git")
-        .current_dir(worktree)
-        .args(args)
-        .output()
-        .map_err(|error| task_error(format!("failed to run git diff: {error}")))?;
-    if !output.status.success() {
-        return Err(task_error(format!(
-            "git diff failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+pub fn task_edit(
+    repo: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    title: Option<String>,
+    notes: Option<String>,
+) -> OpsResult<super::pm::PmUpdateResult> {
+    if title.is_none() && notes.is_none() {
+        return Err(task_error("task edit requires --title or --notes"));
     }
-    Ok(output.stdout)
+    if title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(task_error("Task title cannot be empty"));
+    }
+    super::pm::pm_update(
+        repo,
+        &super::pm::PmUpdateOptions {
+            wave: wave.map(str::to_string),
+            id: issue.to_string(),
+            update: super::pm::PmTaskUpdate::Edit(crate::pm::PmItemUpdate {
+                name: title,
+                description: notes,
+            }),
+        },
+        &super::NullProgress,
+    )
 }
 
-fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    block_on_task(async move {
-        let store = task_store().await?;
-        let mut task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut task).await?;
-        let steer =
-            super::child::append_steer(&store, ChildRef::Task(task.id.clone()), &message).await?;
-        let has_active_flow = store
-            .flow_position(&task.id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .is_some();
-        if has_active_flow && !task_worker_live(&store, &task).await? {
-            relaunch_inactive_process(&store, &mut task).await?;
-        }
-        Ok(TaskControlResult {
-            issue_id: task.plan.identifier.clone(),
-            task_id: task.id.to_string(),
-            receipt: super::child::WorkControlReceipt::Steer { steer },
-            observation: task.observation.clone(),
-        })
-    })
-}
-
-pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_task_steer(issue, message)
+pub fn task_comment(
+    repo: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    message: Option<&str>,
+    steer: bool,
+) -> OpsResult<super::pm::TaskComments> {
+    block_on_task(super::pm::task_comment_async(
+        repo, wave, issue, message, steer,
+    ))
 }
 
 /// Request that the Task end its current turn so the next re-reads its
@@ -4368,11 +5049,12 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let work = crate::durable::WorkRef::Task(task.id.clone());
         store
-            .append_interrupt(&work)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+            .sqlite
+            .set_task_automation(&task.id, false, false)
+            .map_err(task_error)?;
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        store.append_interrupt(&work).await.map_err(task_error)?;
         Ok(TaskControlResult {
             issue_id: task.plan.identifier.clone(),
             task_id: task.id.to_string(),
@@ -4382,17 +5064,12 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
     })
 }
 
-/// Recover an abandoned Task as one linked successor that adopts its worktree
-/// and serial PR history.
-pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<Task> {
-    let issue = issue.to_string();
-    block_on_task(async move {
-        let store = task_store().await?;
-        _recover_abandoned_task(&store, &issue, reason).await
-    })
-}
-
-pub fn task_restart(issue: &str, advice: Option<String>) -> OpsResult<Task> {
+pub fn task_restart(
+    issue: &str,
+    advice: Option<String>,
+    flow: Option<String>,
+    agent: Option<String>,
+) -> OpsResult<TaskSnapshot> {
     let issue = issue.to_string();
     let advice = advice
         .map(|value| value.trim().to_string())
@@ -4404,10 +5081,16 @@ pub fn task_restart(issue: &str, advice: Option<String>) -> OpsResult<Task> {
             }
         })
         .transpose()?;
-    block_on_task(async move { restart_task_async(&issue, advice).await })
+    block_on_task(async move { restart_task_async(&issue, advice, flow, agent).await })
+        .and_then(|task| task_snapshot(&task))
 }
 
-async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Task> {
+async fn restart_task_async(
+    issue: &str,
+    advice: Option<String>,
+    flow: Option<String>,
+    agent: Option<String>,
+) -> OpsResult<Task> {
     let store = task_store().await?;
     let mut task = store
         .get_task_by_issue(issue)
@@ -4429,40 +5112,37 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         }
         WorkStatus::Ready => {}
     }
+    if let Some(agent) = agent.as_deref() {
+        checkout_execution_boundary(&task.worktree, agent)
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    // Reject an unusable replacement before any refresh, checkpoint, or stop so
+    // the pinned Flow and its worker stay exactly as they were.
+    if let Some(flow) = flow.as_deref() {
+        load_task_flow(&task.worktree, flow)?;
+    }
 
-    let resolved = crate::ops::task_pm::resolve_task_async(
-        &task.worktree,
-        task.plan.id.as_str(),
-        crate::ops::pm::PmRefresh::Force,
-    )
-    .await?;
+    let resolved =
+        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Force).await?;
     let selected_flow =
-        select_task_worker_flow_from_project(&task.worktree, &resolved.project, None)?;
+        select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
     let mut project = store
-        .get_project_by_project(&resolved.project.id)
+        .get_project(&task.project_id)
         .await
         .map_err(|error| task_error(format!("failed to resolve refreshed Project: {error}")))?
         .ok_or_else(|| {
             task_error(format!(
-                "refreshed Task {} belongs to unregistered Project {}; run that Project before restarting",
+                "refreshed Task {} has no synced Project record ({}); sync its Wave planning data before restarting",
                 resolved.item.identifier, resolved.project.slug
             ))
         })?;
-    if project.wave_id != task.wave_id {
-        return Err(task_error(format!(
-            "refreshed Task {} moved to Project {} outside its registered Wave",
-            resolved.item.identifier, resolved.project.slug
-        )));
-    }
-    project.plan =
-        crate::ops::project::project_plan(&resolved.project, resolved.snapshot.synced_at)?;
+    project.plan = crate::ops::project::project_plan(&resolved.project, resolved.observed_at)?;
     project.updated_at = time::OffsetDateTime::now_utc();
     store
         .update_project(&project)
         .await
         .map_err(|error| task_error(format!("failed to adopt refreshed Project: {error}")))?;
 
-    let author = task_input_author()?;
     let checkpoint_worktree = task.worktree.clone();
     let checkpoint_identifier = task.plan.identifier.clone();
     let head = tokio::task::spawn_blocking(move || {
@@ -4473,125 +5153,88 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
 
     let now = time::OffsetDateTime::now_utc();
     task.plan = TaskPlan {
-        id: LinearIssueId::new(resolved.item.id.clone())
-            .map_err(|error| task_error(error.to_string()))?,
+        id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
         identifier: resolved.item.identifier.clone(),
         title: resolved.item.name.clone(),
         description: resolved.item.description.clone(),
-        pm_snapshot_synced_at: resolved.snapshot.synced_at,
+        pm_snapshot_synced_at: resolved.observed_at,
     };
-    task.project_id = project.id;
     task.pm_writeback = PmWritebackState::Current;
     task.updated_at = now;
 
-    let direction = task_restart_direction(&task, advice.as_deref());
-    stop_task_worker(&store, &task).await?;
+    if let Some(advice) = advice.as_deref() {
+        super::linear_observe::publish_task_steer(&store, &task, advice).await?;
+    }
+    let stopped = stop_task_worker(&store, &task).await?;
+    select_task_agent(&store, &mut task, agent.as_deref()).await?;
     store
-        .restart_task_flow(&task, &author, &direction, &head)
+        .restart_task_flow(&task, stopped.as_ref(), &head)
         .await
         .map_err(|error| task_error(format!("failed to restart Task flow: {error}")))?;
-    launch_task_process(&store, &mut task, Some(&selected_flow)).await?;
+    exec_task_process(&store, &mut task, Some(&selected_flow)).await?;
     Ok(task)
 }
 
-fn task_restart_direction(task: &Task, advice: Option<&str>) -> String {
-    let advice = advice
-        .map(|value| format!("\n\nRestart advice:\n{value}"))
-        .unwrap_or_default();
-    format!(
-        "<lf:task-restart issue=\"{}\">\n\
-         Begin a new Task Flow from current durable truth. Do not resume or defer to any prior \
-         provider session. Preserve the Task, worktree, branch, and PR. Existing code and scratch \
-         are evidence to reconcile, not an approved implementation basis: \
-         their prior design may be old, poor, or incompatible with the current Task definition. \
-         Read every scratch artifact and reconcile it with the selected Flow.\n\n\
-         Current Task: {}\n\n{}{}\n\
-         </lf:task-restart>",
-        task.plan.identifier, task.plan.title, task.plan.description, advice,
-    )
-}
-
-async fn _recover_abandoned_task(
-    store: &SharedStore,
+/// Continue the saved invocation, including review and failed-boundary recovery.
+/// The public run operation resolves its executable and data before entering here.
+pub(crate) async fn continue_task_async(
     issue: &str,
     reason: Option<String>,
+    agent: Option<String>,
+    requested_flow: Option<String>,
+    retry: bool,
 ) -> OpsResult<Task> {
-    let reason = reason
-        .map(|value| value.trim().to_string())
-        .map(|value| {
-            if value.is_empty() {
-                Err(task_error("recovery reason cannot be empty"))
-            } else {
-                Ok(value)
-            }
-        })
-        .transpose()?;
-    let predecessor = store
-        .get_task_by_issue(issue)
-        .await
-        .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    match task_work_status(store, &predecessor).await? {
-        WorkStatus::Done => {
-            return Err(task_error(format!(
-                "Task {} is completed; start a new Task rather than recovering it",
-                predecessor.plan.identifier
-            )));
-        }
-        WorkStatus::Abandoned => {}
-        WorkStatus::Ready => return Ok(predecessor),
-    }
-
-    // Refuse every unsafe worktree/branch/PR shape before moving ownership.
-    task_recovery_adoption(store, &predecessor)
-        .await
-        .map_err(|error| task_error(format!("validate Task recovery: {error}")))?;
-    let steers = store
-        .work_steers_for_child(&ChildRef::Task(predecessor.id.clone()))
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    let mut carried = crate::durable::render_steers(&steers);
-    if carried.is_empty() {
-        carried = format!(
-            "Continue {}: {}",
-            predecessor.plan.identifier, predecessor.plan.title
-        );
-    }
-    let now = time::OffsetDateTime::now_utc();
-    if let Some(reason) = reason {
-        carried.push_str(&format!("\n\nRecovery reason: {reason}"));
-    }
-    let mut task = predecessor;
-    task.abandon_intent = None;
-    task.updated_at = now;
-    task.observation = Observation::NotRequired;
-    store
-        .reopen_task(&task, None, &task_input_author()?, &carried)
-        .await
-        .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
-    Ok(task)
-}
-
-pub fn task_resume(issue: &str, reason: Option<String>) -> OpsResult<TaskControlResult> {
-    let issue = issue.to_string();
-    block_on_task(async move { resume_task_async(&issue, reason).await })
-}
-
-/// Async core of [`task_resume`], reusable from callers already inside a runtime.
-pub(crate) async fn resume_task_async(
-    issue: &str,
-    reason: Option<String>,
-) -> OpsResult<TaskControlResult> {
     let store = task_store().await?;
     let mut task = store
         .get_task_by_issue(issue)
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    validate_task_launch(&task)?;
-    let position = crate::controller::task::ensure_flow_position(&store, &task.id, None)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
+    let saved = store.task_flow(&task.id).await.map_err(task_error)?;
+    let resolved =
+        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Auto).await?;
+    let selected_flow = match saved.as_ref() {
+        Some(position) => {
+            if let Some(flow) = requested_flow
+                .as_deref()
+                .filter(|name| *name != position.invocation.flow)
+            {
+                return Err(task_error(format!(
+                    "Task {} has a saved Flow; use `lf task restart {} --flow {flow}` to replace it",
+                    task.plan.identifier,
+                    task.plan.identifier,
+                )));
+            }
+            None
+        }
+        None => Some(select_task_worker_flow_from_project(
+            &task.worktree,
+            &resolved.project,
+            requested_flow.as_deref(),
+        )?),
+    };
+    select_task_agent(&store, &mut task, agent.as_deref()).await?;
+    if task_worker_live(&store, &task).await? {
+        return Ok(task);
+    }
+    let mut position =
+        crate::controller::task::ensure_flow_position(&store, &task.id, selected_flow.as_deref())
+            .await
+            .map_err(task_error)?;
+    let reason = reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    if retry || reason.is_some() {
+        position = crate::lf::commands::flow::prepare_native_retry(&store, position)
+            .await
+            .map_err(task_error)?;
+    }
+    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
+    if let Some(refusal) = task_configuration_refusal(&task, skill.as_ref().map(|step| &step.skill))
+    {
+        return Err(task_error(refusal));
+    }
     if let Some(failure) = position.failure.as_ref() {
         if failure.restart_required {
             return Err(task_error(format!(
@@ -4599,24 +5242,16 @@ pub(crate) async fn resume_task_async(
                 failure.reason, task.plan.identifier
             )));
         }
-        let reason = reason
-            .as_deref()
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty());
-        let Some(reason) = reason else {
+        if let Some(reason) = reason {
+            super::linear_observe::publish_task_steer(&store, &task, reason).await?;
+        } else if !retry {
             return Err(task_error(format!(
-                "{}\nThe same execution cannot be resumed. Correct the capability, then use `lf task resume {} --reason \"<what changed>\"` so the new durable input starts a fresh boundary.",
-                failure.reason,
-                task.plan.identifier
+                "{}\nResolve the failure, then use `lf --task {} flow start --reason \"<what changed>\"`.",
+                failure.reason, task.plan.identifier
             )));
-        };
+        }
         store
-            .retry_task_flow(
-                &task.id,
-                &position,
-                &task_input_author()?,
-                &format!("Retry Task advancement after repairing its blocker: {reason}"),
-            )
+            .retry_flow(&position.invocation.id, reason)
             .await
             .map_err(|error| task_error(format!("failed to retry Task advancement: {error}")))?;
     }
@@ -4642,53 +5277,27 @@ pub(crate) async fn resume_task_async(
     // worktree into a between-PR state; refuse a dirty between-PR before the
     // lease is reaped or a successor body is launched.
     refuse_dirty_between_prs(&store, &task).await?;
-    let issue_id = task.plan.identifier.clone();
-    let observation = task.observation.clone();
-    let task_id = task.id.to_string();
-    let work = super::child::resume_task(&store, task).await?;
-    Ok(TaskControlResult {
-        issue_id,
-        task_id,
-        receipt: super::child::WorkControlReceipt::Resume { work },
-        observation,
-    })
-}
-
-pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult> {
-    let reason = reason.trim();
-    if reason.is_empty() {
-        return Err(task_error("`lf task abandon --reason` cannot be empty"));
+    if let Some(intent) = &task.abandon_intent {
+        return Err(task_error(format!(
+            "Task {} is being abandoned: {}",
+            task.plan.identifier, intent.reason
+        )));
     }
-    let reason = reason.to_string();
-    block_on_task(async move {
-        let store = task_store().await?;
-        let mut task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut task).await?;
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        let receipt = store
-            .abandon(&work, &reason)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        Ok(TaskControlResult {
-            issue_id: task.plan.identifier.clone(),
-            task_id: task.id.to_string(),
-            receipt: super::child::WorkControlReceipt::Abandon { receipt },
-            observation: task.observation,
-        })
-    })
+    if ensure_working_pr(&store, &mut task).await?.is_none() {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot advance",
+            task.plan.identifier
+        )));
+    }
+    exec_task_process(&store, &mut task, None).await?;
+    Ok(task)
 }
 
 pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
     let started = Instant::now();
     loop {
-        let task = task_status(issue)?;
+        let task = task_execution_status(Path::new("."), Some(issue))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let status = block_on_task(async {
             let store = task_store().await?;
             task_work_status(&store, &task).await
@@ -4710,15 +5319,14 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_merged_task_landing, launch_task_process, lock_task_pr_mutation,
-        preflight_task_execution, probe_task_execution_boundary, resolve_task_start_input,
-        select_task_worker_flow_from_project, task_event_launch_refusal, task_execution_boundary,
+        apply_merged_task_landing, checkout_execution_boundary, exec_task_process,
+        lock_task_pr_mutation, preflight_task_execution, probe_execution_boundary,
+        resolve_task_create_input, select_task_worker_flow_from_project, task_event_exec_refusal,
     };
     use crate::child::ChildRef;
-    use crate::durable::{Author, WorkRef, WorkStatus};
+    use crate::durable::{WorkRef, WorkStatus};
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::pm::ProjectFlowPlan;
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -4767,11 +5375,724 @@ mod tests {
         task_fixture_at(identifier, repository).await
     }
 
+    #[tokio::test]
+    async fn task_work_completion_preserves_independent_flow_and_managed_selection() {
+        let fixture = task_fixture("WORK-1").await;
+        let managed = claim_stop_fixture(&fixture, 999_999).await;
+        let mut independent = managed.clone();
+        independent.invocation.id = "independent-work".into();
+        independent.task_id = None;
+        independent.wave_id = None;
+        independent.claim = None;
+        let independent = fixture.store.create_flow(independent).await.unwrap();
+        let blockers =
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
+        assert!(blockers
+            .iter()
+            .any(|reason| reason.contains("independent-work")));
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed.clone())
+        );
+        fixture
+            .store
+            .end_flow(independent.id(), independent.version, None, "finished")
+            .await
+            .unwrap();
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
+    #[tokio::test]
+    async fn task_work_recovery_preserves_another_tasks_claim_in_a_descendant_checkout() {
+        let fixture = task_fixture("WORK-PARENT").await;
+        let managed = claim_stop_fixture(&fixture, 999_999).await;
+        let mut child = fixture.task.clone();
+        child.id = TaskId::new();
+        child.plan.id = LinearIssueId::new("child-issue").unwrap();
+        child.plan.identifier = "WORK-CHILD".into();
+        child.worktree = child.worktree.join("child");
+        let mut pr = fixture
+            .store
+            .task_prs(&fixture.task.id)
+            .await
+            .unwrap()
+            .remove(0);
+        pr.id = TaskPrId::new();
+        pr.task_id = child.id.clone();
+        pr.branch = "test/child".into();
+        fixture.store.create_task(&child, &pr).await.unwrap();
+        let mut flow = managed.clone();
+        flow.invocation.id = "child-flow".into();
+        flow.task_id = Some(child.id.clone());
+        flow.cwd = child.worktree.clone();
+        flow.claim = None;
+        let flow = fixture
+            .store
+            .start_task_flow(&child.id, flow)
+            .await
+            .unwrap();
+        let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+        assert!(work
+            .flows
+            .iter()
+            .any(|entry| entry.summary.id == flow.id() && !entry.managed));
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+
+        // A claim can precede the first Flow event. Missing process evidence
+        // cannot authorize recovery over another Task's worker.
+        fixture
+            .store
+            .claim_task_worker(
+                &child.id,
+                flow.id(),
+                flow.version,
+                &managed.claim.as_ref().unwrap().owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = fixture.store.task_flow(&child.id).await.unwrap().unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+        assert_eq!(
+            fixture.store.task_flow(&child.id).await.unwrap(),
+            Some(claimed.clone())
+        );
+        fixture
+            .store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
+    async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowSession {
+        claim_stop_fixture_for(
+            fixture,
+            pid,
+            crate::durable::test_flow_invocation("code", 0, "implement", None, false),
+        )
+        .await
+    }
+
+    async fn claim_stop_fixture_for(
+        fixture: &TaskFixture,
+        pid: u32,
+        invocation: crate::engine::invocation::QueuedInvocation,
+    ) -> crate::durable::FlowSession {
+        let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let position = fixture
+            .store
+            .start_task_flow(
+                &fixture.task.id,
+                crate::durable::FlowSession {
+                    task_id: Some(fixture.task.id.clone()),
+                    wave_id: Some(fixture.task.wave_id.clone()),
+                    cwd: fixture.task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    finished: false,
+                    invocation,
+                    pending_session_id: None,
+                    ready_summary: None,
+                    cursor: Default::default(),
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = crate::durable::TaskWorkerOwner {
+            trace_id: crate::id::TraceId::new(),
+            exec_id: crate::id::ExecId::new(),
+            pid,
+            started_at,
+        };
+        fixture
+            .store
+            .claim_task_worker(
+                &fixture.task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = fixture
+            .store
+            .task_flow(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(claimed.claim.is_some());
+        claimed
+    }
+
+    fn record_stop_process(home: &std::path::Path, position: &crate::durable::FlowSession) {
+        let owner = &position.claim.as_ref().unwrap().owner;
+        let root = home.join(crate::journal::EXEC_PROCESS_ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(format!("{}.json", owner.pid)),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1, "trace_id": owner.trace_id, "exec_id": owner.exec_id,
+                "pid": owner.pid, "started_at": owner.started_at,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::journal::task_worker_owner_evidence(owner),
+            crate::journal::ProcessIdentityEvidence::Live,
+            "fixture receipt must describe the spawned process",
+        );
+    }
+
+    #[tokio::test]
+    async fn task_stop_waits_for_selected_step_after_driver_death() {
+        for released in [false, true] {
+            assert_task_stop_waits_for_selected_step(released).await;
+        }
+    }
+
+    async fn assert_task_stop_waits_for_selected_step(released: bool) {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("STOP-STEP", repo.path().to_owned()).await;
+        // The step is a separate process: it finds the Flow through its Home.
+        let home = fixture._database.path();
+        std::env::set_var("LF_HOME", home);
+        repo.create_file(
+            "scripts/lifecycle_scorecard.py",
+            r#"import os, pathlib, time
+repo = pathlib.Path.cwd()
+repo.joinpath('entering').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').rename(repo.joinpath('entered'))
+time.sleep(30)
+"#,
+        );
+        let mut driver = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let invocation = crate::engine::invocation::QueuedInvocation::new(
+            "operation",
+            vec![crate::engine::ConcreteStep::Command(
+                crate::engine::ConcreteCommand {
+                    item: crate::engine::flow::Command {
+                        command: "__telemetry-scorecard".into(),
+                        args: vec![],
+                    },
+                    sources: vec![],
+                },
+            )],
+        )
+        .unwrap();
+        let position = claim_stop_fixture_for(&fixture, driver.id().unwrap(), invocation).await;
+        record_stop_process(home, &position);
+        // Use the Cargo-built CLI, never an installed lf or an inherited pin.
+        // `cargo build --bin lf` precedes a focused library-only invocation.
+        let binary = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("lf");
+        let mut command = tokio::process::Command::new(binary);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("LF_")
+                || key.to_string_lossy().starts_with("LOOPFLOW_")
+            {
+                command.env_remove(key);
+            }
+        }
+        // Expose the race between killing the effect and recording its result.
+        // Linux CI holds the existing interrupt hook after the owned group dies.
+        #[cfg(target_os = "linux")]
+        {
+            let source = repo.path().join("hold_group_kill.c");
+            let library = repo.path().join("hold_group_kill.so");
+            std::fs::write(
+                &source,
+                include_str!("../../tests/support/hold_group_kill.c"),
+            )
+            .unwrap();
+            let output = std::process::Command::new("cc")
+                .args(["-shared", "-fPIC", "-o"])
+                .arg(&library)
+                .arg(&source)
+                .arg("-ldl")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            command.env("LD_PRELOAD", library);
+        }
+        let log = std::fs::File::create(repo.path().join("step.log")).unwrap();
+        let mut step = command
+            .args(["__flow-step", position.id(), &position.version.to_string()])
+            .current_dir(repo.path())
+            .env("LF_HOME", home)
+            .env(
+                crate::durable::TASK_WORKER_CLAIM_ENV,
+                serde_json::to_string(position.claim.as_ref().unwrap()).unwrap(),
+            )
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !repo.path().join("entered").exists() {
+            assert!(
+                step.try_wait().unwrap().is_none(),
+                "{}",
+                std::fs::read_to_string(repo.path().join("step.log")).unwrap()
+            );
+            assert!(tokio::time::Instant::now() < deadline, "step never entered");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let exec = crate::id::ExecId::parse(
+            &std::fs::read_to_string(repo.path().join("entered")).unwrap(),
+        )
+        .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        driver.kill().await.unwrap();
+        driver.wait().await.unwrap();
+        assert!(super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
+        let execution =
+            crate::ops::task_execution::task_execution(&fixture.store, &fixture.task.id)
+                .await
+                .unwrap();
+        assert_eq!(
+            execution.state,
+            crate::ops::task_execution::TaskExecutionState::Running
+        );
+        assert!(execution.reason.contains(exec.as_str()));
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                crate::lf::commands::flow::wait_for_step(&fixture.store, &position)
+            )
+            .await
+            .is_err(),
+            "replacement cannot invalidate a live step's claim"
+        );
+        assert!(step.try_wait().unwrap().is_none());
+        if released {
+            fixture
+                .store
+                .release_flow(position.id(), position.version, position.claim.as_ref())
+                .await
+                .unwrap();
+        }
+        let (stopped, exit) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(
+                super::stop_task_worker(&fixture.store, &fixture.task),
+                step.wait()
+            )
+        })
+        .await
+        .expect("Task stop must wait for and terminate its selected child");
+        assert_eq!(exit.unwrap().code(), Some(130));
+        assert!(stopped.unwrap().unwrap().claim.is_none());
+        let result: (String, i32) = conn
+            .query_row(
+                "SELECT outcome,exit_code FROM execs WHERE id=?1",
+                [exec.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(result, ("interrupted".into(), 130));
+        let retained = fixture.store.flow(position.id()).await.unwrap().unwrap();
+        assert!(!retained.finished);
+        assert_eq!(retained.cursor, position.cursor);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_flow_step_exec(position.id())
+                .unwrap(),
+            Some(exec)
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM flow_events WHERE kind='operation_completed'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0,
+            "termination cannot invent an operation outcome"
+        );
+        let recovered = fixture
+            .store
+            .recover_flow(position.id(), None)
+            .await
+            .unwrap();
+        assert!(recovered
+            .failure
+            .unwrap()
+            .reason
+            .contains("no completion receipt"));
+        assert_eq!(recovered.cursor, position.cursor);
+    }
+
+    #[tokio::test]
+    async fn task_worker_stop_keeps_unknown_execution_and_restart_refuses_it() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-1").await;
+        let position = claim_stop_fixture(&fixture, std::process::id()).await;
+        let events = fixture
+            .store
+            .task_events_after(&fixture.task.id, 0)
+            .await
+            .unwrap();
+        let pr = fixture
+            .store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap();
+        let error = super::stop_task_worker(&fixture.store, &fixture.task)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("process identity"));
+        assert!(fixture
+            .store
+            .restart_task_flow(&fixture.task, Some(&position), "head")
+            .await
+            .is_err());
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(position)
+        );
+        assert_eq!(
+            fixture
+                .store
+                .task_events_after(&fixture.task.id, 0)
+                .await
+                .unwrap(),
+            events
+        );
+        assert_eq!(
+            fixture
+                .store
+                .active_task_pr(&fixture.task.id)
+                .await
+                .unwrap(),
+            pr
+        );
+    }
+
+    #[tokio::test]
+    async fn task_worker_stop_follows_handoff_and_waits_for_the_worker_to_exit() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-1").await;
+        let mut launcher = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut position = claim_stop_fixture(&fixture, launcher.id().unwrap()).await;
+        record_stop_process(ledger.home(), &position);
+        let initial = position.claim.clone().unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                super::wait_until_running(&fixture.store, &fixture.task.id, Some(&initial)),
+            )
+            .await
+            .is_err(),
+            "a live launcher does not acknowledge a running worker"
+        );
+        let worker = crate::durable::TaskWorkerOwner {
+            exec_id: crate::id::ExecId::new(),
+            pid: child.id().unwrap(),
+            ..initial.owner.clone()
+        };
+        position.claim = Some(
+            fixture
+                .store
+                .sqlite
+                .handoff_task_worker(&fixture.task.id, &initial, &worker)
+                .unwrap(),
+        );
+        record_stop_process(ledger.home(), &position);
+        super::wait_until_running(&fixture.store, &fixture.task.id, Some(&initial))
+            .await
+            .unwrap();
+        assert!(super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
+        let mut cursor = position.cursor.clone();
+        cursor.progress.direction = Some("Continue with the revised direction".into());
+        fixture
+            .store
+            .checkpoint_flow(
+                position.id(),
+                position.version,
+                &cursor,
+                position.claim.as_ref(),
+                None,
+            )
+            .await
+            .unwrap();
+        let position = fixture
+            .store
+            .task_flow(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(position.version > position.claim.as_ref().unwrap().position_version);
+        let (stopped, exit) = tokio::join!(
+            super::stop_task_worker(&fixture.store, &fixture.task),
+            child.wait(),
+        );
+        assert!(!exit.unwrap().success());
+        assert!(launcher.try_wait().unwrap().is_none());
+        assert!(!super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
+        launcher.kill().await.unwrap();
+        let stopped = stopped.unwrap().unwrap();
+        assert!(stopped.claim.is_none());
+        assert_eq!(stopped.invocation, position.invocation);
+        assert_eq!(stopped.cursor, position.cursor);
+        fixture
+            .store
+            .restart_task_flow(&fixture.task, Some(&stopped), "head")
+            .await
+            .unwrap();
+        assert!(fixture
+            .store
+            .task_flow(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(fixture
+            .store
+            .get_task(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(fixture
+            .store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn task_worker_stop_does_not_mistake_a_released_claim_or_signal_for_exit() {
+        use tokio::io::AsyncReadExt;
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-1").await;
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; printf ready; exec sleep 30"])
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut ready = [0; 5];
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_exact(&mut ready)
+            .await
+            .unwrap();
+        assert_eq!(&ready, b"ready");
+        let position = claim_stop_fixture(&fixture, child.id().unwrap()).await;
+        record_stop_process(ledger.home(), &position);
+        let release = async {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            fixture
+                .store
+                .release_flow(position.id(), position.version, position.claim.as_ref())
+                .await
+                .unwrap()
+        };
+        let (stopped, released) = tokio::join!(
+            super::stop_task_worker(&fixture.store, &fixture.task),
+            release
+        );
+        let error = stopped.unwrap_err();
+        assert!(error.to_string().contains("still live"));
+        assert!(child.try_wait().unwrap().is_none());
+        child.kill().await.unwrap();
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(released)
+        );
+    }
+
+    #[tokio::test]
+    async fn task_worker_stop_preserves_a_replacement_worker() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-1").await;
+        let mut child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let position = claim_stop_fixture(&fixture, child.id().unwrap()).await;
+        record_stop_process(ledger.home(), &position);
+        let replace = async {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let released = fixture
+                .store
+                .release_flow(position.id(), position.version, position.claim.as_ref())
+                .await
+                .unwrap();
+            let mut owner = position.claim.as_ref().unwrap().owner.clone();
+            owner.exec_id = crate::id::ExecId::new();
+            fixture
+                .store
+                .claim_task_worker(
+                    &fixture.task.id,
+                    &released.invocation.id,
+                    released.version,
+                    &owner,
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await
+                .unwrap();
+            fixture
+                .store
+                .task_flow(&fixture.task.id)
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        let (stopped, replacement) = tokio::join!(
+            super::stop_task_worker(&fixture.store, &fixture.task),
+            replace
+        );
+        assert!(stopped.unwrap_err().to_string().contains("worker changed"));
+        assert!(child.try_wait().unwrap().is_none());
+        child.kill().await.unwrap();
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(replacement)
+        );
+    }
+
+    #[tokio::test]
+    async fn task_worker_stop_observation_cannot_erase_a_later_invocation_or_retirement() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-1").await;
+        let position = claim_stop_fixture(&fixture, std::process::id()).await;
+        let released = fixture
+            .store
+            .release_flow(position.id(), position.version, position.claim.as_ref())
+            .await
+            .unwrap();
+        let stopped = super::stop_task_worker(&fixture.store, &fixture.task)
+            .await
+            .unwrap();
+        assert_eq!(stopped.as_ref(), Some(&released));
+        let mut replacement = released.clone();
+        replacement.invocation.id = "replacement-invocation".into();
+        let replacement = fixture
+            .store
+            .start_task_flow(&fixture.task.id, replacement)
+            .await
+            .unwrap();
+        let events = fixture
+            .store
+            .task_events_after(&fixture.task.id, 0)
+            .await
+            .unwrap();
+        assert!(fixture
+            .store
+            .restart_task_flow(&fixture.task, stopped.as_ref(), "head")
+            .await
+            .is_err());
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(replacement.clone())
+        );
+        assert_eq!(
+            fixture
+                .store
+                .task_events_after(&fixture.task.id, 0)
+                .await
+                .unwrap(),
+            events
+        );
+        fixture
+            .store
+            .abandon(&fixture.work, "removed while stopping")
+            .await
+            .unwrap();
+        assert!(fixture
+            .store
+            .restart_task_flow(&fixture.task, Some(&replacement), "head")
+            .await
+            .is_err());
+        assert_eq!(
+            fixture.store.work_status(&fixture.work).await.unwrap(),
+            WorkStatus::Abandoned
+        );
+        // Abandonment retires saved execution; a stale restart cannot restore it.
+        assert!(fixture
+            .store
+            .task_flow(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
     #[tokio::test(start_paused = true)]
     async fn startup_observation_accepts_already_finished_flow() {
         let fixture = task_fixture("LOO-901").await;
 
-        let observed = super::wait_until_running(&fixture.store, &fixture.task.id)
+        let observed = super::wait_until_running(&fixture.store, &fixture.task.id, None)
             .await
             .unwrap();
 
@@ -4786,7 +6107,7 @@ mod tests {
 
     async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> TaskFixture {
         let database = tempfile::tempdir().unwrap();
-        let database_path = database.path().join("registry.db");
+        let database_path = database.path().join("loopflow.db");
         let store = std::sync::Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
                 .await
@@ -4801,6 +6122,8 @@ mod tests {
         let project = Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("task-recovery-project").unwrap(),
                 slug: "task-recovery".to_string(),
                 name: "Task recovery".to_string(),
@@ -4827,6 +6150,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree: repository,
             workspace_slug: "task-recovery-fixture".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -4868,6 +6192,173 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_completion_cleanup_waits_for_worker_and_preserves_new_work() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let mut fixture = task_fixture_at("CLEAN-1", repo.path().to_path_buf()).await;
+        let directory = tempfile::tempdir().unwrap();
+        let checkout = directory.path().join("task");
+        let git = |path: &std::path::Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_string()
+        };
+        let mut pr = fixture
+            .store
+            .task_prs(&fixture.task.id)
+            .await
+            .unwrap()
+            .remove(0);
+        git(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &pr.branch,
+                checkout.to_str().unwrap(),
+            ],
+        );
+        let head = git(&checkout, &["rev-parse", "HEAD"]);
+        git(&checkout, &["push", "origin", &pr.branch]);
+        fixture.task.worktree = checkout.clone();
+        fixture.store.update_task(&fixture.task).await.unwrap();
+        pr.base_commit = head.clone();
+        fixture.store.heal_task_pr_base(&pr).await.unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.created_at,
+            presentation: Some(PrPresentation {
+                title: "Complete fixture".into(),
+                body: "Prove cleanup".into(),
+                head_sha: head.clone(),
+            }),
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/test/test/pull/42".into(),
+                head_sha: Some(head.clone()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: pr.created_at,
+                head_sha: head.clone(),
+                after_merge: AfterMerge::CompleteTask,
+                next_slug: None,
+            }),
+        });
+        fixture.store.update_task_pr(&pr).await.unwrap();
+        pr.merge_commit = Some(head.clone());
+        fixture
+            .store
+            .settle_task_pr_merged(&pr, Some(pr.updated_at))
+            .await
+            .unwrap();
+        let position = claim_stop_fixture(&fixture, std::process::id()).await;
+        let claim = position.claim.as_ref().unwrap();
+        fixture
+            .store
+            .complete_task(&fixture.task, None)
+            .await
+            .unwrap();
+        super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .unwrap();
+        assert!(checkout.exists());
+        assert_eq!(
+            fixture
+                .store
+                .task_flow(&fixture.task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .claim,
+            Some(claim.clone())
+        );
+        assert!(fixture
+            .store
+            .end_flow(position.id(), position.version + 1, Some(claim), "done")
+            .await
+            .is_err());
+        fixture
+            .store
+            .end_flow(position.id(), position.version, Some(claim), "done")
+            .await
+            .unwrap();
+
+        std::fs::write(checkout.join("follow-up"), "retain").unwrap();
+        assert!(super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .is_err());
+        git(&checkout, &["add", "follow-up"]);
+        git(&checkout, &["commit", "-m", "follow-up"]);
+        let follow_up = git(&checkout, &["rev-parse", "HEAD"]);
+        assert!(super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .is_err());
+        git(&checkout, &["push", "origin", &pr.branch]);
+        git(&checkout, &["reset", "--hard", &head]);
+        assert!(super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .is_err());
+        assert!(checkout.exists());
+        git(
+            repo.path(),
+            &[
+                "push",
+                &format!("--force-with-lease=refs/heads/{}:{follow_up}", pr.branch),
+                "origin",
+                &pr.branch,
+            ],
+        );
+        super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .unwrap();
+        assert!(!checkout.exists());
+        assert!(git(repo.path(), &["branch", "--list", &pr.branch]).is_empty());
+        assert!(git(repo.path(), &["ls-remote", "--heads", "origin", &pr.branch]).is_empty());
+        let _env = EnvRestore::capture(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", fixture._database.path());
+        let caller = directory.path().to_path_buf();
+        let identifier = fixture.task.plan.identifier.clone();
+        let snapshot = tokio::task::spawn_blocking(move || {
+            let retried = super::task_complete(&caller, &identifier, "Retry cleanup".into())
+                .unwrap()
+                .unwrap();
+            super::task_snapshot(&retried).unwrap()
+        })
+        .await
+        .unwrap();
+        assert_eq!(snapshot.status, WorkStatus::Done);
+        assert_eq!(
+            fixture.store.work_status(&fixture.work).await.unwrap(),
+            WorkStatus::Done
+        );
+        assert_eq!(
+            fixture.store.task_prs(&fixture.task.id).await.unwrap(),
+            vec![pr]
+        );
+        let events = fixture
+            .store
+            .task_events_after(&fixture.task.id, 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, TaskEventKind::Completed { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn parked_human_boundary_reports_blockers_without_provider_preflight() {
         let TaskFixture {
             _database,
@@ -4876,14 +6367,13 @@ mod tests {
             ..
         } = task_fixture("TEST-HUMAN-ADVANCE").await;
         store
-            .restart_task_flow(&task, &Author::User, "park for review", "checkpoint")
+            .restart_task_flow(&task, None, "checkpoint")
             .await
             .unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                crate::durable::FlowPosition {
-                    task_id: task.id.clone(),
+                crate::durable::FlowSession {
                     invocation: crate::durable::test_flow_invocation(
                         "task-design",
                         1,
@@ -4891,46 +6381,77 @@ mod tests {
                         Some("review_kickoff"),
                         true,
                     ),
-                    session_run_id: None,
-                    ready_summary: Some("Ready for review".to_string()),
-                    step_index: 1,
-                    iteration: 0,
+                    cursor: crate::engine::ExecutionCursor {
+                        index: 1,
+                        iteration: 0,
+                        ..Default::default()
+                    },
                     version: 0,
+                    task_id: Some(task.id.clone()),
+                    wave_id: Some(task.wave_id.clone()),
+                    cwd: task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
                     worker_generation: 0,
                     claim: None,
                     failure: None,
+                    finished: false,
                     updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let position = store
+            .reserve_task_review(position.id(), position.version)
+            .await
+            .unwrap();
+        let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
+
+        exec_task_process(&store, &mut task, None).await.unwrap();
+
+        // A parked human boundary keeps its Session's reserved Run without
+        // launching a provider; everything else about the position is untouched.
+        let stored = store.task_flow(&task.id).await.unwrap().unwrap();
+        let sessions = store
+            .sessions(&crate::session::SessionFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].task_id, Some(task.id.clone()));
+        assert!(!sessions[0].input_published);
+        assert_eq!(stored.review_artifact_key(), None);
+        assert_eq!(stored, position);
+        assert_eq!(
+            store.task_events_after(&task.id, 0).await.unwrap().len(),
+            event_count
+        );
+
+        let blocked = store
+            .fail_flow(
+                stored.id(),
+                stored.version,
+                None,
+                &crate::durable::TaskFlowBlocker {
+                    captured: None,
+                    reason: "Saved instructions are unavailable; explicitly restart this Task"
+                        .to_string(),
+                    restart_required: true,
+                    observed_at: time::OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
         let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
 
-        launch_task_process(&store, &mut task, None).await.unwrap();
-
-        assert_eq!(
-            store.flow_position(&task.id).await.unwrap(),
-            Some(position.clone())
-        );
-        assert_eq!(
-            store.task_events_after(&task.id, 0).await.unwrap().len(),
-            event_count
-        );
-
-        let mut blocked = position;
-        blocked.failure = Some(crate::durable::TaskFlowBlocker {
-            reason: "Saved instructions are unavailable; explicitly restart this Task".to_string(),
-            restart_required: true,
-            observed_at: time::OffsetDateTime::now_utc(),
-        });
-        let blocked = store.set_flow_position(&task.id, blocked).await.unwrap();
-
-        let error = launch_task_process(&store, &mut task, None)
+        let error = exec_task_process(&store, &mut task, None)
             .await
             .unwrap_err();
 
         assert!(error.to_string().contains("explicitly restart this Task"));
-        assert_eq!(store.flow_position(&task.id).await.unwrap(), Some(blocked));
+        assert_eq!(store.task_flow(&task.id).await.unwrap(), Some(blocked));
         assert_eq!(
             store.task_events_after(&task.id, 0).await.unwrap().len(),
             event_count
@@ -4948,35 +6469,273 @@ mod tests {
         } = task_fixture("TEST-RESTART").await;
         let prior_pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         task.plan.title = "Refreshed Task definition".to_string();
-        let advice = Some("replace the old design".to_string());
-        let direction = super::task_restart_direction(&task, advice.as_deref());
-        let restart_run_id = crate::durable::RunId::new();
-        let restart_author = crate::durable::Author::Run(restart_run_id);
-
         store
-            .restart_task_flow(&task, &restart_author, &direction, "restart-head")
+            .restart_task_flow(&task, None, "restart-head")
             .await
             .unwrap();
 
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(stored_task.id, task.id);
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
         assert_eq!(
             store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             prior_pr.id
         );
-        let steers = store.work_steers(&work).await.unwrap();
-        assert_eq!(steers.last().unwrap().author, restart_author);
-        assert!(steers
-            .last()
-            .unwrap()
-            .text
-            .contains("prior design may be old, poor"));
+        assert!(store.task_steers(&task.id).await.unwrap().is_empty());
         assert!(matches!(
             store.latest_task_event(&task.id).await.unwrap().unwrap().kind,
             TaskEventKind::Progress { summary } if summary.contains("restart-head")
         ));
+    }
+
+    #[test]
+    fn task_files_use_recorded_placement_without_lifecycle_reconciliation() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
+        let mut pr = runtime
+            .block_on(fixture.store.active_task_pr(&fixture.task.id))
+            .unwrap()
+            .unwrap();
+        pr.base_commit = super::git_output(repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .into();
+        rusqlite::Connection::open(&fixture.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE task_prs SET base_commit=?2 WHERE id=?1",
+                rusqlite::params![pr.id.as_str(), pr.base_commit],
+            )
+            .unwrap();
+        std::fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        std::fs::write(repo.path().join("scratch/note.md"), "local note\n").unwrap();
+        let original_task = runtime
+            .block_on(fixture.store.get_task(&fixture.task.id))
+            .unwrap()
+            .unwrap();
+        let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        connection.execute_batch(
+            "CREATE TRIGGER no_file_task_update BEFORE UPDATE ON tasks BEGIN SELECT RAISE(FAIL,'file access cannot update Task'); END;
+             CREATE TRIGGER no_file_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'file access cannot reconcile PR'); END;"
+        ).unwrap();
+        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+            crate::ops::pm::PmTestContext {
+                path: fixture.database_path.clone(),
+                store: fixture.store.clone(),
+                graphql_url: "http://127.0.0.1:1".into(),
+            },
+            || {
+                for issue in [
+                    "FILES-1",
+                    fixture.task.id.as_str(),
+                    fixture.task.plan.id.as_str(),
+                ] {
+                    let file = super::task_file(issue, "scratch/note.md", false).unwrap();
+                    assert_eq!(file.content.as_deref(), Some("local note\n"));
+                    let changes = super::task_changes(issue, "parent").unwrap();
+                    assert_eq!(changes.base_commit, pr.base_commit);
+                    assert_eq!(changes.scratch, ["scratch/note.md"]);
+                    let diff =
+                        super::task_diff(issue, Some("scratch/note.md"), "head", None).unwrap();
+                    assert!(diff.patch.contains("+local note"));
+                }
+                let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+                let saved = super::file_save::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "saved\n",
+                )
+                .unwrap();
+                assert!(saved.published);
+                assert_eq!(saved.file.content.as_deref(), Some("saved\n"));
+            },
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.get_task(&fixture.task.id))
+                .unwrap()
+                .unwrap(),
+            original_task
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.active_task_pr(&fixture.task.id))
+                .unwrap()
+                .unwrap(),
+            pr
+        );
+        connection
+            .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM task_prs; DELETE FROM projects;")
+            .unwrap();
+        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+            crate::ops::pm::PmTestContext {
+                path: fixture.database_path.clone(),
+                store: fixture.store.clone(),
+                graphql_url: "http://127.0.0.1:1".into(),
+            },
+            || {
+                let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+                let saved = super::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "no PR needed\n",
+                )
+                .unwrap();
+                assert!(saved.published);
+                assert_eq!(saved.file.content.as_deref(), Some("no PR needed\n"));
+                let directory = super::task_files("FILES-1", "scratch", None, false).unwrap();
+                assert_eq!(directory.entries[0].path, "scratch/note.md");
+                assert!(super::task_changes("FILES-1", "parent").is_err());
+                let conflict = super::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "stale",
+                )
+                .unwrap();
+                assert!(!conflict.published);
+                assert_eq!(conflict.file.content, saved.file.content);
+            },
+        );
+    }
+
+    #[test]
+    fn task_files_compare_net_parent_head_and_revisioned_drafts() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            super::git_output(repo.path(), args)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        let commit = || {
+            git(&[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "fixture",
+            ]);
+        };
+        std::fs::write(repo.path().join("cancelled.txt"), "base\n").unwrap();
+        std::fs::write(repo.path().join("old.txt"), "rename me\n").unwrap();
+        git(&["add", "."]);
+        commit();
+        let parent = git(&["rev-parse", "HEAD"]);
+        std::fs::write(repo.path().join("cancelled.txt"), "committed\n").unwrap();
+        git(&["mv", "old.txt", "new.txt"]);
+        git(&["add", "."]);
+        commit();
+        std::fs::write(repo.path().join("cancelled.txt"), "base\n").unwrap();
+        std::fs::create_dir_all(repo.path().join("scratch/nested")).unwrap();
+        std::fs::write(
+            repo.path().join("scratch/nested/notes.md"),
+            "\u{feff}notes\r\n",
+        )
+        .unwrap();
+        let id = TaskId::new();
+        let workspace = super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
+            base_commit: &parent,
+        };
+        let changes = super::changes_snapshot(workspace).unwrap();
+        assert!(!changes
+            .files
+            .iter()
+            .any(|file| file.path == "cancelled.txt"));
+        let renamed = changes
+            .files
+            .iter()
+            .find(|file| file.path == "new.txt")
+            .unwrap();
+        assert_eq!(renamed.old_path.as_deref(), Some("old.txt"));
+        assert_eq!(changes.scratch, ["scratch/nested/notes.md"]);
+        let patch = super::diff_snapshot(workspace, Some("new.txt")).unwrap();
+        assert!(patch.patch.contains("rename from old.txt"));
+        let head = super::resolve_file_base(workspace, "head").unwrap();
+        let head_changes = super::changes_snapshot(super::TaskComparison {
+            base_commit: &head,
+            ..workspace
+        })
+        .unwrap();
+        assert!(head_changes
+            .files
+            .iter()
+            .any(|file| file.path == "cancelled.txt"));
+        assert!(!head_changes.files.iter().any(|file| file.path == "new.txt"));
+        let file = super::file_snapshot(workspace.checkout, "scratch/nested/notes.md").unwrap();
+        assert_eq!(file.content.as_deref(), Some("\u{feff}notes\r\n"));
+        assert_eq!(file.revision.as_ref().unwrap().len(), 64);
+        let draft = super::draft_snapshot(workspace, "new.txt", "local draft\n").unwrap();
+        assert!(draft.patch.contains("--- a/old.txt\n+++ b/new.txt\n"));
+        assert!(draft.patch.contains("-rename me"));
+        assert!(draft.patch.contains("+local draft"));
+        let quoted = super::draft_snapshot(workspace, "new.txt", "Binary files differ\n").unwrap();
+        assert!(!quoted.binary);
+        std::fs::write(repo.path().join("new.txt"), "Binary files differ\n").unwrap();
+        assert!(
+            !super::diff_snapshot(workspace, Some("new.txt"))
+                .unwrap()
+                .binary
+        );
+        std::fs::write(repo.path().join("new.txt"), "rename me\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("new.txt")).unwrap(),
+            "rename me\n"
+        );
+        assert_eq!(
+            super::file_snapshot(workspace.checkout, "gone")
+                .unwrap()
+                .state,
+            super::TaskFileState::Missing
+        );
+        for (bytes, state) in [
+            (vec![0], super::TaskFileState::Binary),
+            (vec![255], super::TaskFileState::UnsupportedEncoding),
+            (vec![b'a'; 1_000_001], super::TaskFileState::Truncated),
+        ] {
+            std::fs::write(repo.path().join("edge"), bytes).unwrap();
+            let file = super::file_snapshot(workspace.checkout, "edge").unwrap();
+            assert_eq!(file.state, state);
+            assert!(file.content.is_none());
+            assert!(file.revision.is_none());
+        }
+        assert!(super::file_snapshot(workspace.checkout, "../outside").is_err());
+        #[cfg(unix)]
+        {
+            let before = super::file_snapshot(workspace.checkout, "new.txt").unwrap();
+            assert!(before.read_only_reason.is_none());
+            std::fs::rename(repo.path().join("new.txt"), repo.path().join("target.txt")).unwrap();
+            std::os::unix::fs::symlink("target.txt", repo.path().join("new.txt")).unwrap();
+            let after = super::file_snapshot(workspace.checkout, "new.txt").unwrap();
+            assert_eq!(before.revision, after.revision);
+            assert_eq!(before.content, after.content);
+            assert!(after.read_only_reason.is_some());
+            std::os::unix::fs::symlink("nested", repo.path().join("scratch/alias")).unwrap();
+            let nested =
+                super::file_snapshot(workspace.checkout, "scratch/alias/notes.md").unwrap();
+            assert_eq!(nested.content, file.content);
+            assert!(nested.read_only_reason.is_some());
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("private"), "outside").unwrap();
+            std::os::unix::fs::symlink(outside.path(), repo.path().join("scratch/link")).unwrap();
+            assert_eq!(
+                super::scratch_paths(repo.path()).unwrap().0,
+                ["scratch/nested/notes.md"]
+            );
+            assert!(super::file_snapshot(workspace.checkout, "scratch/link/private").is_err());
+        }
     }
 
     #[tokio::test]
@@ -5060,18 +6819,16 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let _environment = EnvRestore::capture(&[
             crate::durable::RUN_ID_ENV,
-            crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
+            crate::session_record::RUN_DIR_ENV,
         ]);
         let repository = loopflow_test_support::TestRepo::new();
         repository.create_branch("test/task-recovery-fixture");
         repository.push_new_branch("test/task-recovery-fixture");
         let TaskFixture { store, task, .. } =
             task_fixture_at("TEST-PARENT", repository.path().to_path_buf()).await;
-        let parent_run_id = crate::durable::RunId::new();
+        let parent_run_id = crate::session_record::new_artifact_key();
         std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
-        std::env::remove_var(crate::run_record::RUN_DIR_ENV);
-        std::env::remove_var(crate::run_record::PARENT_RUN_ID_ENV);
+        std::env::remove_var(crate::session_record::RUN_DIR_ENV);
 
         let resolved = super::task_for_checkout(&store, &task.worktree)
             .await
@@ -5083,6 +6840,7 @@ mod tests {
 
     #[tokio::test]
     async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
+        let repository = loopflow_test_support::TestRepo::new();
         let TaskFixture {
             _database,
             store,
@@ -5090,7 +6848,7 @@ mod tests {
             work,
             database_path,
             ..
-        } = task_fixture("LOO-248").await;
+        } = task_fixture_at("LOO-248", repository.path().to_path_buf()).await;
         let now = time::OffsetDateTime::now_utc();
         let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         pr.branch = "HEAD".to_string();
@@ -5154,14 +6912,601 @@ mod tests {
     }
 
     #[test]
-    fn piped_report_supplies_title_and_preserves_full_description() {
-        let report = "\n  lf status rejects stored timestamp  \n\nstack trace\nmore evidence\n";
-        let input = resolve_task_start_input(None, Some(report)).expect("resolve piped report");
+    fn deleted_task_status_requires_explicit_history_lookup() {
+        const CHILD: &str = "LOOPFLOW_DELETED_STATUS_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let path =
+                std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let store = std::sync::Arc::new(
+                runtime
+                    .block_on(crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                        path.clone(),
+                    )))
+                    .unwrap(),
+            );
+            // Install fault injection after schema validation opens the fixture.
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            connection.execute_batch(
+            "CREATE TRIGGER no_history_task_update BEFORE UPDATE ON tasks BEGIN SELECT RAISE(FAIL,'historical Task must remain read-only'); END;
+             CREATE TRIGGER no_history_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'historical PR must remain read-only'); END;
+             CREATE TRIGGER no_history_event BEFORE INSERT ON task_events BEGIN SELECT RAISE(FAIL,'historical Task must not gain events'); END;"
+        ).unwrap();
+            crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+                crate::ops::pm::PmTestContext {
+                    path,
+                    store,
+                    graphql_url: "http://127.0.0.1:1".into(),
+                },
+                || {
+                    let repo = std::env::current_dir().unwrap();
+                    let error = super::task_status(&repo, None).unwrap_err();
+                    assert!(error.to_string().contains("Task was deleted"), "{error}");
+                    let status = super::task_status(&repo, Some("HISTORY-1")).unwrap();
+                    let snapshot = status.execution.as_ref().unwrap();
+                    assert_eq!(
+                        super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                        status
+                    );
+                    assert_eq!(
+                        super::task_status(&repo, Some(&snapshot.issue_id)).unwrap(),
+                        status
+                    );
+                    assert_eq!(snapshot.status, WorkStatus::Done);
+                    assert_eq!(
+                        snapshot.actions.recommended,
+                        Some(crate::ops::task_actions::TaskAction::NoAction)
+                    );
+                },
+            );
+            return;
+        }
 
-        assert_eq!(input.title, "lf status rejects stored timestamp");
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("test/task-recovery-fixture");
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(task_fixture_at("HISTORY-1", repo.path().to_path_buf()));
+        let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        // Seed a completed historical outcome and positive removal evidence.
+        // This is a reader proof, not a provider-deletion fixture.
+        connection
+            .execute(
+                "UPDATE tasks SET work_state='done',work_terminal_at=123 WHERE id=?1",
+                [fixture.task.id.as_str()],
+            )
+            .unwrap();
+        connection.execute(
+            "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,456)",
+            rusqlite::params![fixture.task.wave_id.as_str(), fixture.task.plan.id.as_str(), fixture.task.plan.identifier],
+        ).unwrap();
+        let pr = runtime
+            .block_on(fixture.store.active_task_pr(&fixture.task.id))
+            .unwrap();
+        let events = runtime
+            .block_on(fixture.store.task_events_after(&fixture.task.id, 0))
+            .unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ops::task::tests::deleted_task_status_requires_explicit_history_lookup",
+                "--test-threads=1",
+            ])
+            .env_clear()
+            .envs(std::env::vars().filter(|(name, _)| !name.starts_with("LF_")))
+            .env(CHILD, "1")
+            .env("LF_HOME", fixture._database.path())
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.active_task_pr(&fixture.task.id))
+                .unwrap(),
+            pr
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.task_events_after(&fixture.task.id, 0))
+                .unwrap(),
+            events
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                    [fixture.task.id.as_str()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            123
+        );
+    }
+
+    #[test]
+    fn piped_report_supplies_title_and_preserves_full_description() {
+        let report =
+            "\n  lf wave status rejects stored timestamp  \n\nstack trace\nmore evidence\n";
+        let input = resolve_task_create_input(None, Some(report)).expect("resolve piped report");
+
+        assert_eq!(input.title, "lf wave status rejects stored timestamp");
         assert_eq!(
             input.report,
-            "lf status rejects stored timestamp  \n\nstack trace\nmore evidence"
+            "lf wave status rejects stored timestamp  \n\nstack trace\nmore evidence"
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Serializes identity configuration used during publication.
+    async fn steering_publication_resolves_empty_participant_from_config_or_git() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_USER_NAME",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        ]);
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-STEER", repo.path().canonicalize().unwrap()).await;
+        std::env::set_var("LF_HOME", fixture._database.path());
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "Git Person");
+        fixture
+            .store
+            .upsert_provider_token(&crate::store::ProviderToken {
+                provider: "linear".into(),
+                access_token: "fixture".into(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: None,
+                updated_at: 1,
+                credential_type: crate::store::CredentialType::ApiKey,
+            })
+            .await
+            .unwrap();
+        for (configured, participant, expected) in [
+            (Some("Configured Person"), "", "Configured Person"),
+            (None, "  ", "Git Person"),
+            (Some("Configured Person"), "Caller", "Caller"),
+        ] {
+            std::env::set_var("LF_USER_NAME", participant);
+            let config = configured
+                .map(|name| format!("user:\n  name: {name}\n"))
+                .unwrap_or_default();
+            std::fs::write(fixture._database.path().join("config.yaml"), config).unwrap();
+            let (url, requests) = crate::pm::test_server::spawn(vec![
+                crate::pm::test_server::json_response(
+                    axum::http::StatusCode::OK,
+                    serde_json::json!({"data":{"commentCreate":{"comment":{"id":"posted"}}}}),
+                ),
+                crate::pm::test_server::json_response(
+                    axum::http::StatusCode::OK,
+                    serde_json::json!({"data":{"issue":{
+                        "updatedAt":"2026-09-26T00:00:00Z", "title":fixture.task.plan.title,
+                        "description":fixture.task.plan.description,
+                        "comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}
+                    }}}),
+                ),
+            ])
+            .await;
+            let posted = crate::ops::pm::PM_TEST_CONTEXT
+                .scope(
+                    crate::ops::pm::PmTestContext {
+                        path: fixture.database_path.clone(),
+                        store: fixture.store.clone(),
+                        graphql_url: url,
+                    },
+                    crate::ops::linear_observe::publish_task_steer(
+                        &fixture.store,
+                        &fixture.task,
+                        "Keep going",
+                    ),
+                )
+                .await
+                .unwrap();
+            assert_eq!(posted, "posted");
+            let requests = requests.lock().await;
+            let publication: serde_json::Value = serde_json::from_str(&requests[0].body).unwrap();
+            let body = publication["variables"]["body"].as_str().unwrap();
+            assert!(body.contains("Keep going"));
+            assert!(body.contains("<!-- loopflow-steer:"));
+            assert!(
+                body.contains(&format!("<!-- loopflow-requester:\"{expected}\" -->")),
+                "{body}"
+            );
+            assert_eq!(
+                crate::ops::linear_observe::comment_requester(body, Some("Publisher")),
+                Some(expected.to_string())
+            );
+        }
+    }
+
+    fn preparation_project() -> crate::pm::PmProject {
+        crate::pm::PmProject {
+            revision: None,
+            id: "project-1".into(),
+            slug: "runtime".into(),
+            name: "Runtime".into(),
+            summary: String::new(),
+            metric_targets: Vec::new(),
+            flow: "task-design".into(),
+            status: crate::pm::ProjectStatus::Started,
+            krs: Vec::new(),
+            initiative_ids: vec!["initiative-1".into()],
+            team_ids: vec!["team-1".into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn stacking_preserves_claim_and_history_until_the_owner_releases() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("STACK-1", repo.path().canonicalize().unwrap()).await;
+        let store = &fixture.store;
+        let child = store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut parent_task = fixture.task.clone();
+        parent_task.id = TaskId::new();
+        parent_task.plan.id = LinearIssueId::new("stack-parent-issue").unwrap();
+        parent_task.plan.identifier = "STACK-2".into();
+        parent_task.worktree = repo.path().join("parent");
+        parent_task.workspace_slug = "stack-parent".into();
+        let mut parent = child.clone();
+        parent.id = TaskPrId::new();
+        parent.task_id = parent_task.id.clone();
+        parent.branch = "test/stack-parent".into();
+        parent.slug = "stack-parent".into();
+        store.create_task(&parent_task, &parent).await.unwrap();
+        parent.publication = Some(PrPublication {
+            requested_at: parent.created_at,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: None,
+            }),
+            merge: None,
+        });
+        store.update_task_pr(&parent).await.unwrap();
+        let claimed = claim_stop_fixture(&fixture, std::process::id()).await;
+        let events = store.task_events_after(&fixture.task.id, 0).await.unwrap();
+        assert!(store
+            .stack_task_pr(&child, &parent.id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("worker claim released"));
+        assert_eq!(
+            store.active_task_pr(&fixture.task.id).await.unwrap(),
+            Some(child.clone())
+        );
+        assert_eq!(
+            store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(claimed.clone())
+        );
+        assert_eq!(
+            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
+            events
+        );
+        let released = store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        store.stack_task_pr(&child, &parent.id).await.unwrap();
+        store.stack_task_pr(&child, &parent.id).await.unwrap();
+        assert_eq!(
+            store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(released)
+        );
+        assert_eq!(
+            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
+            events
+        );
+        // Both self-parenting and a reverse edge preserve the accepted dependency.
+        assert!(store.stack_task_pr(&parent, &parent.id).await.is_err());
+        let mut published_child = store
+            .active_task_pr(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        published_child.publication = parent.publication.clone();
+        store.update_task_pr(&published_child).await.unwrap();
+        assert!(store
+            .stack_task_pr(&parent, &child.id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cycle"));
+        assert_eq!(store.get_task_pr(&parent.id).await.unwrap(), Some(parent));
+        assert_eq!(
+            store.get_task_pr(&child.id).await.unwrap(),
+            Some(published_child)
+        );
+    }
+
+    #[tokio::test]
+    async fn task_preparation_rejects_invalid_inputs_before_allocating_placement() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let project = preparation_project();
+        for (options, message) in [
+            (
+                super::TaskExecOptions {
+                    name: Some("bad.name".into()),
+                    ..Default::default()
+                },
+                "kebab-case",
+            ),
+            (
+                super::TaskExecOptions {
+                    directive: Some("  ".into()),
+                    ..Default::default()
+                },
+                "directive cannot be empty",
+            ),
+            (
+                super::TaskExecOptions {
+                    flow: Some("not-a-real-flow".into()),
+                    ..Default::default()
+                },
+                "flow not found",
+            ),
+        ] {
+            let error =
+                super::prepare_new_task(repo.path(), "New task", None, &project, &options, true)
+                    .await
+                    .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+        }
+        assert_eq!(
+            crate::engine::worktrees::list_worktrees(repo.path())
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn task_preparation_preserves_occupied_placement_and_resolves_base_without_creating() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let project = preparation_project();
+        let options = super::TaskExecOptions {
+            name: Some("existing-task".into()),
+            ..Default::default()
+        };
+        let planned =
+            super::prepare_new_task(repo.path(), "New task", None, &project, &options, false)
+                .await
+                .unwrap();
+        assert_eq!(planned.plan.base_ref, repo.head_sha());
+        assert!(!planned.plan.worktree_path.exists());
+        std::fs::create_dir_all(&planned.plan.worktree_path).unwrap();
+        let authored = planned.plan.worktree_path.join("authored.txt");
+        std::fs::write(&authored, "retain these bytes").unwrap();
+        let result =
+            super::prepare_new_task(repo.path(), "New task", None, &project, &options, false).await;
+        assert!(result.unwrap_err().to_string().contains("already exists"));
+        assert_eq!(
+            std::fs::read_to_string(&authored).unwrap(),
+            "retain these bytes"
+        );
+        std::fs::remove_dir_all(planned.plan.worktree_path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_checkout_pins_upstream_without_requiring_clean_canonical_main() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let upstream = repo.head_sha();
+        repo.create_file("local.txt", "unpublished main work");
+        repo.stage_all();
+        repo.commit("Local main work");
+        repo.create_branch("local-feature");
+        repo.create_file("dirty.txt", "uncommitted work");
+        let prepared = super::prepare_new_task(
+            repo.path(),
+            "Clean task",
+            None,
+            &preparation_project(),
+            &super::TaskExecOptions::default(),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(prepared.plan.base_ref, upstream);
+        assert_eq!(
+            crate::engine::git::current_branch(repo.path())
+                .unwrap()
+                .as_deref(),
+            Some("local-feature")
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("dirty.txt")).unwrap(),
+            "uncommitted work"
+        );
+        assert!(!prepared.plan.worktree_path.exists());
+    }
+
+    #[tokio::test]
+    async fn task_preparation_keeps_the_resolved_base_when_the_remote_ref_advances() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let prepared = super::prepare_new_task(
+            repo.path(),
+            "Pinned base",
+            None,
+            &preparation_project(),
+            &super::TaskExecOptions::default(),
+            false,
+        )
+        .await
+        .unwrap();
+        let original = repo.head_sha();
+        repo.create_file("later.txt", "arrived while Linear was creating the issue");
+        repo.stage_all();
+        repo.commit("Advance the remote after preparation");
+        repo.push();
+        assert_ne!(
+            crate::engine::git::rev_parse(repo.path(), "origin/main").unwrap(),
+            original
+        );
+
+        let placement =
+            crate::engine::worktrees::create_from_placement_plan(repo.path(), &prepared.plan)
+                .unwrap();
+        let placed_head = crate::engine::git::rev_parse(&placement.path, "HEAD").unwrap();
+        let has_later_file = placement.path.join("later.txt").exists();
+        std::fs::remove_dir_all(&placement.path).unwrap();
+
+        assert_eq!(placed_head, original);
+        assert_eq!(placed_head, prepared.plan.base_ref);
+        assert!(!has_later_file);
+    }
+
+    #[tokio::test]
+    async fn task_preparation_refuses_an_unresolvable_base_before_allocating_placement() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let output = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args([
+                "remote",
+                "set-url",
+                "origin",
+                "/nonexistent/loopflow-fixture-remote",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let error = super::prepare_new_task(
+            repo.path(),
+            "New task",
+            None,
+            &preparation_project(),
+            &super::TaskExecOptions {
+                name: Some("missing-base".into()),
+                ..Default::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("failed to fetch task base"),
+            "{error}"
+        );
+        assert_eq!(
+            crate::engine::worktrees::list_worktrees(repo.path())
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Serializes the isolated registry environment.
+    async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
+        let _lock = crate::journal::test_env_lock();
+        let names = ["LF_HOME", "LF_ACCOUNT_LEASE"];
+        let _restore = EnvRestore::capture(&names);
+        for name in names {
+            std::env::remove_var(name);
+        }
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+        std::env::set_var("LF_HOME", fixture._database.path());
+        let result = super::prepare_new_task(
+            repo.path(),
+            "Child",
+            None,
+            &preparation_project(),
+            &super::TaskExecOptions {
+                name: Some("child-task".into()),
+                stack_on: Some("FIX-1".into()),
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("open the parent PR"));
+        let existing = crate::pm::PmItem {
+            branch_name: None,
+            revision: None,
+            id: fixture.task.plan.id.as_str().to_string(),
+            identifier: fixture.task.plan.identifier.clone(),
+            url: None,
+            name: fixture.task.plan.title.clone(),
+            description: String::new(),
+            rank: 0,
+            completed: false,
+            completed_at: None,
+            state: Some("unstarted".into()),
+            project_id: Some("project-1".into()),
+            project: Some("runtime".into()),
+            team_id: "team-1".into(),
+            assignee: None,
+        };
+        for state in ["completed", "canceled", "duplicate"] {
+            let mut terminal = existing.clone();
+            terminal.state = Some(state.into());
+            terminal.completed = state == "completed";
+            let refusal = super::prepare_task_creation(
+                repo.path(),
+                "task-recovery",
+                "Repeated report",
+                Some(terminal),
+                preparation_project(),
+                &super::TaskExecOptions::default(),
+            )
+            .await
+            .unwrap_err();
+            assert!(refusal
+                .to_string()
+                .contains("terminal and cannot start execution"));
+        }
+        let retry = super::prepare_task_creation(
+            repo.path(),
+            "task-recovery",
+            "Repeated report",
+            Some(existing),
+            preparation_project(),
+            &super::TaskExecOptions {
+                name: Some(fixture.task.workspace_slug.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            retry.is_none(),
+            "a registered marker match reuses its occupied placement"
+        );
+        let retained = fixture
+            .store
+            .get_task(&fixture.task.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.worktree, fixture.task.worktree);
+        assert_eq!(fixture.store.list_tasks(None).await.unwrap().len(), 1);
+        assert_eq!(
+            fixture
+                .store
+                .task_prs(&fixture.task.id)
+                .await
+                .unwrap()
+                .len(),
+            1
         );
     }
 
@@ -5169,14 +7514,15 @@ mod tests {
     fn task_worker_selects_explicit_or_project_recommended_flow() {
         let repo = tempfile::tempdir().expect("temp repo");
         let project = crate::pm::PmProject {
+            revision: None,
             id: "project-1".to_string(),
             slug: "runtime".to_string(),
             name: "Runtime".to_string(),
             summary: String::new(),
-            definition: "Keep Tasks moving.".to_string(),
-            flows: Some(ProjectFlowPlan {
-                recommended: Some("task-design".to_string()),
-            }),
+
+            metric_targets: Vec::new(),
+            flow: "task-design".to_string(),
+            status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-1".to_string()],
@@ -5190,6 +7536,12 @@ mod tests {
             select_task_worker_flow_from_project(repo.path(), &project, Some("incident")).unwrap(),
             "incident"
         );
+        for skill in ["design", "unbreak"] {
+            assert_eq!(
+                select_task_worker_flow_from_project(repo.path(), &project, Some(skill)).unwrap(),
+                skill
+            );
+        }
     }
 
     #[test]
@@ -5198,7 +7550,7 @@ mod tests {
         let file = directory.path().join("not-a-directory");
         std::fs::write(&file, "occupied").unwrap();
 
-        let error = probe_task_execution_boundary(&AgentExecutionBoundary {
+        let error = probe_execution_boundary(&AgentExecutionBoundary {
             writable_roots: vec![file.clone()],
         })
         .expect_err("a descriptive root that cannot accept a file is not a capability");
@@ -5210,13 +7562,7 @@ mod tests {
     #[test]
     fn execution_boundary_resolves_linked_git_and_control_roots() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
+        let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME"]);
         let directory = tempfile::tempdir().unwrap();
         let main = directory.path().join("repo");
         let worktree = directory.path().join("repo.task");
@@ -5250,14 +7596,10 @@ mod tests {
             .success());
         let control = directory.path().join("control");
         std::fs::create_dir(&control).unwrap();
-        let database = control.join("registry.db");
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", &control);
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::set_var("LF_CONTROL_HOME", &control);
-        std::env::set_var("LF_CONTROL_DB_PATH", &database);
 
-        let boundary = task_execution_boundary(&worktree, "codex").unwrap();
+        let boundary = checkout_execution_boundary(&worktree, "codex").unwrap();
 
         assert_eq!(boundary.writable_roots.len(), 2);
         assert!(boundary
@@ -5271,14 +7613,7 @@ mod tests {
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn task_preflight_refuses_account_id_null_without_allocating_a_sql_run() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-            "LF_ACCOUNT_LEASE",
-        ]);
+        let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME", "LF_ACCOUNT_LEASE"]);
         let directory = tempfile::tempdir().unwrap();
         let repo = directory.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
@@ -5290,19 +7625,18 @@ mod tests {
         assert!(output.status.success());
         let home = directory.path().join("lf-home");
         std::fs::create_dir(&home).unwrap();
-        let database = home.join("missing.db");
+        let database = home.join("loopflow.db");
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", &home);
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::set_var("LF_CONTROL_HOME", &home);
-        std::env::set_var("LF_CONTROL_DB_PATH", &database);
         std::env::remove_var("LF_ACCOUNT_LEASE");
 
         let error = preflight_task_execution(&repo, "codex")
             .await
             .expect_err("headless Task launch requires an explicit account route");
 
-        assert!(error.to_string().contains("account_id=null"));
+        assert!(error
+            .to_string()
+            .contains("connected managed account is required"));
         assert!(!database.exists(), "preflight must not create a registry");
     }
 
@@ -5313,7 +7647,7 @@ mod tests {
         } = task_fixture("TEST-STALE").await;
 
         for _ in 0..2 {
-            let error = launch_task_process(&store, &mut task, Some("retired-task-flow"))
+            let error = exec_task_process(&store, &mut task, Some("retired-task-flow"))
                 .await
                 .expect_err("the unavailable flow must fail startup validation");
             assert!(
@@ -5328,7 +7662,7 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -5349,7 +7683,7 @@ mod tests {
 
         let event = store.latest_task_event(&task.id).await.unwrap().unwrap();
         assert_eq!(event, settled);
-        assert_eq!(task_event_launch_refusal(Some(&event)), Some(blocker));
+        assert_eq!(task_event_exec_refusal(Some(&event)), Some(blocker));
         assert!(matches!(
             event.kind,
             TaskEventKind::Failed {

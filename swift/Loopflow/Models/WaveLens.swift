@@ -62,56 +62,16 @@ public struct WaveLens: Sendable, Hashable {
     /// Project lens: derived only from its Tasks' shared condition evidence. The
     /// most demanding evidence wins (blocked > waiting > unknown > clear),
     /// so unreadable Task evidence surfaces as unknown, not a silent black.
-    public static func forProject(tasks: [WaveTaskWork]) -> WaveLens {
+    public static func forTasks(tasks: [WaveTaskWork]) -> WaveLens {
         let folded = fold(tasks.map(\.condition))
         if let folded { return folded }
         return WaveLens(color: .black, reason: "Off · no active work")
     }
 
-    /// Wave lens (list context): derived only from the shared runtime `lf ls`
-    /// carries for every row — liveness, lifecycle status, and active-work counts.
-    /// Per-Task condition is a focused `lf status` read, never fetched per row, so
-    /// the list projects from the coarse runtime facts. An unregistered Wave has
-    /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
-    /// than guessing from a local session probe.
-    ///
-    /// - green: canonical Work is advancing and the Wave listener answered, or
-    ///   the listener answered while Work claims no current body.
-    /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
-    /// - red: enabled and observed liveness have not converged.
-    /// - black: disabled and no listener remains.
-    public static func forWave(
-        live: Bool,
-        paused: Bool = false,
-        enabled: Bool = true,
-        activeTasks: Int,
-        activeProjects: Int
-    ) -> WaveLens {
-        if !enabled {
-            return live
-                ? WaveLens(color: .red, reason: "Disabled · listener still answered")
-                : WaveLens(color: .black, reason: "Disabled on this Home")
-        }
-        if paused {
-            return WaveLens(
-                color: .blue,
-                reason: live
-                    ? "Paused · listener is serving and queueing input"
-                    : "Paused · listener is stopped"
-            )
-        }
-        if live {
-            return WaveLens(color: .green, reason: "Listening · Wave listener answered")
-        }
-        let outstanding = activeTasks + activeProjects
-        if outstanding > 0 {
-            let noun = outstanding == 1 ? "item" : "items"
-            return WaveLens(
-                color: .red,
-                reason: "Stopped · \(outstanding) active \(noun) still expect work"
-            )
-        }
-        return WaveLens(color: .red, reason: "Expected live · Wave listener did not answer")
+    /// Counts do not establish Task health. Detailed conditions come from status.
+    public static func forWave(activeTasks: Int) -> WaveLens {
+        return WaveLens(color: activeTasks > 0 ? .unknown : .black,
+                        reason: activeTasks > 0 ? "\(activeTasks) active Tasks" : "No active Tasks")
     }
 
     /// Fold Task conditions into the parent's single reading. Priority is

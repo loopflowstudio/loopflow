@@ -17,7 +17,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var repo: String { api.repo }
 
-    public var displayName: String { name }
+    public var displayName: String { api.displayName }
 
     /// The stable id of this Wave's parent, when one exists. Drives future
     /// ancestry indentation in the navigation list.
@@ -27,7 +27,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var openTaskCount: Int { api.activeTasks }
 
     /// The operational lens for this row, in the shared green/red/blue/black grammar.
-    /// A registered Wave projects from the runtime `lf ls` carries; an unregistered
+    /// A registered Wave projects from the runtime `lf wave list` carries; an unregistered
     /// Wave (authored on disk, never served) has no runtime reading, so it stays
     /// unknown-with-reason rather than a silent black or a local-session guess.
     public var lens: WaveLens {
@@ -38,15 +38,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         guard isRegistered else {
             return WaveLens(
                 color: .unknown,
-                reason: "Not served yet · run the Wave to read its state"
+                reason: "Not registered"
             )
         }
         return WaveLens.forWave(
-            live: api.live,
-            paused: api.paused,
-            enabled: api.enabled,
-            activeTasks: api.activeTasks,
-            activeProjects: api.activeProjects
+            activeTasks: api.activeTasks
         )
     }
 

@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": null,
+      "state": "replaced",
+      "pending_session": null,
+      "task_id": null,
+      "wave_id": null,
+      "updated_at": 17,
+      "repo": null,
+      "managed": false,
+      "ended_at": 18,
+      "current_capture": null
+    }
+  ],
+  "next": "00000000-0000-0000-0000-000000000001"
+}

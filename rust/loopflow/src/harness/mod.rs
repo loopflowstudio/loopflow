@@ -1,12 +1,17 @@
 pub mod claude;
+mod claude_history;
 mod claude_mapping;
 pub mod codex;
+#[cfg(unix)]
+pub mod codex_connection;
+mod codex_history;
 mod codex_mapping;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
 mod lf_tag;
 pub mod opencode;
+pub(crate) mod opencode_history;
 mod opencode_mapping;
 pub mod opencode_runtime;
 
@@ -24,21 +29,8 @@ use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
-    let (control_bin, control_home, control_db) = vendor_control_context()?;
-    set_vendor_std_env(command, &control_bin, &control_home, &control_db);
-    Ok(())
-}
-
-pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) -> Result<()> {
-    let (control_bin, control_home, control_db) = vendor_control_context()?;
-    command
-        .env(crate::store::CONTROL_BIN_ENV, control_bin)
-        .env(crate::store::CONTROL_HOME_ENV, control_home)
-        .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
-        .env_remove("LF_BIN")
-        .env_remove("LF_HOME")
-        .env_remove("LF_DB_PATH");
-    Ok(())
+    let context = crate::engine::process::execution_context()?;
+    set_vendor_std_env(command, &context.lf_bin, &context.lf_home)
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
@@ -47,32 +39,58 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     }
     command
         .envs(&config.env)
-        .env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV)
+        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
+    crate::provider_auth::apply_provider_env_to_command(&program, command.as_std_mut());
 }
 
-fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
-{
-    let context = crate::engine::process::pinned_execution_context()?;
-    Ok((context.lf_bin, context.lf_home, context.db_path))
+pub(crate) fn conversation_environment(
+    command: &std::process::Command,
+    config: &AgentConfig,
+) -> std::collections::BTreeMap<String, String> {
+    command
+        .get_envs()
+        .filter_map(|(key, value)| {
+            let key = key.to_string_lossy();
+            let intended = config.env.contains_key(key.as_ref())
+                || matches!(
+                    key.as_ref(),
+                    "PATH" | "LF_BIN" | "LF_HOME" | "LOOPFLOW_DIRECTIVE_FILE"
+                );
+            intended
+                .then_some(value)
+                .flatten()
+                .map(|value| (key.into_owned(), value.to_string_lossy().into_owned()))
+        })
+        .collect()
 }
 
 fn set_vendor_std_env(
     command: &mut std::process::Command,
     control_bin: &std::path::Path,
     control_home: &std::path::Path,
-    control_db: &std::path::Path,
-) {
+) -> Result<()> {
     command
-        .env(crate::store::CONTROL_BIN_ENV, control_bin)
-        .env(crate::store::CONTROL_HOME_ENV, control_home)
-        .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
-        .env_remove("LF_BIN")
-        .env_remove("LF_HOME")
-        .env_remove("LF_DB_PATH");
+        .env("LF_BIN", control_bin)
+        .env("LF_HOME", control_home)
+        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
+    let mut paths = vec![control_bin
+        .parent()
+        .expect("absolute lf has a parent")
+        .to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    command.env("PATH", std::env::join_paths(paths)?);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -90,40 +108,52 @@ mod environment_tests {
     use crate::engine::agent::AgentConfig;
 
     #[test]
-    fn vendor_receives_control_context_but_not_ordinary_store_context() {
-        let mut command = std::process::Command::new("vendor");
-        command
-            .env("LF_BIN", "/ambient/lf")
-            .env("LF_HOME", "/production")
-            .env("LF_DB_PATH", "/production/loopflow.db")
-            .env("LF_CONTROL_HOME", "/old-control");
-
+    fn conversation_tools_observe_sanitized_overrides_and_removals() {
+        let mut config = AgentConfig::default();
+        for key in [
+            "LF_DISCORD_TOKEN",
+            "LOOPFLOW_DIRECTIVE_FILE",
+            "LF_BIN",
+            "LF_HOME",
+        ] {
+            config.env.insert(key.into(), "stale-fixture".into());
+        }
+        config
+            .env
+            .insert("LF_AGENT_CALLER".into(), "current-fixture".into());
+        let mut engine = tokio::process::Command::new("vendor");
+        configure_agent_env(&mut engine, &config);
         set_vendor_std_env(
-            &mut command,
+            engine.as_std_mut(),
             Path::new("/control/lf"),
-            Path::new("/custom"),
-            Path::new("/custom/loopflow.db"),
-        );
+            Path::new("/private"),
+        )
+        .unwrap();
+        // Provider account environment is not conversation tool authority.
+        engine.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
+        let tools = super::conversation_environment(engine.as_std(), &config);
+        let script = "test -z \"${LF_DISCORD_TOKEN+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
+        assert!(std::process::Command::new("/bin/sh")
+            .env_clear()
+            .envs(tools)
+            .args(["-c", script])
+            .status()
+            .unwrap()
+            .success());
+    }
 
-        let environment = command
-            .get_envs()
-            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
-            .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(environment["LF_HOME"], None);
-        assert_eq!(environment["LF_DB_PATH"], None);
-        assert_eq!(environment["LF_BIN"], None);
-        assert_eq!(
-            environment["LF_CONTROL_BIN"],
-            Some(OsString::from("/control/lf"))
+    #[tokio::test]
+    async fn provider_child_cannot_read_the_bridge_token() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
+        command.env(crate::engine::process::DISCORD_TOKEN_ENV, "fixture-token");
+        let mut config = AgentConfig::default();
+        config.env.insert(
+            crate::engine::process::DISCORD_TOKEN_ENV.into(),
+            "fixture-override".into(),
         );
-        assert_eq!(
-            environment["LF_CONTROL_HOME"],
-            Some(OsString::from("/custom"))
-        );
-        assert_eq!(
-            environment["LF_CONTROL_DB_PATH"],
-            Some(OsString::from("/custom/loopflow.db"))
-        );
+        configure_agent_env(&mut command, &config);
+        assert!(command.status().await.unwrap().success());
     }
 
     #[test]
@@ -131,15 +161,14 @@ mod environment_tests {
         let mut command = tokio::process::Command::new("vendor");
         command
             .env(crate::durable::RUN_ID_ENV, "run_stale")
-            .env(crate::run_record::RUN_DIR_ENV, "/stale/run")
-            .env(crate::run_record::PARENT_RUN_ID_ENV, "run_stale_parent");
+            .env(crate::session_record::RUN_DIR_ENV, "/stale/run");
         let mut config = crate::engine::agent::AgentConfig::default();
         config.env.insert(
             crate::durable::RUN_ID_ENV.to_string(),
             "run_fresh".to_string(),
         );
         config.env.insert(
-            crate::run_record::RUN_DIR_ENV.to_string(),
+            crate::session_record::RUN_DIR_ENV.to_string(),
             "/fresh/run".to_string(),
         );
 
@@ -155,30 +184,9 @@ mod environment_tests {
             Some(OsString::from("run_fresh"))
         );
         assert_eq!(
-            environment[crate::run_record::RUN_DIR_ENV],
+            environment[crate::session_record::RUN_DIR_ENV],
             Some(OsString::from("/fresh/run"))
         );
-        assert_eq!(environment[crate::run_record::PARENT_RUN_ID_ENV], None);
-    }
-
-    #[test]
-    fn provider_drops_legacy_worktree_writer_authority() {
-        let mut command = tokio::process::Command::new("vendor");
-        command.env("LF_WORKTREE_WRITER_ID", "writer_stale");
-        let mut config = AgentConfig::default();
-        config.env.insert(
-            "LF_WORKTREE_WRITER_ID".to_string(),
-            "writer_explicit".to_string(),
-        );
-
-        configure_agent_env(&mut command, &config);
-
-        let environment = command
-            .as_std()
-            .get_envs()
-            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
-            .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(environment["LF_WORKTREE_WRITER_ID"], None);
     }
 }
 
@@ -201,30 +209,6 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
 /// turn spawns fresh via `--resume`.
 pub fn is_terminal_harness_error(code: &str) -> bool {
     matches!(code, "codex_disconnected" | "opencode_disconnected")
-}
-
-/// Drain events trailing a `TurnCompleted { Failed }` to extract an actionable
-/// error code. The opencode mapping emits usage before completion, then an
-/// `Error { code }` for hollow-body, decode-gap, and disconnect failures. The
-/// harness sends them synchronously, so the error is already in the buffer when
-/// the runner processes the completion.
-/// Returns the best failure reason: the error code/message if found, else the
-/// generic fallback.
-pub(crate) fn drain_turn_failure_reason(
-    event_rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    fallback: &str,
-) -> String {
-    match event_rx.try_recv() {
-        Ok(ConversationEvent::Error { code, message, .. }) => format!("{code}: {message}"),
-        Ok(other) => {
-            tracing::debug!(
-                event = ?other,
-                "unexpected event trailing a Failed turn; keeping fallback reason"
-            );
-            fallback.to_string()
-        }
-        Err(_) => fallback.to_string(),
-    }
 }
 
 /// What happened when the controller tried to deliver input to the exact
@@ -285,6 +269,11 @@ pub trait Harness: Send + Sync {
     /// opencode announce it by the time `start` returns; claude announces it
     /// on the first turn's stream. Callers persist this before driving turns.
     fn provider_session_id(&self) -> Option<String>;
+    /// The owned provider child, for read-only activity sampling. This does not
+    /// grant process-group signal authority.
+    fn process_id(&self) -> Option<u32> {
+        None
+    }
     /// Independently isolated provider process group, when the harness owns
     /// one. Providers that remain in the runner's process group return None;
     /// the Run retains the runner group recorded at activation.
@@ -354,19 +343,6 @@ impl HarnessKind {
 pub fn canonical_harness(name: &str) -> Option<&'static str> {
     HarnessKind::parse(name).map(HarnessKind::as_str)
 }
-
-/// How a body builds its provider. `default_create_harness` is the only
-/// production implementation; holding it as a value rather than calling it
-/// directly is what lets a body's construction be substituted.
-pub type CreateHarness = Box<
-    dyn Fn(
-            &str,
-            ApprovalPolicy,
-            mpsc::UnboundedSender<ConversationEvent>,
-        ) -> Result<Box<dyn Harness>>
-        + Send
-        + Sync,
->;
 
 pub fn default_create_harness(
     name: &str,

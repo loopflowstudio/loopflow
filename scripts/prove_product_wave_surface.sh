@@ -13,7 +13,7 @@ OUT="$REPO/.lf/tmp/wave-surface/product-live"
 STATUS="$OUT/status.json"
 
 mkdir -p "$OUT"
-( cd "$TARGET_REPO" && lf status product --json ) >"$STATUS"
+( cd "$TARGET_REPO" && lf wave status product --json ) >"$STATUS"
 
 uv run python - "$STATUS" <<'PY'
 import json
@@ -22,23 +22,22 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 if payload["wave"]["name"] != "product":
-    raise SystemExit("FAIL — lf status did not return the Product Wave")
+    raise SystemExit("FAIL — lf wave status did not return the Product Wave")
 if not payload["wave"]["goal"].strip():
     raise SystemExit("FAIL — Product has no objective")
-projects = payload["projects"]
-if not projects:
-    raise SystemExit("FAIL — Product has no Projects")
-if not any(project["project"]["krs"] for project in projects):
-    raise SystemExit("FAIL — Product has no Project KR evidence")
-if not any(
-    not task["task"]["completed"]
-    for project in projects
-    for task in project["tasks"]
-):
+chapter = payload["chapter"]
+if chapter is None:
+    raise SystemExit("FAIL — Product has no readable chapter")
+if not chapter["krs"]:
+    raise SystemExit("FAIL — Product has no chapter KR evidence")
+tasks = payload["tasks"]
+if tasks["state"] != "ok":
+    raise SystemExit("FAIL — Product Task evidence is unavailable")
+if not any(not task["task"]["completed"] for task in tasks["items"]):
     raise SystemExit("FAIL — Product has no open Task rows to render")
 print(
-    f"Product registry proof: {len(projects)} Projects, "
-    f"{sum(len(project['project']['krs']) for project in projects)} KRs"
+    f"Product registry proof: chapter {chapter['id']}, "
+    f"{len(chapter['krs'])} KRs, {len(tasks['items'])} Tasks"
 )
 PY
 

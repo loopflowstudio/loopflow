@@ -1,4 +1,4 @@
-//! Checkout freshness shared by interactive rebases and unattended installs.
+//! Checkout freshness shared by interactive syncs and unattended installs.
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -10,7 +10,7 @@ use crate::engine::git::{
     absolute_git_dir, current_branch, fetch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
-use crate::ops::git_operation::begin_rebase_operation;
+use crate::ops::git_operation::begin_sync_operation;
 use crate::ops::{OpsError, OpsResult, Progress};
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
@@ -154,7 +154,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
         )?;
         return Ok(branch);
     };
-    let mut operation = begin_rebase_operation(&checkout, &target)?;
+    let mut operation = begin_sync_operation(&checkout, &target)?;
     fetch(&checkout, "origin", &branch)?;
     let upstream = rev_parse(&checkout, &target)?;
     operation.pin_target(upstream.clone())?;
@@ -179,7 +179,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
             git(&checkout, &["merge", "--abort"])?;
         }
         merge.map_err(|error| OpsError::Message(format!(
-            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf rebase`: {error}", checkout.display()
+            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf task sync`: {error}", checkout.display()
         )))?;
         if !is_ancestor(&checkout, &upstream, "HEAD")? {
             return Err(OpsError::Message(format!(

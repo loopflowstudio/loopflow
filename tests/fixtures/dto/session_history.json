@@ -1,0 +1,63 @@
+[
+  {
+    "session_id": "session_fixture",
+    "provider_thread": "thread_fixture",
+    "provider_turn": "turn_fixture",
+    "provider_generation": null,
+    "exec_id": null,
+    "task_id": null,
+    "wave_id": null,
+    "observed_at": 1790620000,
+    "seq": 41,
+    "kind": "usage",
+    "payload": {
+      "total": {
+        "inputTokens": 40,
+        "outputTokens": 10
+      },
+      "last": {
+        "inputTokens": 20,
+        "outputTokens": 5
+      }
+    }
+  },
+  {
+    "session_id": "session_fixture",
+    "provider_thread": "thread_fixture",
+    "provider_turn": "turn_fixture",
+    "provider_generation": null,
+    "exec_id": null,
+    "task_id": null,
+    "wave_id": null,
+    "observed_at": 1790620000,
+    "seq": 42,
+    "kind": "completed",
+    "payload": {
+      "status": "completed",
+      "error": null,
+      "started_at": 1790619900,
+      "completed_at": 1790619999,
+      "duration_ms": 99000
+    }
+  },
+  {
+    "session_id": "session_fixture",
+    "provider_thread": null,
+    "provider_turn": null,
+    "provider_generation": null,
+    "exec_id": null,
+    "task_id": null,
+    "wave_id": null,
+    "observed_at": 1790620010,
+    "seq": 43,
+    "kind": "observed",
+    "payload": {
+      "input_id": "run_00000000000000000000000000000001",
+      "source": "terminal.json",
+      "evidence": {
+        "outcome": "failed",
+        "ended_at": "2026-09-20T20:05:00Z"
+      }
+    }
+  }
+]

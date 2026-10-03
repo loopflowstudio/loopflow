@@ -5,13 +5,12 @@
     uv run python scripts/canonicalize_migrations.py 0.12.2 --check
 
 The release cut is the single publication boundary that turns drafts into
-canonical migrations. `lf release run` invokes this inside its release worktree,
+canonical migrations. `lf repo release run` invokes this inside its release worktree,
 after the version bump and before the commit, so the generated files are part of
 the release PR and run under real Rust CI before the queue merges and tags. It:
 
-  1. reads every `rust/loopflow/src/store/migrations/drafts/<name>__<id>.sql`;
-  2. rejects missing, cyclic, or self dependencies, and two drafts that share a
-     readable name in the same cut;
+  1. reads every `rust/loopflow/src/store/migrations/drafts/<name>.sql`;
+  2. rejects missing, cyclic, or self dependencies;
   3. topologically orders the set (dependency edges, ties broken by name), a
      total order that does not depend on merge timing, PR number, or wall clock;
   4. concatenates the ordered SQL into the release's single canonical
@@ -25,8 +24,7 @@ A dependency may name another draft in the cut or an already-released migration
 (a released upstream is an ancestor of the whole cut, so it imposes no in-cut
 ordering). Deterministic and retry-safe: the same draft set and version always
 produce the same ids, files, and diff, so an aborted release regenerates
-identically. The draft id is authoring-time identity only; it never appears in
-canonical output. An empty draft set is a no-op.
+identically. An empty draft set is a no-op.
 
 Writing requires explicit release-cut authority. CI may materialize the same tree
 in its disposable checkout with `--materialize-for-tests`; when the active
@@ -47,19 +45,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 PACKAGE_MANIFEST = REPO_ROOT / "Cargo.toml"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
-# `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
-# separates it from the immutable 128-bit token (32 hex chars).
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
-DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
+# `<name>.sql`; the filename is the draft's identity.
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
-DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
-DRAFT_HEADER_ID = re.compile(r"^--[ \t]*id:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
+HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
@@ -99,7 +93,7 @@ def _released_names() -> set[str]:
 
 
 def _draft_body(text: str) -> str:
-    """The draft's SQL with its `-- name:` / `-- id:` / `-- depends_on:` header stripped."""
+    """The draft's SQL with its `-- depends_on:` header stripped."""
     body = "\n".join(line for line in text.splitlines() if not HEADER_LINE.match(line))
     body = body.strip("\n")
     return body + "\n" if body else ""
@@ -116,38 +110,14 @@ def _read_drafts() -> list[Draft]:
         if not match:
             _draft_fail(
                 "invalid_filename",
-                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
-                "— run scripts/new_migration.py"
+                f"draft {path.name} is not `<snake_case_name>.sql` — run scripts/new_migration.py",
             )
-        name, file_id = match.group(1), match.group(2)
+        name = match.group(1)
         text = path.read_text()
         if DRAFT_MARKER.search(text):
             _draft_fail(
                 "reserved_marker",
                 f"draft {path.name} uses reserved `-- draft:` release provenance",
-            )
-        header = DRAFT_HEADER_NAME.search(text)
-        if not header:
-            _draft_fail("missing_name", f"draft {path.name} has no `-- name:` header")
-        if header.group(1) != name:
-            _draft_fail(
-                "name_mismatch",
-                f"draft {path.name} header names {header.group(1)!r}, not {name!r}",
-            )
-        id_header = DRAFT_HEADER_ID.search(text)
-        if not id_header:
-            _draft_fail("missing_id", f"draft {path.name} has no `-- id:` header")
-        header_id = id_header.group(1).strip()
-        if not DRAFT_ID.fullmatch(header_id):
-            _draft_fail(
-                "invalid_id",
-                f"draft {path.name} id {header_id!r} is not a 128-bit token "
-                "(32 hex chars) — run scripts/new_migration.py"
-            )
-        if header_id != file_id:
-            _draft_fail(
-                "id_mismatch",
-                f"draft {path.name} header id {header_id!r} disagrees with its filename",
             )
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
@@ -166,15 +136,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     migration name; a released upstream imposes no in-cut edge (it precedes the
     whole cut).
     """
-    by_name: dict[str, Draft] = {}
-    for draft in drafts:
-        if draft.name in by_name:
-            _draft_fail(
-                "duplicate_name",
-                f"two drafts share the readable name {draft.name!r} in this cut "
-                "— rename one before releasing"
-            )
-        by_name[draft.name] = draft
+    by_name = {draft.name: draft for draft in drafts}
 
     released = _released_names()
     for draft in drafts:
@@ -191,7 +153,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
             _draft_fail(
                 "missing_dependency",
                 f"draft {draft.name} depends on {dependency!r}, which is neither a "
-                "draft in this cut nor an already-released migration"
+                "draft in this cut nor an already-released migration",
             )
 
     indegree = {
@@ -216,9 +178,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
 
     if len(order) != len(drafts):
         stuck = sorted(set(by_name) - set(order))
-        _draft_fail(
-            "cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}"
-        )
+        _draft_fail("cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}")
     return [by_name[name] for name in order]
 
 
@@ -249,7 +209,7 @@ def _batch_sql(drafts: list[Draft]) -> str:
 
 
 def _new_registry_text(entries: str) -> str:
-    """The full migrations.rs source with `entries` appended to the registry."""
+    """The full migration_catalog.rs source with `entries` appended to the registry."""
     source = MIGRATIONS_RS.read_text()
     start = source.find("const MIGRATIONS: &[Migration] = &[")
     if start == -1:

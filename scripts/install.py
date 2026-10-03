@@ -2,27 +2,20 @@
 """Install published Loopflow releases or build this worktree locally.
 
     install.py local            # build this worktree into local-bin/
-    install.py local --use      # promote it into the installed development Home
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # install the latest published release
 
-Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
+Remote releases happen via `lf repo release run patch` -> merge -> auto-tag -> CI.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import platform
-import plistlib
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +32,6 @@ APP_NAME = "Loopflow"
 # app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
 SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("cargo", "swift")
-LATEST_RELEASE_URL = "https://github.com/loopflowstudio/loopflow/releases/latest"
-RELEASE_DOWNLOAD_BASE = "https://github.com/loopflowstudio/loopflow/releases/download"
 
 
 # --- Bundle spec (single source of truth for Loopflow.app layout) ---
@@ -89,7 +80,6 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         executables=(
             swift / ".build" / "release" / "LoopflowMac",
             cargo_release / "lf",
-            cargo_release / "lfd",
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
@@ -268,125 +258,6 @@ def _stage_binaries(local_bin: Path) -> None:
     """Copy freshly built control binaries into this worktree's local-bin/."""
     local_bin.mkdir(parents=True, exist_ok=True)
     _atomic_install(ROOT / "target" / "release" / "lf", local_bin / "lf")
-    _atomic_install(ROOT / "target" / "release" / "lfd", local_bin / "lfd")
-
-
-def _download_release_asset(url: str, destination: Path) -> str:
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            destination.write_bytes(response.read())
-            return response.geturl()
-    except OSError as exc:
-        raise StageError(f"download failed: {url}: {exc}") from exc
-
-
-def _release_tag_from_latest_url(url: str) -> str:
-    marker = "/releases/tag/"
-    if marker not in url:
-        raise StageError(f"latest release did not resolve to a pinned tag: {url}")
-    tag = url.split(marker, 1)[1].split("/", 1)[0]
-    if not tag.startswith("v") or len(tag) == 1:
-        raise StageError(f"latest release resolved to an invalid tag: {tag}")
-    return tag
-
-
-def _latest_release_tag() -> str:
-    request = urllib.request.Request(LATEST_RELEASE_URL, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return _release_tag_from_latest_url(response.geturl())
-    except OSError as exc:
-        raise StageError(f"latest release lookup failed: {exc}") from exc
-
-
-def _manifest_digest(manifest: Path, asset: str) -> str:
-    for line in manifest.read_text().splitlines():
-        fields = line.split()
-        if len(fields) == 2 and fields[1].removeprefix("*") == asset:
-            return fields[0]
-    raise StageError(f"published SHA256SUMS does not name {asset}")
-
-
-def _verify_release_asset(path: Path, expected: str) -> None:
-    actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != expected:
-        raise StageError(
-            f"digest mismatch for {path.name}: expected {expected}, downloaded {actual}"
-        )
-
-
-def _install_published_release(install_dir: Path) -> str:
-    tag = _latest_release_tag()
-    if (
-        all(_has_release_version(install_dir / name, tag) for name in ("lf", "lfd"))
-        and _is_published_cli(install_dir / "lf")
-        and (platform.system() != "Darwin" or _has_release_app(tag))
-    ):
-        typer.echo(f"Published release {tag} is already installed.")
-        return tag
-    with tempfile.TemporaryDirectory(prefix="loopflow-release-") as temp:
-        directory = Path(temp)
-        pinned_base = f"{RELEASE_DOWNLOAD_BASE}/{tag}"
-        manifest = directory / "SHA256SUMS"
-        _download_release_asset(f"{pinned_base}/SHA256SUMS", manifest)
-        installer = directory / "install.sh"
-        _download_release_asset(f"{pinned_base}/install.sh", installer)
-        _verify_release_asset(installer, _manifest_digest(manifest, "install.sh"))
-        env = {**os.environ, "LF_INSTALL_DIR": str(install_dir)}
-        _run_or_raise(
-            ["sh", str(installer), "--version", tag],
-            "published release",
-            env=env,
-        )
-        return tag
-
-
-def _has_release_version(binary: Path, tag: str) -> bool:
-    try:
-        version = subprocess.run(
-            [str(binary), "--version"], capture_output=True, text=True, timeout=30
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return version.returncode == 0 and version.stdout.strip() == (
-        f"{binary.name} {tag.removeprefix('v')}"
-    )
-
-
-def _has_release_app(tag: str) -> bool:
-    applications = Path(os.environ.get("LF_APPLICATIONS_DIR", "/Applications"))
-    contents = applications / f"{APP_NAME}.app" / "Contents"
-    try:
-        info = plistlib.loads((contents / "Info.plist").read_bytes())
-    except (OSError, ValueError):
-        return False
-    version = tag.removeprefix("v")
-    return (
-        isinstance(info, dict)
-        and info.get("CFBundleShortVersionString") == version
-        and info.get("CFBundleVersion") == version
-        and all(
-            (contents / "MacOS" / name).is_file() and os.access(contents / "MacOS" / name, os.X_OK)
-            for name in (APP_NAME, "lf", "lfd")
-        )
-    )
-
-
-def _is_published_cli(binary: Path) -> bool:
-    # A clean development build at a release tag has the same version string.
-    # Reuse the installer's read-only identity instead of inventing a receipt.
-    try:
-        result = subprocess.run(
-            [str(binary), "install", "preflight", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        preview = json.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return False
-    candidate = preview.get("candidate") if isinstance(preview, dict) else None
-    return isinstance(candidate, dict) and candidate.get("authority") == "published"
 
 
 # --- Loopflow bundle ---
@@ -530,93 +401,31 @@ def _root() -> None:
     """Build and install loopflow locally."""
 
 
-@app.command()
-def schedule() -> None:
-    """Run the full laptop refresh at login and hourly, retrying missed runs."""
-    if platform.system() != "Darwin":
-        raise typer.BadParameter("automatic laptop refresh currently uses macOS launchd")
-    binary = _resolve_install_dir() / "lf"
-    label = "com.loopflow.refresh"
-    logs = Path.home() / "Library" / "Logs" / "Loopflow"
-    logs.mkdir(parents=True, exist_ok=True)
-    path = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Stable tool locations only: provider-session PATHs expire after the run.
-    search_path = ":".join(
-        [
-            str(binary.parent),
-            str(Path.home() / ".cargo/bin"),
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-        ]
-    )
-    payload = plistlib.dumps(
-        {
-            "Label": label,
-            "ProgramArguments": [str(binary), "install"],
-            "WorkingDirectory": str(ROOT.resolve()),
-            "EnvironmentVariables": {"PATH": search_path},
-            "RunAtLoad": True,
-            "StartCalendarInterval": {"Minute": 0},
-            "StandardOutPath": str(logs / "refresh.log"),
-            "StandardErrorPath": str(logs / "refresh.log"),
-        }
-    )
-    domain = f"gui/{os.getuid()}"
-    loaded = (
-        subprocess.run(["launchctl", "print", f"{domain}/{label}"], capture_output=True).returncode
-        == 0
-    )
-    if path.exists() and path.read_bytes() == payload and loaded:
-        typer.echo(f"Refresh already scheduled: {path}")
-        return
-    if loaded:
-        _run_or_raise(["launchctl", "bootout", f"{domain}/{label}"], "unschedule refresh")
-    path.write_bytes(payload)
-    _run_or_raise(["launchctl", "bootstrap", domain, str(path)], "schedule refresh")
-    typer.echo(f"Refresh scheduled at login and hourly: {path}; logs: {logs / 'refresh.log'}")
-
-
-@app.command()
+@app.command(hidden=True)
 def refresh(
-    install_dir: Path | None = typer.Option(
-        None, "--install-dir", help="Install lf here instead of the resolved local bin dir"
-    ),
+    install_dir: Annotated[
+        Path | None,
+        typer.Option("--install-dir", help="Install lf here instead of the resolved local bin dir"),
+    ] = None,
 ) -> None:
-    """Install the latest published release through the external-user path."""
-    resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
-
+    """Upgrade callers installed before native release installation."""
+    # Older installed CLIs update main before calling this entry point.
+    # Calling `lf install` here would recurse into that same older CLI.
+    directory = install_dir.expanduser() if install_dir else _resolve_install_dir()
     try:
-        tag = _install_published_release(resolved_install_dir)
+        _run_or_raise(
+            ["sh", str(ROOT / "release" / "install.sh")],
+            "published release",
+            env={**os.environ, "LF_INSTALL_DIR": str(directory)},
+        )
     except StageError as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-
-    target = resolved_install_dir / "lf"
-    typer.echo(f"release: {tag}")
-    typer.echo(f"installed: {target}")
-    result = subprocess.run([str(target), "--version"], text=True)
-    if result.returncode != 0:
-        raise typer.Exit(code=result.returncode)
 
 
 @app.command()
 def local(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
-    use_install: Annotated[
-        bool, typer.Option("--use", help="Promote this local build after staging")
-    ] = False,
-    fresh: Annotated[
-        bool, typer.Option("--fresh", help="Fork a fresh disposable development Home")
-    ] = False,
-    install_dir: Annotated[
-        Path | None,
-        typer.Option("--install-dir", help="Install lf here instead of the resolved local bin dir"),
-    ] = None,
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
@@ -626,13 +435,9 @@ def local(
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
-    if fresh and not use_install:
-        raise typer.BadParameter("--fresh requires --use")
     builds_app = platform.system() == "Darwin"
     if not builds_app:
         skip_set.add("swift")
-    if use_install and builds_app and "swift" in skip_set:
-        raise typer.BadParameter("--use cannot skip the swift artifact set")
 
     spec = default_bundle_spec()
     version = read_release_version(ROOT)
@@ -645,10 +450,8 @@ def local(
             executable_names = ", ".join(path.name for path in spec.executables)
             typer.echo(f"  Contents/MacOS/: {executable_names}")
         else:
-            typer.echo(f"Would stage lf + lfd into {LOCAL_BIN}")
+            typer.echo(f"Would stage lf into {LOCAL_BIN}")
         typer.echo("Would keep the validation-only build under local-bin/")
-        if use_install:
-            typer.echo("Would promote it into a disposable installed development Home")
         return
 
     total_start = time.monotonic()
@@ -661,55 +464,14 @@ def local(
             _install_loopflow(spec, version)
             typer.echo(f"Built {spec.app_path}")
         else:
-            typer.echo(f"Built lf + lfd into {LOCAL_BIN}")
-        if use_install:
-            _promote_local_build(
-                spec,
-                install_dir.expanduser() if install_dir else _resolve_install_dir(),
-                fresh,
-            )
-            typer.echo("\nInstalled the local build against a disposable development Home.")
-        else:
-            typer.echo(f"\nBuilt into {LOCAL_BIN}. Development builds cannot become production.")
+            typer.echo(f"Built lf into {LOCAL_BIN}")
+        typer.echo(f"\nBuilt into {LOCAL_BIN}. Set LF_HOME explicitly to run an experiment.")
     except StageError as exc:
         typer.echo(f"install failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     elapsed = time.monotonic() - total_start
     typer.echo(f"\nTotal time: {elapsed:.1f}s")
-
-
-def _promote_local_build(spec: BundleSpec, install_dir: Path, fresh: bool) -> None:
-    candidate = LOCAL_BIN / "lf"
-    command = [
-        str(candidate),
-        "install",
-        "promote",
-        "--from-build",
-        str(candidate),
-        "--cli-target",
-        str(install_dir / "lf"),
-        "--daemon-source",
-        str(LOCAL_BIN / "lfd"),
-        "--daemon-target",
-        str(install_dir / "lfd"),
-        "--sync-skills",
-    ]
-    if fresh:
-        command.append("--fresh")
-    if platform.system() == "Darwin":
-        applications = Path(os.environ.get("LF_APPLICATIONS_DIR", "/Applications"))
-        command.extend(
-            [
-                "--app-source",
-                str(spec.app_path),
-                "--app-target",
-                str(applications / f"{APP_NAME}.app"),
-                "--legacy-app-target",
-                str(applications / "Concerto.app"),
-            ]
-        )
-    _run_or_raise(command, "local promotion")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@
     uv run python scripts/check_architecture.py --json
 
 The check is deliberately finite. It covers live SQLite tables, root CLI
-families, executable/process entrypoints, Wave and Home-daemon HTTP routes,
-provider kinds, literal Rust subprocess edges, declared read projections and
+families, executable/process entrypoints, provider kinds, literal Rust subprocess
+edges, declared read projections and
 compatibility seams, and exact retired vocabulary. It does not claim that every
 public Rust item is an architectural concept.
 """
@@ -26,31 +26,27 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHITECTURE = Path("docs/architecture-reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
-WAVE_SERVER = Path("rust/loopflow/src/controller/wave/server.rs")
-LFD_SERVER = Path("rust/loopflow/src/lfd/mod.rs")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
 FLOWS = Path(".lf/flows")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
 MIGRATION_INCLUDE = re.compile(r'include_str!\("migrations/([^\"]+)"\)')
-ROUTE = re.compile(r'\.route\(\s*"([^"]+)"\s*,\s*(get|post|put|delete|patch)\(', re.S)
 COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
-HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
-DRAFT_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
+HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-FLOW_OP = re.compile(r"^\s*-\s*op:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
+FLOW_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
 SCAN_ROOTS = (
     Path("README.md"),
     Path("PROMPTS.md"),
     Path("RELEASE_NOTES.md"),
-    Path("STYLE.md"),
+    Path("AGENTS.md"),
     Path("TESTING.md"),
     Path("VISUAL_DESIGN.md"),
     Path("deploy"),
@@ -68,8 +64,8 @@ SCAN_ROOTS = (
     Path(".lf"),
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "target", "DerivedData", "__pycache__"}
-# Generated docs and chapter evidence copy other sources, not live architecture.
-IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"))
+# Generated docs, historical evidence and local receipts are not live architecture.
+IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"), Path(".lf/tmp"), Path(".lf/log"))
 
 
 @dataclass(frozen=True)
@@ -192,7 +188,7 @@ def _discover_internal_flow_commands(root: Path, internal: set[str]) -> Counter[
     if not flows.is_dir():
         return Counter()
     for path in sorted((*flows.glob("*.yaml"), *flows.glob("*.yml"))):
-        for name in FLOW_OP.findall(path.read_text()):
+        for name in FLOW_COMMAND.findall(path.read_text()):
             command = f"lf {name}"
             if command in internal:
                 commands.add(command)
@@ -216,15 +212,6 @@ def _discover_binaries(root: Path) -> set[str]:
         if match:
             binaries.add(match.group(1))
     return binaries
-
-
-def _discover_routes(root: Path) -> set[str]:
-    routes: set[str] = set()
-    for owner, path in (("wave", WAVE_SERVER), ("lfd", LFD_SERVER)):
-        source = (root / path).read_text()
-        for route, method in ROUTE.findall(source):
-            routes.add(f"{owner} {method.upper()} {route}")
-    return routes
 
 
 def _discover_providers(root: Path) -> set[str]:
@@ -279,10 +266,7 @@ def _ordered_draft_sql(root: Path) -> list[str]:
     drafts: dict[str, tuple[set[str], str]] = {}
     for path in sorted(drafts_dir.glob("*.sql")):
         text = path.read_text()
-        name_match = DRAFT_NAME.search(text)
-        if name_match is None:
-            raise ValueError(f"draft {path.name} has no name")
-        name = name_match.group(1)
+        name = path.stem
         depends_match = DRAFT_DEPENDS.search(text)
         dependencies = set()
         if depends_match:
@@ -422,9 +406,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
         scopes = CODE_TOKEN.findall(row.get("allowed scopes", ""))
         used_scopes: set[str] = set()
         for relative, source in sources:
-            matching_scopes = {
-                scope for scope in scopes if _scope_matches(relative, scope)
-            }
+            matching_scopes = {scope for scope in scopes if _scope_matches(relative, scope)}
             for pattern in patterns:
                 case_sensitive = pattern.isupper()
                 for number, line in enumerate(source.splitlines(), start=1):
@@ -437,9 +419,7 @@ def _vocabulary_errors(root: Path, rows: list[dict[str, str]]) -> list[str]:
                         else:
                             errors.append(f"stale vocabulary {pattern!r} at {relative}:{number}")
         for scope in sorted(set(scopes) - used_scopes):
-            errors.append(
-                f"unused vocabulary scope {scope!r} for {', '.join(patterns)}"
-            )
+            errors.append(f"unused vocabulary scope {scope!r} for {', '.join(patterns)}")
     return errors
 
 
@@ -563,7 +543,6 @@ def check_repository(root: Path = REPO_ROOT) -> Report:
         tables = _discover_tables(root)
         coverage.append(_cover("SQLite owner/mirror", tables, persistence, errors))
         coverage.append(_projection_coverage(root, projection_rows, tables, errors))
-        coverage.append(_cover("HTTP route", _discover_routes(root), public, errors))
         coverage.append(_cover("provider edge", _discover_providers(root), edges, errors))
         coverage.append(_cover("subprocess edge", _discover_executable_edges(root), edges, errors))
         coverage.append(_shim_coverage(root, shim_tokens, errors))

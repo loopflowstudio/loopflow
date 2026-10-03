@@ -19,16 +19,11 @@ Session's pending turn still blocks. Cleanup shares that checker: keep any new
 completion allowance separate from cleanup and abandonment protections. The
 unrelated color-scheme message was withdrawn and contributes no requirement.
 
-The earlier schema blocker is resolved for this continuation. Failed Session
-event 30887 rejected root `maxProperties` in Codex's output schema; it supplied
-no navigation verdict. Source repair `fac48dd22` (#1401) removed that keyword
-and root union; its four local schema tests passed. Jack Heart's supplied steer
-reports installed 0.12.31 contains the repair and authorizes blocked-worker
-recovery. Supplied step feedback confirms the corrected decision request reached
-the agent and returned to implementation. No further recovery or product approval
-is required here. Original diagnostic details remain at
-`7c1d84b1e:scratch/flow-decision-schema-blocker.md`; they do not describe the current
-runtime or establish Task acceptance.
+The earlier output-schema blocker is resolved by #1401, included in installed
+0.12.31 according to Jack Heart's steer. Jack authorized recovery; supplied step
+feedback confirms the corrected decision returned to implementation. The failed
+request supplied no verdict. Original diagnostics remain at
+`7c1d84b1e:scratch/flow-decision-schema-blocker.md`; no further recovery is required.
 
 ## Outcome and demo
 
@@ -145,6 +140,11 @@ result consumption. Moving that check to launch boundaries preserves the existin
 terminal launch rule and exact receipt fencing. Task completion neither fabricates
 Flow success nor discards a real successful step. Public requesting-conversation
 completion and native-turn acceptance remain unimplemented/unproven.
+
+Compression reuses `resolve_launch_task`'s validated managed Task for review
+preparation, deleting the repeated selection and Task lookup. Recorded-result
+consumption remains outside that check. The issue-confirmation Task-plan write
+remains necessary: normalized planning ingestion does not update that retained row.
 
 Task placement columns are already nullable in the released schema. The required
 migration concerns the Flow cwd dependency, not converting non-null Task columns.
@@ -373,13 +373,8 @@ per-operation checks and confirmation/retry proofs are the safeguards.
 
 Simulated review finding: merely relaxing `task_completion_gate` would neither
 admit a research Session nor fix the context reader's PR requirement, and could
-weaken delivery. The complete deletion cut therefore starts with registration
-and placement and preserves the gate's evidence obligations. Planning confirmation, independent Flow cwd persistence and removal of implicit
-Flow settlement are implemented; public admission and full acceptance remain unproven.
+weaken delivery. Start the remaining cut with registration and placement while
+preserving the gate's evidence obligations. The seeded-store Flow-directory proof
+does not establish public binding; no Task completion or acceptance follows.
 
-Check: `cargo test -p loopflow task_completion --lib` — 11 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; public admission/binding, active-conversation completion and Desktop acceptance remain with implementation/gate.
-
-Review finding: the Flow-directory proof exercises the real store and released
-migration frontier, but uses a directly seeded Task without a workspace. It must
-not be reported as the required public Session-binding proof. No Task or Flow
-was completed by this implementation pass.
+Check: `cargo test -p loopflow --lib task_completion` — 11 passed; `cargo test -p loopflow --lib lf::commands::flow::tests` — 4 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; public admission/binding, active-conversation completion and Desktop acceptance remain with implementation/gate.

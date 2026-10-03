@@ -9,6 +9,7 @@ use crate::lf::output::Colors;
 use crate::lf::{Cli, FlowCommand};
 use crate::ops::{flow_run, NullProgress, WorkBinding};
 use crate::store::SharedStore;
+use crate::work::task::Task;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use std::path::Path;
@@ -655,29 +656,31 @@ impl CliFlowExecutor<'_> {
         }
     }
 
-    async fn require_launch(&self, flow: &FlowSession) -> Result<()> {
+    /// Resolve and validate the managed Task only when preparing new work.
+    async fn resolve_launch_task(&self, flow: &FlowSession) -> Result<Option<Task>> {
         let Some(task_id) = &flow.task_id else {
-            return Ok(());
+            return Ok(None);
         };
-        if self
+        if !self
             .store
             .task_flow(task_id)
             .await?
             .is_some_and(|managed| managed.id() == flow.id())
         {
-            let task = self
-                .store
-                .get_task(task_id)
-                .await?
-                .context("Task disappeared")?;
-            crate::ops::task::resolve_managed_task_planning(
-                &self.store,
-                &task,
-                crate::ops::pm::PmRefresh::Auto,
-            )
-            .await?;
+            return Ok(None);
         }
-        Ok(())
+        let task = self
+            .store
+            .get_task(task_id)
+            .await?
+            .context("Task disappeared")?;
+        crate::ops::task::resolve_managed_task_planning(
+            &self.store,
+            &task,
+            crate::ops::pm::PmRefresh::Auto,
+        )
+        .await?;
+        Ok(Some(task))
     }
 
     /// The row at the step about to run, with any earlier attempt settled.
@@ -701,27 +704,9 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if skill.human {
-            self.require_launch(&flow).await?;
             // Reaching review releases the claim. The Task's selected Flow
             // still owns review preparation.
-            let managed_task = match &flow.task_id {
-                Some(task_id)
-                    if self
-                        .store
-                        .task_flow(task_id)
-                        .await?
-                        .is_some_and(|managed| managed.id() == flow.id()) =>
-                {
-                    Some(task_id)
-                }
-                _ => None,
-            };
-            let feedback = if let Some(task_id) = managed_task {
-                let task = self
-                    .store
-                    .get_task(task_id)
-                    .await?
-                    .context("Task disappeared")?;
+            let feedback = if let Some(task) = self.resolve_launch_task(&flow).await? {
                 crate::controller::task::park_at_review(&self.store, &task, &flow).await?;
                 None
             } else {
@@ -746,7 +731,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 .as_ref()
                 .is_some_and(crate::durable::FlowAttempt::completed)
             {
-                self.require_launch(&flow).await?;
+                self.resolve_launch_task(&flow).await?;
                 execute_child(&self.store, &flow, self.launcher).await?;
                 flow = self
                     .store
@@ -806,7 +791,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if !self.store.sqlite.flow_operation_completed(flow.id())? {
-            self.require_launch(&flow).await?;
+            self.resolve_launch_task(&flow).await?;
             eprintln!("op: {}", ops.item.display_name());
             execute_child(&self.store, &flow, self.launcher).await?;
         }

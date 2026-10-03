@@ -37,18 +37,18 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-At `a60ac0281`, telemetry retry timing moved to the observation after recovery;
-original `next_due_at` remains adjacency evidence. The local October 2 revision
-commits frozen same-Home coverage once. Shared readers derive owners; original
-candidate, failure and intervention provenance survives. The firing segment owns
-current telemetry/retry. Every Home change breaks continuation. Dues materialize
-before the atomic owner write; the existing lock keeps reads consistent. Local proof is
-synthetic; gate, Jack Heart's review and configured settlement remain outstanding.
+`a60ac0281` fixes observation-time retry; original dues retain adjacency.
+`02d6b3c00` implements atomic same-Home coverage after due materialization,
+superseding “continuation unimplemented” feedback. Shared readers preserve
+original ownership/provenance; firing segments own telemetry/retry. Home changes
+break continuation. Synthetic tests cover interruption, late writers and recovery
+without republishing. Physical overlap reporting, integrated proof, gate,
+Jack Heart's review and configured settlements remain open. `f7a3769dc` integrates
+v0.12.32 metadata, not installed accounting acceptance.
 
-The full child Release memory and goal were read in this reconciliation; it is
-the only immediate child scope in this checkout. Its September 28 incident shows
-why operation-level recovery must survive the scheduled entry point: an agent's
-successful report of a failed release produced a misleading green cron receipt.
+Release is the only immediate child; its memory and goal were read. Its September
+28 incident proves scheduled entry points need operation-level recovery: an
+agent reported failure successfully, producing a misleading green cron receipt.
 Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
 without proving this accounting branch is installed or either qualifying outcome.

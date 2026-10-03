@@ -1,8 +1,9 @@
 # Account for scheduled release opportunities and settle product outcomes
 
 LOO-285 · accepted outcome; same-Home persistence revision implemented locally.
-Reconciled against `328c7a065` (main integration) and `a60ac0281` (retry timing).
-The source integration is present; the complete Task outcome remains unproved.
+Reconciled October 2 against `02d6b3c00` (atomic same-Home coverage) and
+`f7a3769dc` (main integration through v0.12.32). The supplied continuation feedback
+predates that implementation; the complete Task outcome remains unproved.
 
 ## Outcome and accepted decisions
 
@@ -192,19 +193,15 @@ missing capability never silently waives required acceptance.
 
 ## Remaining implementation and proof
 
-1. **Closed same-context continuation implemented locally.** One owner write
-   covers all outstanding dues materialized across the uninterrupted same-Home
-   predecessor chain. Saved candidates and failed attempts remain on the original
-   opportunity. Shared ownership resolution fences late writers and supplies
-   telemetry, history, disposition and CLI projections. Current telemetry, future
-   retry and newly due waits use the successor that fired. Removed schedules and
-   changed Homes still require repair. Configured acceptance remains outstanding.
-2. **Wait continuation accuracy implemented in `a60ac0281`.** Telemetry
-   failure/deferral reads the retained calendar at the observation after recovery returns. It no longer
-   uses entry `next_due_at`; removed schedules report closure rather than a past
-   retry. Physical job-overlap text and out-of-window overlap receipt inclusion
-   remain consumer work.
-3. **Integrated interruption/verification proof.** Exercise actual telemetry's
+1. **Physical overlap reporting.** The cron job-lock loser still records generic
+   “next configured firing” text in `ops/cron.rs`. The release controller's
+   observation-time continuation already uses the retained calendar, including
+   closure and DST; physical overlap receipts need equally truthful continuation.
+   `release_history` retains out-of-window telemetry references, but does not
+   include release attempt receipt IDs in its linked set. Preserve those physical
+   receipts when their retained attempts remain visible, without counting an
+   overlap as a settlement. These consumer gaps are separate from atomic coverage.
+2. **Integrated interruption/verification proof.** Exercise actual telemetry's
    missing-natural-receipt path against current SessionHistory analytics without
    relabeling Recovery or weakening doctor. Retain truthful blockers and dated
    disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
@@ -212,11 +209,23 @@ missing capability never silently waives required acceptance.
    justified by the final call graph. Closed continuation now has the synthetic
    post-publication/pre-settlement recovery proof described below. Review command
    dispatch/descriptor retention through merged Session/Exec/Home/Flow paths.
-4. **Affected-suite gate and configured acceptance.** Focused passes are not the
+3. **Affected-suite gate and configured acceptance.** Focused passes are not the
    final affected-suite gate or hosted matrix. After code proof and authorized
    delivery, supported installed acceptance still needs telemetry, UI-host/public
    proof and the actual two-execution pair. No branch binary may repair the main
    Home, and no release/schedule/operator intervention may manufacture that pair.
+
+Same-Home continuation and observation-time retry are implemented in
+`02d6b3c00` and `a60ac0281`. Source inspection confirms the materialize-before-owner
+write, shared derived coverage, candidate preservation, late-writer fencing and
+Home-change boundary. The existing synthetic unit and CLI tests cover those
+contracts, including reconciliation after publication but before settlement.
+They do not close the integrated or configured proof above.
+
+The `f7a3769dc` merge adds v0.12.32 version/lock metadata and release notes for
+Task-worker recovery and PR rediscovery. It adds no accounting implementation or
+configured acceptance evidence. Those recovery changes do not grant release
+settlement authority or supersede this Task's production restrictions.
 
 No new product choice is needed for these accepted local contracts. Transferring
 an old Home's authority, accepting a new remote repair handoff, changing cadence,
@@ -407,4 +416,6 @@ source, and repetitive completed slices with remaining work. The reconciled plan
 separates these boundaries and retains the full acceptance criteria. That earlier reconciliation changed prose only; the current implementation and
 its focused checks are described above.
 
-Check: isolated `cargo test -p loopflow --lib ops::cron::` passed 45 tests (changed intervention regression rechecked); `cargo test -p loopflow --test scheduled_release_tests` passed eight cases and the repaired/extended replacement regression passed separately; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed. Full affected gate, hosted/UI/public proof and configured two-execution acceptance remain outstanding.
+Recorded implementation checks: isolated `cargo test -p loopflow --lib ops::cron::` passed 45 tests (changed intervention regression rechecked); `cargo test -p loopflow --test scheduled_release_tests` passed eight cases and the repaired/extended replacement regression passed separately; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed. Full affected gate, hosted/UI/public proof and configured two-execution acceptance remain outstanding.
+
+Check (October 2 realign): `git diff --check` and `lf context --skill realign` passed; prose-only reconciliation reused recorded focused results; full affected gate and configured acceptance remain deferred.

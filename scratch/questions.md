@@ -1,90 +1,18 @@
-# Material decisions and unresolved evidence
+# Remaining decisions and assumptions
 
-- This Run is the writable human design review for LOO-285. It does not start
-  sibling work, change the accepted serial Reliability allocation, or launch
-  a release. Human approval/iteration remains on the existing session surface.
-- The human accepted catch-up and explicitly allowed “exactly 1 run” that
-  automatically collapses misses. Use one release execution per wake for the
-  due set frozen at entry. Preserve every due time, link collapsed entries to
-  the owning execution, and leave newly due work for the next wake. One shared
-  result counts once toward the two-settlement proof. The implementation detail
-  is to retain an existing candidate's owner; otherwise the newest outstanding
-  due opportunity owns the execution. This needs no per-day replay loop.
-- Keep installed daily 09:00 telemetry and 10:00 release schedules. Proposed
-  `on_time` display means start during the scheduled calendar minute, with
-  exact delay always retained; later automatic starts are caught up.
-- Keep the original 35 failed telemetry targets as counterevidence. Fresh
-  evidence contains 36. The latest scorecard still queries `agent_turns`, absent
-  from the current store. This is a demonstrated verification blocker, not a
-  demonstrated present-day artifact-publication failure. LOO-285 owns making
-  its release acceptance dependency explicit; an Intelligence repair handoff
-  is proposed, not performed or accepted by another owner.
-- `release/UI_HOST_GATE.md` declares a required host UI gate. No fresh gate run
-  was performed. The design preserves its required status and demands current
-  evidence rather than inferring permission or an exemption from old notes.
-- Public v0.12.19 existence is reported by `lf release status`; the publisher
-  receipt has hashes/stages. No live asset download/smoke was performed, and
-  no two-opportunity proof is claimed.
-- Historical timezone/trigger provenance is incomplete. Do not backfill it
-  from the current timezone or assume all `source=scheduled` receipts were
-  autonomous. Preserve unknown coverage before the observation frontier.
-- The source's `sync_main` can leave edits in a stash. The design removes that
-  call from release selection rather than reopening historical LOO-266 or
-  changing the shared helper's unrelated callers.
+Jack Heart accepted one execution per wake for frozen catch-up coverage, without
+weakening the two-distinct-execution acceptance requirement. The implementation
+uses one atomic obligation document instead of separate opportunity files.
 
-## Implementation decisions
+Same-Home continuation preserves original due/candidate/failed proof under the
+existing release controller. It does not transfer old Home authority. Cross-Home
+transfer, a newly accepted remote Intelligence handoff, changed cadence or reduced
+verification remain unselected decisions, not prerequisites for local progress.
 
-- The active Run is now the implementation step. Human review's one-execution
-  catch-up decision is retained; the opening review-only note describes the
-  preceding session.
-- Store each obligation and all coalescing links in one atomic JSON replacement.
-  This is the same accounting owner with a smaller crash surface than separate
-  per-opportunity files. Keep the private Home file store and schema-1 cron
-  history; no database migration or scheduler replacement is introduced.
-- Current telemetry is checked before selection. The accepted design supersedes
-  the earlier no-retry draft: a missing/failed current prerequisite now receives
-  at most one automatic retry per release wake through the installed executor.
-  The attempt reserves that receipt before launch and retains original failures.
-  Running prerequisites defer while the recorded runner is live or unknown.
-  New receipts retain its observed OS start time; confirmed runner death permits
-  one reserved recovery through the existing job lock. A surviving child still
-  excludes execution. The old receipt stays unchanged and unresolved. Historical
-  receipts without start identity never gain authority from age or a missing PID.
-  Automatic recovery now waits at most one hour for a terminal result, matching
-  the existing release-stage wait policy. The deadline defers release and leaves
-  the receipt Running; the child keeps its job lock and is not killed. No later
-  observer invents its exit result. A fresh check at a later wake can prove
-  current recovery after exclusion ends. This bounds observation, not runtime;
-  no background receipt writer or scheduler was introduced.
-- Original prerequisites now reference retained telemetry obligation segments,
-  including their own schedule, timezone, Home and observation frontier. The
-  existing obligation document owns both job kinds; only release jobs have
-  release opportunities. Replacement and removal preserve old segments first.
-  A missing segment, a different Home, or a prerequisite before observation or
-  segment activation stays unknown. In particular, changing a schedule between
-  telemetry and release does not borrow the previous segment's check to satisfy
-  the new segment before its first due. Current installation cannot reconstruct
-  unobserved historical authority. Closed release continuation remains open.
-- `doctor` still judges scheduled firings, not recovery process success. A missing
-  scheduled receipt can therefore remain a continuity failure inside the real
-  telemetry retry. The simulated verifier proves retry mechanics, not that the
-  actual telemetry flow will pass. No continuity exemption is introduced.
-- Disposition writes require an existing local Task Work id plus explicit reason
-  and Wave. They record repair ownership without claiming a remote handoff.
-- Legacy artifact receipts missing required UI proof invoke the exact-source UI
-  gate before read-back can qualify; no historical capability gap is assumed.
-- No configured two-opportunity proof or deployment is claimed. Preserve the
-  observed scorecard blocker and unresolved Intelligence handoff through review.
-- Built-CLI read probes reported stale ambient Wave identity, and one concurrent
-  journal initialization reported SQLite locked. Requested file-backed history
-  still returned all 70 retained receipts. This is separate runtime evidence;
-  no registry/auth repair was attempted and no production-journal health is
-  claimed.
+Historical prerequisites before a replacement telemetry segment's first due stay
+unknown; a previous segment's receipt cannot prove the replacement's check.
+The September 24 missing-table diagnosis remains dated counterevidence. Current
+SessionHistory source must be exercised before assigning another analytics repair.
 
-- Closed obligations first gain an explicit repair-disposition path. Their
-  retained closure timestamp supplies the blocker and ownership deadline;
-  attempts retain their actual process/product observations. History exposes
-  unsettled execution owners even outside its date window. Disposition records
-  ownership, not cancellation, successful settlement or a transfer to the new
-  Home. Automatic candidate continuation across segments remains separate
-  required work; this slice does not add a manual publication bypass.
+The existing plan owns remaining implementation and proof; archived discussions
+are preserved at `fe36937faf75151a2f5d7195b32ff708ce335e86:scratch/questions.md`.

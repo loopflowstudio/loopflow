@@ -1,429 +1,237 @@
 # Account for scheduled release opportunities and settle product outcomes
 
-## Problem
+LOO-285 · accepted design, reconciled against `fe36937faf75151a2f5d7195b32ff708ce335e86`.
+The source integration is present; the complete Task outcome remains unproved.
 
-LOO-285 serves Reliability's release-settlement KR. Maintainers need to know
-what happened to every configured release opportunity: when it was due, which
-execution attempted it, what verification passed or failed, and what users can
-download. Today these facts have separate owners but no durable connection.
-`CronReceipt::Succeeded` means the scheduled target process exited zero. For
-Infrastructure that process is an agent running the `release-run` skill. Its
-successful exit does not establish release completion.
+## Outcome and accepted decisions
 
-The accepted chapter requires two consecutive configured opportunities to
-settle as truthful no-change or complete publication, with at least one
-publication, required verification and exact-tag smoke passing, and no manual
-repair. Deferred opportunities remain outstanding. Successful scheduling never
-clears failed telemetry. This design preserves that entire finish line.
+Maintainers need one authoritative connection from every configured due release
+opportunity to execution, required verification and actual product outcome.
+Published, truthful no-change, deferred with reason and continuation, and failed
+with actionable repair remain distinct. Cron process success never establishes
+product success, and scheduling continuity never clears failed verification.
 
-This is the kickoff artifact at source base
-`88cf10641b0e88fc4bfcf504ef62bed4aa057539`. It specifies implementation and
-operational proof; neither has been completed by this kickoff. No schedule,
-release, installation, PM state, or Task disposition was changed.
+Jack Heart accepted one release execution per scheduled wake, covering the
+outstanding due set frozen at entry. Every original due survives. An existing
+candidate keeps its opportunity owner; otherwise the newest outstanding due owns
+catch-up. Collapsed misses refer to that execution and count once, never as extra
+successful settlements. Dues arising during execution wait for a later wake.
 
-## Human review: collapse missed opportunities
+Completion still requires two adjacent original configured opportunities settled
+by two distinct automatic executions, at least one with artifact publication,
+all required checks and no manual repair. Delayed automatic starts may qualify;
+collapsed or operator-triggered executions cannot manufacture the second success.
+The separate fourteen-day availability window is not claimed by this Task.
 
-The human accepted catch-up and explicitly allowed “exactly 1 run” that
-automatically collapses misses. Use that simpler policy: one release execution
-per scheduled wake, covering the outstanding due times captured at entry.
-Keep every original due time and link collapsed entries to the one execution;
-do not replay one release decision per missed day. New due times arising during
-execution wait for the next configured wake.
+The existing serial Reliability Task and coherent PR retain implementation and
+review ownership. No scheduler replacement, new resident service, generic deploy
+platform, process-liveness registry, PM redesign or new Task is needed. Existing
+release recovery, calendar calculation, cron executor, generated-worktree
+classification and OS locks remain the implementation owners.
 
-This changes execution cardinality, not evidence cardinality: one execution
-can prove only one publication/no-change settlement. Collapsed entries are
-accounted for but do not manufacture additional qualifying settlements. The
-two-settlement commitment still needs two distinct automatic executions for
-adjacent original due opportunities, with at least one publication.
+Jack's September 28 activation steer records successful v0.12.24 publication,
+supported installation, cron preflight and skill-to-Flow sync at the unchanged
+10:00 schedule. The misleading original success receipt survived. That is
+activation evidence, not proof this later accounting implementation is installed
+or either required configured settlement occurred. The authored 09:00 telemetry
+and 10:00 release cadence remains unchanged; Release's nested Wave owns the
+release schedule. Installed placement/ownership must be observed, not inferred
+from authored files.
 
-Telemetry repair ownership remains a proposed Intelligence dependency; this
-catch-up decision does not constitute an accepted handoff or waive verification.
+Jack's October 2 direction retained this checkout and all authored work, required
+main integration and closed same-Home continuation, and prohibited production
+release, branch installation, schedule changes, Home-authority transfer,
+verification waivers or completing Jack's review. The latest feedback reports
+main merged and focused recovery, publisher, minor-release and static checks
+passing. Source history places the merge at `5e10e9cd1`, CI-repair ownership at
+`7c401c1e7`, and the final smoke-command formatting at `fe36937fa`.
 
-## The demo
+## Implemented ownership and behavior
 
-After two real configured firings, run
-`lf release history --wave infrastructure --days 3 --json` (new read surface).
-It shows consecutive original due times, exact cron and release attempts,
-verification evidence, one published exact tag with downloadable verified
-artifacts, and the next publication or verified empty release range. A delayed
-wake retains the missed due times, collapsed into one release execution rather
-than replayed individually; an overlap shows a reason and continuation
-instead of a second publisher. The same history view retains failed scheduled
-verification and its repair disposition even when `lf doctor --json` reports
-healthy scheduling continuity.
-
-## Approach
-
-Extend the existing cron receipt storage and release operation. Keep launchd as
-the wake source, the installed obligation as the timing authority, the release
-operation as the settlement writer, and the configured publisher as the product
-side-effect owner. Add no daemon, queue service, general execution lease, or
-parallel release implementation.
-
-### Existing owners and integration points
-
-| Surface | Current authority | Change |
+| Owner | Existing implementation | Evidence limit |
 | --- | --- | --- |
-| `wave/infrastructure/GOAL.md`, installed launchd plist | Daily 09:00 telemetry and 10:00 release in Home-local time; durable activation | Preserve cadence. Persist obligation history and timezone evidence before replacement/removal. |
-| `ops/cron.rs` | Physical launch receipts under `<LF_HOME>/cron/receipts` | Enumerate due release opportunities, retain wake/trigger provenance, associate each launch with attempts. |
-| `lf/commands/doctor.rs` | Latest-due-interval scheduling continuity | Share its calendar calculation with accounting; retain its scheduling meaning. Release history separately projects settlement and verification health. |
-| `.lf/flows/release-run.yaml` (new) | Repository selection of the scheduled target | One mechanical `op: release run patch`; replace the scheduled agent wrapper. |
-| `ops/flow.rs`, `lf/commands/flow.rs` | Mechanical flow execution already supports release operations | Carry an explicit optional cron receipt reference to the release operation. |
-| `ops/release.rs` | Selection, PR/candidate/tag recovery, stage leases, publication check | Persist typed attempts, verification, continuation, and terminal settlement through one shared entry point. |
-| `scripts/publish_release.py` | Candidate hashes/stages and final publisher receipt | Retain those receipts; add exact public-artifact read-back evidence. |
-| `.github/workflows/release.yml`, `package-build.yml` | Exact candidate native matrix and smoke | Keep required jobs; bind their workflow run and commit into settlement. |
+| `ops/cron/accounting.rs` | One atomically replaced private-Home obligation document holds calendar/Home segments, original dues, frozen coverage and attempts. Telemetry segments have no release opportunities. | Historical unobserved coverage remains unknown; closed execution continuation is absent. |
+| `ops/cron.rs` | Physical receipts retain process outcome, source and optional runner birth identity. One executor handles ordinary firing and one reserved Recovery prerequisite per wake. Trigger requests retain operator provenance; ordinary kickstart does not force-replace a job. | Shell/seeded-date tests do not prove live launchd timing or trigger races. |
+| Flow command executor | `.lf/flows/release-run.yaml` contains `cmd: repo release run patch`. Explicit receipt and descriptor attribution reaches the release operation through current Flow/Exec dispatch. | Old `op:` and Run-era integration plans are superseded; installed propagation remains acceptance work. |
+| `ops/release.rs` | One manual/scheduled controller owns target exclusion, exact selection, checks, recovery and settlement. Fetched origin and owned exact-source checkouts preserve caller bytes. | Local preservation cases do not cover every interruption boundary. |
+| `settle` | Exact-attempt fencing atomically saves attempt verification and product outcome. Conflicting/late evidence cannot replace accepted success. `finish_process` cannot promote zero exit. | Product proof must still be independently complete. |
+| `scripts/publish_release.py` | One ArtifactReceipt retains prepared identity/hashes/stages; public proof records fresh read-back and smoke. Reconcile reuses existing publication operations. | Simulated endpoints/signing/UI are not live acceptance. |
+| `ops/cron/history.rs` | Joins opportunities, physical receipts, retained prerequisite failures and dated dispositions; judges original adjacency and intervention eligibility. Closed unsettled owners remain visible outside the display window. | Assignment is neither execution nor settlement. |
 
-The built-in `release-run` skill remains useful for explicit human/agent use in
-other repositories. It ceases to be Infrastructure's scheduled execution path.
-Catalog resolution and installed `target_kind` must converge to the repository
-flow at ordinary cron sync. No fallback to the skill is allowed if that flow is
-missing. The public cadence and `release-run` name remain unchanged.
+The obligation identity includes canonical repository, stable Home/Wave, job,
+schedule and retained timezone interval; each due key retains its original UTC
+instant/local calendar evidence. Target kind is execution provenance, so a
+skill-to-Flow cutover preserves the daily obligation. Changed placement, schedule
+or timezone closes a segment; successor links preserve closure even if the old
+snapshot rewrite is interrupted. Removal preserves the predecessor before unload.
+History materializes missing dues read-only, preserving an absent-wake denominator.
+The shared calendar uses the first ambiguous occurrence and skips nonexistent
+local times. Today's timezone cannot reconstruct unobserved historical changes.
 
-### Durable identities and records
+Whole-document replacement commits frozen coverage and collapse links together,
+replacing the kickoff proposal for separate opportunity files and reciprocal
+writes. Accounting uses a short lock, released before target acquisition/network
+work. The target lock covers selection and mutations; the existing job descriptor
+authenticates scheduled attribution; checkout leases protect exact source removal.
+None grants another owner's authority. Keep schema-1 physical receipt decoding
+because those are durable history, not a compatibility shim for an internal DTO.
 
-Use the current private Home cron storage with versioned JSON and atomic
-replacement. Add `cron/obligations/` and `cron/opportunities/` beside existing
-`cron/receipts/`; these contain different facts, not a second copy of execution
-truth. Do not introduce SQLite tables just to join three local file records.
+The current model uses AgentSession/FlowSession/Exec. Cron receipt identity remains
+the physical-attempt join; no new generic Run object or SQLite opportunity table
+is needed. Main's placement-preflight failure path remains part of accounting.
+Taskless and managed execution use the merged command machinery.
 
-An obligation snapshot identifies the canonical repository, stable Home and
-Wave identity, job name, schedule, activation/end times, and observed local
-timezone. Preserve the existing activation across an unchanged sync. A changed
-schedule, placement, or timezone closes one interval and opens the next;
-replacement must persist the closed snapshot before unloading the old job.
-Record target kind and resolved release operation/configuration as execution
-provenance. The skill-to-flow cutover continues the same daily obligation rather
-than dropping a due time or counting it twice.
+### Saved candidates, invalid sources and queue recovery
 
-An opportunity key is `(obligation identity, due_at UTC)`. Retain local date,
-offset, and the next due time for inspection. Use a digest of canonical identity
-fields for filenames; do not rely on the current lossy `safe_component` mapping
-to distinguish identities. An opportunity is independent of its wake time,
-attempt count, selected tag, and process PID.
+Saved-candidate inspection is implemented, not the next slice. Under the existing
+target lock, the publisher inspects the exact source. A valid candidate resumes
+unchanged. An invalid candidate permits one successor selection only after
+affirmative unpublished evidence from GitHub, crates.io and versioned R2. Unknown
+or partial publication and a moved original tag refuse replacement.
 
-`ReleaseOpportunity` contains:
+The running attempt retains rejected selection plus inspection/authorization;
+original dues, prior failures, manual provenance and frozen coverage survive.
+An interruption before successor selection leaves the rejected candidate pinned
+and requires fresh authorization on retry. Stale writers cannot authorize/select;
+a successor does not inherit its predecessor's workflow id. Another invalid
+successor remains saved for a later wake, without a new opportunity or extra
+settlement. The recovery decisions reuse run-records' implementation observed at
+`6acd2389e878bbc47c1b80bdab8591ebf06a46fe`; caller-preserving selection was retained.
+Cached packages undergo successful packaged preflight in a fresh disposable Home.
+Published authority alone cannot excuse rejection.
 
-- Obligation key and original due interval; discovery time and coverage origin
-  (`observed` or explicitly incomplete historical reconstruction).
-- Optional `coalesced_into` opportunity reference. The owning opportunity
-  retains the execution and settlement; collapsed entries refer to it without
-  copying attempts, verification, or product outcomes. Preserve any earlier
-  failed attempts on a collapsed entry. A link alone is not successful catch-up:
-  history also shows the owning execution's pending/deferred/failed result.
-- Append-only attempt entries: attempt id, physical cron receipt id, optional
-  attributed Run id, start/end, launch source, explicit intervention records,
-  target, frozen selection evidence, current stage and typed outcome.
-- Required verification references: exact command/config digest and subject
-  commit, result, start/end, retained evidence path/digest or hosted run URL/id.
-  A missing check is distinct from a failed check or a check not applicable to
-  this outcome.
-- One current disposition and a terminal settlement referencing the attempt
-  that proved it. Repeated reconciliation of the same settlement is idempotent;
-  a conflicting settlement is an actionable error and preserves both evidence
-  inputs without overwriting the accepted result.
-- Failure disposition when needed: cause, next action, owning Task/Work
-  reference, disposition time, and linked successful retry if later repaired.
-  LOO-285 is the disposition owner for release-accounting failures during this
-  work; record that fact with the disposition command below, not a hardcoded
-  production issue id. Ownership assignment is evidence, never automatic
-  permission to start another Task.
+The integrated controller retains current queue-aware `observe_pr_merge` /
+`merge_needs_integration`, reobserves merged state after repair errors, and carries
+target/checkout ownership through CI repair children. Queued work waits;
+AwaitingQueue does not force integration merely because a head is behind. Main's
+minor-cycle recovery is integrated; the older note describing it as unported is
+historical. A merge and reported focused passes do not establish a full gate.
 
-Add `lf cron disposition <receipt-or-opportunity-id> --owner <work-id> --reason <text>` to
-record an explicit repair disposition beside an existing failed receipt. The
-write retains prior dispositions and their timestamps; it does not edit the
-receipt or invoke PM. Release history joins this evidence for prerequisite
-failures as well as release attempts. Missing/unresolved owner ids remain
-unassigned in the report; an owner name in prose is not an accepted remote Task
-handoff. For prelaunch opportunity failures with no receipt, the opportunity
-record itself retains the disposition through the same storage operation.
+### Child lifetime and caller preservation
 
-Keep `CronReceipt` as the physical process result. The opportunity points to it;
-there is no need to rewrite old cron receipts with inferred success or duplicate
-their whole contents. A child release operation can settle before its wrapper
-exits; later wrapper failure remains visible as a distinct fact. Publish
-evidence may exist even when the release invocation fails after publication.
+The existing target/checkout descriptors reach tag/publish/inspection children,
+shared PR mutations, auto-merge, Git stage/commit/push, hooks, lockfile tools,
+notes providers, source fetch/add/reset/remove/delete and Task compensation.
+The CI-repair integration additionally carries them into the repair process tree.
+The shared PR/Git/Task owners remain authoritative; no parallel release writer
+or ambient role inference is introduced.
 
-Retain the existing schema-1 cron reader because these are durable historical
-receipts. Historical absence of opportunity, intervention, verification, or
-timezone evidence is explicitly unknown, never a serde default that means
-success. New wire DTOs have required or optional fields and fixture coverage.
+Cleanup drops the controller's lease and independently reacquires before removal:
+a surviving child sharing the old description still excludes it. Unexpected
+post-checkout HEAD changes retain both checkout and branch instead of deleting
+unpublished work. Notes input lives in the existing prompt store with a unique
+name, so launcher exit cannot erase a surviving provider's input. Named source
+creation has no main-sync mode or implicit background branch push. Earlier
+negative searches missed indirect `sync_main`; the hook regression exposed a
+stash replacing the held lock inode. The later removal of that mode supersedes
+those overly broad negative claims.
 
-### Enumerate, attempt, settle
+Local tests execute real CLI/Git/bare origins/processes/locks and check resulting
+state and caller HEAD, branch, raw index, staged/unstaged/untracked bytes and local
+commits. Provider/GitHub/telemetry/publication evidence is simulated where noted.
+They do not prove arbitrary vendor descendants retain descriptors or permit
+killing production processes to gain access.
 
-1. At scheduled entry, materialize every due opportunity since the retained
-   accounting cursor, using the existing daily calendar semantics. A bounded
-   page is fine; advancing the cursor past an unwritten due time is not. The
-   cursor is optimization only: deterministic keys permit replay after a crash.
-   History readers also calculate missing due entries without writing, so a
-   failed or absent wake cannot hide the denominator.
-2. Preserve installed Home placement checks and preflight-failure receipts.
-   Failed preflight accounts for a due opportunity with its cause; it never
-   authorizes execution on the wrong Home. If persistence itself fails, return
-   nonzero with the failed path. Readers must still expose the missing entry.
-3. Freeze the outstanding due set at wake entry and persist its coalescing
-   decision before release mutation. Execute once through the existing
-   mechanical flow, carrying the owning opportunity and covered due keys. Carry
-   the physical receipt reference explicitly in the flow execution context and
-   typed release entry point; do not infer process role from an ambient env
-   variable or parse agent stdout. Validate that reference against the installed
-   job, repository, Home, and due record before adding evidence. Attribution
-   never grants publication or process-control authority.
-4. Acquire one narrow repository/target release-operation lock before release
-   selection or mutation. Scheduled and manual `lf release run` share it. Use
-   the existing OS file-lock primitive and retain existing generated-worktree
-   stage leases and publisher lock. Acquisition of the target lock does not
-   supersede a surviving stage lease. Record overlap as deferred, linked to the
-   active attempt, without starting another publisher or bumping another tag.
-   Standalone tag/publish mutations must honor the same exclusion; a publisher's
-   nested `lf release publish` reuses its inherited exact lock descriptor rather
-   than deadlocking on reacquisition or trusting an environment flag.
-5. Reconcile the last exact candidate/tag and any durable intermediate before
-   selecting new work. Write the attempt's selection and each completed stage
-   before proceeding to the next consequential operation. Replace opportunity
-   records under a short file lock and fence updates by exact attempt id.
-   An old attempt cannot overwrite a retry or a terminal settlement.
-6. After the attempt, account for due opportunities that accumulated while it
-   ran, but do not start another release execution or expand the frozen covered
-   set. Retain those opportunities as deferred to the next configured firing.
-   If the attempt deferred or failed, all covered entries expose that result
-   and its exact continuation. The existing stage waits remain bounded. Do not
-   drain the backlog in a loop or add another timer.
+### Telemetry, dispositions and truthful outcomes
 
-Use a short per-job accounting lock for materialization and record updates;
-never hold it across a network call or whole release. The longer target lock
-owns release mutation. Use a fixed lock order and release the accounting lock
-before attempting the target lock. Children performing side effects must retain
-the release lock for their lifetime (inherited lock descriptor, or equivalently
-the same existing stage lease covering their operation). Prove parent death
-with a live publisher child: an unlocked parent PID or six-hour age is not
-permission to publish concurrently. This is a release lock, not a new process
-liveness registry. Never kill a process to make progress.
+Every attempt freezes historical prerequisite segment/receipt references for its
+covered original dues separately from current observations. Missing segments,
+unknown timezone history, different Homes, and a new segment before its first due
+stay unknown. Canonical repository aliases resolve consistently. Referenced old
+failures remain visible outside the requested history window.
 
-One wake makes one selection/verification decision for its frozen due set.
-When a due opportunity already owns an incomplete candidate/tag, preserve that
-owner and resume it; link the other covered due times to that opportunity.
-Otherwise, the newest outstanding due opportunity owns the catch-up execution
-and earlier misses link to it. Retrying preserves the original owner and failed
-attempts. A previously settled opportunity cannot absorb new misses.
+Missing/failed current telemetry can reserve one Recovery receipt before launch
+through the same installed cron executor. One hour bounds observation, not child
+runtime. Deadline/error leaves an unobserved process result unknown; no child is
+killed or late exit invented. Live/unknown runner identity defers; proven runner
+death still requires job-lock acquisition, which a surviving child excludes.
+A successful new check is current recovery, never a rewritten historical pass.
+Same-second UUID ordering cannot establish recovery order: Running/Failed evidence
+wins conservatively over a tied success.
 
-Persist the owner and complete covered-key set before writing the reciprocal
-links. Reconciliation repairs missing links from that saved set after a crash;
-partial linking never authorizes another publisher. Coalescing only applies
-within the same repository, target, and Home execution context; historical
-placement blockers retain their existing treatment.
+Doctor continues to judge natural Scheduled firing evidence independently of
+result. Recovery cannot fill a missing natural receipt, so the actual telemetry
+Flow may still fail continuity during catch-up. The merged Flow runs doctor,
+scorecard and weekly usage. `scripts/lifecycle_scorecard.py` now consumes supplied
+SessionHistory JSON and current Task PR facts; its old `agent_turns` /
+`agent_invocations` SQL is gone. The missing-table diagnosis dates to September 24,
+not a fresh failure of this source. All 36 failed receipts (including the original
+35) remain counterevidence. No current installed pass or accepted Intelligence
+handoff is established; commissioning a duplicate analytics repair is unwarranted
+without reproducing a remaining failure against the integrated path.
 
-Only the owning opportunity receives the product settlement. A collapsed entry
-reports its original due time and linked catch-up result, never a separate
-publication or synthetic no-change. Collapsed entries cannot supply the second
-success in the consecutive-settlement proof. This preserves every missed date
-without doing redundant release work for each date.
+`lf cron disposition` requires a registered local Task Work id, explicit Wave and
+reason, and appends dated ownership. It neither claims remote acceptance nor
+rewrites the receipt/opportunity. First-assignment lateness survives reassignment.
+Closed unsettled owners expose original Home/candidate/closure and dated repair
+outside the window. Closed saved waits are labeled historical. An already
+executing exact attempt may settle after closure; that does not authorize a new
+execution on the closed segment or transfer its Home.
 
-Timing is orthogonal to product outcome. Retain `due_at`, first attempt time,
-settled time, and delay seconds. For presentation, `on_time` means the first
-attempt began in the due calendar minute; later starts are `caught_up`.
-This is a reporting convention, not permission to omit late work or an SLA
-that grants control authority. Product dispositions are:
+Published requires exact tag/commit, applicable verification, prepared hashes,
+all publisher stages and public read-back/smoke. No-change requires a captured
+origin tip, exact empty target-scoped range and a completely verified published
+baseline plus current prerequisites. An unavailable range is not empty. All
+resume/no-change paths share applicable verification; no early-return bypass.
+Deferred retains its typed reason and real continuation; unclassified errors,
+failed checks, unavailable authority and corrupt evidence remain failures.
+External publication followed by smoke failure retains the effect without
+qualifying success. A wrapper failure after settlement remains a separate fact.
 
-| State | Required evidence | Continuation |
-| --- | --- | --- |
-| Pending/running | Original due key and current attempt/stage | Observed work, never a settled success |
-| Published | Exact tag/commit, successful required verification, prepared hashes, publisher stages, public read-back/smoke | Terminal success; later external deletion is a new observation, not rewritten history |
-| No-change | Previous completed tag, captured origin tip, exact empty target-scoped commit range, required verification for this opportunity | Terminal success; unavailable GitHub or unknown range is not empty |
-| Deferred | Typed reason, retained PR/candidate/tag/stage, next configured retry time or exact active attempt | Outstanding; deadline expiring without progress remains visible |
-| Failed | Named stage/cause, evidence, actionable repair and owner | Failed attempt remains immutable; repair may append a retry on the same opportunity |
+Required proof includes scheduled telemetry, repository verify hooks, release PR
+checks, hosted acceptance, all four native packages and exact-version CLI/daemon
+smoke, packaged candidate acceptance, signing/notarization, installer/website and
+every configured publisher stage, required UI-host evidence, exact public hashes,
+versioned DMG and isolated pinned installer/package smoke. Mutable latest URLs
+alone cannot prove the tag. Immutable-subject checks may reuse matching evidence;
+current-state prerequisites cannot borrow yesterday's pass. Legacy missing UI
+proof requires the exact-source gate. Headless capability belongs to gate/CI;
+missing capability never silently waives required acceptance.
 
-Do not classify arbitrary error strings as retryable. Introduce typed release
-failures only for actual release stages: queued/running external work with a
-known continuation is deferred; a rejected verification, unavailable authority,
-corrupt record, or unclassified command failure is failed. Existing one-hour
-workflow/PR waits remain bounded. A failed verification is not disguised as an
-intentional wait even if retrying later may succeed.
+## Remaining implementation and proof
 
-### Truthful verification and publication
+1. **Closed same-context continuation.** `begin` still selects inside one
+   obligation; `receipt_context` rejects closed segments and `record_telemetry`
+   skips them. Preserve the old opportunity/candidate/failed attempts and original
+   due/Home identity when a same-Home replacement schedule wakes. Reuse existing
+   recovery under the target lock; no manual publication bypass, synthetic
+   settlement or cross-Home transfer. A removed schedule has no future firing;
+   unresolved old-Home authority remains a named repair blocker. This is a
+   substantial remaining controller/accounting change, not supplied by disposition.
+2. **Wait continuation accuracy.** Target/job overlap uses the retained calendar
+   to calculate an exact next due at observation. Telemetry still uses the entry
+   snapshot's `next_due_at`; a long wait can advertise a past retry time. Resolve
+   it through the existing calendar/continuation reader and prove a crossed-due
+   boundary. Physical job-overlap error text remains generic and out-of-window
+   receipt inclusion follows telemetry links, not overlap links; complete those
+   consumer checks before claiming comprehensive overlap presentation.
+3. **Integrated interruption/verification proof.** Exercise actual telemetry's
+   missing-natural-receipt path against current SessionHistory analytics without
+   relabeling Recovery or weakening doctor. Retain truthful blockers and dated
+   disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
+   Task compensation beyond pre-push, materialization and post-publication-before-
+   settlement boundaries as justified by the final call graph. Review command
+   dispatch/descriptor retention through merged Session/Exec/Home/Flow paths.
+4. **Affected-suite gate and configured acceptance.** Focused passes are not the
+   final affected-suite gate or hosted matrix. After code proof and authorized
+   delivery, supported installed acceptance still needs telemetry, UI-host/public
+   proof and the actual two-execution pair. No branch binary may repair the main
+   Home, and no release/schedule/operator intervention may manufacture that pair.
 
-All paths, including no-change and resume, enter one settlement routine. Today
-`NoChanges` and early `resume_existing_release` return before `target.verify`;
-the new entry must run applicable required checks or attach retained successful
-evidence for the exact immutable subject and check definition. Current-state
-checks such as the scheduled telemetry target cannot reuse yesterday's pass.
+No new product choice is needed for these accepted local contracts. Transferring
+an old Home's authority, accepting a new remote repair handoff, changing cadence,
+weakening proof or changing the coherent-PR boundary would require Jack's decision.
+Those changes are not selected. Concrete operational blockers belong beside their
+observations; historical startup errors do not prove a current blocker. The old
+0.12.29 foreign-Team restart and pre-merge missing-Daemon fixture failures remain
+historical after Jack's reported 0.12.31 recovery and main integration.
 
-Preserve and identify separately:
-
-1. Scheduled telemetry (`doctor` and `__telemetry-scorecard`) for the applicable
-   daily obligation. Retain the telemetry obligation preceding each covered
-   original due time, including its missing/failed evidence. The one catch-up
-   execution must pass current prerequisites and link any recovery checks to
-   that execution and the original failure. It does not rerun telemetry once
-   per collapsed day or label historical failures as passes. Missing or failed
-   required verification for this execution blocks a qualifying settlement;
-   historical failures retain their separate owning repair dispositions.
-2. Repository `release.targets.default.verify`, currently the migration check.
-3. Required release-PR checks, hosted release acceptance, all four native
-   packages, and their exact-version CLI/daemon smoke checks on the candidate.
-4. Publisher candidate validation, signing/notarization, installer and website
-   checks, and every configured publication stage.
-5. Public exact-tag artifacts read back after publication: expected asset set,
-   hashes matching the prepared receipt, version-pinned installer/package
-   smoke in an isolated Home, and the immutable versioned DMG. Keep platform
-   matrix smoke evidence from hosted builds; never claim cross-platform
-   execution from one host's smoke. Website/deployment checks retain the exact
-   release identity; mutable `latest` URLs alone cannot prove this tag.
-
-The repository also documents `scripts/test.py --ui-host` as required. It is
-not established by `--all` or package smoke. Implementation must inventory its
-required evidence at the candidate/release boundary and include it; absent
-capability is an explicit blocker, never an exemption invented here. This
-kickoff did not run UI automation or prove a current permission gap.
-
-For a missing/failed prerequisite, the release wake may make one bounded retry
-through the existing cron target executor, carrying the applicable telemetry due
-identity and frozen catch-up coverage, and recording an automatic catch-up
-attempt. A present-day check proves current recovery, not a historical pass.
-It then observes the
-result before release mutation. This permits recovery after a repaired check
-without requiring an operator to manufacture a new receipt. It adds no timer
-or independent worker. Limit prerequisite retry to once per prerequisite per
-wake; if it still fails, retain the failure/owner and stop with the next
-configured firing as continuation. Old failure evidence and late disposition
-remain visible even after a linked successful retry.
-
-No-change does not require rebuilding an unchanged published artifact, but it
-must prove the empty range, the baseline tag's complete publication evidence,
-and current required scheduled verification. A missing artifact/check for that
-baseline means repair/resume, not no-change. For a resumed immutable candidate,
-reuse exact matching recorded checks; if a required result or artifact has
-expired or is absent, execute the necessary check again before settlement.
-
-Keep the Python candidate and publisher receipts as their stage evidence.
-Persist their digest and content needed for settlement before temporary
-artifact cleanup. Add a publisher read-back/smoke mode rather than making Rust
-reimplement the asset manifest. A crash after external publication but before
-local settlement reconciles that exact tag and hashes and finishes the same
-opportunity. It must not bump a new version or invoke credentialed publication
-again merely to obtain a receipt. If no final publisher receipt was written,
-reconstruct only the stages that can be independently checked, retry remaining
-idempotent stages through existing recovery, and leave missing proof explicit.
-
-“Published externally” and “qualifying complete publication” may differ. If
-assets became visible but post-publication smoke failed, retain the external
-effect and classify the attempt failed at smoke. Never roll back the fact that
-users could already download the assets.
-
-### Wake provenance, history, and cutover
-
-`lf cron trigger` currently calls `launchctl kickstart -k` and the launched
-plist always supplies `--scheduled`. That both obscures manual provenance and
-can replace an active job. Remove `-k` for the ordinary trigger. Persist the
-trigger request id/time before kickstart; associate or conservatively mark
-overlapping observed firings as operator-triggered. An unused request expires
-with a recorded disposition. An ambiguous trigger/natural firing cannot count
-as autonomous proof. Direct manual runs remain manual. Neither creates a new
-due time; an explicitly requested repair of an existing opportunity remains
-marked intervention and disqualifies that pair from the no-manual-repair KR.
-
-Use the existing local calendar rule: first occurrence of an ambiguous local
-time, no occurrence for a nonexistent local time. Test DST and timezone
-changes against the shared function. Record the effective zone/offset with
-each due key and obligation segment. Unobserved historical timezone changes
-cannot be reconstructed from today's zone; mark the affected denominator
-uncertain. Never silently reinterpret prior local schedules as UTC.
-
-At cutover, preserve the old installed obligation, receipts, and known due
-times. Import unambiguous receipt associations as evidence only. Historical
-successful agent exits remain `outcome_unknown` unless exact product evidence
-can be linked. Begin complete observation at an explicit frontier while still
-showing all prior chapter gaps/unknowns. This frontier does not waive the
-chapter's universal accounting KR or manufacture historical no-change results.
-Old Home obligations stay historical after placement changes; do not invent
-cross-Home publication coordination or discard outstanding work. If an old
-Home's active attempt cannot be reconciled, record the named placement blocker.
-
-### Preserve caller work
-
-`release_run` currently calls `sync_main`, which can reset another checkout,
-stash overlapping edits, and leave their recovery to a human. That does not
-satisfy this Task's unchanged caller branch/index/working-bytes contract.
-Select from fetched `origin/<default>` without resetting the caller or sibling
-main. Run checks requiring a source checkout in the existing owned release
-worktree at the selected commit. Continue using the existing generated-worktree
-classification and stage leases for reuse and cleanup. No general rewrite of
-`sync_main` or new worktree platform is needed.
-
-## De-risking
-
-| Question | Finding | Impact on design |
-| --- | --- | --- |
-| Are the 35 telemetry failures merely old continuity gaps? | Fresh 35-day read has 36/36 failed telemetry targets. Latest log passes continuity then fails scorecard on missing `agent_turns`; a read-only SQL prepare reproduces the missing table. | Retain original 35 and the new failure. Name the schema-mismatched scorecard as a concrete verification blocker; scheduling repair alone cannot green the KR. |
-| Is publication still blocked at v0.12.14? | Current `lf release status` reports v0.12.19, successful workflow 35894647999, and a GitHub Release. Existing publisher receipt contains exact commit, hashes, and all stages. | Do not resurrect LOO-261 or infer that all successful agent exits hid failures. Current publication is positive evidence, not the required consecutive pair. |
-| Can launchd identify every missed opportunity? | Apple's calendar semantics coalesce missed sleep intervals; power-off waits for a later designated firing. The plist passes no original due time. | Enumerate retained obligations at wake; actual start is never opportunity identity. [Apple guide](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html), [Apple launchd manual source](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5). |
-| Can existing continuity be reused? | Activation is preserved across unchanged sync; `latest_due_interval` uses local calendar rules and exact scheduled receipt identity. It checks one current interval, intentionally accepting failed targets as proof of firing. | Extract its calendar function; retain that scheduling meaning and add separate health checks rather than changing firing into publication truth. |
-| Does release recovery already own durable intermediates? | Exact candidate refs, prepared artifacts, prepare/publish worktree classification, and OS-backed stage leases are implemented and covered by targeted Rust fixtures. | Reuse these mechanisms. Add operation-level selection exclusion and settlement, not a second recovery machine. |
-| Is the mechanical flow possible without a new cron target type? | Existing `Op` parser and `execute_flow_ops` already dispatch `release run`. | Use a repo flow and explicit context plumbing; no new scheduler command language. |
-| Are manual launchd triggers distinguishable? | Current trigger uses `kickstart -k`; plist identifies all resulting starts as scheduled. | Record trigger provenance and remove forced replacement before claiming unattended proof. |
-| Does publication prove artifact accessibility? | Rust completion reads `isDraft`; publisher writes local hashes/stages. Neither alone is retained public download/smoke evidence. | Add exact public read-back to the publisher's existing verification responsibility. |
-| Can required checks be skipped on resume/no-change? | Source has early returns before `target.verify`; no-change has only target/tag in its result. | Funnel outcomes through one checker and retain the exact range and required evidence. |
-| Are caller bytes protected on every exit? | `sync_main` explicitly resets and can retain overlapping changes in a stash; the tests expect that behavior. | Avoid that helper in release selection. Keep branch/index/bytes untouched on every exit. |
-
-Primary observations and limits are in [research.md](research.md), with captured
-CLI receipts under [evidence/](evidence/). Six existing publisher tests passed;
-they validate current local preparation behavior, not this design or live
-publication. No independent current artifact-publication failure was reproduced.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-| --- | --- | --- |
-| Correlate cron starts, agent text, and latest release after the fact | Almost no execution change | Ambiguous manual runs, delayed wakes, and overlapping releases make the join non-authoritative. Cannot prove no-change or crashed settlement. |
-| New release queue/controller and transactional store | Centralizes all scheduling and release state | Duplicates launchd, existing obligations, stage recovery, and publication machinery. The migration/ownership problem is as large as the requested fix. |
-| Extend existing cron evidence plus the mechanical release operation (chosen) | Requires narrow identity/context plumbing and explicit settlement | Keeps owners intact and reaches the user's observable outcome. Durable records are not allowed to dispatch work independently. |
-
-## Key decisions
-
-- Success is product evidence. An agent/process exit and a GitHub tag are
-  supporting facts, never settlement shortcuts.
-- Attempts can fail repeatedly; due identity is stable. Retry history and
-  external partial publication survive recovery.
-- Retain failure ownership and its age independently of later green checks.
-  Release history reports undispositioned failures past one day. The latest
-  scheduled failure stays visible even when continuity passes. Do not feed
-  this retrospective health projection into `doctor`'s exit status: telemetry
-  contains `doctor`, so making a prior unsettled release fail that prerequisite
-  creates a cycle. Existing doctor checks and scorecard failures still gate
-  telemetry; the new history view does not change their verification contract.
-- The scorecard's obsolete SQL is an observed verification dependency. LOO-285
-  retains responsibility for the release acceptance blocker; Intelligence owns
-  correction of analytical evidence, consistent with the chapter boundary.
-  Record a concrete handoff before any separate Task is selected. No new Task,
-  parallel implementation slot, or remote assignment is created by this doc.
-- Historical UI capability notes are not a fresh diagnosis. Missing current
-  required evidence blocks the claim; a real probe must establish the cause.
-- Wild success: a wake after a long sleep shows every missed day, finishes the
-  existing candidate in one execution, and links all collapsed misses to its
-  verifiable publication. A later scheduled execution can independently prove
-  no-change, with no operator archaeology.
-- Wild failure: a green accounting screen masks red verification, every retry
-  invents a new release, or a stale process deletes another attempt's artifacts.
-  The proof matrix below specifically rejects those outcomes.
-
-## Scope
-
-- In scope: due opportunity accounting; typed release outcomes; explicit cron
-  linkage; delayed wake and overlap; bounded recovery; verification failures
-  and disposition; public exact-tag proof; caller preservation; CLI history,
-  shared doctor calendar calculation, repo flow, and matching docs/fixtures.
-- Out of scope: scheduler replacement, arbitrary cron grammar, new resident
-  services, multi-product deployment framework, general process liveness or
-  worktree leases, PM redesign, resurrecting completed historical Tasks, and
-  Intelligence's broader usage/operation-population implementation.
-- The fourteen-day availability KR is separate. This work supplies release
-  evidence to it but does not claim that duration window.
-
-## Done when
+## Acceptance counterexamples
 
 ### Focused behavioral proof
 
-Add behavioral cases to existing cron, doctor, release integration, flow, and
-publisher tests. Use real temporary repositories/files/OS locks and simulated
+Required behavioral cases belong in existing cron, doctor, release integration,
+Flow and publisher tests; recorded passes retain their original scope. Use real temporary repositories/files/OS locks and simulated
 external services. Assert durable outcomes and preserved bytes, not mock calls.
 
 | Counterexample | Required observation |
@@ -445,597 +253,63 @@ external services. Assert durable outcomes and preserved bytes, not mock calls.
 | Staged/unstaged/untracked caller edits and local commits, including overlapping upstream paths | Exact caller HEAD/branch/index/working bytes unchanged after every failure, retry, and success |
 | Independent target/repository | No opportunity collision or unintended shared publication lock |
 
-Suggested affected-suite commands after implementation:
-
-```sh
-cargo test -p loopflow --lib ops::cron::tests
-cargo test -p loopflow --lib lf::commands::doctor::tests
-cargo test -p loopflow --test release_tests
-uv run pytest python/tests/test_release_publisher.py python/tests/test_release_automation.py
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-```
-
-Also run the actual added flow/context and DTO fixture tests and the design's
-caller-preservation cases; update commands to their final names. Do not claim
-a successful compiler/static check as configured operational proof.
-
 ### Configured-path acceptance
 
-1. Capture installed obligation, Home, binary/source digest, effective timezone,
-   release config and required-check inventory, and unresolved historical
-   failures. Record cutover and any unaccounted chapter intervals.
-2. Install through the supported release/install path and sync cron using `lf`.
-   Preserve the 09:00/10:00 cadence. Record actual installed flow resolution.
-3. Observe two adjacent real due opportunities. Do not manually trigger them,
-   alter their dates, or select two nonadjacent green rows. Delayed automatic
-   catch-up is eligible when it retains original consecutive due identities
-   and two distinct executions. Collapsed entries are accounted for but cannot
-   count as additional settlements or make nonadjacent due times consecutive.
-4. Retain exact attempts, verification records, release workflow/check URLs,
-   tag/commit, publisher manifest, asset download hashes, isolated exact-version
-   smoke results, and intervention provenance. At least one opportunity must
-   publish. Both must settle no-change/publication without manual repair.
-5. Inspect `lf release history` and `lf doctor` from the installed CLI. Prove
-   every due opportunity is present or explicitly missing/uncertain, all
-   deferred work names its continuation, and failures name an owner within one
-   day. A late disposition must remain visibly late.
-   Show collapsed due count separately from execution and settlement counts.
+- Capture exact installed obligations, placement, executable/source digest,
+  timezone, release configuration, required-check inventory and unresolved
+  historical failures. Keep pre-observation coverage explicitly incomplete.
+- Use the supported release/install/sync path when authorized, preserving the
+  09:00/10:00 cadence and existing receipts. The September 28 activation is
+  retained evidence, not a substitute for observing the final implementation.
+- Observe two adjacent original real dues through two distinct automatic
+  executions, at least one published, with all verification and no manual repair.
+  No forced trigger, backdated due, collapsed duplicate or nonadjacent green pair.
+- Retain exact attempts, command/config digests and immutable subjects, hosted
+  workflow/check references, tag/commit, publisher manifests, asset hashes,
+  platform smoke and intervention provenance. An absent required check remains
+  absent; cross-platform execution cannot be inferred from one host.
+- Installed history/doctor must expose every due as accounted, missing or unknown;
+  unresolved work needs truthful continuation and failures need dated owners.
+  A late assignment remains late. A pending configured firing is a bounded
+  declared wait at its observed next due, not an agent sleeping for a day.
 
-If verification remains blocked, complete the code proof but keep operational
-acceptance open with the named blocker. Do not mark the Task/KR complete on a
-fixture, on the v0.12.19 observation, or on two arbitrary manual runs. A pending
-configured opportunity is a declared wait with its exact next due time, not a
-reason to keep an agent sleeping for a day. The pinned lifecycle owns landing
-and final Task disposition; this kickoff does not invoke it manually.
+Measure due/accounted/unknown/unresolved counts, original timing and delays,
+collapsed dues, distinct executions and settlements, failure-disposition age,
+and eligible adjacent pairs. Collapsed dues contribute to accounting only.
+No retrospective release-health gate enters doctor: release already depends on
+telemetry containing doctor, and such a gate would create a dependency cycle.
 
-## Forbidden outcomes
+## Retained evidence and review
 
-- A scheduler/process receipt promoted into product success.
-- Failed telemetry disappearing because scheduling continuity is green.
-- A new tag used to escape a resumable incomplete tag or missing proof.
-- One publication counted repeatedly across due opportunities.
-- Collapsed misses fabricated as independent no-change settlements, or due
-  times arriving during execution silently absorbed into its frozen coverage.
-- Manual trigger/repair counted as unattended success.
-- Missing verification treated as pass, or required UI/host checks silently
-  dropped to obtain a publication receipt.
-- A timeout, stale PID, or unclaimed process interpreted as mutation authority.
-- A second release state machine, daemon, generic deployment platform, or
-  historical receipt rewrite.
-- Caller edits left only in a stash, changed index state, reset local commits,
-  or cleanup of dirty/divergent/live-owned generated worktrees.
-- A new observation frontier that silently removes earlier chapter failures
-  or uncertain due opportunities from the denominator.
+All prior designs, slice/review/compression notes and raw evidence remain at
+`fe36937faf75151a2f5d7195b32ff708ce335e86:scratch/`. They were clean committed bytes
+before curation. In particular, `release-saved-candidate-recovery.md` retains the
+four-case Docker recovery proof, inspector survival, queue cases and 30 publisher
+passes; `shepherd-assessment-20261002.md` retains the read-only main/run-records
+comparison. Its statements that main integration and saved-candidate recovery
+were still future work are superseded by the source and steers above. Historical
+review verdicts and their narrower source searches do not navigate the current Flow.
 
-## Internal slices
+`evidence/baseline-summary.json` retains the September 24 00:31 UTC observation:
+70 receipts (36 failed telemetry, 33 successful release processes, one failed
+release process), published v0.12.19 and missing `agent_turns` probe. Full receipts,
+logs, publisher receipt and read projections are available in the same git tree.
+The baseline cannot establish a settlement percentage or the two-opportunity KR.
+The independent invalid v0.12.30 incident source `8cbd0c5b1c99a12151908c59f923b0128706a34f`
+contained canonical release SQL plus `drafts/remove_ask.sql`; the retained
+run-records assessment names packaged rejection. Present provider publication
+state was not checked, so that incident is not asserted as a current blocker.
 
-These are ordered cuts within one coherent PR, not separate Tasks or deployable
-half-contracts.
+Latest supplied feedback reports focused recovery, publisher, minor-release and
+static passes after main merge and CI-repair ownership repair. This reconciliation
+reuses those results within their scope; it does not invent a final-tree gate,
+hosted outcome, current installed check or configured settlement. The prior Docker
+proof used seeded dues and simulated external services with real Git/CLI/locks.
 
-1. Extract calendar calculation; add retained obligation/opportunity records,
-   migration of historical evidence, atomic persistence, and identity tests.
-2. Replace scheduled agent wrapping with the mechanical flow; carry explicit
-   receipt context, preserve trigger provenance, and collapse missed due times
-   into one release execution per wake.
-3. Converge manual/scheduled release paths on operation locking, typed outcomes,
-   exact-stage recovery, caller-preserving selection, and single settlement.
-4. Bind required checks and publisher read-back; add the release-history view,
-   failure disposition, DTO fixtures, and user docs. Exercise preservation and
-   interruption tests through the joined path.
-5. Run configured acceptance. Name and retain any independent blocker before
-   selecting further work; do not split around required proof.
+The simulated review identified stale completion claims in the plan: assignment
+had been conflated with continuation, dated telemetry diagnosis with current
+source, and repetitive completed slices with remaining work. The reconciled plan
+separates these boundaries and retains the full acceptance criteria. Production
+code is unchanged; no behavioral rerun is warranted for these prose edits.
 
-## This slice
-
-Recover a scheduled opportunity's invalid unpublished saved candidate through
-run-records' exact-source inspection and the existing successor controller.
-Persist the rejected selection and affirmative publication inspection before
-allowing one successor selection in the running attempt. Keep original dues,
-prior failed attempts, intervention provenance, required verification and caller
-bytes. Unknown or partial publication blocks replacement; a valid candidate
-resumes unchanged. Interruption before selection keeps the rejected owner pinned.
-
-### Delete — do not maintain
-
-- Unconditional saved-candidate completion: inspect exact source before choosing
-  resume or evidenced replacement; keep one controller and settlement writer.
-- `GhPrView` release-only polling: use current main's combined queue observation
-  and queue-aware integration decision, retaining mutation lock inheritance.
-- Publisher acceptance based only on `authority=published`: require successful
-  packaged preflight in a fresh Home, including cached prepared artifacts.
-
-The October 2 contribution ports only the required release interfaces; it does
-not sync main's Session/Exec/Home/Flow model or run-records' minor-cycle controller.
-Another invalid integrated successor fails visibly with its exact selection saved
-for the next wake, rather than draining candidates in this wake. Full main
-integration, closed same-Home continuation, remaining interruption proofs, the
-affected-suite gate, and configured telemetry/UI/public acceptance remain open.
-The two adjacent original dues still require two distinct automatic executions,
-one publication, all required checks, and no manual repair. All retained telemetry
-failures remain counterevidence; no new Intelligence handoff is implied.
-
-## Slice ledger
-
-- 2026-09-23 local / 2026-09-24 UTC: read assigned Wave memory, accepted
-  Reliability chapter proposal, source and installed cron/release surfaces.
-- Captured 70 physical receipts: 36 failed telemetry, 33 successful release
-  targets, one failed release target. This extends rather than erases the
-  accepted 35-failure counterevidence.
-- Observed v0.12.19 publication via `lf release status` and existing publisher
-  receipt. No new publication or live artifact smoke performed.
-- Read-only SQLite prepare reproduced `no such table: agent_turns`.
-- Existing publisher tests: `uv run pytest python/tests/test_release_publisher.py
-  -q` — 6 passed in 1.10s. No Rust, full CI, or UI suite run for this design-only
-  change.
-- Simulated code review changed the design: separate timing from product
-  outcome; preserve manual trigger provenance; reject main-reset/stash as
-  caller preservation; keep parent-death/child-lock and post-publication-crash
-  cases; distinguish a real published tag from a qualifying KR settlement;
-  remove the proposed doctor health gate that would create a telemetry/release
-  dependency cycle.
-
-- Implementation uses one atomically replaced obligation document containing its
-  opportunities and links, rather than separately committing reciprocal link
-  files. This removes the partial-link crash window without another writer.
-- A file descriptor carried alongside the exact cron receipt fences attribution;
-  a receipt id alone cannot attach a manual invocation to scheduled evidence.
-  Scheduled and manual release mutations also share the target OS lock.
-- Source selection reads fetched origin and verifies in an owned exact-source
-  checkout. Focused preservation test passes for local commits, staged/unstaged
-  bytes, untracked files, unchanged HEAD/branch, and byte-identical index on
-  both no-change and verification failure.
-- Five accounting tests passed for frozen delayed coverage, candidate retry,
-  stale settlement, failed unselected catch-up, schedule replacement, and
-  corrupt-record preservation. New history fixture tests reject collapsed,
-  triggered, unknown, and unverified rows as a consecutive pair while retaining
-  failed telemetry and late repair ownership.
-- A real shell cron target confirms three missed due times link to one execution;
-  its zero exit remains unverified. The OS-lock test keeps exclusion after the
-  parent drops its descriptor while a child survives. Neither is a live
-  scheduled release or a killed production publisher.
-- Nine publisher tests passed, including mocked public-service recovery with a
-  real temporary installer and binary smoke, changed/missing artifact rejection,
-  missing required host verification, and actual descriptor propagation through
-  `uv run python`. Public networking, signing, UI automation, and publication
-  remain unexercised in this session.
-- Cutover finding: target kind is execution provenance, not daily obligation
-  identity. Changing the installed target from skill to flow preserves activation
-  and scheduling continuity; old process receipts still do not gain settlements.
-
-- Final focused proof at this implementation checkpoint: 14 Rust boundary tests,
-  three release integration cases (caller preservation, candidate preparation,
-  same-tag recovery), and ten Python publisher cases passed. The history fixture
-  tests also passed after the count-window adjustment. `cargo fmt --check`,
-  `cargo clippy --all-targets -- -D warnings`, Python Ruff, and the `lf` binary
-  build passed. These are focused implementation checks, not the lifecycle gate
-  or full CI matrix.
-- Manual release/tag/publication interventions now survive automatic retries and
-  collapsed coverage. They disqualify the corresponding unattended pair. Direct
-  publisher stages require the owning inherited release descriptor.
-- A durable successor link closes the predecessor obligation even if the old
-  snapshot rewrite is interrupted. A focused test preserves this boundary and
-  distinct identities across same-second reconfiguration.
-- Due times arriving during an execution receive a recorded wait reason and
-  exact next configured firing, without extending the original covered set.
-- Built-CLI read-back returned the same 70 physical receipts, 36 failed telemetry
-  targets, 37 undispositioned failures, no qualifying pair, and unknown pre-cutover
-  opportunity coverage. `flow show release-run` resolved to the mechanical op.
-  Stale ambient Wave/journal-lock warnings are retained in `research.md`; no
-  runtime repair or configured acceptance is inferred from these read probes.
-
-- Compression: verification now belongs solely to the attempt and is persisted
-  atomically with its outcome. Removed the duplicate success-proof payloads and
-  separate verification writer across producers, history, and the JSON fixture.
-  Publisher preparation/publication use one artifact receipt type; stage evidence
-  and public observations remain distinct. See [compression.md](compression.md).
-
-- Review reproduced and repaired wrong-source verification on initial tag resume
-  and lost candidate ownership after an intervening preflight failure. Both
-  regression tests failed before and passed after their fixes. The candidate
-  preparation success test also passed with exact-candidate checks in the shared
-  completion path. Detailed verdict and remaining work: [review-slice.md](review-slice.md).
-
-- Implementation follow-up: the joined real-CLI fixture reproduced built-in skill
-  shadowing of the authored release flow. Central discovery now gives repository
-  flows precedence; declared cron flows fail on absence or invalid content.
-- Publisher reconciliation now observes every configured public endpoint,
-  including the latest DMG alias. It repairs known missing/stale stages using the
-  existing publisher operations, retains stage receipts after each repair, and
-  refuses unavailable authority, immutable conflicts, or rollback of a newer tag.
-- Thirteen focused Python cases passed, including candidate-only recovery,
-  missing/stale-stage repair, unavailable service, immutable conflict, newer
-  release, failed read-back, missing UI proof, and real failing installer smoke.
-- The joined Rust fixture passed all five outcomes and caller preservation in
-  35.13 seconds. The declared-flow catalog regression passed. Synthetic due times
-  and mocked external proof remain explicitly ineligible for the configured KR.
-- Rust formatting/all-target Clippy and Python Ruff check/format passed for this
-  cut. No broader suite, hosted matrix, installed cutover, or live acceptance ran.
-
-- Follow-up review repeated the joined real-CLI demonstration (five scenarios,
-  39.68 seconds) and eleven focused publisher recovery cases. Two new history
-  counterexamples reproduced false unattended qualification and lost on-time
-  classification after collapse. The corrected read projection passed all four
-  history tests, retaining product counts and the existing DTO shape. The
-  verdict remains iterate; configured acceptance and retained execution gaps
-  remain open in the same Task.
-
-
-- Direct mutation-child follow-up: both killed-controller regressions reproduced
-  second-writer access while the original child remained active. Tag pushes,
-  candidate refs/workflow submission, GitHub publication, and existing publisher
-  launches now carry the same borrowed target lock into their children.
-- Final parent-death proof passed both cases in 7.08 seconds. The real tag push
-  reaches a disposable bare origin; the publication endpoint remains simulated.
-  Another repository progresses independently, and same-target access returns
-  after the child exits. Candidate-preparation and missing-object-fetch focused
-  tests also passed, as did formatting and all-target Clippy.
-- Shared PR/hook/worktree subprocess exclusion, original telemetry linkage and
-  recovery, closed-obligation continuation, and configured acceptance remain
-  open. No production mutation or PR publication occurred in this cut. Details:
-  [mutation-child-exclusion.md](mutation-child-exclusion.md).
-
-Review of the direct mutation-child cut remains **iterate**. The built-CLI
-parent-death demonstration passed again. A new manual-provenance counterexample
-failed: an unlocked descriptor for the correct lock file suppressed intervention
-recording. Acquisition now treats that descriptor as fresh ownership; the CLI
-regression proves manual evidence is retained and genuine nested ownership stays
-unmarked. All three lock integration cases passed after repair, as did Rust
-formatting and all-target Clippy. Shared PR/hook/worktree ownership, historical
-telemetry recovery, closed-obligation continuation and configured acceptance
-remain open. Full matrix and next direction:
-[review-mutation-children.md](review-mutation-children.md).
-
-- 2026-09-24: ordinary checkout removal reproduced deletion under a surviving
-  preparation child after its exact controller died. The existing worktree lease
-  now reaches preparation, publication and public-reconciliation children beside
-  the target lock. Python publisher/deployment/packaging helpers forward both
-  descriptors; checkout-only inheritance cannot authorize publisher entry.
-- The built-CLI parent-death proof passed preparation and publication, retained
-  source bytes, independent checkout removal, target exclusion and cleanup after
-  exit (7.66s). Normal candidate preparation/tag/publication also passed (12.38s).
-  Six Python descendant/authority cases, formatting, Ruff and all-target Clippy
-  passed. These are local simulated-service proofs; shared PR/hook/source/cleanup
-  children, telemetry recovery, closed obligations and configured acceptance
-  remain open. Details: [publisher-checkout-preservation.md](publisher-checkout-preservation.md).
-
-- Publisher checkout review remains **iterate**. The controller-death proof
-  passed again, then an added launcher-failure case reproduced controller cleanup
-  deleting the checkout under a surviving descendant. Cleanup now relinquishes
-  its lease and reacquires through ordinary removal; it preserves the checkout
-  and branch when the descendant still owns protection. All four preparation/
-  publication and controller-exit scenarios passed after repair (14.68s), along
-  with six Python ownership cases, normal candidate completion (12.73s), Rust
-  formatting and all-target Clippy. Remaining shared mutation children,
-  telemetry recovery, closed obligations and configured acceptance stay open.
-  See [review-publisher-checkout.md](review-publisher-checkout.md).
-
-- 2026-09-24: configured verification/preparation hooks now inherit the existing
-  target lock and checkout lease. The CLI counterexample first reproduced a
-  second tag while verification survived its controller. Preparation then exposed
-  an indirect `sync_main` in worktree creation that could replace the held lock
-  file and reset caller state. Both creation paths now disable sync; rebuild
-  refreshes origin explicitly and resets only its owned checkout. Earlier source
-  claims that sync was unreachable missed this helper path.
-- Four hook stage/exit cases passed with exact caller HEAD/branch/index and
-  staged/unstaged/untracked preservation (14.01s); PR rebuild with advancing main,
-  hook expansion/failure, and migration preparation checks passed. Remaining
-  shared mutation children, telemetry recovery, closed obligations and configured
-  acceptance stay open. Details: [release-hook-ownership.md](release-hook-ownership.md).
-
-Hook review remains **iterate**. The four-case built-CLI demonstration passed
-again (14.64s). A new rebuild counterexample reproduced cleanup deleting a
-divergent local release branch after rejecting its HEAD. Rebuild now uses the
-existing exact-source recovery classifier before mutation/cleanup; unpublished
-repair commits and caller state survive (2.32s), and normal reintegration with
-advancing main still passes (6.86s). Shared mutation children, telemetry
-association/recovery, closed obligations and configured acceptance remain open.
-See [review-release-hooks.md](review-release-hooks.md).
-
-- 2026-09-24: shared auto-merge enable/disable commands now inherit the release
-  target lock during initial arming and re-arming; preparation also supplies its
-  checkout lease. The CLI regression first reproduced a second tag while the
-  original merge child survived. All eight initial/re-arm, enable/disable and
-  killed-controller/failed-launcher cases passed after repair (47.72s), retaining
-  simulated remote head/revocation state and preparation checkout protection.
-- Normal dropped-arm recovery (11.58s), advancing-main preparation (4.67s) and
-  ordinary PR arming (10.86s) passed, as did formatting and all-target Clippy.
-  Git/process/lock execution is real; GitHub and notes are simulated. Other
-  mutation children, historical telemetry recovery, closed obligations and
-  configured acceptance remain open. See [release-auto-merge-ownership.md](release-auto-merge-ownership.md).
-
-Auto-merge review remains **iterate**. The built-CLI demonstration passed all
-eight survival scenarios again (45.04s); no additional bounded defect was
-established and no executable code changed. Shared mutation children, historical
-telemetry association/recovery and repair ownership, closed-obligation
-continuation and configured acceptance remain open. See
-[review-auto-merge.md](review-auto-merge.md).
-
-- 2026-09-24: shared PR creation, base/title/body edits and readiness commands
-  now inherit release target and preparation checkout capabilities. The CLI
-  regression first reproduced a second tag while a PR-creation child survived.
-  Release preparation now commits/pushes without a best-effort draft, then uses
-  shared finalization as its PR creation owner.
-- Eight metadata survival cases passed (60.53s), as did eight auto-merge cases
-  after explicitly representing the existing replacement PR (46.83s), normal
-  release reintegration (5.51s), ordinary arming (11.32s), formatting and all-target
-  Clippy. GitHub/notes are simulated. Shared Git/notes/tools/worktree and Task
-  compensation paths, telemetry recovery, closed obligations and configured
-  acceptance remain open. See [release-pr-mutation-ownership.md](release-pr-mutation-ownership.md).
-
-PR mutation review remains **iterate**. The built-CLI demonstration passed all
-eight survival scenarios again (60.85s); no additional bounded defect was
-established and no executable code changed. Task compensation and other shared
-mutation children, historical telemetry linkage/retry and repair ownership,
-closed-obligation continuation and configured acceptance remain open. See
-[review-pr-mutations.md](review-pr-mutations.md).
-
-- 2026-09-24: shared staging, commit and branch pushes now inherit the release
-  target lock and checkout lease, including upstream establishment and the
-  force-with-lease fallback. The built-CLI regression first reproduced a second
-  tag while staging survived its killed controller. Ten survival cases passed
-  after repair (43.90s), with real Git hooks for commit and actual index/commit/
-  bare-origin results. Ordinary commit/push, Task revocation before push,
-  advancing-main preparation and missing-identity commit checks also passed,
-  along with formatting and all-target Clippy. GitHub/notes are simulated.
-- Task compensation, notes/tools/worktree children, historical telemetry recovery,
-  dated repair ownership, closed obligations and configured acceptance remain
-  open. See [release-git-ownership.md](release-git-ownership.md). No publication,
-  installation or Task completion occurred in this cut.
-
-Git ownership review remains **iterate**. The built-CLI demonstration passed all
-ten survival scenarios again (43.50s), including actual index/commit and bare-origin
-results. No additional bounded defect was established and no executable code
-changed. Task compensation, notes/tools/worktree children, historical telemetry
-linkage/retry and dated repair ownership, closed-obligation continuation and
-configured acceptance remain open. See [review-git.md](review-git.md).
-
-- 2026-09-24: manifest lockfile tools now inherit the existing release target
-  lock and exact checkout lease. The built-CLI regression first reproduced a
-  competing tag while the Cargo launcher survived controller death. Four
-  Cargo/uv and killed-controller/failed-launcher cases passed after repair
-  (18.34s), including real offline lockfile updates and exact caller-state
-  preservation. Ordinary bump, release reintegration, formatting and all-target
-  Clippy also passed. Task
-  compensation, notes/worktree children, historical telemetry recovery, closed
-  obligations and configured acceptance remain open. See
-  [release-lockfile-ownership.md](release-lockfile-ownership.md).
-
-Lockfile ownership review remains **iterate**. The built-CLI demonstration
-passed all four Cargo/uv survival scenarios again (16.17s), including real offline
-updates and exact caller-state preservation. No additional bounded defect was
-established and no executable code changed. Notes/Task/worktree child ownership,
-historical telemetry linkage/retry and dated repair ownership, closed obligations
-and configured acceptance remain open. See [review-lockfile.md](review-lockfile.md).
-
-- 2026-09-24: notes generation now passes its existing target lock and exact
-  checkout lease through the nested CLI into the provider launch. The real-CLI/
-  Codex-harness regression reproduced competing tag access after controller death,
-  then premature context deletion after launcher failure. Exact bounded input now
-  uses the existing runtime prompt writer with a unique invocation name.
-- Both interruption cases passed (19.23s), including context read and notes write
-  after interruption, checkout protection, target exclusion and exact caller-state
-  preservation. Six existing notes-policy cases (5.34s), normal candidate completion
-  (12.59s), formatting and all-target Clippy passed. Provider/GitHub services are
-  simulated; CLI, harness, Git and OS locks are real. Task compensation,
-  source/worktree children, telemetry recovery, closed obligations and configured
-  acceptance remain open. See [release-notes-ownership.md](release-notes-ownership.md).
-
-Notes ownership review remains **iterate**. The built-CLI/Codex-harness
-demonstration passed both interruption scenarios again (18.23s), retaining exact
-input, completed notes, target/checkout protection and caller state. No additional
-bounded defect was established and no executable code changed. Task compensation,
-source/worktree children, historical telemetry linkage/retry and dated repair
-ownership, closed obligations and configured acceptance remain open. See
-[review-notes.md](review-notes.md).
-
-- 2026-09-24: source fetching, checkout creation, rebuild reset, removal and
-  branch cleanup now retain their existing target/checkout capabilities in Git
-  children. The CLI regression first reproduced a competing tag during a surviving
-  initial fetch. Named source checkout creation no longer starts a background
-  branch push; preparation owns its explicit publication and ordinary placement
-  keeps its existing synchronization.
-- Twelve source mutation/exit cases passed (44.60s), including stale-ref refresh,
-  actual checkout/reset/removal/deletion results, unchanged remote branches and
-  exact caller state. Ten existing Git survival cases passed (47.57s), along with
-  normal candidate completion, advancing-main rebuild, divergent-branch
-  preservation, ordinary named creation, formatting and all-target Clippy.
-  GitHub is simulated. Task compensation, telemetry recovery, closed obligations
-  and configured acceptance remain open. See
-  [release-source-ownership.md](release-source-ownership.md).
-
-- Source ownership compression removed `create_named_worktree`'s obsolete
-  main-sync mode: both production callers already disabled it, and only a test
-  kept the resetting branch alive. Source selection now has one caller-owned
-  path; named creation cannot synchronize/reset main. Updated every direct
-  caller and replaced the old reset test with exact-source/local-source creation
-  plus caller HEAD/branch/index/working-byte preservation (passed, 0.62s).
-  Formatting and all-target Clippy passed. Existing survival proofs were not
-  rerun; Task compensation, telemetry recovery, closed obligations and configured
-  acceptance remain open. See [compression.md](compression.md).
-
-Source ownership review remains **iterate**. The built-CLI demonstration passed
-all twelve survival scenarios again (46.98s). A new real post-checkout hook case
-reproduced mismatch cleanup deleting the checkout under a live descendant.
-Materialization now retains the unexpected checkout and branch for inspection;
-the regression passed after repair (5.77s), preserving the hook commit, usable
-source, target/checkout exclusion and caller HEAD/branch/index. Task compensation,
-telemetry recovery and repair ownership, closed obligations and configured
-acceptance remain open. See [review-source.md](review-source.md).
-
-- 2026-09-24: Task merge-intent revocation, replacement and stale-head
-  compensation now carry their caller's existing release target/checkout
-  capabilities. The built-CLI regression reproduced competing tag access while
-  a Task revocation child survived its controller. Both interruption modes and
-  ordinary replay now pass (12.33s), retaining durable intent, preventing an
-  early push, preserving caller state and checking the eventual bare-origin head.
-- Three ordinary Task revocation cases, failed-finalization compensation,
-  settlement-disposition replacement and normal release preparation passed,
-  as did formatting and all-target Clippy. Git/CLI/store/process/lock execution
-  is real; GitHub and notes are simulated. Other compensation routes were not
-  independently killed. Historical telemetry recovery and dated repair ownership,
-  closed obligations and configured acceptance remain open. See
-  [release-task-compensation.md](release-task-compensation.md).
-
-Task compensation review remains **iterate**. The built-CLI demonstration passed
-both interruption modes and ordinary replay again (12.00s), preserving release
-exclusion, checkout, durable intent, caller state and the eventual bare-origin
-head. No additional bounded defect was established and no executable code changed.
-Historical telemetry linkage/retry and dated repair ownership, closed-obligation
-continuation, remaining interruption proof and configured acceptance remain open.
-See [review-task-compensation.md](review-task-compensation.md).
-
-- 2026-09-24: release attempts now retain frozen telemetry prerequisite
-  observations, original receipt references and one reserved automatic recovery
-  receipt. The installed executor performs at most one retry per wake; earlier
-  failures remain unchanged and linked receipts remain visible outside the
-  history window. Missing historical schedule/timezone authority stays unknown.
-- Eight joined CLI scenarios passed (267.10s), including recovered/missing/failed
-  telemetry, older linked failure, same-second ambiguity, product failure and
-  exact caller preservation. Nine focused library tests and four history tests
-  passed, as did formatting and all-target Clippy. Verification and public
-  services remain simulated; Git, CLI, store and OS locks are real.
-- Prior telemetry obligation segments, dated repair ownership, bounded target
-  runtime/controller recovery, closed obligations and configured acceptance
-  remain open. Doctor semantics are unchanged: a missing natural scheduled
-  receipt can still fail real telemetry recovery. No continuity exemption,
-  installed cutover or qualifying automatic pair is claimed. Details:
-  [release-telemetry-recovery.md](release-telemetry-recovery.md).
-
-Telemetry recovery review remains **iterate**. The joined built-CLI demonstration
-passed all eight scenarios again (92.40s), preserving original failures, frozen
-coverage, one automatic retry and exact caller state. No additional bounded
-defect was established and no executable code changed. Bounded target waiting
-and recovery from retained Running receipts, the real telemetry Flow's continuity
-boundary, prior obligation segments, dated repair ownership, closed obligations
-and configured acceptance remain open. See [review-telemetry.md](review-telemetry.md).
-
-- 2026-09-24: new physical cron receipts retain the runner's observed OS start
-  time. Confirmed runner death permits one reserved telemetry recovery through
-  the existing executor; a surviving child still excludes it with the job lock.
-  Live and unknown runners defer. Interrupted receipts remain unchanged, and
-  historical schema-1 receipts without identity remain explicitly unknown.
-- The built-CLI regression reproduced permanent deferral after controller death,
-  then passed live-runner, surviving-child and post-exit recovery boundaries.
-  Final joined proof passed three tests / ten scenarios (85.50s), including
-  legacy unknown identity, frozen coverage, receipt preservation, current proof
-  subject and caller preservation. Four focused library checks, formatting and
-  all-target Clippy passed. External verification/public services are simulated.
-- Bounded target runtime, actual telemetry continuity, previous obligation
-  segments, dated repair ownership, closed obligations and configured acceptance
-  remain open. No installed cutover or qualifying automatic pair is claimed.
-  Details: [release-interrupted-telemetry.md](release-interrupted-telemetry.md).
-
-Interrupted telemetry review remains **iterate**. The built-CLI demonstration
-passed its three firing boundaries again (18.22s): live-runner deferral,
-surviving-child exclusion after controller death, then recovery after child exit.
-Original receipt, frozen coverage, current verification subject and caller bytes
-remain preserved. No additional bounded defect was established; executable code
-is unchanged. Bounded runtime, actual telemetry continuity, prior segments,
-dated repair ownership, closed obligations and configured acceptance remain open.
-See [review-interrupted-telemetry.md](review-interrupted-telemetry.md).
-
-
-- 2026-09-24: automatic telemetry recovery now waits at most one hour for an
-  observed exit. Deadline expiry defers release with the exact receipt/log and
-  next due; the physical receipt remains Running and the child keeps its job
-  lock. Observation errors fail without inventing a target exit. No signal,
-  extra retry, background observer or scheduler was added.
-- Three focused deadline/observation/exclusion cases passed (0.60s), along with
-  ordinary terminal receipts (0.21s) and the built-CLI three-firing interruption
-  proof (36.96s). Formatting and all-target Clippy passed. The short deadline
-  uses the production wait function directly;
-  it is not a one-hour CLI timeout or configured automatic settlement. Actual
-  telemetry continuity, prior segments, repair ownership, closed obligations,
-  required UI/public proof and configured acceptance remain open. See
-  [release-telemetry-wait.md](release-telemetry-wait.md).
-
-
-Telemetry wait review remains **iterate**. Three focused deadline, observation-error
-and exclusion cases passed again (0.64s); the built-CLI interruption demonstration
-passed its three firing boundaries (19.12s). No additional bounded defect was
-established and executable code is unchanged. The deadline proof directly calls
-the production wait with 50ms; the CLI proof covers interruption, not one-hour
-deadline expiry. Actual telemetry continuity, prior segments, dated repair
-ownership, closed obligations, remaining interruption proof and configured
-acceptance remain open. See [review-telemetry-wait.md](review-telemetry-wait.md).
-
-- 2026-09-24: telemetry now retains schedule/timezone/Home segments through the
-  existing obligation store. Sync preserves legacy predecessors before replacement,
-  closes old placement in its original store, and retains removal boundaries.
-  Original prerequisite references select their own segment and scheduled receipts;
-  missing/unobserved history stays unknown. Telemetry creates no release dues.
-- The segment tests exposed repository-alias matching (`/var` versus `/private/var`);
-  the join now uses canonical identity. Focused segment/reservation and installation
-  cases passed, and the history DTO/qualification cases retained their counts.
-  The joined CLI proof spans two telemetry schedules and retains an older failure
-  outside the display window, with frozen coverage and exact caller preservation.
-  Final validation and limits: [release-telemetry-segments.md](release-telemetry-segments.md).
-- Actual telemetry continuity, dated repair ownership, closed release continuation,
-  remaining interruption proof, required UI/public proof and configured acceptance
-  stay open. No installed cutover or qualifying automatic pair is claimed.
-
-
-Telemetry segment review remains **iterate**. The joined built-CLI historical
-schedule demonstration passed again (9.84s), retaining both segment references,
-the older failed receipt and caller bytes. A new CLI counterexample reproduced
-telemetry-only history suppressing the unknown release-coverage warning. Text
-now uses the existing release observation frontier; the regression passed after
-repair (10.71s), as did formatting and all-target Clippy. Closed release
-continuation, dated repair ownership, actual telemetry/UI/public proof, remaining
-interruption proof and configured acceptance stay open. See
-[review-telemetry-segments.md](review-telemetry-segments.md).
-
-- 2026-09-24: closed unsettled release owners now remain visible beyond the
-  history window and accept dated repair ownership through the existing
-  disposition command. Candidate, attempt, collapsed due and original Home
-  evidence remain unchanged; assignment neither settles nor transfers work.
-- The new regression reproduced the missing repair obligation, then passed
-  removal, schedule/timezone/Home replacement and interrupted predecessor-write
-  cases (0.49s). The built CLI disposition/history proof passed (16.34s), as did
-  four history/DTO cases, formatting and all-target Clippy. These are seeded
-  local records, not configured release acceptance.
-- Automatic continuation across closed segments, exact overlap continuation,
-  actual telemetry/UI/public proof and two adjacent automatic settlements remain
-  open. Details: [release-closed-disposition.md](release-closed-disposition.md).
-
-Closed disposition review remains **iterate**. The built-CLI demonstration
-passed again (11.41s), then an expanded case reproduced a closed opportunity
-still advertising its saved wait as a future firing. Text now labels that wait
-and expected firing as historical; the expanded proof passed (15.81s), retaining
-byte-identical opportunity storage and the original JSON wait. Automatic closed
-continuation, exact overlap continuation, actual telemetry/UI/public evidence
-and two adjacent configured settlements remain open. See
-[review-closed-disposition.md](review-closed-disposition.md).
-
-- 2026-09-24: scheduled target-lock and cron-job overlap now retain an exact next
-  due time from the original obligation calendar, with its Home and observation
-  time. A closed segment instead names its opportunity repair command on the
-  original Home. The existing attempt/settlement writers and active frozen
-  coverage remain unchanged; no retry reservation or new execution owner exists.
-- The real-CLI counterexample reproduced generic continuation before repair.
-  Focused accounting checks passed for later-day observations, cron overlap,
-  original-Home repair after closure and retained timezone across DST. The joined
-  CLI proof passed with no release mutation and exact caller preservation.
-  Final validation and limitations: [release-overlap-continuation.md](release-overlap-continuation.md).
-  Automatic closed-segment execution recovery, actual telemetry/UI/public proof,
-  other wait-boundary continuations and two configured settlements remain open.
-
-## Measure
-
-Use the Reliability KR's actual due population, not successful process counts.
-Report configured due count, accounted count, unresolved/unknown count,
-on-time/caught-up attempts, product outcomes, maximum failure-disposition age,
-collapsed due count, distinct execution count, and consecutive qualifying
-settlements. Collapsed entries contribute to accounted count, never to product
-settlement count; their owner's unresolved result remains visible. Always retain
-the original due times and intervention flags. Baseline is 70 physical receipts with no authoritative
-opportunity join; it cannot supply a truthful historical settlement percentage.
-
-## Saved-candidate integration check — 2026-10-02
-
-Bounded implementation and remaining obligations are recorded in
-[release-saved-candidate-recovery.md](release-saved-candidate-recovery.md).
-Focused Docker CLI recovery/child/queue proofs, local accounting/DTO checks,
-30 publisher tests, Rust formatting/Clippy and Python Ruff passed; gate owns the
-affected suites and configured acceptance remains open.
+Check: `git diff --check` — passed; `lf context --wave infrastructure --skill realign --json` — memory 15,600/16,000 tokens, scratch below 12,000; both byte limits pass. Prose only; behavioral checks not rerun.

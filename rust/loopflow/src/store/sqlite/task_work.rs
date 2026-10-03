@@ -7,9 +7,6 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
-// Bound Flows inherit their Task's checkout instead of storing a second path.
-const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.task_id))";
-
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -24,7 +21,7 @@ pub(super) fn flow_ids(selector: &str) -> String {
     format!(
         "SELECT af.id FROM flow_sessions af JOIN ({}) tw ON af.task_id=tw.id OR ({})",
         tasks(selector),
-        checkout(FLOW_CWD)
+        checkout("af.cwd")
     )
 }
 
@@ -35,7 +32,7 @@ fn session_membership(session: &str) -> String {
          AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
          WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
         checkout(&format!("{session}.cwd")),
-        checkout(FLOW_CWD)
+        checkout("af.cwd")
     )
 }
 
@@ -338,12 +335,12 @@ mod tests {
                 );
             }
             for (id, cwd, bound) in [
-                ("managed", "/elsewhere", true),
+                ("managed", "/missing/task%_", true),
                 ("independent", "/missing/task%_/sub", false),
                 ("unrelated", "/other", false),
             ] {
                 conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
-                    VALUES(?1,?2,?3,?4,?5,0,0,1,0,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),(!bound).then_some(cwd),serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
+                    VALUES(?1,?2,?3,?4,?5,0,0,1,0,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),cwd,serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
             }
             conn.execute(
                 "UPDATE tasks SET current_invocation_id='managed' WHERE id=?1",
@@ -429,7 +426,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,0,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state) VALUES('child-flow',?1,?2,'/missing/task%_/child',?3,0,0,1,0,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
             conn.execute(
                 "UPDATE tasks SET current_invocation_id='child-flow' WHERE id=?1",
                 [child.as_str()],

@@ -338,7 +338,7 @@ mod tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,work_state,work_terminal_at)
                 VALUES(?1,'proj_11111111111111111111111111111111','old-issue','PROOF-1',1,'done',2)",[task]).unwrap();
             conn.execute(
-                "UPDATE flow_sessions SET cwd=NULL,task_id=?1,wave_id=?2",
+                "UPDATE flow_sessions SET task_id=?1,wave_id=?2",
                 params![task, wave],
             )
             .unwrap();

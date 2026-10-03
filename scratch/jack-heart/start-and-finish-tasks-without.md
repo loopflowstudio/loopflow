@@ -79,8 +79,9 @@ without plumbing blockers. No quantitative chapter targets were supplied.
   explicit binds with checkout membership, including absent-checkout history.
   Retain that reader and managed Flow distinction from LOO-358.
 - `cleanup_completed_task` already runs after durable completion and retains the
-  checkout when associated work blocks cleanup. It also ends a settled managed
-  Flow before deletion. Reuse the existing cleanup operation; the new requesting
+  checkout when associated work blocks cleanup. It also ends a managed
+  Flow after process settlement without proving graph completion. Remove that
+  implicit settlement while retaining cleanup; the new requesting
   conversation allowance must not reach that Flow-ending or deletion path while
   the conversation is active. Its Session and provider turn remain intact.
 - `task_actions::derive_task_actions` applies launch refusal before considering
@@ -96,6 +97,32 @@ control; missing observations are unknown; Flow completion is not Task completio
 The dated continuation and Task-deletion sections of the full supplied memory
 were read along with LOO-358 and current Wave guidance.
 
+## Persistence and completion counterexamples · 2026-10-02
+
+Source inspection found two dependencies missing from the proposed deletion cut.
+
+- `store/sqlite/flows.rs::insert_flow_in` discarded cwd whenever Task attribution
+  was present, and released SQLite triggers enforced that restriction. The reader
+  then derived cwd from Task placement. Optional placement alone would make a new
+  Flow unreadable, and later allocation would change its historical directory.
+  The branch now records every Flow's launch cwd and removes that fallback and
+  its two triggers. The single `optional_task_workspace` draft freezes existing
+  inherited paths; unknown historical placement stays NULL. A released-frontier
+  migration test and persistent Flow test cover this cut. The latter seeds the
+  unplaced Task row directly: it does not establish public Task admission or binding.
+- `lf/commands/flow.rs::drive` ends the managed Flow when Task state becomes Done.
+  `ops/task/lifecycle.rs::cleanup_completed_task` also ends a managed Flow after
+  checking execution liveness. Neither check proves the authored Flow finished.
+  Preserving these paths would violate Jack Heart's requirement that Task completion
+  grants no Flow settlement authority. Cleanup safety alone cannot implement the
+  accepted conversation contract. These implicit settlement paths must join the
+  deletion cut before relaxing completion. No new product decision is needed.
+
+Task placement columns are already nullable in the released schema. The required
+migration concerns the Flow cwd dependency, not converting non-null Task columns.
+Rust decoding still requires placement, and admission remains coupled to the first
+PR. Continue editing this Task's one draft rather than adding another migration.
+
 ## Chosen architecture
 
 Keep one Task, one shared Flow engine and the existing planning completion writer.
@@ -103,7 +130,7 @@ Remove placement assumptions at their current owners.
 
 1. Make Task placement explicitly optional. Represent the path and workspace slug
    together as `Option<TaskWorkspace>` in Rust so a half-present placement cannot
-   escape the store. Existing rows migrate to present placement unchanged; absent
+   escape the store. Existing nullable columns retain present placement unchanged; absent
    placement is SQL NULL, never an empty string or the caller's directory.
    The Task keeps its existing identity, Project, Wave, outcome and event history.
    No second Task table or workflow policy record is needed.
@@ -201,6 +228,11 @@ Remaining targets at their existing owners:
   `FlowCommand::Start`'s Task-only dispatch.
 - `complete_task`'s unconditional checkout inspection and
   `derive_task_actions`' launch refusal as a prerequisite to completion.
+- Task-Done-driven `end_flow` in `lf/commands/flow.rs::drive` and cleanup's
+  implicit managed-Flow settlement. Preserve actual graph completion, exact claims
+  and retained-work protections; Task completion cannot fabricate Flow completion.
+- The Task-bound Flow cwd restriction and read-time placement fallback: removed
+  in this branch, with retained-path migration and focused tests.
 
 The implemented confirmation cut already removes `load_wave_async` and the
 post-mutation `refresh_pm_snapshot` calls. Keep current-Project filing selection
@@ -261,7 +293,7 @@ failure; registered completion retains its existing pending-writeback state.
    stored historical skill wording historical. Complete migration and consumer
    tests before removing obsolete assertions.
 
-Gate runs once on the finished tree:
+Remaining acceptance checks on the finished tree:
 
 - `cargo test -p loopflow task_without_delivery`: add behavior coverage across
   persistent store, real CLI dispatch and shared snapshots. Cover file → inspect →
@@ -315,11 +347,9 @@ weaken delivery. The complete deletion cut therefore starts with registration
 and placement and preserves the gate's evidence obligations. Only the narrow
 planning-confirmation slice is implemented; full acceptance remains unproven.
 
-Check: retained `cargo test -p loopflow ops::pm::task_planning_tests --lib` — 16 passed, 1 subprocess entry ignored, and `cargo fmt --check` — pass; realign `git diff --check` — pass; full acceptance and Clippy remain with gate on the finished implementation.
+Check: `cargo test -p loopflow task_without_delivery --lib` — 4 passed; `cargo test -p loopflow task_work --lib` — 18 passed, including retained recovery edits; `cargo test -p loopflow store::sqlite::flow --lib` — 14 passed; formatting and `cargo clippy --all-targets -- -D warnings` passed; full public admission/binding, completion and Desktop acceptance remain unimplemented.
 
-Review source finding: `ops/task/lifecycle.rs::execution_blockers` exempts the
-current Exec but still checks the non-managed conversation's pending turn and
-other live Execs. `cleanup_completed_task` reuses `associated_work_blockers`.
-Simply expanding that shared exemption could remove a checkout still in use.
-The implementation must distinguish completion eligibility from cleanup safety
-and prove the real nested command path, not only a direct gate call.
+Review finding: the Flow-directory proof exercises the real store and released
+migration frontier, but uses a directly seeded Task without a workspace. It must
+not be reported as the required public Session-binding proof. No Task or Flow
+was completed by this implementation pass.

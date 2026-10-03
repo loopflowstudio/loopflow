@@ -261,7 +261,10 @@ and conversation rows before provider launch, even when earlier observation fail
 
 ### Flow outcomes and authority
 
-A FlowSession is the existing invocation owner evolved, not a parallel cursor.
+A FlowSession is the existing invocation owner evolved, not a parallel cursor. Each
+Flow retains its actual launch directory independently of Task attribution. Later
+Task checkout allocation cannot change that captured directory. Migration freezes
+previously inherited Task paths; absent historical paths remain unknown.
 Task and taskless execution share it. A Task observes every AgentSession,
 FlowSession and Exec associated with its checkout, plus explicitly bound work.
 The shared Rust association reader includes checkout descendants at path component

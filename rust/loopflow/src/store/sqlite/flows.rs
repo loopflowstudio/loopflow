@@ -28,7 +28,7 @@ pub(super) const TASK_INVOCATION: &str =
     "id IN (SELECT current_invocation_id FROM tasks WHERE id=?1) AND state='current'";
 
 const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index, f.iteration,
-    f.updated_at, f.position_version, f.task_id, f.wave_id, COALESCE(f.cwd, t.worktree),
+    f.updated_at, f.position_version, f.task_id, f.wave_id, f.cwd,
     f.message, f.model, f.current_capture,
     (SELECT input_published FROM agent_sessions WHERE current_capture=f.current_capture),
     (SELECT json_extract(done.payload,'$.status') FROM session_events start
@@ -38,7 +38,7 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
     f.pending_session_id,
     (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
     f.worker_generation, f.claim_json, f.failure_json, f.state, (SELECT receipt_key FROM session_events WHERE seq=f.current_capture)
-    FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
+    FROM flow_sessions f";
 
 // Keep the expression identical to index_session_metadata. SQLite reads the
 // indexed scalar; no invocation, cursor, claim or selected-history body is read.
@@ -295,9 +295,8 @@ fn validate_flow(flow: &FlowSession) -> StoreResult<()> {
     Ok(())
 }
 
-/// Store a launched Flow at its first step. A Task invocation runs in the
-/// Task worktree and stores no cwd of its own; its Wave is the Task's. The
-/// import re-registers a Flow it already stored; the row it finds wins.
+/// Store a Flow's captured launch directory and optional Task attribution.
+/// Repeated insertion preserves the original capture.
 pub(super) fn insert_flow_in(
     conn: &Connection,
     flow: &FlowSession,
@@ -309,7 +308,7 @@ pub(super) fn insert_flow_in(
             step_index, iteration, position_version, worker_generation, failure_json,
             updated_at, review_json, state, unbound_repo)
          VALUES(?1,?2,COALESCE(?3,(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
-            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13)
+            WHERE t.id=?2)),?4,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13)
          ON CONFLICT(id) DO NOTHING",
         params![
             flow.invocation.id,
@@ -1770,6 +1769,51 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
+    }
+
+    #[test]
+    fn task_without_delivery_flow_retains_launch_directory_after_checkout_allocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let task = crate::durable::TaskId::new();
+        let project = crate::durable::ProjectId::new();
+        let wave = crate::id::WaveId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at) VALUES(?1,?2,'issue','PROOF-1',1)", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+        }
+        let ordinary = launched(&store, vec![step("work", None)], 0);
+        let mut attributed = ordinary.clone();
+        attributed.invocation = QueuedInvocation::new("proof", vec![step("work", None)]).unwrap();
+        attributed.task_id = Some(task.clone());
+        attributed.wave_id = Some(wave);
+        attributed.cwd = dir.path().join("research");
+        let saved = store.create_flow(&attributed).unwrap();
+        assert_eq!(saved.cwd, attributed.cwd);
+        assert_eq!(saved.cursor, ordinary.cursor);
+        assert_eq!(saved.invocation.steps, ordinary.invocation.steps);
+        assert!(store.task_flow(&task).unwrap().is_none());
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(work.flows.len(), 1);
+        assert!(!work.flows[0].managed);
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE tasks SET worktree='/delivery/checkout',workspace_slug='delivery' WHERE id=?1", [task.as_str()]).unwrap();
+            let prs: i64 = conn
+                .query_row("SELECT count(*) FROM task_prs", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(prs, 0);
+        }
+        assert_eq!(store.flow(saved.id()).unwrap().unwrap(), saved);
+        assert_eq!(store.task_work(&task).unwrap(), work);
+        assert_eq!(store.flow(ordinary.id()).unwrap().unwrap(), ordinary);
     }
 
     #[test]

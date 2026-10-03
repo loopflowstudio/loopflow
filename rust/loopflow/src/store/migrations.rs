@@ -1897,6 +1897,50 @@ mod tests {
     }
 
     #[test]
+    fn task_without_delivery_migration_freezes_retained_flow_directories() {
+        let conn = open();
+        apply_before_current_draft(&conn, "optional_task_workspace");
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave','proof','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            VALUES('retained','project','retained','PROOF-1','/retained',1),('unknown','project','unknown','PROOF-2',NULL,1);").unwrap();
+        for (id, task, cwd) in [
+            ("bound", Some("retained"), None),
+            ("unbound", None, Some("/ordinary")),
+            ("missing", Some("unknown"), None),
+        ] {
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES(?1,?2,?3,?4,?5,0,0,1,0,1,'current')", rusqlite::params![id, task, task.map(|_| "wave"), cwd, serde_json::json!({"id":id,"flow":"proof","steps":[]}).to_string()]).unwrap();
+        }
+        conn.execute_batch(&current_draft_sql("optional_task_workspace"))
+            .unwrap();
+        conn.execute("UPDATE tasks SET worktree='/later' WHERE id='retained'", [])
+            .unwrap();
+        let paths = conn
+            .prepare("SELECT id,cwd FROM flow_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            paths,
+            vec![
+                ("bound".into(), Some("/retained".into())),
+                ("missing".into(), None),
+                ("unbound".into(), Some("/ordinary".into()))
+            ]
+        );
+        conn.execute(
+            "UPDATE flow_sessions SET cwd='/research' WHERE id='missing'",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn task_agent_migration_preserves_existing_tasks() {
         let conn = open();
         apply_before_current_draft(&conn, "task_agent");

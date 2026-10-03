@@ -278,31 +278,45 @@ Final check results appear once below.
 - Preserve original dues, candidate/failed proof, exact-attempt fencing, independent
   physical outcomes and the two-distinct-automatic-execution qualification rule.
 
-### Compression review (October 2, `a60ac0281`)
+### Compression review (`02d6b3c00`, after same-Home persistence revision)
 
-No production reduction selected. The inspected model remains obligation segment
-→ original due → attempts, with independent physical receipts, verification and
-product outcomes. The review followed accounting writers/validation into release
-telemetry, history qualification, CLI text/JSON, the release-history fixture,
-scheduled-release tests, publisher receipts/tests and release documentation.
+No further production reduction selected. Effective model: retained obligation
+segment → original due → attempts. Each attempt freezes coverage, candidate,
+verification and outcome; its execution segment identifies the wake. Physical
+cron receipts and dated repair dispositions remain independent facts. This pass
+leaves that model and all public APIs unchanged.
 
-`covered` and `coalesced_into` duplicate the coverage relationship, but deleting
-the latter alone would break owner lookup and late-writer fencing. Take that cut
-with the proposed cross-segment persistence revision above, including CLI owner
-display. The later revision above completes that deletion.
-`next_due_at` remains original adjacency evidence for qualifying pairs, even
-though retry timing now uses the calendar at observation. Removing it as a stale
-retry snapshot would conflate those contracts.
+Reviewed accounting persistence, predecessor traversal, coverage derivation and
+exact-attempt writers through telemetry, release-history qualification and CLI
+text/JSON. Checked the release-history DTO fixture, interruption/legacy/Home-boundary
+unit cases, scheduled replacement regression, publisher receipt definitions and
+public read-back, plus release README and cron-host documentation. No additional
+Swift or Python mirror of ReleaseHistory/ReleaseOpportunity was found.
 
-Keep physical exit and product outcome separate. Keep prepared artifact hashes
-and publisher stages distinct from fresh public read-back/smoke evidence;
-`PublicReleaseReceipt` already shares `ArtifactReceipt` through inheritance.
-Rust's private `PublicReleaseProof` reads the identity/hash/stage subset, while
-the full JSON is retained as verification evidence. `ReleaseHistory` joins
-multiple independent facts and a derived summary; it is not a redundant wrapper
-around one object. That dated compression pass made no production change. The later persistence
-revision above removes the duplicate storage relationship and updates its readers;
-final gate and configured acceptance remain outstanding.
+- The previous duplication is already removed: `covered` owns the relationship;
+  `coalesced_into` is derived and omitted from new persisted documents. Deleting
+  the public projection would push owner resolution into each consumer. Adding
+  separate storage DTOs solely to avoid the save-time omission adds vocabulary.
+- `execution_obligation` and the original owner differ on replacement wakes.
+  Combining them loses current telemetry/retry context or original candidate
+  ownership. Missing execution provenance in retained documents deliberately
+  means the original segment; deleting that read path discards durable history.
+- `next_due_at` proves original adjacency; the observation-time calendar owns
+  retry timing. Historical telemetry associations and current recovery similarly
+  answer different questions and cannot share a mutable observation.
+- Receipt exit, attempt settlement and publisher stages cannot share a status.
+  Prepared artifact hashes and fresh public read-back have separate proof roles.
+  PublicReleaseReceipt already inherits ArtifactReceipt; Rust's private proof
+  reader validates its subset while retaining the complete JSON evidence.
+- ReleaseHistory joins obligations, receipts and dispositions with a computed
+  summary. It does not wrap one object. Coverage validation, late-writer fencing
+  and intervention qualification are distinct obligations of that join.
+
+Simulated review found no additional coherent deletion on this model path.
+The interruption cases retain original failure/candidate evidence and reject
+late writers; their synthetic scope remains unchanged. No code changed and no
+behavioral tests were rerun. The focused results below remain recorded evidence;
+full gate, Jack Heart's review and configured automatic settlements remain open.
 
 ## Acceptance counterexamples
 

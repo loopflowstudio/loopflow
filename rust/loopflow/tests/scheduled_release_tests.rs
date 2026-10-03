@@ -298,7 +298,7 @@ case "$1 $2" in
     else printf '['; fi
     printf '{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/42"}}]\n' "$commit" ;;
   'release view')
-    [ -f '{}' ] || exit 1
+    [ -f '{}' ] || {{ echo 'release not found' >&2; exit 1; }}
     printf '{{"isDraft":false}}\n' ;;
   'run download') exit 0 ;;
   'pr list')
@@ -369,7 +369,10 @@ esac
                 publisher.display()
             ),
         );
-        repo.create_file(".lf/flows/release-run.yaml", "- op: release run patch\n");
+        repo.create_file(
+            ".lf/flows/release-run.yaml",
+            "- cmd: repo release run patch\n",
+        );
         repo.create_file("wave/infrastructure/GOAL.md", "# Infrastructure\n");
         repo.stage_all();
         repo.commit("Release fixture");
@@ -434,13 +437,12 @@ esac
         let mut host = CronHost {
             home_id: HomeId::new(),
             lf_home: lf_home.clone(),
-            db_path: lf_home.join("loopflow.db"),
             path_env: std::env::var("PATH").unwrap(),
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
         host.home_id = runtime.block_on(async {
             let store = loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(host.db_path.clone()),
+                &loopflow::store::StorageConfig::sqlite(host.lf_home.join("loopflow.db")),
             )
             .await
             .unwrap();
@@ -507,7 +509,6 @@ exit 0
                 ])
                 .current_dir(&repo_path)
                 .env("LF_HOME", &lf_home)
-                .env("LF_DB_PATH", &host.db_path)
                 .stdout(Stdio::from(log.try_clone().unwrap()))
                 .stderr(Stdio::from(log))
                 .spawn()
@@ -1046,7 +1047,6 @@ exit 0
                 ])
                 .current_dir(&repo_path)
                 .env("LF_HOME", &lf_home)
-                .env("LF_DB_PATH", &host.db_path)
                 .output()
                 .unwrap();
             assert!(

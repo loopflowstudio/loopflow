@@ -1316,7 +1316,6 @@ mod tests {
             host: CronHost {
                 home_id: HomeId::new(),
                 lf_home: root.join("home"),
-                db_path: root.join("db"),
                 path_env: "/usr/bin".into(),
             },
         }

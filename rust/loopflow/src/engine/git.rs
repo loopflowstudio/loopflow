@@ -46,6 +46,13 @@ pub(crate) struct WorktreeLease {
 }
 
 impl WorktreeLease {
+    pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            path: self.path.clone(),
+            file: self.file.try_clone()?,
+        })
+    }
+
     /// Keep ordinary checkout removal excluded while this child uses it.
     pub(crate) fn inherit(&self, command: &mut Command) {
         let fd = self.file.as_raw_fd();

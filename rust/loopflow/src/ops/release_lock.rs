@@ -19,6 +19,13 @@ pub(crate) struct ReleaseLock {
 }
 
 impl ReleaseLock {
+    pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            inherited: self.inherited,
+        })
+    }
+
     pub(crate) fn acquire(repo: &Path, target: &str) -> OpsResult<Self> {
         let dir = repo.join(".lf/locks");
         fs::create_dir_all(&dir)?;

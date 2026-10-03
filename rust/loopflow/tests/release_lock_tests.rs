@@ -1734,7 +1734,7 @@ NOTES
                 push: true,
                 create_draft_pr: false,
                 task: "commit".to_string(),
-                flow_parents: Vec::new(),
+                sources: Vec::new(),
                 message: Some("retry prepared Task head".to_string()),
                 agent: None,
             },
@@ -1760,4 +1760,190 @@ NOTES
         );
         worktree_remove(repo.path(), &checkout).unwrap();
     }
+}
+
+#[test]
+fn surviving_ci_repair_keeps_release_and_checkout_exclusive_after_controller_death() {
+    let merge_state = "BLOCKED";
+    let awaiting_queue = false;
+    let state = tempfile::tempdir().unwrap();
+    let repaired = state.path().join("repaired");
+    let checks = support::github_checks_page(
+        "$head",
+        &[
+            ("tests-result", "FAILURE", true),
+            ("swift-test", "FAILURE", false),
+        ],
+    );
+    let open = support::github_merge_response(
+        1309,
+        "$head",
+        "OPEN",
+        merge_state,
+        Some(if awaiting_queue {
+            "awaiting_queue"
+        } else {
+            "auto"
+        }),
+    );
+    let merged = support::github_merge_response(1309, "$head", "MERGED", "UNKNOWN", None);
+    // Keep the release poll and both repair observations stale. The error-path
+    // refresh is the first authoritative merge observation.
+    let stale_views = 0;
+    let gh = format!(
+        r#"#!/bin/sh
+repaired='{}'
+head=$(git rev-parse HEAD)
+case "$1 $2" in
+  '--version ') echo 'gh fixture';;
+  'release view') echo 'release not found' >&2; exit 1;;
+  'run list') echo '[]';;
+  'pr list')
+    case " $* " in
+      *' --head '*) printf '[{{"number":1309,"state":"OPEN","mergeCommit":null,"url":"https://github.com/loopflowstudio/release-fixture/pull/1309","headRefOid":"%s"}}]\n' "$head";;
+      *) echo '[]';;
+    esac;;
+  'api graphql')
+    case "$*" in
+      *LoopflowPrChecks*)
+        cat <<JSON
+{checks}
+JSON
+        ;;
+      *)
+        if [ -f "$repaired" ]; then
+          count=0
+          [ ! -f "$repaired.views" ] || count=$(cat "$repaired.views")
+          count=$((count + 1))
+          printf '%s' "$count" > "$repaired.views"
+          if [ "$count" -le {stale_views} ]; then
+            cat <<JSON
+{open}
+JSON
+            exit 0
+          fi
+          cat <<JSON
+{merged}
+JSON
+        else
+          cat <<JSON
+{open}
+JSON
+        fi ;;
+
+    esac;;
+  *) echo "unexpected gh: $*" >&2; exit 1;;
+esac
+"#,
+        repaired.display()
+    );
+
+    let barrier = format!("pwd > '{0}/checkout'\n: > '{0}/ready'\nwhile [ ! -f '{0}/allow' ]; do [ -d '{0}' ] || exit 1; sleep 0.02; done\nprintf 'surviving repair\n' > repair.txt\n: > '{0}/completed'\n", state.path().display());
+    let codex = codex_app_server_script(
+        r#"{"status":"published","summary":"Fixture repair finished."}"#,
+        "",
+    )
+    .replace(
+        "read -r turn_start\n",
+        &format!("read -r turn_start\n{barrier}"),
+    );
+    let _env = EnvGuard::new(&[
+        ("gh", &gh),
+        ("codex", &codex),
+        ("tmux", "#!/bin/sh\nexit 92\n"),
+    ]);
+    let git_output = |repo: &TestRepo, args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let git = |repo: &TestRepo, args: &[&str]| {
+        git_output(repo, args);
+    };
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(repo.path().join(".lf/config.yaml"), "agent: codex\n").unwrap();
+    fs::write(repo.path().join("feature.txt"), "release me").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "Release fixture"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let branch = format!(
+        "{}/release-default-v0-9-2",
+        loopflow::engine::naming::git_user(repo.path()).unwrap()
+    );
+    git(
+        &repo,
+        &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+    );
+    let local_remote = git_output(&repo, &["remote", "get-url", "origin"]);
+    let github_remote = "https://github.com/loopflowstudio/release-fixture.git";
+    git(
+        &repo,
+        &[
+            "config",
+            &format!("url.{local_remote}.insteadOf"),
+            github_remote,
+        ],
+    );
+    git(&repo, &["remote", "set-url", "origin", github_remote]);
+
+    fs::write(repo.path().join("caller.txt"), "local commit\n").unwrap();
+    git(&repo, &["add", "caller.txt"]);
+    git(&repo, &["commit", "-m", "Keep local work"]);
+    fs::write(repo.path().join("caller.txt"), "staged\n").unwrap();
+    git(&repo, &["add", "caller.txt"]);
+    fs::write(repo.path().join("caller.txt"), "unstaged\n").unwrap();
+    fs::write(repo.path().join("untracked.txt"), "untouched\n").unwrap();
+    let caller_head = repo.head_sha();
+    let caller_branch = current_branch(repo.path()).unwrap();
+    let caller_index = fs::read(repo.path().join(".git/index")).unwrap();
+    // Provider facts name the published release branch, not the caller's local commit.
+    let gh = gh.replace("head=$(git rev-parse HEAD)", &format!("head={head}"));
+    let executable = std::env::var_os("PATH").unwrap();
+    let gh_path = std::env::split_paths(&executable)
+        .map(|p| p.join("gh"))
+        .find(|p| p.is_file())
+        .unwrap();
+    fs::write(gh_path, gh).unwrap();
+    let mut parent = start(&repo, state.path(), &["repo", "release", "run", "patch"]);
+    let checkout = PathBuf::from(
+        fs::read_to_string(state.path().join("checkout"))
+            .unwrap()
+            .trim(),
+    );
+    parent.child.kill().unwrap();
+    assert!(!parent.child.wait().unwrap().success());
+    assert!(matches!(
+        release_tag(repo.path(), "0.9.3", None),
+        Err(OpsError::ReleaseDeferred { .. })
+    ));
+    assert!(worktree_remove(repo.path(), &checkout).is_err());
+    assert_eq!(repo.head_sha(), caller_head);
+    assert_eq!(current_branch(repo.path()).unwrap(), caller_branch);
+    assert_eq!(
+        fs::read(repo.path().join(".git/index")).unwrap(),
+        caller_index
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("caller.txt")).unwrap(),
+        "unstaged\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+        "untouched\n"
+    );
+    fs::write(state.path().join("allow"), "").unwrap();
+    wait_for(&state.path().join("completed"));
+    assert_eq!(
+        fs::read_to_string(checkout.join("repair.txt")).unwrap(),
+        "surviving repair\n"
+    );
+    wait_until_released(|| release_tag(repo.path(), "0.9.3", None).map(|_| ()));
 }

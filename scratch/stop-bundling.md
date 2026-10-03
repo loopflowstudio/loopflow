@@ -75,9 +75,9 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 - **Stored profile:** the existing per-account directory. Holds one credential for login, refresh and quota probes. Also the runtime home of an isolated conversation.
 - **Native home:** the provider default, or the caller's explicit `CODEX_HOME` / `CLAUDE_CONFIG_DIR`. Resolved once at admission from the launch's own environment so a nested launch never mistakes an inherited isolated home for the native one.
 - **Active account:** whichever stored account the native credential identifies. Source of truth is the native credential; nothing remembers it separately.
-- **Activation** (`provider_account.rs`, new): under the provider credential lock, save the native credential back to the stored profile with the same identity; if it matches none, store it as a new profile; install the selected profile's credential by atomic rename (Codex `auth.json`; Claude Keychain item on macOS, `.credentials.json` elsewhere). Already active: no-op.
-- **Launch wrapper** (`provider_account.rs`, new; chosen name `launch_as`): no account named, or the named account already active → spawn. Otherwise lock, activate, spawn, record, unlock, return the child without waiting. Isolated → today's `apply` path unchanged. All five sites call it and nothing else touches account environment.
-- **Selection:** in shared mode routing returns the active account while it is eligible. When it is strained or unavailable, routing calls the switch at “everyone now” toward the next eligible account, since every shared agent is on the failing one. In isolated mode selection is unchanged from today.
+- **Activation** (`provider_account/activation.rs`): under the provider credential lock, save the native credential back to the stored profile with the same identity; if it matches none, store it as a new profile; install the selected profile's credential by atomic rename (Codex `auth.json`; Claude Keychain item on macOS, `.credentials.json` elsewhere). Already active: no-op.
+- **Launch wrapper** (`ProviderAccountRoute::launch_as`, chosen name): no account named, or the named account already active → spawn. Otherwise lock, activate, spawn, record, unlock, return the child without waiting. Built without “record”: the lock is held across activate and spawn only, and recording the launch as a running shared agent arrives with slice 3. Isolated → today's `apply` path unchanged. All five sites call it and nothing else touches account environment.
+- **Selection:** in shared mode routing returns the active account while it is eligible. When it is strained or unavailable, routing calls the switch at “everyone now” toward the next eligible account, since every shared agent is on the failing one; until slice 3 it switches at “from now on”. In isolated mode selection is unchanged from today.
 - **Switch command** (chosen: `lf account use <provider> <account> [--now]`; the account namespace is `lf account`, there is no `lf auth`): the only writer of a shared account change. Bare is “from now on” and is built; `--now` is “everyone now”, which also resumes each running shared Codex agent under the new account, keeping its conversation and native ID, and arrives with slice 3.
 - **Modes:** `--isolate` and `--shared` are bare global flags beside `--account` / `--only-account`, mutually exclusive. They travel in `LF_ACCOUNT_ISOLATION` beside `LF_ACCOUNT_SELECTION`, and a Flow invocation captures the mode in an optional `isolate` field beside its captured accounts. Chosen default key: `isolate: true` in `.lf/config.yaml`; config loading already merges `~/.lf/config.yaml` under the repository file, so a Home-level default works too. Resolution: flag, then config, then shared.
 
@@ -128,7 +128,7 @@ Session-store symlinks or a history synchronizer between homes. A second place t
 
 One Task, complete end state above. Each slice leaves the tree working.
 
-1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), `launch_as` at all five sites (Claude routes stay isolated until slice 2), shared-mode selection, `lf account use` at “from now on”, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
+1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), `launch_as` at all five sites, shared-mode selection, `lf account use` at “from now on”, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
    - Quota probes, reset redemption, launch readiness and lease credentials read the native home for the active account (`activation::credential_home`).
    - A shared conversation resumes under whichever account is active; the account it began under is not a pin. Before this, reconnecting one switched the native home back.
    - A launch naming several accounts stays on the active one it includes; naming only another account moves to it.
@@ -137,6 +137,8 @@ One Task, complete end state above. Each slice leaves the tree working.
 2. **Claude shared by default — built.** One reader and writer for a Claude home's login (`provider_auth::read_claude_login` / `write_claude_login`: Keychain for a native home on macOS, written through `security -i` on standard input; the file for stored profiles, other platforms and unit tests). Activation, `active_account`, `credential_home` and `identity::same_login` take the provider. Routing, live status and activation place a refreshed login through `observe_active_account`. Quota polls, identity checks and token preparation read the native store for the active account. Integration test support points `CLAUDE_CONFIG_DIR` at a temporary directory.
 3. **“Everyone now” for Codex.** Gated on the research below. Resume each running shared Codex agent under the new account; exhaustion switches use it (today a strained active account makes routing activate the next one at “from now on”, logged with cause `exhaustion`). Needs a record of running shared agents, which slice 1 does not keep: the credential lock is held across activate and spawn only.
 4. **Docs — built.** `docs/subscriptions.md` and `docs/security.md` (where logins live, what a provider child's environment carries, `LF_ACCOUNT_ISOLATION`); `TESTING.md` names the Claude fixture. There is no separate environment page.
+
+Owed besides slice 3, from “Done when”: a Loopflow-started Claude conversation found by plain `claude --resume`, and a Claude conversation ID opening through `lf session`. Both are built on the shared path and neither has been exercised.
 
 ## Remaining questions
 
@@ -165,6 +167,8 @@ Gate, headless:
 Claude's Keychain path is macOS-only and the fixture uses it there, the file elsewhere; neither fixture runs in CI today.
 
 ## Evidence
+
+Check, realign at `5ccba23fb`: named functions, tests, the five `launch_as` sites, both fixtures and the docs read against the tree — all present; nothing rerun, the tree is unchanged since the compress check below.
 
 Check, compress: `cargo test -p loopflow --lib -- provider_account` — 49 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` — clean. No behavior change; both fixtures and the integration suites stay owed to gate.
 

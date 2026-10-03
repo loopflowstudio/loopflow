@@ -1,0 +1,286 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shared provider homes · PR 1416 review</title><style>*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:#f6f3eb;color:#252c31;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:#11675f;text-underline-offset:3px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #ad571b;outline-offset:4px}.wrap{max-width:1160px;margin:auto;padding:64px 38px}header{border-top:7px solid #176b62;padding-top:24px;padding-bottom:36px}.eyebrow{font-size:12px;letter-spacing:.16em;font-weight:750;color:#176b62}h1{font:600 clamp(36px,5vw,62px)/1.1 Georgia,serif;max-width:880px;margin:20px 0}h2{font:500 32px/1.2 Georgia,serif;margin:8px 0 22px}h3{font-size:20px;margin-top:30px}.lede{font-size:21px;max-width:820px}.scope{font-size:13px;overflow-wrap:anywhere;color:#515b61}.layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:44px}nav{position:sticky;top:25px;align-self:start;font-size:14px}nav a{display:block;padding:9px 0;border-bottom:1px solid #d6dbd4;text-decoration:none}section{padding:10px 0 45px;margin-bottom:34px;border-bottom:1px solid #c9cfc7}p{margin:14px 0}figure{margin:24px 0;background:#fff;border:1px solid #ccd6cc;border-radius:6px;overflow:hidden}figcaption{font-size:12px;line-height:1.6;padding:12px 16px;background:#e9eee6;overflow-wrap:anywhere}figcaption a{font-weight:700}pre{margin:0;padding:18px;overflow:auto;tab-size:4;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;color:#203a40}p code,li code,td code{font-size:.85em;background:#e8e9e0;padding:2px 4px;border-radius:3px}.note{padding:17px 20px;border-left:4px solid #ad571b;background:#f0e7d6}details{margin:22px 0}summary{cursor:pointer;color:#11675f;font-weight:650}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;padding:15px 12px;border-bottom:1px solid #c9cfc7}th{background:#e9eee6}td:first-child{width:30%;font-weight:600}li{margin-bottom:12px}.skip{position:absolute;left:-999px}.skip:focus{left:20px;top:10px;background:white;padding:10px}@media(max-width:760px){.wrap{padding:30px 20px}.layout{display:block}nav{position:static;display:flex;flex-wrap:wrap;gap:0 18px;margin-bottom:35px}nav a{font-size:13px}h2{font-size:28px}pre{font-size:11px}th,td{padding:10px 6px;font-size:12px}}@media print{body{background:white;font-size:11pt}.wrap{padding:0;max-width:none}.layout{display:block}nav,.skip{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:8pt}figure{break-inside:avoid}details{display:block}h2{break-after:avoid}section{margin:0}a{color:inherit}}</style></head><body><a class="skip" href="#home">Skip to walkthrough</a><div class="wrap"><header><p class="eyebrow">LOOPFLOW / CODE WALKTHROUGH / 02 OCT 2026</p><h1>One conversation history.<br>Several stored logins.</h1><p class="lede">Claude and Codex now launch into their ordinary homes by default. Switching saves the old login, installs the next, and leaves isolation available for conversations that must stay put.</p><p><strong>Delivered:</strong> shared homes, future switches, isolation and provider-ID resolution.<br><strong>Still planned:</strong> “everyone now” migration of running Codex agents.</p><p class="scope"><a href="https://github.com/loopflowstudio/loopflow/pull/1416">PR #1416</a> · base main <code>a278d6bc1bd4373f78f27027b8ae249100ef14d3</code><br>Published head and local HEAD <code>511f73eb3f0ece643152098a40b7a7f356fbf9a0</code><br>Actual merge base equals the PR base above. Working tree was clean at inspection; this walkthrough and captures are local-only review artifacts. Excerpts below are taken directly from the named Git revisions.</p></header><div class="layout"><nav aria-label="Reading route"><a href="#home">01 · Shared history</a><a href="#switch">02 · Save, then switch</a><a href="#claude">03 · Claude’s store</a><a href="#isolate">04 · Isolation & resume</a><a href="#resume">05 · Native IDs</a><a href="#remaining">06 · Remaining decisions</a><a href="#evidence">Evidence & limits</a></nav><main><section id="home"><p class="eyebrow">STOP 01</p><h2>A new conversation lives beside the provider’s own conversations</h2><p>Before this PR, selecting a managed account redirected the provider into that account’s private home. Now a shared launch clears credential overrides and leaves an ordinary caller-supplied home alone. An account home inherited from an isolated parent is removed so it does not become the shared home.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L397-L411">ProviderAccountRoute::apply</a> · rust/loopflow/src/provider_account.rs:397–411 · 511f73eb3</figcaption><pre tabindex="0"><code>    fn apply(&amp;self, command: &amp;mut Command) {
+        if matches!(self.authority, AccountRouteAuthority::Shared { .. }) {
+            // A shared launch names neither a home nor a credential. Only a
+            // home inherited from an isolated parent is cleared, so the
+            // provider falls back to its native one.
+            for name in PROVIDER_CREDENTIAL_ENV_VARS {
+                let is_home = matches!(name, &quot;CODEX_HOME&quot; | &quot;CLAUDE_CONFIG_DIR&quot;);
+                let inherited_account_home = launch_env(command, name)
+                    .is_some_and(|home| activation::is_account_home(Path::new(&amp;home)));
+                if !is_home || inherited_account_home {
+                    command.env_remove(name);
+                }
+            }
+            return;
+        }</code></pre></figure><p>The active eligible account wins while it is unstrained. Otherwise routing selects another eligible account; the launch installs that account’s login before spawning. This is the new shared path through the existing account catalog and quota selection machinery.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L1021-L1040">select_shared_account</a> · rust/loopflow/src/provider_account.rs:1021–1040 · 511f73eb3</figcaption><pre tabindex="0"><code>    let native = activation::native_home(provider, None);
+    let active = activation::observe_active_account(store, provider, &amp;native)
+        .await?
+        .filter(|account_id| eligible.contains(account_id));
+    if let Some(active) = &amp;active {
+        let limits = store
+            .provider_account_limits(Some(provider.as_str()))
+            .await?;
+        if !is_strained(provider.as_str(), active, &amp;limits, now_unix()) {
+            let kept = store
+                .select_provider_account(provider, std::slice::from_ref(active), None)
+                .await?;
+            if kept.is_some() {
+                return Ok(kept);
+            }
+        }
+    }
+    Ok(store
+        .select_provider_account(provider, eligible, None)
+        .await?)</code></pre></figure><details><summary>Where the provider process takes this route</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/harness/codex.rs#L1081-L1090">CodexHarness launch</a> · rust/loopflow/src/harness/codex.rs:1081–1090 · 511f73eb3</figcaption><pre tabindex="0"><code>        if let Some(cwd) = &amp;launch.cwd {
+            command.current_dir(cwd);
+        }
+        // Held until the engine has spawned, so a concurrent switch cannot
+        // replace the native login between activation and startup.
+        let _activation = match &amp;self.account_route {
+            Some(route) =&gt; route.launch_as(command.as_std_mut()).await?,
+            None =&gt; None,
+        };
+        // Own process group so stop() can kill everything under the `codex`</code></pre></figure><p>The same wrapper is used by the Claude harness, direct agent execution and terminal resume. No history is copied between homes. Existing private histories remain where they were created.</p></details></section><section id="switch"><p class="eyebrow">STOP 02</p><h2>Switching to B preserves A’s latest login</h2><p><strong>Representative action:</strong> A is active and has refreshed its login. Jack runs <code>lf account use codex B</code> (A and B are illustrative stored account selectors). The command resolves B, locates the native home, and requests activation on a person’s behalf.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/lf/commands/account.rs#L178-L190">use_account — entry point</a> · rust/loopflow/src/lf/commands/account.rs:178–190 · 511f73eb3</figcaption><pre tabindex="0"><code>async fn use_account(raw_provider: &amp;str, raw_email: &amp;str) -&gt; Result&lt;()&gt; {
+    let provider = parse_managed_provider(raw_provider)?;
+    let store = open_account_store().await?;
+    let account = super::profile::find_provider_account(&amp;store, provider, raw_email).await?;
+    let native = crate::provider_account::activation::native_home(provider, None);
+    let switched = crate::provider_account::activation::activate(
+        &amp;store,
+        provider,
+        &amp;account.account_id,
+        &amp;native,
+        crate::provider_account::activation::SwitchCause::Person,
+    )
+    .await?;</code></pre></figure><p>After validating B and acquiring the provider credential lock, activation saves the native login back to its owner. An unplaceable login is preserved beside the profiles. Only then does it install B and append a switch receipt. The command reports “now signed in”; a later plain Codex process reads B from the same home.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L206-L219">activate — state change</a> · rust/loopflow/src/provider_account/activation.rs:206–219 · 511f73eb3</figcaption><pre tabindex="0"><code>    match save_back(store, provider, native, &amp;accounts).await? {
+        // The native login was this account&#x27;s all along, rotated since it was stored.
+        Kept::Profile(owner) if owner == *account_id =&gt; return Ok(None),
+        Kept::Profile(_) | Kept::Nothing =&gt; {}
+        Kept::Unplaced(credential) =&gt; keep_aside(provider, &amp;credential)?,
+    }
+    let credential = read_login(provider, profile).ok_or_else(|| {
+        ProviderAccountError::Filesystem(format!(&quot;read stored {provider} credential&quot;))
+    })?;
+    write_login(provider, native, &amp;credential)?;
+    store
+        .record_provider_account_switch(provider, account_id, &quot;from_now_on&quot;, cause.as_str())
+        .await?;
+    Ok(Some(lock))</code></pre></figure><p>Saving A’s current bytes before installing B is what makes A → B → A retain a rotated login. A login with a newly learned identity becomes an explicit-only profile, so preserving it does not volunteer it for automatic work.</p><details><summary>Save-back ownership and the already-active boundary</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L350-L361">save_back — existing owner</a> · rust/loopflow/src/provider_account/activation.rs:350–361 · 511f73eb3</figcaption><pre tabindex="0"><code>        let identity = identity.as_ref()?;
+        accounts.iter().find(|account| {
+            account.observed_subject.as_deref() == Some(identity.subject.as_str())
+                || account
+                    .login_email
+                    .as_ref()
+                    .is_some_and(|email| email.as_str().eq_ignore_ascii_case(&amp;identity.email))
+        })
+    });
+    if let Some((owner, home)) = owner.and_then(|account| Some((account, account.home.as_deref()?)))
+    {
+        write_login(provider, home, &amp;credential)?;</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L390-L403">save_back — new explicit-only account</a> · rust/loopflow/src/provider_account/activation.rs:390–403 · 511f73eb3</figcaption><pre tabindex="0"><code>    let account_id = super::account_id_for_login(&amp;login);
+    let home = super::ensure_account_home(provider, &amp;account_id)?;
+    write_login(provider, &amp;home, &amp;credential)?;
+    let mut account = super::new_account(provider, account_id.clone(), home, Some(login));
+    if provider == Provider::Claude {
+        account.observed_credential_digest =
+            Some(credential_digest(&amp;String::from_utf8_lossy(&amp;credential)));
+    }
+    account.observed_email = Some(identity.email);
+    account.observed_subject = Some(identity.subject);
+    // A login nobody registered is kept, not volunteered for automatic work.
+    account.routing_state = RoutingState::ExplicitOnly;
+    store.upsert_provider_account(&amp;account).await?;
+    Ok(Kept::Profile(account_id))</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L182-L205">activate — validate before changing the home</a> · rust/loopflow/src/provider_account/activation.rs:182–205 · 511f73eb3</figcaption><pre tabindex="0"><code>    let profile = selected
+        .home
+        .as_deref()
+        .filter(|home| has_login(provider, home));
+    let Some(profile) = profile else {
+        return Err(ProviderAccountError::NoAuthenticatedAccount {
+            provider,
+            accounts: format!(
+                &quot;lf account connect {provider} {} (its stored profile has no usable credential)&quot;,
+                account_login(selected)
+            ),
+        });
+    };
+    let is_active = || same_login(provider, native, profile);
+    if is_active() {
+        return Ok(None);
+    }
+    let lock = lock_native_credential(provider)?;
+    if is_active() {
+        return Ok(None);
+    }
+    if provider == Provider::Codex {
+        require_file_credential_store(native)?;
+    }</code></pre></figure><p>A missing usable profile fails with a reconnect command before changing the native store. An already-active account returns without a switch. A Codex configuration selecting another credential store is rejected before save-back.</p></details><p class="note">Operational boundary: the credential write and SQLite receipt are sequential, not one transaction. If logging fails after installation, the command can report an error after the native account changed. This follows directly from the ordering above; it was not fault-injected.</p></section><section id="claude"><p class="eyebrow">STOP 03</p><h2>Claude uses the same switch through its native credential store</h2><p>The product action is the same for Claude. On macOS, native homes read the Keychain first; stored account homes and unit tests use files. The write path mirrors that split, so changing a file that Claude ignores is avoided.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_auth/mod.rs#L2345-L2360">read_claude_login</a> · rust/loopflow/src/provider_auth/mod.rs:2345–2360 · 511f73eb3</figcaption><pre tabindex="0"><code>/// Returns an error when a store exists but cannot be read.
+pub(crate) fn read_claude_login(config_dir: &amp;Path) -&gt; Result&lt;Option&lt;SecretString&gt;, AuthError&gt; {
+    #[cfg(all(target_os = &quot;macos&quot;, not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
+            return Ok(Some(credential.blob));
+        }
+    }
+    match fs::read_to_string(config_dir.join(&quot;.credentials.json&quot;)) {
+        Ok(content) =&gt; Ok(Some(SecretString::new(content))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound =&gt; Ok(None),
+        Err(error) =&gt; Err(AuthError::Filesystem(format!(
+            &quot;read Claude credential file: {error}&quot;
+        ))),
+    }
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_auth/mod.rs#L2368-L2377">write_claude_login</a> · rust/loopflow/src/provider_auth/mod.rs:2368–2377 · 511f73eb3</figcaption><pre tabindex="0"><code>pub(crate) fn write_claude_login(
+    config_dir: &amp;Path,
+    credential: &amp;SecretString,
+) -&gt; Result&lt;(), AuthError&gt; {
+    #[cfg(all(target_os = &quot;macos&quot;, not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        return write_claude_keychain_credential(config_dir, credential);
+    }
+    write_claude_profile_credentials(config_dir, credential)
+}</code></pre></figure><p>Claude’s login does not carry a readable owner identity. If its tokens no longer match a stored profile, observing the active account asks the provider through save-back, under the credential lock. A network failure can leave ownership unknown; activation preserves the bytes and proceeds with the selected login.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L131-L148">observe_active_account</a> · rust/loopflow/src/provider_account/activation.rs:131–148 · 511f73eb3</figcaption><pre tabindex="0"><code>    let active = |accounts| {
+        active_account(provider, native, accounts).map(|account| account.account_id.clone())
+    };
+    if let Some(active) = active(&amp;accounts) {
+        return Ok(Some(active));
+    }
+    if provider != Provider::Claude || read_login(provider, native).is_none() {
+        return Ok(None);
+    }
+    let _lock = lock_native_credential(provider)?;
+    if let Some(active) = active(&amp;accounts) {
+        return Ok(Some(active));
+    }
+    Ok(match save_back(store, provider, native, &amp;accounts).await? {
+        Kept::Profile(account_id) =&gt; Some(account_id),
+        Kept::Unplaced(_) | Kept::Nothing =&gt; None,
+    })
+}</code></pre></figure><p>Unlike Codex, a running Claude is expected to adopt the changed native login. That behavior was inferred from the inspected Claude binary in the prior research, not exercised with a running agent. The fixture proves a newly launched Claude sends the installed login.</p></section><section id="isolate"><p class="eyebrow">STOP 04</p><h2>An isolated conversation reopens in its account’s home</h2><p><code>--isolate</code> retains private account homes. <code>--shared</code> overrides an <code>isolate: true</code> default. On resume, the recorded conversation mode takes precedence over today’s launch default. A shared conversation drops its historical exact-account pin and follows the current shared account.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L866-L879">resolve_provider_account_exact</a> · rust/loopflow/src/provider_account.rs:866–879 · 511f73eb3</figcaption><pre tabindex="0"><code>    // A conversation resumes in the home it started in; a new one follows the
+    // launch&#x27;s mode.
+    let recorded = match (&amp;store, provider_session_id) {
+        (Some(store), Some(session_id)) =&gt; {
+            store
+                .provider_session_isolated(provider, session_id)
+                .await?
+        }
+        _ =&gt; None,
+    };
+    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
+    // A shared conversation resumes under whichever account is active; the
+    // account it began under is history, not a pin.
+    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));</code></pre></figure><p>The database gains a mode on the existing session-account association. Old rows default to isolated, preserving their private histories without migration. New records explicitly state their mode.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/store/migrations/drafts/shared_provider_homes.sql#L1-L4">shared_provider_homes draft migration</a> · rust/loopflow/src/store/migrations/drafts/shared_provider_homes.sql:1–4 · 511f73eb3</figcaption><pre tabindex="0"><code>-- Conversations pinned before shared provider homes live in their account&#x27;s
+-- own home, so existing rows are isolated. Every new pin states its mode.
+ALTER TABLE provider_session_accounts ADD COLUMN isolated INTEGER NOT NULL DEFAULT 1
+    CHECK (isolated IN (0, 1));</code></pre></figure><details><summary>How mode is recorded and resolved</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L478-L492">pin_session</a> · rust/loopflow/src/provider_account.rs:478–492 · 511f73eb3</figcaption><pre tabindex="0"><code>    pub(crate) async fn pin_session(
+        &amp;self,
+        provider_session_id: &amp;str,
+    ) -&gt; Result&lt;(), ProviderAccountError&gt; {
+        match &amp;self.authority {
+            AccountRouteAuthority::Local { store, .. }
+            | AccountRouteAuthority::Shared { store, .. } =&gt; {
+                store
+                    .pin_provider_session_route(
+                        self.provider,
+                        provider_session_id,
+                        &amp;self.account_id,
+                        matches!(self.authority, AccountRouteAuthority::Local { .. }),
+                    )
+                    .await?;</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account/activation.rs#L85-L93">launch_isolated</a> · rust/loopflow/src/provider_account/activation.rs:85–93 · 511f73eb3</figcaption><pre tabindex="0"><code>/// Flag, then `isolate:` in config, then shared.
+pub(crate) fn launch_isolated() -&gt; bool {
+    isolation_from_env().unwrap_or_else(|| {
+        let repo = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| crate::repo::discover_repo_root(&amp;cwd).ok().flatten());
+        crate::engine::config::load_config_or_default(repo.as_deref()).isolate
+    })
+}</code></pre></figure></details><p class="note">Isolation separates runtime homes, but copying the same account’s login into both homes can leave two descendants of one refresh token. Whether concurrent refresh invalidates either copy remains unproven with live Codex credentials.</p></section><section id="resume"><p class="eyebrow">STOP 05</p><h2>The provider’s ID finds the Loopflow conversation</h2><p><code>lf session connect &lt;native-id&gt;</code> first resolves an existing Session. If none exists, connect searches the provider’s homes and admits that conversation. Other ID-taking commands resolve recorded provider IDs but do not admit new conversations.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/ops/human_session.rs#L1181-L1191">open — connect admits on demand</a> · rust/loopflow/src/ops/human_session.rs:1181–1191 · 511f73eb3</figcaption><pre tabindex="0"><code>    let target = match find_session(store, session_id).await? {
+        Some(target) =&gt; target,
+        // Connecting is what brings a provider-started conversation in.
+        None =&gt; SessionTarget::Row {
+            session: Box::new(
+                provider_conversation::admit(store, session_id)
+                    .await?
+                    .ok_or_else(|| session_not_found(session_id))?,
+            ),
+        },
+    };</code></pre></figure><p>A recorded provider ID must name exactly one Session. Ambiguity names the competing Sessions instead of choosing one.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/ops/human_session/provider_conversation.rs#L19-L30">recorded — decisive ID resolution</a> · rust/loopflow/src/ops/human_session/provider_conversation.rs:19–30 · 511f73eb3</figcaption><pre tabindex="0"><code>    let sessions = store.sqlite.sessions_for_provider_thread(id)?;
+    match sessions.as_slice() {
+        [] =&gt; Ok(None),
+        [session] =&gt; Ok(store.session(session).await?),
+        sessions =&gt; bail!(
+            &quot;Provider conversation {id} is ambiguous: Sessions {}&quot;,
+            sessions.join(&quot;, &quot;)
+        ),
+    }
+}
+
+/// A conversation the provider can resume, in the home that holds it.</code></pre></figure><details><summary>Admission boundaries and ownership</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/ops/human_session/provider_conversation.rs#L42-L64">admit — UUID and multiple-home boundaries</a> · rust/loopflow/src/ops/human_session/provider_conversation.rs:42–64 · 511f73eb3</figcaption><pre tabindex="0"><code>    // Provider conversation ids are UUIDs; nothing else names a transcript.
+    if uuid::Uuid::parse_str(id).is_err() {
+        return Ok(None);
+    }
+    let lock_id = format!(&quot;provider-conversation:{id}&quot;);
+    let _admission = tokio::task::spawn_blocking(move || lock_session_exec(&amp;lock_id)).await??;
+    if let Some(session) = recorded(store, id).await? {
+        return Ok(Some(session));
+    }
+    let found = find(store, id).await?;
+    let conversation = match found.as_slice() {
+        [] =&gt; return Ok(None),
+        [conversation] =&gt; conversation,
+        found =&gt; bail!(
+            &quot;Provider conversation {id} is ambiguous: {}&quot;,
+            found
+                .iter()
+                .map(|found| format!(&quot;{} in {}&quot;, found.provider, found.home.display()))
+                .collect::&lt;Vec&lt;_&gt;&gt;()
+                .join(&quot;, &quot;)
+        ),
+    };
+    let cwd = match conversation.cwd.clone().filter(|cwd| cwd.is_dir()) {</code></pre></figure><p>Admission creates a conversation with no Task, Wave or Flow assignment. It searches native and stored account homes; a conversation found in a stored home is marked isolated. Discovery checks known transcript locations, not a live provider resume request. Non-UUID names do not enter discovery.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/ops/human_session/provider_conversation.rs#L85-L90">admit — no inherited work authority</a> · rust/loopflow/src/ops/human_session/provider_conversation.rs:85–90 · 511f73eb3</figcaption><pre tabindex="0"><code>                work_source: None,
+                bound_at: None,
+                kind: SessionKind::Conversation,
+                interactive: true,
+                repo: None,
+                title: format!(&quot;{} {}&quot;, conversation.provider, &amp;id[..8]),</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/ops/human_session/provider_conversation.rs#L113-L120">admit — preserve private home</a> · rust/loopflow/src/ops/human_session/provider_conversation.rs:113–120 · 511f73eb3</figcaption><pre tabindex="0"><code>    }
+    Ok(Some(session))
+}
+
+/// Every provider home holding a conversation with this id: each provider&#x27;s
+/// native home and each stored account&#x27;s own.
+async fn find(store: &amp;SharedStore, id: &amp;str) -&gt; Result&lt;Vec&lt;NativeConversation&gt;&gt; {
+    let accounts = store.list_provider_accounts(None).await?;</code></pre></figure></details><p class="note"><strong>Finding history is not sufficient to resume it immediately.</strong> The Codex fixture stops retained Loopflow engines before plain app-server resume. Prior research observed “already has an active writer” while an engine remained alive. Direct terminal <code>codex resume</code> under that condition is still unverified; the retained-engine lifecycle already exists in the base.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/tests/e2e/codex_connect.py#L939-L948">_shared_provider_home_contract — fixture boundary</a> · tests/e2e/codex_connect.py:939–948 · 511f73eb3</figcaption><pre tabindex="0"><code>    # starts one of its own that Loopflow has not seen. Codex allows a
+    # conversation one writer, and Loopflow keeps a finished conversation&#x27;s
+    # engine for reconnection, so that engine is stopped first.
+    _stop_fixture_engines(Path(env[&quot;LF_PROBE_ENGINES&quot;]))
+    with plain_codex() as client:
+        assert ours in json.dumps(client.call(&quot;thread/list&quot;, {}))
+        assert client.call(&quot;thread/resume&quot;, {&quot;threadId&quot;: ours})[&quot;thread&quot;][&quot;id&quot;] == ours
+        theirs = start(client)
+    assert rollout(native, theirs) and theirs not in conversations()
+    results[&quot;plain_codex_conversation&quot;] = theirs</code></pre></figure></section><section id="remaining"><p class="eyebrow">STOP 06</p><h2>A switch changes future launches; “everyone now” is still absent</h2><p>Jack accepted two switch strengths. This PR implements “from now on.” The command has no <code>--now</code> field, and activation writes only <code>from_now_on</code> receipts. The migration reserves an <code>everyone_now</code> value but does not implement agent migration.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/lf/mod.rs#L1463-L1464">AccountCommand::Use</a> · rust/loopflow/src/lf/mod.rs:1463–1464 · 511f73eb3</figcaption><pre tabindex="0"><code>    /// Sign the provider&#x27;s ordinary home in as a stored login, from now on
+    Use { provider: String, email: String },</code></pre></figure><p>Exhaustion also takes this activation path today. A running Codex keeps its original account until restarted or resumed; a running Claude is expected to follow the native login. Attribution reflects that distinction for rate-limit and credential-health observations.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L265-L284">ProviderAccountRoute::used_account</a> · rust/loopflow/src/provider_account.rs:265–284 · 511f73eb3</figcaption><pre tabindex="0"><code>
+    /// The account this route&#x27;s usage belongs to now. A launch&#x27;s account is
+    /// where a shared agent began; the switch log says where a provider that
+    /// follows its native login has moved it since.
+    async fn used_account(&amp;self) -&gt; Result&lt;ProviderAccountId, ProviderAccountError&gt; {
+        if let AccountRouteAuthority::Shared {
+            store, launched_at, ..
+        } = &amp;self.authority
+        {
+            if activation::running_agents_follow_native_login(self.provider) {
+                let moved = store
+                    .provider_account_switched_since(self.provider, *launched_at)
+                    .await?;
+                if let Some(account_id) = moved {
+                    return Ok(account_id);
+                }
+            }
+        }
+        Ok(self.account_id.clone())
+    }</code></pre></figure><p>The new launch wrapper returns a lock, and the caller drops it once the process is spawned. It does not wait for credential-read readiness or register a set of shared agents to migrate. A concurrent switch after spawn can therefore affect which login a new process reads; the design explicitly accepts that ambiguity for future launches.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/engine/agent.rs#L2009-L2017">spawn_agent_child — lock boundary</a> · rust/loopflow/src/engine/agent.rs:2009–2017 · 511f73eb3</figcaption><pre tabindex="0"><code>/// `activation` is the native credential lock a shared launch took; it is
+/// released once the provider process exists.
+fn spawn_agent_child(
+    cmd: &amp;mut Command,
+    capture: Option&lt;&amp;CaptureHandle&gt;,
+    activation: Option&lt;std::fs::File&gt;,
+) -&gt; Result&lt;Child, CoreError&gt; {
+    let mut child = cmd.spawn()?;
+    drop(activation);</code></pre></figure><h3>Judgment still needed</h3><ul><li>When should a finished Codex conversation release its retained engine so plain resume can take over?</li><li>For “everyone now,” should an in-flight turn be interrupted immediately or allowed to finish? Research still owes terminal input, scrollback, tool replay and history continuity.</li><li>The <code>account use</code> name, explicit-only treatment of discovered logins, and the need for a Wave-level isolation default remain implementation choices or open questions in the plan.</li></ul></section><section id="evidence"><p class="eyebrow">EVIDENCE &amp; LIMITS</p><h2>What has been shown</h2><p>This review inspected code and fixture assertions. It did not rerun runtime tests or exercise live credentials. Prior results below are recorded evidence from <a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/scratch/stop-bundling.md#L159-L183">the branch’s design notes</a>, not new passes at this head.</p><table><thead><tr><th>Claim</th><th>Evidence and limit</th></tr></thead><tbody><tr><td>Codex shared history, A → B → A and provider IDs</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/tests/e2e/codex_connect.py#L778-L1084">Codex contract fixture</a> recorded passing with Codex 0.160.0 at an earlier branch revision. Plain resume uses app-server and stops the retained engine first.</td></tr><tr><td>Claude launches use the selected native login</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/tests/e2e/claude_shared_home.py#L180-L255">Claude fixture</a> recorded passing on macOS with Claude 2.1.288. Its endpoint refuses every turn; it verifies launch/authentication, not a completed conversation or resume.</td></tr><tr><td>Rotated login preserved; isolated/shared resume routing</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L2857-L2882">Codex save-back test</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L2976-L3027">Claude save-back tests</a> and <a href="https://github.com/loopflowstudio/loopflow/blob/511f73eb3f0ece643152098a40b7a7f356fbf9a0/rust/loopflow/src/provider_account.rs#L3126-L3190">resume-routing tests</a> inspected. Synthetic credentials and local endpoints do not prove real refresh-token concurrency.</td></tr><tr><td>Focused Rust checks</td><td>Compress recorded 49 provider-account tests passing and package clippy clean at 5ccba23fb. Integration suites and both fixtures remain owed to gate after the later changes.</td></tr><tr><td>Claude conversation interoperability</td><td>Native transcript discovery has unit coverage. Plain Claude resume of a Loopflow conversation and its ID opening through lf have not been exercised end to end.</td></tr></tbody></table><h3>Review observations</h3><p>The implementation keeps the credential owner in the provider’s store and reuses existing route selection. Two boundaries deserve explicit acceptance: native write and switch receipt can partially succeed, and the advertised plain-resume experience depends on retained-engine lifetime. No product code was changed during this review.</p></section></main></div></div><script>addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>{d.dataset.previous=d.open;d.open=true}));addEventListener('afterprint',()=>document.querySelectorAll('details').forEach(d=>d.open=d.dataset.previous==='true'));</script></body></html>

@@ -40,6 +40,39 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 11. **Old history is not migrated.** “Dont bother migrating”.
 12. **`lf session` accepts provider session IDs.** “I want to take this opportunity to make sure the lf session command all accept the session IDs from the providers”; “so if codex resume X works than so should lf session resume X or whatever it is”.
 
+## Runtime ownership (design discussion, 2026-10-03)
+
+**Accepted behavior — Jack Heart:** ordinary interactive exit closes the live
+runtime by default. If Desktop or `lf session` takes over the conversation, the
+old interface's exit must leave it running under its new owner. Jack also
+proposed closing after batch invocation exit and after interactive Flow steps
+whose exit advances the Flow. Exact lifecycle APIs and policies remain in design;
+no runtime teardown change has been implemented.
+
+The durable conversation, a provider turn, the current driver, and the engine
+have separate lifetimes. Closing the runtime preserves saved history; it does
+not by itself mean completing a Task or settling a Flow. A handoff transfers
+control of the same live conversation rather than completing it.
+
+**Proposed API consequence:** make ordinary close and ownership transfer the
+normal operations, using the existing Session driver generation to serialize
+their race. If transfer wins, the old driver's close cannot stop the new
+owner's work. If close wins, a later opener resumes saved history. Avoid a
+retention flag per surface or a second remembered owner. Names and exact
+transaction boundaries are proposals, not accepted implementation decisions.
+
+**Still open:** whether an engine should serve more than one conversation and
+what product benefit justifies that ownership complexity; whether Codex can
+release one loaded thread without stopping sibling conversations; accidental
+disconnect/crash behavior; how closure during a turn preserves completed tool
+effects. Batch-to-interactive handoff must also preserve the new owner's work.
+
+**Next proof:** normal exit releases the writer and permits native resume;
+handoff followed by old-driver exit preserves the running conversation; a
+close/transfer race has one owner and a recoverable conversation. Distinguish
+provider-history resumability from Loopflow's current refusal to connect some
+completed Sessions. These checks are not yet run.
+
 ## Risk findings
 
 **Codex holds its login for the life of the process; a fresh process takes the native one.** Probe, synthetic credentials in a temporary home, Codex 0.160.0: an app-server started under A still reported A's token after the native `auth.json` was replaced with B's, including after a refresh request; a second process started afterward reported B; the native file still belonged to B. The binary also carries “Skipping auth reload due to account id mismatch” and “…you have since logged out or signed in to another account.” Consequences: activation cannot be clobbered by a running Codex agent; a running shared Codex agent does not move by itself and must be resumed to move.
@@ -54,7 +87,7 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 
 **The lock does not need a readiness signal.** The earlier worry was a second launch swapping the credential before a just-started process read it. Chosen instead: install the credential by atomic rename, and hold the lock across activate and spawn; at “from now on” either account is then a correct outcome for a concurrent launch, and no per-launch-site signal is required. Built that far. Holding it across recording the launch as a shared agent too, so a concurrent “everyone now” sees and resumes the new agent, waits on slice 3's record of running shared agents.
 
-**Plain Codex cannot resume a conversation whose Loopflow engine is still alive.** Observed with Codex 0.160.0 through `app-server` (`thread/resume` from a second process): “thread … already has an active writer”. Loopflow detaches a conversation's Codex engine when its driver exits and keeps it for reconnection, including after a finished headless run, and nothing on this branch or `main` stops it. So the demo's second line holds for listing at once, and for resuming only after that engine is gone; while it lives, `lf session connect <native-id>` is the way in. Whether the Codex terminal `codex resume` is refused the same way was not exercised. Unresolved: when Loopflow should release a finished conversation's engine.
+**Plain Codex cannot resume a conversation whose Loopflow engine is still alive.** Observed with Codex 0.160.0 through `app-server` (`thread/resume` from a second process): “thread … already has an active writer”. Current managed teardown detaches and retains the engine once a thread exists, including after a finished headless run; it has no eventual idle cleanup policy. So the demo's second line holds for listing at once, and for resuming only after that engine is gone; while it lives, `lf session connect <native-id>` is the way in. Whether the Codex terminal `codex resume` is refused the same way was not exercised. The accepted ordinary-exit versus handoff distinction above still needs implementation.
 
 **An isolated launch on the active account shares its token lineage.** Activation copies one login into the native home, so the native copy and the stored profile descend from the same refresh token. Probes now read the native home for the active account, but an `--isolate` launch on that same account still runs on the profile copy. If Codex rotates refresh tokens, the two can invalidate each other. Unproven either way; no live credential was exercised.
 

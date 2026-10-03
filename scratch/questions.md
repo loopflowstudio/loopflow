@@ -9,7 +9,7 @@
 - “Pinned binary”: only the account's own home, or also a pinned provider or `lf` executable.
 - Automatic switch on exhaustion uses “everyone now”; confirm.
 - Placement remains unresolved; no Wave supplied.
-- Plain `codex resume` is refused while Loopflow's retained engine for that conversation is alive (“already has an active writer”), including after a finished headless run. Should Loopflow stop a finished conversation's engine, so the demo's second line works straight away?
+- Runtime ownership: Jack settled ordinary interactive exit as close-by-default, except when Desktop or `lf session` takes ownership (2026-10-03; design in `stop-bundling.md`). Still open: shared-engine ownership, thread-level release, accidental disconnects, and recovery when closing during a turn. No lifecycle code changed.
 - Only `lf session connect` brings in a conversation plain Codex started; `history`, `rename`, `bind` and `complete` report it as not found until then. Confirm.
 - A shared conversation now resumes under the active account rather than switching the home back to the account it began under. Confirm.
 

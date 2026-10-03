@@ -92,11 +92,9 @@ without plumbing blockers. No quantitative chapter targets were supplied.
   explicit binds with checkout membership, including absent-checkout history.
   Retain that reader and managed Flow distinction from LOO-358.
 - `cleanup_completed_task` already runs after durable completion and retains the
-  checkout when associated work blocks cleanup. It also ends a managed
-  Flow after process settlement without proving graph completion. Remove that
-  implicit settlement while retaining cleanup; the new requesting
-  conversation allowance must not reach that Flow-ending or deletion path while
-  the conversation is active. Its Session and provider turn remain intact.
+  checkout when associated work blocks cleanup. It now retains the checkout for an unfinished managed Flow even after its worker
+  exits. Cleanup no longer ends that Flow. The new requesting-conversation
+  allowance must remain separate from this retention check.
 - `task_actions::derive_task_actions` applies launch refusal before considering
   completion; its no-PR case recommends resuming a saved Flow. `task_flow` owns
   shared control explanations. Desktop's `RegistryQuery`, `PodiumModel` and
@@ -131,13 +129,22 @@ Source inspection found two dependencies missing from the proposed deletion cut.
   inherited paths; unknown historical placement stays NULL. A released-frontier
   migration test and persistent Flow test cover this cut. The latter seeds the
   unplaced Task row directly: it does not establish public Task admission or binding.
-- `lf/commands/flow.rs::drive` ends the managed Flow when Task state becomes Done.
-  `ops/task/lifecycle.rs::cleanup_completed_task` also ends a managed Flow after
-  checking execution liveness. Neither check proves the authored Flow finished.
-  Preserving these paths would violate Jack Heart's requirement that Task completion
-  grants no Flow settlement authority. Cleanup safety alone cannot implement the
-  accepted conversation contract. These implicit settlement paths must join the
-  deletion cut before relaxing completion. No new product decision is needed.
+- Task completion previously ended the managed Flow in both the driver and
+  cleanup. Both shortcuts are removed. The driver consumes recorded step results
+  through the ordinary checkpoint/graph path, and checks managed planning only
+  before a new agent/operation launch or review preparation. A recorded final
+  result can finish its graph after the Task becomes Done; an unexecuted later
+  step remains unfinished and receives the existing terminal-Task refusal.
+  Cleanup retains the checkout while its managed Flow is unfinished, including
+  an idle Flow with no claim. Regression tests cover these boundaries without
+  granting completion authority to a seeded Task or starting a real provider.
+
+Review finding: removing only the Done shortcut stranded even a recorded final
+operation because `resolve_managed_task_planning` rejects terminal Tasks before
+result consumption. Moving that check to launch boundaries preserves the existing
+terminal launch rule and exact receipt fencing. Task completion neither fabricates
+Flow success nor discards a real successful step. Public requesting-conversation
+completion and native-turn acceptance remain unimplemented/unproven.
 
 Task placement columns are already nullable in the released schema. The required
 migration concerns the Flow cwd dependency, not converting non-null Task columns.
@@ -250,8 +257,8 @@ Remaining targets at their existing owners:
 - `complete_task`'s unconditional checkout inspection and
   `derive_task_actions`' launch refusal as a prerequisite to completion.
 - Task-Done-driven `end_flow` in `lf/commands/flow.rs::drive` and cleanup's
-  implicit managed-Flow settlement. Preserve actual graph completion, exact claims
-  and retained-work protections; Task completion cannot fabricate Flow completion.
+  implicit managed-Flow settlement: removed, with recorded-result and idle-Flow
+  retention regressions. Actual graph completion still owns Flow settlement.
 - The Task-bound Flow cwd restriction and read-time placement fallback: removed
   in this branch, with retained-path migration and focused tests.
 
@@ -367,10 +374,10 @@ per-operation checks and confirmation/retry proofs are the safeguards.
 Simulated review finding: merely relaxing `task_completion_gate` would neither
 admit a research Session nor fix the context reader's PR requirement, and could
 weaken delivery. The complete deletion cut therefore starts with registration
-and placement and preserves the gate's evidence obligations. Planning confirmation
-and independent Flow cwd persistence are implemented; public admission and full acceptance remain unproven.
+and placement and preserves the gate's evidence obligations. Planning confirmation, independent Flow cwd persistence and removal of implicit
+Flow settlement are implemented; public admission and full acceptance remain unproven.
 
-Check: realign `git diff --check` passed and `lf context --wave infrastructure --json` fits memory/scratch budgets; no new code changes or behavioral reruns. Prior compression ran `cargo test -p loopflow task_work --lib` — 18 passed, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; unchanged `task_without_delivery --lib` (4) and `store::sqlite::flow --lib` (14) retain prior passes; full public admission/binding, completion and Desktop acceptance remain with implementation and gate.
+Check: `cargo test -p loopflow task_completion --lib` — 11 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; public admission/binding, active-conversation completion and Desktop acceptance remain with implementation/gate.
 
 Review finding: the Flow-directory proof exercises the real store and released
 migration frontier, but uses a directly seeded Task without a workspace. It must

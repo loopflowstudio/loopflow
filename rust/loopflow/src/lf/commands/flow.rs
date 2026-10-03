@@ -426,50 +426,6 @@ async fn drive_loop(
         if flow.finished {
             return Ok(FlowOutcome::Completed);
         }
-        if let Some(task_id) = &flow.task_id {
-            if store
-                .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
-                .await?
-                == crate::durable::WorkStatus::Done
-                && store
-                    .task_flow(task_id)
-                    .await?
-                    .is_some_and(|managed| managed.id() == id)
-            {
-                store
-                    .end_flow(&id, flow.version, owned_claim.as_ref(), "Task completed")
-                    .await?;
-                let task = store
-                    .get_task(task_id)
-                    .await?
-                    .context("completed Task disappeared")?;
-                crate::ops::task::cleanup_completed_task(&store, &task).await?;
-                return Ok(FlowOutcome::Completed);
-            }
-        }
-        if let Some(task_id) = &flow.task_id {
-            if store
-                .task_flow(task_id)
-                .await?
-                .is_some_and(|managed| managed.id() == flow.id())
-            {
-                let task = store.get_task(task_id).await?.context("Task disappeared")?;
-                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
-                    &store,
-                    &task,
-                    crate::ops::pm::PmRefresh::Auto,
-                )
-                .await
-                {
-                    if owned_claim.is_some() {
-                        store
-                            .release_flow(flow.id(), flow.version, owned_claim.as_ref())
-                            .await?;
-                    }
-                    return Err(error.into());
-                }
-            }
-        }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
                 "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
@@ -699,6 +655,31 @@ impl CliFlowExecutor<'_> {
         }
     }
 
+    async fn require_launch(&self, flow: &FlowSession) -> Result<()> {
+        let Some(task_id) = &flow.task_id else {
+            return Ok(());
+        };
+        if self
+            .store
+            .task_flow(task_id)
+            .await?
+            .is_some_and(|managed| managed.id() == flow.id())
+        {
+            let task = self
+                .store
+                .get_task(task_id)
+                .await?
+                .context("Task disappeared")?;
+            crate::ops::task::resolve_managed_task_planning(
+                &self.store,
+                &task,
+                crate::ops::pm::PmRefresh::Auto,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     /// The row at the step about to run, with any earlier attempt settled.
     async fn begin(&self) -> Result<FlowSession> {
         let flow = recover_native_flow(&self.store, &self.id, self.claim().as_ref(), false).await?;
@@ -720,6 +701,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if skill.human {
+            self.require_launch(&flow).await?;
             // Reaching review releases the claim. The Task's selected Flow
             // still owns review preparation.
             let managed_task = match &flow.task_id {
@@ -764,6 +746,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 .as_ref()
                 .is_some_and(crate::durable::FlowAttempt::completed)
             {
+                self.require_launch(&flow).await?;
                 execute_child(&self.store, &flow, self.launcher).await?;
                 flow = self
                     .store
@@ -823,6 +806,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if !self.store.sqlite.flow_operation_completed(flow.id())? {
+            self.require_launch(&flow).await?;
             eprintln!("op: {}", ops.item.display_name());
             execute_child(&self.store, &flow, self.launcher).await?;
         }

@@ -164,17 +164,17 @@ and unresolved delivery remain blockers. Membership alone grants no exemption,
 Flow settlement or process control. This refines the LOO-358 completion rule below;
 it does not weaken cleanup or abandonment protections.
 
-The branch confirms creation and mutation through the affected issue's normalized
-facts instead of a post-mutation whole-Wave refresh. Filing and marker recovery
-still require current-Project routing. Failed issue confirmation remains explicit;
-registered completion retains pending writeback. Recorded stateful fixture results
-cover planning-only completion and retries, not configured provider acceptance.
+Issue-specific confirmation replaces post-mutation whole-Wave refresh. Filing
+and marker recovery retain current-Project routing; failed confirmation remains
+explicit and registered completion retains pending writeback. Stateful fixtures
+prove planning-only completion/retries, not configured provider acceptance.
 Flows now persist launch cwd independently of Task placement; migration freezes
 previously inherited paths without inventing unknown history. Store/migration tests
 pass, but public admission/binding, shared explicit startup and working-conversation
-completion remain unimplemented. Source review found both the driver and cleanup
-implicitly ending managed Flows on Task completion. Remove that settlement coupling
-while retaining cleanup safety; process exit is not authored Flow completion.
+completion remain unimplemented. Task completion no longer ends managed Flows. Recorded results settle through
+the graph; managed planning gates new launches and review preparation. Terminal
+Tasks can consume their final results without launching another managed step. Cleanup retains unfinished
+Flows' checkouts even without a worker. Public admission and working-conversation completion remain unproven.
 Upstream #1415 is integrated: recovery can distinguish unrelated historical
 Execs without process receipts from current Session drivers, live processes and
 claims. The retained local optimization reads Session drivers only for recovery;

@@ -29,22 +29,14 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         return Ok(());
     }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
-        if execution_unsettled(store, &position)? {
+        if !position.finished {
             eprintln!(
-                "Task {} is complete; checkout cleanup waits for its execution to settle.",
-                task.plan.identifier
+                "Task {} is complete; retained checkout for unfinished Flow {}.",
+                task.plan.identifier,
+                position.id(),
             );
             return Ok(());
         }
-        store
-            .end_flow(
-                position.id(),
-                position.version,
-                position.claim.as_ref(),
-                "Task completed",
-            )
-            .await
-            .map_err(task_error)?;
     }
     let result = async {
         let wave = owning_wave(store, task).await?;

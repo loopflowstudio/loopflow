@@ -5545,6 +5545,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_completion_preserves_unfinished_managed_flow_without_a_worker() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("WORK-DONE").await;
+        let claimed = claim_stop_fixture(&fixture, 999_999).await;
+        let saved = fixture
+            .store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        fixture
+            .store
+            .complete_task(&fixture.task, None)
+            .await
+            .unwrap();
+
+        super::cleanup_completed_task(&fixture.store, &fixture.task)
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(saved.clone())
+        );
+
+        let cli = <crate::lf::Cli as clap::Parser>::parse_from(["lf"]);
+        let error =
+            crate::lf::commands::flow::drive(fixture.store.clone(), saved.clone(), None, &cli)
+                .await
+                .unwrap_err();
+        assert!(error.to_string().contains("terminal and cannot advance"));
+        let retained = fixture.store.flow(saved.id()).await.unwrap().unwrap();
+        assert!(!retained.finished);
+        assert_eq!(retained.invocation, saved.invocation);
+        assert_eq!(retained.cursor, saved.cursor);
+        assert!(retained
+            .failure
+            .unwrap()
+            .reason
+            .contains("terminal and cannot advance"));
+        assert_eq!(
+            fixture.store.work_status(&fixture.work).await.unwrap(),
+            WorkStatus::Done
+        );
+    }
+
+    #[tokio::test]
+    async fn task_completion_allows_only_recorded_flow_results_to_finish() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        for remaining in [false, true] {
+            let fixture = task_fixture("WORK-RESULT").await;
+            let command = crate::engine::ConcreteStep::Command(crate::engine::ConcreteCommand {
+                item: crate::engine::flow::Command {
+                    command: "task".into(),
+                    args: vec!["complete".into()],
+                },
+                sources: vec![],
+            });
+            let mut steps = vec![command.clone()];
+            if remaining {
+                steps.push(command);
+            }
+            let invocation =
+                crate::engine::invocation::QueuedInvocation::new("finish", steps).unwrap();
+            let flow = claim_stop_fixture_for(&fixture, 999_999, invocation).await;
+            let flow = fixture
+                .store
+                .release_flow(flow.id(), flow.version, flow.claim.as_ref())
+                .await
+                .unwrap();
+            let start = fixture
+                .store
+                .sqlite
+                .begin_flow_operation(flow.id(), flow.version, None, None)
+                .unwrap()
+                .unwrap();
+            fixture
+                .store
+                .complete_task(&fixture.task, None)
+                .await
+                .unwrap();
+            fixture
+                .store
+                .sqlite
+                .finish_flow_operation(flow.id(), flow.version, None, start, None, true)
+                .unwrap();
+            let cli = <crate::lf::Cli as clap::Parser>::parse_from(["lf"]);
+            let result =
+                crate::lf::commands::flow::drive(fixture.store.clone(), flow.clone(), None, &cli)
+                    .await;
+            let retained = fixture.store.flow(flow.id()).await.unwrap().unwrap();
+            assert_eq!(retained.cursor.index, 1);
+            assert_eq!(retained.finished, !remaining);
+            if remaining {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("terminal and cannot advance"));
+            } else {
+                assert_eq!(result.unwrap(), crate::engine::FlowOutcome::Completed);
+            }
+            assert_eq!(
+                fixture.store.work_status(&fixture.work).await.unwrap(),
+                WorkStatus::Done
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn task_work_recovery_preserves_another_tasks_claim_in_a_descendant_checkout() {
         let fixture = task_fixture("WORK-PARENT").await;
         let managed = claim_stop_fixture(&fixture, 999_999).await;

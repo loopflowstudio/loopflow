@@ -558,6 +558,12 @@ or disappears. Missing process evidence stays uncertain. Explicit restart retain
 the previous FlowSession as history and captures another. Completion clears the
 managed selection without completing Task Work or choosing a successor.
 
+Task completion does not end its managed Flow. The driver consumes recorded
+results through the captured graph; managed planning gates new launches and
+review preparation. A completed Task cannot launch another managed step, but a
+recorded final result can finish its Flow. Cleanup retains the checkout while
+the managed Flow remains unfinished, even when no worker is running.
+
 Independent helpers may carry the same Task and separately authorized Git/PR
 operations. Attribution does not acquire its managed Flow claim. Binding to done
 Work assigns a conversation without reopening it. Unresolved reviews remain

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::identity::same_codex_login;
 use super::{account_login, ProviderAccountError};
 use crate::provider_auth::{codex_identity_from_home, Provider};
 use crate::store::{ProviderAccount, ProviderAccountId, RoutingState, SharedStore};
@@ -19,12 +20,10 @@ use crate::store::{ProviderAccount, ProviderAccountId, RoutingState, SharedStore
 /// process and every launch beneath it. Absent, configuration decides.
 pub const ACCOUNT_ISOLATION_ENV: &str = "LF_ACCOUNT_ISOLATION";
 
-pub fn isolation_env_value(isolate: bool) -> &'static str {
-    if isolate {
-        "isolated"
-    } else {
-        "shared"
-    }
+/// The variable and value that carry a mode to a child process.
+pub fn isolation_env(isolate: bool) -> (&'static str, &'static str) {
+    let mode = if isolate { "isolated" } else { "shared" };
+    (ACCOUNT_ISOLATION_ENV, mode)
 }
 
 pub(crate) fn isolation_from_env() -> Option<bool> {
@@ -126,7 +125,7 @@ pub(crate) fn active_account<'a>(
 /// last switch and refreshing both copies could invalidate one of them.
 pub(crate) fn credential_home(provider: Provider, profile: &Path) -> PathBuf {
     let native = native_home(provider, None);
-    if provider == Provider::Codex && super::identity::same_codex_login(&native, profile) {
+    if provider == Provider::Codex && same_codex_login(&native, profile) {
         native
     } else {
         profile.to_path_buf()
@@ -153,11 +152,11 @@ pub(crate) async fn activate(
         .iter()
         .find(|account| account.account_id == *account_id)
         .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
-    let wanted = selected
+    let profile = selected
         .home
         .as_deref()
-        .and_then(|home| Some((home, codex_identity_from_home(home)?)));
-    let Some((profile, wanted)) = wanted else {
+        .filter(|home| codex_identity_from_home(home).is_some());
+    let Some(profile) = profile else {
         return Err(ProviderAccountError::NoAuthenticatedAccount {
             provider,
             accounts: format!(
@@ -166,8 +165,7 @@ pub(crate) async fn activate(
             ),
         });
     };
-    let is_active =
-        || codex_identity_from_home(native).is_some_and(|current| current.same_login(&wanted));
+    let is_active = || same_codex_login(native, profile);
     if is_active() {
         return Ok(None);
     }

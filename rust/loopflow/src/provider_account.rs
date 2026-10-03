@@ -393,9 +393,7 @@ impl ProviderAccountRoute {
             // home inherited from an isolated parent is cleared, so the
             // provider falls back to its native one.
             for name in PROVIDER_CREDENTIAL_ENV_VARS {
-                let is_home = [Provider::Codex, Provider::Claude]
-                    .into_iter()
-                    .any(|provider| activation::home_env(provider) == Some(name));
+                let is_home = matches!(name, "CODEX_HOME" | "CLAUDE_CONFIG_DIR");
                 let inherited_account_home = launch_env(command, name)
                     .is_some_and(|home| activation::is_account_home(Path::new(&home)));
                 if !is_home || inherited_account_home {
@@ -857,21 +855,21 @@ pub(crate) async fn resolve_provider_account_exact(
     exact_account_id: Option<&ProviderAccountId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
+    let store = route_store().await?;
+    // A conversation resumes in the home it started in; a new one follows the
+    // launch's mode.
+    let recorded = match (&store, provider_session_id) {
+        (Some(store), Some(session_id)) => {
+            store
+                .provider_session_isolated(provider, session_id)
+                .await?
+        }
+        _ => None,
+    };
+    let isolated = recorded.unwrap_or_else(|| activation::launch_isolated(provider));
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
-    let began_shared = match provider_session_id {
-        Some(session_id) => match route_store().await? {
-            Some(store) => {
-                store
-                    .provider_session_isolated(provider, session_id)
-                    .await?
-                    == Some(false)
-            }
-            None => false,
-        },
-        None => false,
-    };
-    let exact_account_id = exact_account_id.filter(|_| !began_shared);
+    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
     let client = lease::AccountLeaseClient::from_env()?;
     if client.is_some() || !lease::AccountSelection::from_env()?.is_default() {
         return resolve_merged_provider_account(
@@ -879,10 +877,11 @@ pub(crate) async fn resolve_provider_account_exact(
             provider_session_id,
             exact_account_id,
             client,
+            store,
+            isolated,
         )
         .await;
     }
-    let store = route_store().await?;
     let Some(store) = store else {
         if let Some(account_id) = exact_account_id {
             return Err(ProviderAccountError::NoEligibleAccount {
@@ -948,7 +947,6 @@ pub(crate) async fn resolve_provider_account_exact(
             accounts: rejected.join("; "),
         });
     }
-    let isolated = route_isolated(&store, provider, provider_session_id).await?;
     let selection = if isolated {
         store
             .select_provider_account(provider, &eligible, provider_session_id)
@@ -1006,24 +1004,6 @@ pub(crate) async fn resolve_provider_account_exact(
     }))
 }
 
-/// A conversation resumes in the home it started in; a new one follows the
-/// launch's mode.
-async fn route_isolated(
-    store: &SharedStore,
-    provider: Provider,
-    provider_session_id: Option<&str>,
-) -> Result<bool, ProviderAccountError> {
-    let recorded = match provider_session_id {
-        Some(session_id) => {
-            store
-                .provider_session_isolated(provider, session_id)
-                .await?
-        }
-        None => None,
-    };
-    Ok(recorded.unwrap_or_else(|| activation::launch_isolated(provider)))
-}
-
 /// Shared routing stays on the active account while it is eligible and
 /// unstrained, and otherwise moves to the next eligible account.
 async fn select_shared_account(
@@ -1059,25 +1039,28 @@ async fn resolve_merged_provider_account(
     provider_session_id: Option<&str>,
     exact_account_id: Option<&ProviderAccountId>,
     client: Option<lease::AccountLeaseClient>,
+    local_store: Option<SharedStore>,
+    isolated: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = current_repo_id()?;
-    let Some(candidates) = ordered_merged_candidates(
+    let Some(mut candidates) = ordered_merged_candidates(
         provider,
         provider_session_id,
         exact_account_id,
         client,
         repo_id.as_ref(),
-        route_store().await?,
+        local_store,
         true,
     )
     .await?
     else {
         return Ok(None);
     };
-    let mut candidates = candidates;
-    if let Some(index) = active_candidate(provider, provider_session_id, &candidates).await? {
-        let active = candidates.remove(index);
-        candidates.insert(0, active);
+    if !isolated {
+        if let Some(index) = active_candidate(provider, &candidates) {
+            let active = candidates.remove(index);
+            candidates.insert(0, active);
+        }
     }
     let mut last_forwarded_error = None;
     for (candidate, explicit) in candidates {
@@ -1104,7 +1087,7 @@ async fn resolve_merged_provider_account(
                         .is_some_and(|account_id| account_id == candidate.account.account_id),
                     None => false,
                 };
-                if !route_isolated(store, provider, provider_session_id).await? {
+                if !isolated {
                     return Ok(Some(ProviderAccountRoute::shared(
                         provider,
                         candidate.account.account_id.clone(),
@@ -1156,27 +1139,18 @@ async fn resolve_merged_provider_account(
 
 /// A shared launch stays on the active account where its own choice allows:
 /// among the accounts it named, or among all of them when it named none.
-async fn active_candidate(
-    provider: Provider,
-    provider_session_id: Option<&str>,
-    candidates: &[(AccountCandidate, bool)],
-) -> Result<Option<usize>, ProviderAccountError> {
+fn active_candidate(provider: Provider, candidates: &[(AccountCandidate, bool)]) -> Option<usize> {
     let native = activation::native_home(provider, None);
     let named = candidates.iter().any(|(_, explicit)| *explicit);
-    for (index, (candidate, explicit)) in candidates.iter().enumerate() {
-        let AccountCandidateAuthority::Local { store, home } = &candidate.authority else {
-            continue;
+    candidates.iter().position(|(candidate, explicit)| {
+        let AccountCandidateAuthority::Local { home, .. } = &candidate.authority else {
+            return false;
         };
-        if *explicit == named
+        *explicit == named
             && candidate.credential_available
             && !candidate.is_strained(now_unix())
             && identity::same_codex_login(&native, home)
-        {
-            let shared = !route_isolated(store, provider, provider_session_id).await?;
-            return Ok(shared.then_some(index));
-        }
-    }
-    Ok(None)
+    })
 }
 
 async fn ordered_merged_candidates(
@@ -2794,10 +2768,8 @@ mod account_first_tests {
     ];
 
     fn set_isolation(isolate: bool) {
-        std::env::set_var(
-            activation::ACCOUNT_ISOLATION_ENV,
-            activation::isolation_env_value(isolate),
-        );
+        let (name, mode) = activation::isolation_env(isolate);
+        std::env::set_var(name, mode);
     }
 
     /// A Home with Codex accounts `first` and `second` on the default route

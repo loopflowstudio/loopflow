@@ -102,12 +102,8 @@ impl QueuedInvocation {
 
     /// The captured launch mode, for a process relaunched from this invocation.
     pub(crate) fn isolation_env(&self) -> Option<(&'static str, &'static str)> {
-        self.isolate.map(|isolate| {
-            (
-                crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
-                crate::provider_account::activation::isolation_env_value(isolate),
-            )
-        })
+        self.isolate
+            .map(crate::provider_account::activation::isolation_env)
     }
 
     pub fn load(repo: &Path, flow: &str) -> Result<Self> {

@@ -388,13 +388,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         finish(&mut position).unwrap();
-        for expected in [
-            "compress",
-            "sync",
-            "realign",
-            "gate",
-            "pr land -c",
-        ] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
             assert_eq!(finished, expected == "pr land -c");

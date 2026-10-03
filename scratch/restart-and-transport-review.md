@@ -1,7 +1,7 @@
 # Restart and transport review — 2026-10-02
 
-Status: interactive design review; cached-planning policy awaits Jack Heart's
-answer. No new acceptance or implementation authorization is recorded.
+Status: approved by Jack Heart on 2026-10-02. Jack approved valid cached planning
+regardless of age, waived a personal demo, and requested an autonomous Flow.
 
 The [working design](make-the-release-and-ci.md) retains all four outcomes from
 LOO-326. Jack's supplied steers establish the Swift repair's shipment; the
@@ -10,7 +10,7 @@ evidence and does not authorize a live restart.
 
 Source review confirms remote planning acquisition at restart, continuation and
 managed Flow admission. The proposed local-read policy must cover all three.
-The question presented to Jack is whether otherwise valid cached facts admit
+Jack approved otherwise valid cached facts admitting
 existing work regardless of age. Known invalidation, removal, terminal state and
 ownership mismatch still block; publication and completion retain their checks.
 New advice still requires Linear publication before worker replacement.
@@ -26,9 +26,12 @@ Design refinements from source review:
   wrapper. Its sandbox denies WindowServer only; external network denial still
   needs its own proof, including descendants and usable loopback.
 
-Next useful action: capture Jack's cached-planning decision in the design and
-[open questions](questions.md). Implementation and behavioral verification remain
-outstanding. No Flow navigation decision is made here.
+Next useful action: replace the feature Flow with `recover-transient-faults`,
+which implements, compresses, refreshes, evaluates remaining work, and ships
+through gate and landing without a personal demo. This replacement follows
+Jack's explicit request, not an inferred review navigation decision.
+Implementation and behavioral verification remain outstanding;
+[decisions and bounds](questions.md) records the accepted policy.
 
 Check: inspected task/release/check-reader code and Desktop test wrapper; only
 design notes changed, so behavioral suites were not run.

@@ -1,10 +1,12 @@
 # LOO-326: recover from transient faults without rerunning the work
 
-Draft implementation plan — 2026-10-02. Reconciled against `101a19b8c`.
-Jack Heart requested preservation of already shipped fixes and the chapter's
-review boundaries. This plan is not an approval or a release instruction.
+Approved implementation plan — 2026-10-02. Reconciled against `101a19b8c`.
+Jack Heart approved the design, including valid cached planning regardless of
+age, waived a personal demo, and requested an autonomous Flow on 2026-10-02.
+Automated acceptance and delivery checks remain required. This authorizes Task
+delivery, not a product release or installation replacement.
 
-## Problem and demo
+## Problem and acceptance
 
 Jack can cut a release or restart existing work without a transient transport
 failure forcing a whole-operation rerun. Test fixtures cannot spend hours waiting
@@ -12,7 +14,7 @@ on external services. This serves Infrastructure's execution-continuity objectiv
 and the chapter KR that Tasks advance without plumbing intervention; no numerical
 chapter target was supplied.
 
-The demo uses disposable repositories, a private Home and scripted provider
+Automated acceptance uses disposable repositories, a private Home and scripted provider
 boundaries. One release invocation encounters a partial artifact download and a
 GitHub 502, recovers, and prepares the same candidate. With Linear unreachable,
 `lf task restart FIX-1` replaces its saved Flow and reaches the first authored
@@ -110,8 +112,8 @@ observation and retain its actual observation timestamp.
 Absent, invalid, removed, terminal or mismatched records refuse before checkpoint
 or stop and name the planning problem. An old but otherwise valid observation
 can admit existing work, while status continues to show its age. This is the
-proposed outage policy for this Task, not a claim of previously settled general
-offline planning policy. It cannot discover a remote change during an outage;
+outage policy approved by Jack Heart for this Task on 2026-10-02; it does not
+change unrelated planning policy. It cannot discover a remote change during an outage;
 new locally received invalidation must block the next boundary.
 
 Bare restart is the required offline operation. Supplying new advice continues

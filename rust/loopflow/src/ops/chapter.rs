@@ -18,8 +18,8 @@ use crate::work::project::{Project, ProjectId};
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{
-    checked_projects, linear_project_name, pm_store, refresh_pm_snapshot, resolve_context,
-    PmContext,
+    checked_projects, linear_project_name, pm_store, project_is_foreign, refresh_pm_snapshot,
+    resolve_context, PmContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,7 +339,7 @@ pub(crate) async fn adopt_legacy_projects(
     let Some(wave) = store.get_wave_at(&locator).await.map_err(error)? else {
         return Ok(Vec::new());
     };
-    let pending = store
+    let mut pending = store
         .projects_pending_adoption(wave.id())
         .await
         .map_err(error)?;
@@ -356,6 +356,10 @@ pub(crate) async fn adopt_legacy_projects(
             projects.push(ctx.client.project_ownership(id).await.map_err(error)?);
         }
     }
+    // Retained migration records can belong to another repository's Team.
+    // Leave those Projects and their receipts untouched, just as ordinary sync does.
+    projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
+    pending.retain(|(id, _)| projects.iter().any(|project| &project.id == id));
     let has_current = projects
         .iter()
         .any(|project| project.status == ProjectStatus::Started);

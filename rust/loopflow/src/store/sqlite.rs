@@ -60,6 +60,16 @@ pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Recorded checkout evidence remains usable without chapter metadata.
+#[derive(Debug, Clone)]
+pub(crate) struct TaskCheckout {
+    pub task_id: TaskId,
+    pub issue_id: String,
+    pub issue_identifier: String,
+    pub worktree: PathBuf,
+    pub home_id: Option<crate::durable::HomeId>,
+}
+
 /// Stable identity fields for observation, independent of execution schema.
 #[derive(Debug)]
 pub(crate) struct WorkIdentity {
@@ -592,7 +602,7 @@ impl SqliteStore {
     /// the same connection lock while the connection-level transaction stays
     /// open. Observability callers create a private read-only store for this
     /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_run_ledger_snapshot<T>(
+    pub(crate) fn read_exec_snapshot<T>(
         &self,
         read: impl FnOnce(&Self) -> StoreResult<T>,
     ) -> StoreResult<T> {

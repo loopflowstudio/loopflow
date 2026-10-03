@@ -31,9 +31,50 @@ struct WorkspaceDestinationTests {
         let link = try TaskLink(url: #require(URL(string: "loopflow://task/LOO-303?repo=%2Fsrc%2Fspace%20here")))
         #expect(link.issue == "LOO-303")
         #expect(link.repo == "/src/space here")
+        let sessionLink = try TaskLink(url: #require(URL(string: "loopflow://task/LOO-303?session=review%201&repo=%2Fsrc")))
+        #expect(sessionLink.session == "review 1")
+        #expect(sessionLink.repo == "/src")
+        for value in ["loopflow://task/A?session=", "loopflow://task/A?session=x&session=y"] {
+            #expect(throws: (any Error).self) { try TaskLink(url: #require(URL(string: value))) }
+        }
         for value in ["loopflow://task/", "loopflow://task/A/B", "loopflow://task/A%2FB", "loopflow://task/A%0AB", "loopflow://task/A?repo=", "loopflow://task/A?repo=x&repo=y", "loopflow://task/A#node"] {
             let url = try #require(URL(string: value))
             #expect(throws: (any Error).self) { try TaskLink(url: url) }
+        }
+    }
+
+    @Test func taskLinkOpensExactSessionFromLaterPage() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        let record = try renameFixtureRecord("linked-session", title: "Design review", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let unrelated = try renameFixtureRecord("unrelated", title: "Other work", work: .task(id: "other-task"))
+        let otherEncoded = String(decoding: try JSONEncoder().encode(unrelated), as: UTF8.self)
+        let model = PodiumModel(query: RegistryQuery { args, cwd in
+            if args.contains("--task") { return exact }
+            if args.first == "session", cwd == wave.wave.repo {
+                if args.contains("--after") { return #"{"entries":[\#(encoded),\#(otherEncoded)],"next":null}"# }
+                return #"{"entries":[],"next":"page-two"}"#
+            }
+            throw RegistryQueryError("No mutation permitted")
+        })
+        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
+        await model.openTaskLink(try #require(url.url))
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.navigation.content == .terminals)
+        #expect(model.linkedSession?.id == record.id)
+        #expect(!model.showsTaskLink)
+
+        for session in ["missing", unrelated.id] {
+            url.queryItems = [URLQueryItem(name: "session", value: session)]
+            await model.openTaskLink(try #require(url.url))
+            #expect(model.navigation.selectedSessionId == record.id)
+            #expect(model.taskLinkReading.errorMessage?.contains(session) == true)
+            #expect(model.showsTaskLink)
         }
     }
 
@@ -61,6 +102,31 @@ struct WorkspaceDestinationTests {
         #expect(destination.task(id: task.id)?.task.task.name == task.task.name)
         #expect(destination.visibleRoadmaps.isEmpty)
         #expect(destination.breadcrumb?.task?.task.id == task.id)
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: try #require(task.reference.workspace?.identity))
+        workspace.multiplexer.newShell(command: ["local-server"])
+        let layout = workspace.multiplexer.layout
+        let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
+                                       query: exactQuery).document("note.txt")
+        document.editor.string = "unsaved draft"
+        let retained = SessionsContentView(
+            model: destination, repoPath: wave.wave.repo,
+            workspaces: registry, homeId: "local", query: exactQuery
+        )
+        #expect(throws: Never.self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+        }
+        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
+        #expect(!workspace.showsMaterials)
+        #expect(throws: (any Error).self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
+        }
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(document.editor.string == "unsaved draft")
+        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
+        #expect(throws: Never.self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
+        }
         #expect(throws: Never.self) {
             try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
         }
@@ -200,6 +266,30 @@ struct WorkspaceDestinationTests {
                 #expect(model.taskLinkReading.errorMessage == nil)
             }
         }
+    }
+
+    @Test(arguments: [false, true])
+    func scopedTaskLinkOpensItsMatchWithAnotherWaveUnavailable(scoped: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        var result = try #require(JSONSerialization.jsonObject(with: Data(exact.utf8)) as? [String: Any])
+        var waves = try #require(result["waves"] as? [[String: Any]])
+        let other = try #require(waves.indices.first { index in
+            let tasks = waves[index]["tasks"] as? [String: Any]
+            return (tasks?["items"] as? [Any])?.isEmpty == true
+        })
+        waves[other]["tasks"] = ["state": "unavailable", "reason": "Chapter unavailable"]
+        result["waves"] = waves
+        let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+        let model = PodiumModel(query: RegistryQuery { _, _ in response })
+        var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.selection == (scoped ? .task(id: task.id) : nil))
+        #expect(model.showsTaskLink == !scoped)
     }
 
     @Test func coldAndWarmLinksReachOnlyOneWorkspace() throws {

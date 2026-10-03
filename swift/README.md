@@ -7,9 +7,10 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app follows the machine-selected Loopflow Home through the
-stable install gate, so launching it from Finder shows the same Waves and
-Sessions as terminal `lf`.
+The development app bundles this checkout's CLI. Ordinary launches use the
+installed CLI and main Home. For a branch demo, launch with an explicit private
+`LF_HOME`; that uses the matching source CLI on disposable data. A copied Home
+retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -43,8 +44,11 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Choose **Show Files** in a Task or Session toolbar to read `scratch/` and changed files
-beside the retained terminal. **Parent** compares the worktree with the Task PR's
+Choose **Show Files** in a Task or Session toolbar to browse its checkout beside
+the retained terminal. Expand folders to read one page of up to 500 entries;
+**Load more** continues the directory and **Show ignored** includes ignored paths.
+Tracked, unchanged and untracked files remain available without an active PR.
+**Changes** optionally compares the worktree with the Task PR's
 recorded base; **HEAD** compares with its current commit. The displayed SHA pins
 the file list and selected diff. A recorded PR links above the file navigator.
 Use ↑/↓ in the navigator to select files; hover a row for its full path.
@@ -54,6 +58,9 @@ Use ↑/↓ in the navigator to select files; hover a row for its full path.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Switching files, hiding Files and returning to the Task keeps the draft.
+Files reached through symlinks remain readable within the checkout and show a
+read-only explanation. If a regular file becomes a symlink, its retained draft
+and Undo survive while editing, Save and autosave stop.
 
 Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
 app menu for explicit **Save** (⌘S). Both modes receive filesystem changes live,
@@ -81,26 +88,38 @@ without changing its destination.
 Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
 long lines retain the native editor's known responsiveness limitation.
 
-Select a repository in the outline, then choose a Task or Session. Use the
-outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
-shows repo → Wave → Task → Session and promotes descendants of singleton Waves
-when planning is readable;
-Tasks remain visible even before they have a Session. Disclosure folds a branch,
-while presentation changes preserve its saved expansion and selection.
-The sidebar lists started Tasks; unstarted Tasks remain in the Wave plan.
-Repository conversations and Sessions with unavailable ancestry stay reachable
-in **Orphan sessions** above search. Its header opens the first Session; the
-control room and manual binding are follow-up work.
+Select a repository, then a Task. Its workspace retains conversations, shells,
+file drafts and layout across visits. Use **+** in the toolbar for a conversation
+or shell, and the document icon for Files. The sidebar icon hides or restores the
+Sessions pane without changing its terminals or drafts. Click the Task title for
+details and the full Flow; the toolbar's current stage opens its available review.
 
-Right-click a row to inspect its subject or ancestors, start a scoped conversation,
-or open an ordinary terminal. Right-click the outline background for repository
-actions. **Show retained terminals** restores the existing pane layout. Search,
-scroll, presentation, expansion and selection survive repository switches within
-the window. Selecting a Task with exactly one open Session enters that Session;
-otherwise it opens the Task overview, which names each conversation. Monitor is
-an explicit breadcrumb control. Selecting a Session opens its exact terminal
-through the shared Session action.
-The Task overview draws its Flow from the shared read: before start, the chosen
+Exiting a disposable CLI conversation retires it from navigation while keeping
+its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
+Task conversations and repository/Wave primaries remain reachable.
+Stopping a response alone never closes the conversation or completes a review.
+
+Each Session or shell's **…** menu holds its pane actions. **Collapse** hides a pane while its process
+continues; **Expand** returns to it. **Focus** gives one conversation the content
+area; **Restore** brings back the panes and files. **Terminate** ends a shell.
+New conversations arrive in the list without taking focus.
+
+Task rows show all Sessions in the Task checkout, including independent conversations.
+Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
+Sessions; choose a name to open it directly.
+**Available** means the conversation can be joined; **Ready to complete** means
+its agent has recorded a summary. Failed provider starts offer recovery.
+
+Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
+Repository conversations and Sessions with unavailable ancestry stay reachable
+below the outline. Sessions without a Task association are also available under
+**Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
+There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
+
+The Task's compact Flow shows interactive stages and inspectable background work.
+Select a current stage to join its exact conversation; select a future stage to
+inspect it. **Detailed Flow** exposes the captured branches and repeats. The header
+uses the shared read: before start, the chosen
 Flow's preview (click its name to search the catalogue) and **Start**; once
 started, the pinned definition, the current occurrence, and each loop's iteration.
 Hover or focus the name for **Stop & restart…**, which confirms before replacing
@@ -163,15 +182,25 @@ the Session name. Both open the same picker: review the named Task, then choose
 ```sh
 open 'loopflow://task/LOO-303'
 open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow&session=SESSION_ID'
 ```
 
-Task links and palette Task entries open details, including Tasks outside the
-current chapter. They never start work or enter a Task's sole Session. Ambiguous
-links offer repository-qualified choices; unavailable reads keep the current
+Task links and palette Task entries open retained workspaces, including Tasks
+outside the current chapter, without starting a Task Flow. A repository-qualified
+link opens its exact match even when another Wave's planning is unavailable.
+Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
+Add `session` to open an existing Task conversation in its terminal pane. A
+missing or unrelated Session leaves the current workspace intact and offers Retry.
+Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
-Flow template, all Tasks and chapter history. Templates fold composed Flows;
+Flow template, current Tasks and chapter history. Completed Tasks start hidden.
+**Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
+Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
+(successful completions of any age); click that label to edit again. The checkbox
+hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
+execution and retained Session access remain available. Templates fold composed Flows;
 click a group or its disclosure control to expand it. Repeated uses disclose
 independently, and both return edges remain visible at folded boundaries. Tab to
 a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
@@ -191,7 +220,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Sessions, Task human FlowSteps, and ad-hoc Asks.
+include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session until Complete.
 
@@ -206,21 +235,18 @@ is rejected, its error stays visible in the toolbar through refresh and the term
 retry Complete after addressing the error. Undo does
 not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
-and reopen exactly as left. An Ask agent
-can mark itself ready, but the row and terminal remain until you complete
-the conversation. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
+and reopen exactly as left. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
 Rejected completion preserves the terminal and keeps its error visible through refresh.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
 Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
-Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
-files before the caller resumes. The app lists, opens, and acts on the shared
+The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
-Every record carries a required `runId` for Run lookup, including unopened Ask
-and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
-Run. A prepared Run alone does not establish live provider activity.
+The Session ID targets conversation actions and history lookup. A prepared
+input alone does not establish live provider activity.
+
 Choose a skill beside **New Session** below the repository name. Search by name
 or description, use ↑/↓ and Return to select, or Escape to close. Selection is
 remembered per repository and does not launch anything. Click **New Session**
@@ -234,9 +260,17 @@ Wave rows also offer **New Session** with the selected skill in their context me
 
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
-creating a Task or running an autonomous operating pass. **New terminal** opens
+creating a Task or running an autonomous operating pass. **New shell** opens
 an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
+
+In a Task workspace, one existing Session starts with the Sessions sidebar hidden;
+multiple Sessions show a collapsible sidebar. Use the toolbar to toggle it. Clicking
+a Session focuses its visible pane or opens it in the active Session pane, preserving
+other splits. **⌘-click** toggles a pane without ending the Session; **Option-click**
+or **Open alongside** reveals its saved split or opens it to the right. Visible rows
+are highlighted, and the focused row has an accent marker. New arrivals preserve
+the current layout and sidebar preference. Running shells stay intact.
 
 Selecting a Session in another checkout restores that worktree's conversation,
 companion terminals, split layout, and focus. Outside Task context, the toolbar's
@@ -329,7 +363,6 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — current chapter plan, Tasks and Runs
-- `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
@@ -349,6 +382,10 @@ remote-connection mode.
 The dev app uses the installed CLI and main `~/.lf` Home. Its bundled source
 CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
 experiments remain disposable and never become the app's default.
+
+For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
+and UI use this checkout’s wire protocol. Its recorded checkout paths still
+refer to real files. A copied Home does not prove live provider continuation.
 
 | Command | What it does |
 | --- | --- |

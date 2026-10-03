@@ -2904,7 +2904,7 @@ async fn checked_projects_with_store(
     Ok(projects)
 }
 
-fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+pub(super) fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
     !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
@@ -3272,7 +3272,7 @@ mod tests {
             "url": null,
             "title": format!("Task {identifier}"),
             "description": "",
-            "prioritySortOrder": 0.0,
+            "completedAt": null, "prioritySortOrder": 0.0,
             "sortOrder": 0.0, "updatedAt": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
             "assignee": null,
             "state": { "type": if completed { "completed" } else { "unstarted" } },
@@ -3725,7 +3725,7 @@ mod tests {
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
-                  "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                   "assignee": null, "state": { "type": "unstarted" },
                   "project": { "id": "project-123", "name": "Scan" },
                   "team": { "id": "team-123" } }

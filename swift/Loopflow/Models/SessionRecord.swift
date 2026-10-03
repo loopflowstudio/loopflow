@@ -7,10 +7,22 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     case active
     case ready
     case closed
+    case interrupted
+}
+
+public enum SessionAttention: String, Codable, Sendable, Hashable {
+    case review
+    case reply
+
+    public var label: String {
+        switch self {
+        case .review: "Needs review"
+        case .reply: "Needs reply"
+        }
+    }
 }
 
 public enum SessionKind: String, Codable, Sendable, Hashable {
-    case ask
     case flow
     case conversation
 }
@@ -134,14 +146,31 @@ public struct SessionAction: Codable, Sendable, Hashable {
     }
 }
 
+public struct SessionWorkspace: Codable, Sendable, Hashable {
+    public var identity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: worktree) }
+    public let homeId: String
+    public let worktree: String
+    public let taskId: String?
+    public let unavailable: String?
+
+    enum CodingKeys: String, CodingKey {
+        case worktree, unavailable
+        case homeId = "home_id"
+        case taskId = "task_id"
+    }
+}
+
 /// One resumable Session and the exact command that opens it.
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let primaryScope: String?
+    public let attention: SessionAttention?
     public let taskIds: [String]
     public let id: String
     public let kind: SessionKind
     public let interactive: Bool
     public let work: WorkReference?
+    public var workspace: SessionWorkspace?
     public let waveId: String?
     public let workPath: String?
     public let actions: [SessionAction]
@@ -158,12 +187,26 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let openArgv: [String]
     public let terminalIds: [String]
 
+    public var offersParticipation: Bool {
+        guard state != .closed, kind == .flow,
+              case .step(_, _, _, _, _, .current) = flowMembership else { return false }
+        return actions.contains { ($0.kind == .open || $0.kind == .moveHere || $0.kind == .complete) && $0.unavailableReason == nil }
+    }
+
+    public var participationLabel: String {
+        if state == .ready { return "Ready to complete" }
+        if offersParticipation { return state == .active ? "Available · discussing" : "Available · preparing" }
+        if kind == .flow { return "Needs recovery" }
+        return state == .active ? "Active" : "Conversation"
+    }
+
     public func action(_ kind: SessionActionKind) -> SessionAction? {
         actions.first { $0.kind == kind }
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, interactive, work, title, detail, provider, cwd, state
+        case id, kind, interactive, work, workspace, title, detail, provider, cwd, state, attention
+        case primaryScope = "primary_scope"
         case waveId = "wave_id"
         case taskIds = "task_ids"
         case actions

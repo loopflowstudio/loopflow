@@ -27,6 +27,7 @@ while it records — the intervals are named after what you did.
 | `cold_start` | `LoopflowApp.init` (message carries `pre_main_ms`) | next main-queue callback after non-empty rows are observed |
 | `hierarchy_interaction` | fold, presentation, filter keystroke, repository switch | next main-queue callback after changed rows are observed |
 | `task_workspace_ready` | `scenario=wave` / `task`: selection; `scenario=session`: Session opened | next main-queue callback after detail/focus is observed |
+| `retained_workspace_action` | collapse, expand, focus or restore of a retained pane | next main-queue callback after the workspace observes the layout change |
 | `lf` | one `lf` subprocess read (message = verb) | stdout decoded |
 | `markdown_parse` | one Description/Comment parse | blocks built |
 | `terminal_key_to_draw` | key press in a Ghostty pane | next display-link draw |

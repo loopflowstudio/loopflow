@@ -33,8 +33,11 @@ become a second driver.
   recovery already under way. If one exists, leave it alone and say so.
 - A failed read, a stale plan or unknown liveness never proves an empty backlog,
   a finished Task, or permission to close or restart work. Name the gap.
-- Reviews and decisions that need the user stay in their own Sessions. Tell the
-  user which Session is ready (`lf session list`) rather than answering it here.
+- Read failed work's existing status and logs. Resolve authorized impediments and
+  discuss missing decisions here in the Wave context. Retry through existing Task
+  controls only after new evidence or direction warrants it.
+- Authored Task reviews stay in their own Sessions. Tell the user which review
+  is ready (`lf session list`); this chat does not complete it on their behalf.
 - Bound retries. When the same failure repeats on unchanged evidence, stop and
   report the evidence instead of trying again.
 

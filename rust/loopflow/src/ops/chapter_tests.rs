@@ -149,6 +149,7 @@ fn task(state: &str) -> PmItem {
         description: String::new(),
         rank: 0,
         completed: state == "completed",
+        completed_at: None,
         state: Some(state.into()),
         project_id: Some("old".into()),
         project: Some("old".into()),
@@ -405,7 +406,7 @@ fn provider_fixture() -> Provider {
         ] {
             let issue = format!("{wave}-{suffix}");
             provider.issues.insert(issue.clone(), json!({"id":issue,"identifier":format!("FIX-{issue}"),"url":null,
-                "title":issue,"description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "title":issue,"description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
                 "state":{"type":state},"project":{"id":id,"name":name},"team":{"id":"team-1"}}));
         }
     }
@@ -1345,6 +1346,62 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
             }
         }
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    {
+        let mut state = provider.lock().await;
+        let old = state.projects.get_mut("a-old").unwrap();
+        old["status"]["type"] = json!("backlog");
+        old["content"] = json!("## Flows\nrecommended: custom");
+        for id in ["a-next", "a-archived"] {
+            let mut foreign = state.projects["a-old"].clone();
+            foreign["id"] = json!(id);
+            foreign["teams"]["nodes"] = json!([{"id":"other-team"}]);
+            foreign["status"]["type"] = json!("started");
+            if id == "a-archived" {
+                foreign["archivedAt"] = json!("2026-09-01T00:00:00Z");
+            }
+            state.projects.insert(id.into(), foreign);
+        }
+    }
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = legacy_home(&directory.path().join("foreign.db"), &repo, &url).await;
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            let store = super::pm_store().await.unwrap();
+            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let plans = super::checked_projects(&repo, &ctx, "a").await.unwrap();
+            assert_eq!(plans.len(), 1);
+            assert_eq!(super::select_current("a", &plans).unwrap().id, "a-old");
+            let before = provider.lock().await.projects.clone();
+            let converted = super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
+                .await
+                .unwrap();
+            assert_eq!(converted.len(), 1);
+            assert_eq!(converted[0].status, ProjectStatus::Started);
+            let wave = store
+                .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut pending = store.projects_pending_adoption(wave.id()).await.unwrap();
+            pending.sort();
+            assert_eq!(
+                pending,
+                vec![("a-archived".into(), 0), ("a-next".into(), 0)]
+            );
+            let state = provider.lock().await;
+            for id in ["a-next", "a-archived"] {
+                assert_eq!(state.projects[id], before[id]);
+            }
+        })
+        .await;
     server.abort();
 }
 

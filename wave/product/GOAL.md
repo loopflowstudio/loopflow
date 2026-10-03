@@ -8,6 +8,7 @@ chat:
   channel_id: '1528936130748223519'
 pm:
   linear_initiative: 33e774b0-ec3b-4bd6-a4f8-07676f9e897b
+id: 5081a624-c095-4218-9a54-6d1a6711f282
 ---
 
 ## Objective
@@ -46,7 +47,8 @@ the existing pane multiplexer organize work. Preserve native input and useful
 context while inspecting planning or monitoring Runs. Measure hierarchy navigation
 and Task workspace opening/switching at rendered, usable endpoints before choosing
 optimizations. Publish measured budgets before scoring; retain failed attempts,
-configured Session/Ask caller-release proof, and human usability confirmation.
+configured Session continuation and Task review completion proof, and human
+usability confirmation.
 
 Long-lived implementation pursuit and PR ownership belong to Tasks. Wave operation
 selects and steers the current chapter's work; its internal Project is not another

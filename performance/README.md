@@ -55,9 +55,12 @@ Run the repository's daily operator flow:
 lf telemetry-daily
 ```
 
-The flow runs the Home audit, then renders the deterministic lifecycle
-scorecard. The generator is an internal operation so it stays available to
+The flow runs the Home audit, renders the deterministic lifecycle
+scorecard, then publishes the weekly [context cost](context-cost.md) readings. The generator is an internal operation so it stays available to
 scheduled telemetry without becoming a general-user command or stable DTO.
+
+`lf usage --binds` compares Task and Wave totals under the two
+[bind attribution](bind-attribution.md) rules.
 
 `budgets.json` is the policy source. Each scorecard row carries its budget,
 measured/eligible coverage, nearest-rank p50 and p95, verdict, and the exact

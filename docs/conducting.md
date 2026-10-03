@@ -66,6 +66,7 @@ It is history, not another live process model: `lf ps` owns current motion.
 
 ```bash
 lf session list --task INF-123 --json
+lf session list --orphan --json          # Sessions without Task association
 lf session list --interactive false --history --task INF-123 --json
 lf session history SESSION --json
 lf session connect SESSION
@@ -73,6 +74,10 @@ lf mon show --task INF-123 --json
 lf mon show run_ab12 --final
 lf replay run_ab12
 ```
+
+Sessions in a Task checkout belong to that Task, including subdirectories and
+symlink aliases. Explicit repo/Wave Sessions remain separate. `--orphan` only
+filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
@@ -101,7 +106,7 @@ lf usage --json    # current usage wire, newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf ci watch --status # the CI watcher: live or not, last poll, what it started
-lf doctor          # audit the ledger: continuity, attribution, lineage
+lf doctor          # check installation, Exec integrity and scheduled receipts
 ```
 
 `lf top` is the first move when work feels slow — live machine-health evidence.
@@ -121,7 +126,7 @@ lf --wave <wave> wave/operate "ship the parser fix first"
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf interrupt INF-123                     # end this turn and re-read direction
-lf session list --json                        # unresolved Sessions
+lf session list --needs-me --json             # conversations waiting for review or reply
 lf session connect <session-id> --json           # recover one exact conversation
 ```
 
@@ -131,10 +136,10 @@ comments without starting execution. Task interrupt ends the active turn so
 advancement re-reads direction. Publication and transport acceptance do not
 prove that the agent applied the correction. See [The Agent API](agent-api.md#steer).
 
-`lf ask` is a synchronous boundary with a person. It opens an interactive AgentSession
-against the caller's exact checkout, enters the Sessions surface, and blocks
-the caller until the user completes the conversation.
-Use `lf --task <task> : "<prompt>"` when only another agent perspective is needed.
+Headless work that lacks required input explains its failure and stops. Read
+its existing status and logs; discuss unresolved judgment in the ongoing Wave
+chat. Authored Task reviews keep their own Sessions and feedback contract.
+Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
 A review node retains its exact FlowSession boundary and captured Skill. Opening
 its AgentSession returns to the conversation. Ready saves feedback; Complete
@@ -155,7 +160,8 @@ Task workspace shells run directly in the app's terminal.
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
 Use `lf comment` for durable Task direction,
-`lf --task` for another agent perspective, and `lf ask` for a new review boundary.
+and `lf --task` for another agent perspective. Author interactive review nodes
+in the Flow when a Task needs its own review conversation.
 
 ## Next
 

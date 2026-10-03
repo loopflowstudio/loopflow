@@ -85,11 +85,21 @@ pub struct AgentSession {
     pub repo: Option<String>,
     pub title: String,
     pub title_source: TitleSource,
-    /// What an Ask's caller asked; absent for other kinds.
+    /// Retained request context from historical conversations.
     pub request: Option<String>,
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
+}
+
+/// A Session assigned to a Task after it began.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionBind {
+    pub session_id: String,
+    pub at: i64,
+    /// The Task's issue identifier.
+    pub task: String,
+    pub wave: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,7 +107,6 @@ pub struct AgentSession {
 pub enum SessionKind {
     Conversation,
     FlowReview,
-    Ask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +146,7 @@ pub enum WorkSource {
 /// SQL selection for conversation inventory; mode and completion are independent.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
+    pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
     pub search: Option<String>,
@@ -151,6 +161,7 @@ pub struct SessionFilter {
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
+            orphan: false,
             repo: None,
             task: None,
             search: None,
@@ -167,6 +178,10 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub primary_scope: Option<String>,
+    pub driver_outcome: Option<String>,
+    pub latest_turn: Option<String>,
+    pub task_terminal: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: String,

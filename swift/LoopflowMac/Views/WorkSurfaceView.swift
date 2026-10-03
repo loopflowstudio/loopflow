@@ -113,7 +113,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     HStack(alignment: .center, spacing: Spacing.md) {
-                        Text(roadmap.wave.name)
+                        Text(roadmap.wave.displayName)
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")
@@ -166,11 +166,22 @@ struct WorkSurfaceView: View {
                         WorkspaceSectionHeading("Tasks")
                         Text(reason).font(Typography.body(13)).foregroundStyle(Color.statusWarning)
                     }
-                case .available(let tasks, let truncated):
+                case .available(let inventory, let truncated):
+                    let filter = model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter()
+                    let tasks = inventory.filter {
+                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: model.taskHistoryNow)
+                    }
                     section {
-                        WorkspaceSectionHeading("Tasks", count: tasks.count)
+                        WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                            TaskHistoryControls(filter: Binding(
+                                get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
+                                set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
+                            ))
+                            .id(roadmap.wave.id)
+                        }
+                        .accessibilityIdentifier("wave-task-count")
                         if tasks.isEmpty {
-                            Text("No Tasks in this chapter.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                            Text("No current Tasks").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                         } else {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(tasks.sorted { $0.task.rank < $1.task.rank }.enumerated()), id: \.element.id) { index, task in
@@ -266,10 +277,10 @@ struct WorkSurfaceView: View {
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
                     if case .pinned = task.flow.record {
-                        TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                        TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                     }
                 } else {
-                    TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
+                    TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                 }
                 TaskWorkView(model: model, task: task, wave: found.wave.wave)
                 TaskRunsView(model: model, task: task, wave: found.wave.wave)
@@ -381,7 +392,7 @@ struct WorkSurfaceView: View {
         case .unknown: .neutral
         case .active: .running
         case .waiting, .ready: .human
-        case .closed: .stopped
+        case .closed, .interrupted: .stopped
         }
     }
 
@@ -429,7 +440,9 @@ struct WorkSurfaceView: View {
     /// The plan row's state, read from the shared Task projection. Only running,
     /// done, human, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
     private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
-        if task.task.completed { return ("Completed", .done) }
+        if let label = task.task.historyLabel {
+            return (label, task.task.isSuccessful ? .done : .neutral)
+        }
         if case .pinned(let pinned) = task.flow.record {
             return pinned.execution.presentation
         }

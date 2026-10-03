@@ -15,7 +15,6 @@ extension Notification.Name {
 enum TerminalIdentity: Hashable, Sendable {
     case session(String)
     case shell(String)
-    case taskTerminal(String)
 }
 
 struct GhosttyTerminalTitle {

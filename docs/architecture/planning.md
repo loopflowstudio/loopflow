@@ -137,7 +137,9 @@ runs in its own child lf Exec through the ordinary command path. The Flow driver
 owns navigation; a child's command outcome alone cannot settle agent work.
 
 A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
-`summary`, or `blocked` with a nonempty `reason`. A router returns a JSON object containing
+`summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
+keys are required in the provider schema. Settlement also accepts persisted receipts
+that omitted the unused field. A router returns a JSON object containing
 `path`, constrained to the captured branch's path names. Each provider receives
 the schema before generation. Session history retains the native output and
 completion separately; only the exact selected successful result is consumed
@@ -145,9 +147,10 @@ inside the Flow's fenced settlement transaction. Invalid output receives at most
 two corrective turns in the same conversation; provider failure remains distinct.
 Helpers, older successes and late generations cannot settle the current selection.
 
-A blocked decision opens one keyed Ask. Completion returns saved feedback for
-reassessment at the same boundary, never a navigation verdict. Retry preserves
-the answer instead of opening duplicate conversations.
+Blocked records the reason and stops at the current Flow position. Existing logs
+and outcomes provide the evidence. The Wave operator resolves authorized
+impediments or discusses missing judgment in its ongoing chat. Explicit retry
+retains the position and pass; unchanged failures do not automatically retry.
 
 ## Recover without inventing an outcome
 
@@ -176,18 +179,15 @@ their claim and background placement are driver mechanics.
 A live claimed worker cannot be replaced because a status read timed out. Missing
 process evidence is uncertainty, and causal ancestry grants no signal authority.
 
-## Ask and review
+## Task reviews
 
 ```bash
-lf ask "Review which migration should survive"
 lf session list --json
 lf session connect SESSION --json
 lf session ready "Feedback and remaining work"
 lf session complete SESSION
 ```
 
-Ask opens a durable AgentSession in the caller's checkout and waits for explicit
-completion. A keyed retry returns the stored answer without a provider launch.
 A Flow review opens its captured Skill and retains exact Flow membership. Ready
 saves feedback; Complete persists it before provider teardown and successor
 launch. The following step receives the feedback; a later decision chooses

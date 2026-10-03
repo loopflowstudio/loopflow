@@ -40,8 +40,8 @@ pub fn task_save(
     revision: &str,
     content: &str,
 ) -> OpsResult<TaskFileSave> {
-    let (task, pr) = file_context(issue)?;
-    save(TaskWorkspace::new(&task, &pr), path, revision, content)
+    let checkout = file_context(issue)?;
+    save(TaskWorkspace::from(&checkout), path, revision, content)
 }
 
 pub(super) fn recovery_directory(workspace: TaskWorkspace<'_>) -> OpsResult<PathBuf> {
@@ -348,7 +348,6 @@ mod tests {
             issue_identifier: "TEST-1",
             task_id: &id,
             worktree: repo.path(),
-            base_commit: "",
         };
         let path = repo.path().join("notes.txt");
         fs::write(&path, "\u{feff}notes\r\n").unwrap();
@@ -410,7 +409,6 @@ mod tests {
                 issue_identifier: "TEST-1",
                 task_id: &id,
                 worktree: repo.path(),
-                base_commit: "",
             };
             let path = repo.path().join("notes.txt");
             fs::write(&path, "original").unwrap();
@@ -492,7 +490,6 @@ mod tests {
             issue_identifier: "TEST-1",
             task_id: &id,
             worktree: repo.path(),
-            base_commit: "",
         };
         fs::write(outside.path().join("notes"), "external").unwrap();
         symlink(outside.path(), repo.path().join("link")).unwrap();

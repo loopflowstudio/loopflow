@@ -85,6 +85,16 @@ pub fn execute_flow_command(
         }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
+        Some(Commands::Monitor {
+            cmd:
+                Some(
+                    cmd @ crate::lf::commands::monitor::MonitorCommand::Usage {
+                        weekly: true, ..
+                    },
+                ),
+            ..
+        }) => crate::lf::commands::monitor::run(&cmd)
+            .map_err(|error| OpsError::Message(error.to_string())),
         _ => Err(unsupported()),
     };
     result.map(|()| None)

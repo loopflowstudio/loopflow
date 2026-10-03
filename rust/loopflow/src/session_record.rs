@@ -469,7 +469,6 @@ impl SessionHistory {
 #[derive(Debug)]
 enum RecorderMessage {
     Event(EventEnvelope),
-    Terminal(TerminalReceipt),
     Drain(mpsc::Sender<()>),
 }
 
@@ -522,7 +521,6 @@ impl SessionRecorder {
                             let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
                             result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
                         }
-                        RecorderMessage::Terminal(receipt) => observe("terminal.json".into(), receipt.ended_at, serde_json::json!(receipt)),
                         RecorderMessage::Drain(acknowledge) => {
                             let result = sync_telemetry(&writer_dir);
                             let _ = acknowledge.send(());
@@ -1855,6 +1853,20 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 #[derive(Debug, Clone)]
 pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 
+pub(crate) fn register_session_driver_interrupt(
+    store: &crate::store::sqlite::SqliteStore,
+    session: String,
+    driver: crate::exec::SessionDriver,
+) {
+    let store = store.clone();
+    crate::engine::agent::register_interrupt_cleanup(move || {
+        match store.finish_session_driver(&session, &driver, "interrupted") {
+            Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
+            Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
+        }
+    });
+}
+
 impl CaptureHandle {
     /// Publish identity before a human boundary becomes visible. No provider or
     /// terminal receipt exists until this prepared Session executes.
@@ -2190,6 +2202,18 @@ impl CaptureHandle {
             replace_provider,
         )?;
         capture.driver = Some((session.id, driver));
+        drop(capture);
+        let capture = Arc::downgrade(&self.0);
+        crate::engine::agent::register_interrupt_cleanup(move || {
+            if let Some(capture) = capture.upgrade() {
+                let mut capture = capture.lock().expect("Session capture mutex poisoned");
+                if capture.settled_outcome.is_none() {
+                    if let Err(error) = capture.finish("interrupted") {
+                        tracing::warn!(%error, "record interrupted Session exit");
+                    }
+                }
+            }
+        });
         Ok(())
     }
 
@@ -2643,9 +2667,32 @@ impl SessionCapture {
             ended_at: OffsetDateTime::now_utc(),
             result_ref: None,
         };
-        write_terminal(&self.dir, &terminal)?;
-        if let Err(error) = self.recorder.record(RecorderMessage::Terminal(terminal)) {
-            self.warn_telemetry(error);
+        let terminal = write_terminal(&self.dir, terminal)?;
+        if self.manifest.harness != "loopflow" {
+            let store = row_store(&self.dir).map_err(std::io::Error::other)?;
+            let input = &self.manifest.artifact_key;
+            if let Some(session) = store
+                .session_for_artifact(input)
+                .map_err(std::io::Error::other)?
+            {
+                store
+                    .retain_session_observation(
+                        &session,
+                        &crate::session::SessionObservation {
+                            artifact_key: input.clone(),
+                            source: "terminal.json".into(),
+                            observed_at: terminal.ended_at.unix_timestamp(),
+                            task_id: session.task_id.clone(),
+                            wave_id: session.wave_id.clone(),
+                            payload: serde_json::json!({
+                                "input_id": input,
+                                "source": "terminal.json",
+                                "evidence": terminal,
+                            }),
+                        },
+                    )
+                    .map_err(std::io::Error::other)?;
+            }
         }
         self.settled_outcome = Some(outcome.to_string());
         if self.attempt_started {
@@ -2663,7 +2710,7 @@ impl SessionCapture {
         self.recorder.drain_after_settlement();
         if let Some((session, driver)) = self.driver.take() {
             match row_store(&self.dir)
-                .and_then(|store| store.release_session_driver(&session, &driver))
+                .and_then(|store| store.finish_session_driver(&session, &driver, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => return Err(std::io::Error::other(error)),
@@ -2769,6 +2816,8 @@ fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
     (manifest.artifact_key == artifact_key).then_some(artifact_key)
 }
 
+// Session captures retain their published on-disk layout; the directory name
+// does not make Run an owner. SQLite selects captures by artifact key.
 pub(crate) fn record_dir(lf_home: &Path, artifact_key: &str) -> Option<PathBuf> {
     parse_artifact_key(artifact_key).ok()?;
     let prefix = artifact_key
@@ -2923,17 +2972,20 @@ fn publish_manifest(
     Ok(published)
 }
 
-fn write_terminal(dir: &Path, receipt: &TerminalReceipt) -> std::io::Result<()> {
+fn write_terminal(dir: &Path, receipt: TerminalReceipt) -> std::io::Result<TerminalReceipt> {
     let path = dir.join("terminal.json");
-    let bytes = serde_json::to_vec_pretty(receipt).map_err(std::io::Error::other)?;
+    let bytes = serde_json::to_vec_pretty(&receipt).map_err(std::io::Error::other)?;
     match write_private_exclusive(&path, &bytes) {
-        Ok(()) => sync_dir(dir),
+        Ok(()) => {
+            sync_dir(dir)?;
+            Ok(receipt)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             let existing = fs::read(&path)?;
             let existing = serde_json::from_slice::<TerminalReceipt>(&existing)
                 .map_err(std::io::Error::other)?;
             if existing.outcome == receipt.outcome {
-                Ok(())
+                Ok(existing)
             } else {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
@@ -3903,6 +3955,23 @@ mod tests {
             .expect("settle without telemetry");
 
         assert!(dir.join("terminal.json").is_file());
+    }
+
+    #[test]
+    fn terminal_history_survives_an_unavailable_telemetry_recorder() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        capture.0.lock().unwrap().recorder.sender = None;
+
+        capture.finish("completed").unwrap();
+        capture.finish("completed").unwrap();
+        let store = super::row_store(&capture.artifact_dir()).unwrap();
+        fs::remove_dir_all(capture.artifact_dir()).unwrap();
+
+        let history = store
+            .input_history(capture.artifact_key().as_str())
+            .unwrap();
+        assert_eq!(history.recorded_outcome.as_deref(), Some("completed"));
     }
 
     #[test]

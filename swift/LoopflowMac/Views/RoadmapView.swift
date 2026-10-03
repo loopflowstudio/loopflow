@@ -23,7 +23,8 @@ enum RoadmapTaskAction: Equatable {
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     guard task.runtime != nil else {
-        return task.task.completed ? nil : .run
+        guard let start = task.flow.control(.start), start.unavailable == nil else { return nil }
+        return .run
     }
     switch task.actions.recommended {
     case .resume: return .resume
@@ -72,13 +73,11 @@ struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @StateObject private var terminalStore = TaskTerminalStore()
     @State private var model: PodiumModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
-    @State private var workspaceSelection: RoadmapTaskSelection?
 
     init(
         repoPath: String?,
@@ -142,16 +141,6 @@ struct RoadmapView: View {
                 if Task.isCancelled { return }
                 await refresh()
             }
-        }
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                prURL: selection.task.activePr?.publication?.github?.url,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
         }
     }
 
@@ -609,9 +598,9 @@ struct RoadmapTaskRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.task.completed ? "checkmark.circle.fill" : "circle")
+            Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.completed ? Color.statusSuccess : task.section.color)
+                .foregroundStyle(task.task.isSuccessful ? Color.statusSuccess : task.section.color)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -669,8 +658,8 @@ struct WorkChannelChips: View {
     var body: some View {
         HStack(spacing: Spacing.xs) {
             channel("Condition", task.condition.state.rawValue, task.condition.state.color)
-            channel("PM", task.task.completed ? "done" : "open",
-                    task.task.completed ? Color.statusSuccess : palette.textSecondary)
+            channel("PM", task.task.terminalLabel ?? "open",
+                    task.task.isSuccessful ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {

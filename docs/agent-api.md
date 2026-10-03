@@ -26,7 +26,7 @@ asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
-while `lf ask` blocks its caller on a durable AgentSession in its own checkout.
+and headless failures remain visible in ordinary output and recorded outcomes.
 
 A Wave directing a task is the internal case:
 
@@ -176,6 +176,8 @@ lf mon show --project parser --json
 lf mon show --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
+lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
+lf usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
 lf ps --json                # one OS-live process frame
 ```
 
@@ -202,8 +204,8 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
 - Answer the user in the current conversation; use typed Work observations for durable
-  coordination, ordinary `lf --task` conversations for another agent perspective, and
-  `lf ask` only for a new session.
+  coordination and ordinary `lf --task` conversations for another agent perspective.
+  Missing required input stops headless work; its existing logs supply the evidence.
 - Keep repeatable instructions with their skill, repository rules in its agent guide,
   and durable Wave learning in its existing memory.
 

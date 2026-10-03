@@ -67,11 +67,14 @@
               "description": "Envelope over the per-wave join.",
               "rank": 4,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
               "workspace": {
+                "home_id": "home_00000000000000000000000000000001",
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
                 "worktree": "/src/loopflow.make-lf-work-the-machine",
@@ -228,7 +231,140 @@
                       ],
                       "paths": []
                     }
-                  ]
+                  ],
+                  "interactions": {
+                    "stages": [
+                      "4"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "@start",
+                        "to": "4",
+                        "nodes": [
+                          "0",
+                          "1",
+                          "2",
+                          "3"
+                        ],
+                        "routes": [
+                          {
+                            "from": "@start",
+                            "to": "0",
+                            "condition": null
+                          },
+                          {
+                            "from": "0",
+                            "to": "1",
+                            "condition": null
+                          },
+                          {
+                            "from": "1",
+                            "to": "2",
+                            "condition": null
+                          },
+                          {
+                            "from": "2",
+                            "to": "3",
+                            "condition": null
+                          },
+                          {
+                            "from": "3",
+                            "to": "4",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "3",
+                            "to": "1",
+                            "condition": "repeat"
+                          }
+                        ]
+                      },
+                      {
+                        "from": "4",
+                        "to": "4",
+                        "nodes": [
+                          "1",
+                          "2",
+                          "3",
+                          "5"
+                        ],
+                        "routes": [
+                          {
+                            "from": "4",
+                            "to": "5",
+                            "condition": null
+                          },
+                          {
+                            "from": "5",
+                            "to": "1",
+                            "condition": "repeat"
+                          },
+                          {
+                            "from": "1",
+                            "to": "2",
+                            "condition": null
+                          },
+                          {
+                            "from": "2",
+                            "to": "3",
+                            "condition": null
+                          },
+                          {
+                            "from": "3",
+                            "to": "4",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "3",
+                            "to": "1",
+                            "condition": "repeat"
+                          }
+                        ]
+                      },
+                      {
+                        "from": "4",
+                        "to": "@end",
+                        "nodes": [
+                          "5",
+                          "6",
+                          "7",
+                          "8"
+                        ],
+                        "routes": [
+                          {
+                            "from": "4",
+                            "to": "5",
+                            "condition": null
+                          },
+                          {
+                            "from": "5",
+                            "to": "6",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "6",
+                            "to": "7",
+                            "condition": "fix"
+                          },
+                          {
+                            "from": "6",
+                            "to": "8",
+                            "condition": "skip"
+                          },
+                          {
+                            "from": "8",
+                            "to": "@end",
+                            "condition": null
+                          },
+                          {
+                            "from": "7",
+                            "to": "8",
+                            "condition": null
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 },
                 "current": 2,
                 "completed": [
@@ -293,11 +429,14 @@
               "description": "Consume the shared roadmap DTO.",
               "rank": 1,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
               "workspace": {
+                "home_id": "home_00000000000000000000000000000001",
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
                 "worktree": "/src/loopflow.all-wave-roadmap",
@@ -483,7 +622,140 @@
                       ],
                       "paths": []
                     }
-                  ]
+                  ],
+                  "interactions": {
+                    "stages": [
+                      "4"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "@start",
+                        "to": "4",
+                        "nodes": [
+                          "0",
+                          "1",
+                          "2",
+                          "3"
+                        ],
+                        "routes": [
+                          {
+                            "from": "@start",
+                            "to": "0",
+                            "condition": null
+                          },
+                          {
+                            "from": "0",
+                            "to": "1",
+                            "condition": null
+                          },
+                          {
+                            "from": "1",
+                            "to": "2",
+                            "condition": null
+                          },
+                          {
+                            "from": "2",
+                            "to": "3",
+                            "condition": null
+                          },
+                          {
+                            "from": "3",
+                            "to": "4",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "3",
+                            "to": "1",
+                            "condition": "repeat"
+                          }
+                        ]
+                      },
+                      {
+                        "from": "4",
+                        "to": "4",
+                        "nodes": [
+                          "1",
+                          "2",
+                          "3",
+                          "5"
+                        ],
+                        "routes": [
+                          {
+                            "from": "4",
+                            "to": "5",
+                            "condition": null
+                          },
+                          {
+                            "from": "5",
+                            "to": "1",
+                            "condition": "repeat"
+                          },
+                          {
+                            "from": "1",
+                            "to": "2",
+                            "condition": null
+                          },
+                          {
+                            "from": "2",
+                            "to": "3",
+                            "condition": null
+                          },
+                          {
+                            "from": "3",
+                            "to": "4",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "3",
+                            "to": "1",
+                            "condition": "repeat"
+                          }
+                        ]
+                      },
+                      {
+                        "from": "4",
+                        "to": "@end",
+                        "nodes": [
+                          "5",
+                          "6",
+                          "7",
+                          "8"
+                        ],
+                        "routes": [
+                          {
+                            "from": "4",
+                            "to": "5",
+                            "condition": null
+                          },
+                          {
+                            "from": "5",
+                            "to": "6",
+                            "condition": "advance"
+                          },
+                          {
+                            "from": "6",
+                            "to": "7",
+                            "condition": "fix"
+                          },
+                          {
+                            "from": "6",
+                            "to": "8",
+                            "condition": "skip"
+                          },
+                          {
+                            "from": "8",
+                            "to": "@end",
+                            "condition": null
+                          },
+                          {
+                            "from": "7",
+                            "to": "8",
+                            "condition": null
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 },
                 "current": 4,
                 "completed": [
@@ -550,7 +822,9 @@
               "description": "Derive Now/Available from one read.",
               "rank": 6,
               "completed": false,
-              "assignee": null
+              "assignee": null,
+              "state": "unstarted",
+              "completed_at": null
             },
             "reference": {
               "issue_url": null,
@@ -610,11 +884,14 @@
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
-              "assignee": null
+              "assignee": null,
+              "state": "completed",
+              "completed_at": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
               "workspace": {
+                "home_id": "home_00000000000000000000000000000001",
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
                 "worktree": "/src/loopflow.now-available-research",

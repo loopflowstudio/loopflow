@@ -652,6 +652,35 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn operate_resolves_to_repo_and_wave_operate_stays_explicit() {
+        let tmp = TempDir::new().unwrap();
+        for (name, expected) in [
+            ("operate", "repo/operate"),
+            ("repo/operate", "repo/operate"),
+            ("wave/operate", "wave/operate"),
+        ] {
+            let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
+                panic!("expected a skill for {name}");
+            };
+            assert_eq!(skill.name, expected);
+        }
+
+        let skills = tmp.path().join(".lf/skills/repo");
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(skills.join("operate.md"), "Repository operation override").unwrap();
+        for name in ["operate", "repo/operate"] {
+            let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
+                panic!("expected a skill for {name}");
+            };
+            assert_eq!(skill.name, "repo/operate");
+            assert_eq!(
+                skill.content.as_deref(),
+                Some("Repository operation override")
+            );
+        }
+    }
+
+    #[test]
     fn discover_skill_loads_user_namespaced_override() {
         let tmp = TempDir::new().expect("tempdir");
         let skills_dir = tmp.path().join(".lf/skills/gstack");

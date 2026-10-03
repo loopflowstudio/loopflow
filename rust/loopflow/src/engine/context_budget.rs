@@ -41,9 +41,13 @@ impl BudgetKey {
 
     pub fn default_limit(self) -> usize {
         match self {
-            Self::MemoryTokens | Self::ScratchTokens | Self::GoalTokens => 16_000,
+            Self::MemoryTokens | Self::GoalTokens => 16_000,
+            // The Task's own notes fit; replays without older scratch reached the
+            // same outcomes, reading files from disk (performance/context-ablation.md).
+            Self::ScratchTokens => 12_000,
             Self::InputTokens => 64_000,
-            Self::MemoryBytes | Self::ScratchBytes | Self::GoalBytes => 128 * 1024,
+            Self::MemoryBytes | Self::GoalBytes => 128 * 1024,
+            Self::ScratchBytes => 96 * 1024,
             Self::InputBytes => 512 * 1024,
         }
     }

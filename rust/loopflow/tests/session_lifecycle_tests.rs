@@ -36,8 +36,7 @@ impl Fixture {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // `lf ask` hands its conversation to a background launcher. The test
-        // opens the Session itself, so the launcher only records its request.
+        // Reviews use a background launcher; record requests without a display.
         let tmux = bin.join("tmux");
         std::fs::write(
             &tmux,
@@ -218,53 +217,6 @@ impl Fixture {
             .join(&run_id.strip_prefix("run_").unwrap_or(run_id)[..2])
             .join(run_id)
     }
-
-    /// `lf ask` as called from inside the caller's conversation.
-    fn ask(&self, caller_run: &str, question: &str) -> Command {
-        let mut command = self.command(&["ask", question]);
-        command
-            .env("LF_RUN_ID", caller_run)
-            .env("LF_RUN_DIR", self.run_dir(caller_run))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        command
-    }
-
-    fn wait_for_ask(&self, asking: &mut Child) -> (String, String) {
-        let deadline = Instant::now() + PATIENCE;
-        loop {
-            let stored = self.db().query_row(
-                "SELECT id,(SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture) FROM agent_sessions WHERE kind='ask'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            );
-            match stored {
-                Ok(stored) => return stored,
-                Err(rusqlite::Error::QueryReturnedNoRows) => {}
-                Err(rusqlite::Error::SqliteFailure(error, _))
-                    if matches!(
-                        error.code,
-                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
-                    ) => {}
-                Err(error) => {
-                    let _ = asking.kill();
-                    let _ = asking.wait();
-                    panic!("cannot inspect stored Ask: {error}");
-                }
-            }
-            if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
-                let _ = asking.kill();
-                let status = asking.wait();
-                panic!("Ask stored no Session: {status:?}");
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn launcher_requests(&self) -> String {
-        std::fs::read_to_string(self.home.path().join("tmux.log")).unwrap_or_default()
-    }
 }
 
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
@@ -340,48 +292,57 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert!(!blank.status.success());
 
     fixture.release(first);
-    let retained = fixture.sessions();
-    assert_eq!(
-        retained.len(),
-        1,
-        "provider exit does not complete a Session"
+    assert!(
+        fixture.sessions().is_empty(),
+        "exited orphans leave the working set"
     );
-    // Passive inventory no longer opens native history to infer closure.
-    assert_eq!(retained[0]["state"], "unknown");
-    assert_eq!(retained[0]["title"], "Parser review");
+    let (_, _, saved_title, saved_source, completed) = fixture.session_row(&first_run);
+    assert!(completed);
+    assert_eq!(
+        (saved_title.as_str(), saved_source.as_str()),
+        ("Parser review", "human")
+    );
+    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(history[0]["id"], id);
+    assert_eq!(history[0]["state"], "closed");
 
-    // Open resumes the same conversation with its captured input.
-    let described = fixture.json(&["session", "connect", &id, "--json"]);
-    assert_eq!(described["id"], id.as_str());
-    let (resumed, resumed_run) = fixture.attach(&["session", "connect", &id]);
-    assert_eq!(resumed_run, first_run);
-    assert_eq!(fixture.sessions()[0]["state"], "active");
-    fixture.release(resumed);
-    assert_eq!(fixture.sessions().len(), 1);
-
-    // Another launch in the same checkout is another conversation.
     let (second, second_run) = fixture.attach(&LAUNCH);
-    fixture.release(second);
     let (second_id, ..) = fixture.session_row(&second_run);
     assert_ne!(second_id, id);
-    assert_eq!(fixture.sessions().len(), 2);
-    assert_eq!(fixture.sessions().len(), 2);
+    assert_eq!(fixture.sessions().len(), 1);
+    fixture.release(second);
+    assert!(fixture.sessions().is_empty());
+}
 
-    let completed = fixture.run(&["session", "complete", &id]);
-    assert!(completed.status.success(), "{completed:?}");
-    assert!(
-        fixture.session_row(&first_run).4,
-        "completion is a row update"
-    );
-    let remaining = fixture.sessions();
-    assert_eq!(remaining.len(), 1, "{remaining:?}");
-    assert_eq!(remaining[0]["id"], second_id.as_str());
-    let reopened = fixture.run(&["session", "connect", &id, "--json"]);
-    assert!(!reopened.status.success(), "{reopened:?}");
-    assert!(
-        String::from_utf8_lossy(&reopened.stderr).contains("already complete"),
-        "{reopened:?}"
-    );
+#[test]
+fn sigint_records_session_interruption_and_retires_the_orphan() {
+    let fixture = Fixture::new(true);
+    let (mut child, input) = fixture.attach(&LAUNCH);
+    let (id, ..) = fixture.session_row(&input);
+    // SAFETY: child is the live process this test spawned and has not reaped.
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130));
+            break;
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("interrupt did not finish");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(fixture.sessions().is_empty());
+    assert!(fixture.session_row(&input).4);
+    let history = fixture.json(&["session", "history", &id, "--json"]);
+    assert!(history
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["payload"]["type"] == "driver_exit"
+            && event["payload"]["outcome"] == "interrupted"));
 }
 
 #[test]
@@ -450,6 +411,33 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .block_on(task.store.create_session(session, None))
             .unwrap();
     }
+    fixture.db().execute("UPDATE agent_sessions SET ready_summary='Review this',interactive=0 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
+    let attention = fixture.json(&[
+        "session",
+        "list",
+        "--needs-me",
+        "--json",
+        "--page",
+        "--limit",
+        "1",
+    ]);
+    assert_eq!(attention["entries"][0]["id"], "inventory-111");
+    assert_eq!(attention["entries"][0]["attention"], "review");
+    assert_eq!(attention["next"], "inventory-111");
+    let next = fixture.json(&[
+        "session",
+        "list",
+        "--needs-me",
+        "--json",
+        "--page",
+        "--limit",
+        "1",
+        "--after",
+        "inventory-111",
+    ]);
+    assert_eq!(next["entries"][0]["id"], "inventory-112");
+    assert!(next["next"].is_null());
+    fixture.db().execute("UPDATE agent_sessions SET ready_summary=NULL,interactive=1 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
     let list = ["session", "list", "--json", "--limit", "2"];
     let page = fixture.json(&list);
     assert_eq!(
@@ -583,9 +571,10 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 #[test]
 fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
+    let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-binding",
         &fixture.repo.head_sha(),
     );
@@ -647,7 +636,9 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(preview["task_id"], task.task.id.as_str());
     assert_eq!(preview["identifier"], "INF-123");
     assert_eq!(started(task.task.id.as_str()), None);
-    assert_eq!(fixture.sessions()[0]["work"], Value::Null);
+    assert!(fixture.sessions().is_empty());
+    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(history[0]["work"], Value::Null);
     assert_eq!(fixture.launches().len(), 1);
 
     // The bind happens measurably after the conversation was created.
@@ -679,8 +670,12 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert!((before..=after).contains(&bound_at));
     assert_eq!(started(task.task.id.as_str()), Some(bound_at));
     assert!(task_runs("INF-123").is_empty());
-    let listed = fixture.sessions();
-    assert_eq!(listed.len(), 1);
+    assert!(
+        fixture.sessions().is_empty(),
+        "binding preserves completion"
+    );
+    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(
         listed[0]["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -812,24 +807,6 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let parent: String = fixture.db().query_row("SELECT parent_exec_id FROM execs WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
         assert_eq!(parent, origin.as_str());
     }
-    // Asking outside the Task retains causal input but does not inherit its Task.
-    let mut asking = fixture
-        .ask(&original, "Which target?")
-        .env("LF_AGENT_CALLER", &caller)
-        .spawn()
-        .unwrap();
-    let (ask, input) = fixture.wait_for_ask(&mut asking);
-    assert_eq!(fixture.run_parents(&input), (None, None, None));
-    store
-        .ready_session(
-            &ask,
-            store.captured_sequence(&input).unwrap(),
-            "Keep this checkout",
-        )
-        .unwrap();
-    assert!(fixture.run(&["session", "complete", &ask]).status.success());
-    assert!(asking.wait_with_output().unwrap().status.success());
-    assert_eq!(fixture.run_parents(&original), (None, None, None));
     // A stale provider keeps its original causal parent and grants no Work.
     store
         .claim_session_driver(&session, Some(&driver), &origin, true)
@@ -1027,173 +1004,6 @@ const BOUND_LAUNCH: [&str; 8] = [
     "Review the parser",
 ];
 
-#[test]
-fn ask_returns_feedback_once_and_rejects_a_stale_answer() {
-    let fixture = Fixture::new(true);
-    let task = support::register_unrun_task(
-        fixture.home.path(),
-        fixture.repo.path(),
-        "task-binding",
-        &fixture.repo.head_sha(),
-    );
-    fixture.repo.create_branch("task-binding");
-    let (caller, caller_run) = fixture.attach(&BOUND_LAUNCH);
-
-    let mut asking = fixture
-        .ask(&caller_run, "Which release target?")
-        .spawn()
-        .unwrap();
-    let (id, first_run) = fixture.wait_for_ask(&mut asking);
-    wait_for("the conversation launcher", || {
-        fixture
-            .launcher_requests()
-            .contains("serve-ask")
-            .then_some(())
-    });
-    assert_eq!(fixture.sessions().len(), 2);
-    let inherited = (
-        Some(task.task.id.to_string()),
-        Some(task.task.wave_id.to_string()),
-        Some("checkout".to_string()),
-    );
-    assert_eq!(fixture.run_parents(&first_run), inherited);
-    let ask_run = |run_id: &str| -> (Option<String>, Option<String>, String) {
-        fixture
-            .db()
-            .query_row(
-                "SELECT s.flow_session_id, json_extract(i.payload,'$.caller_key'), s.id FROM session_events i JOIN agent_sessions s ON s.id=i.session_id AND i.kind='captured' WHERE i.receipt_key=?1",
-                [run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap()
-    };
-    assert_eq!(
-        ask_run(&first_run),
-        (None, Some(caller_run.clone()), id.clone()),
-        "an Ask inherits work and its caller, never an invocation"
-    );
-
-    let listed = fixture.sessions();
-    let listed = listed
-        .iter()
-        .find(|session| session["id"] == id.as_str())
-        .unwrap_or_else(|| panic!("the Ask does not list: {listed:?}"));
-    assert_eq!(listed["kind"], "ask");
-    assert_eq!(listed["title"], "Which release target?");
-    assert_eq!(listed["title_source"], "generated");
-    assert_eq!(listed["state"], "unknown");
-    assert_eq!(
-        listed["work"],
-        serde_json::json!({"kind": "task", "id": task.task.id})
-    );
-    assert_eq!(listed["flow_membership"]["kind"], "independent");
-
-    let named = fixture.json(&["session", "rename", &first_run, "Launch notes", "--json"]);
-    assert_eq!(named["id"], id.as_str());
-    assert_eq!(named["title"], "Launch notes");
-    assert_eq!(named["title_source"], "human");
-
-    let inside = |run_id: &str, args: &[&str]| -> Output {
-        fixture
-            .command(args)
-            .env("LF_RUN_ID", run_id)
-            .env(
-                "LF_HUMAN_SESSION",
-                serde_json::json!({"kind": "ask", "id": id}).to_string(),
-            )
-            .output()
-            .unwrap()
-    };
-    let early = fixture.run(&["session", "complete", &id]);
-    assert!(
-        String::from_utf8_lossy(&early.stderr).contains("not marked this ready"),
-        "{early:?}"
-    );
-    let ready = inside(&first_run, &["session", "ready", "Ship to staging"]);
-    assert!(ready.status.success(), "{ready:?}");
-    let feedback = || -> (String, Option<String>, String, bool) {
-        fixture
-            .db()
-            .query_row(
-                "SELECT title, ready_summary, (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture), completed_at IS NOT NULL
-                 FROM agent_sessions WHERE id=?1",
-                [&id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap()
-    };
-    assert_eq!(
-        feedback(),
-        (
-            "Launch notes".to_string(),
-            Some("Ship to staging".to_string()),
-            first_run.clone(),
-            false
-        )
-    );
-
-    // A consumed launch without provider history is replaced on the next open.
-    // Replacement captures another input in the same conversation.
-    std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
-    let (opened, second_run) = fixture.attach(&["session", "connect", &id]);
-    assert_ne!(second_run, first_run);
-    assert_eq!(
-        feedback(),
-        (
-            "Launch notes".to_string(),
-            Some("Ship to staging".to_string()),
-            second_run.clone(),
-            false
-        )
-    );
-    assert_eq!(
-        ask_run(&second_run),
-        (None, Some(caller_run.clone()), id.clone())
-    );
-    assert_eq!(fixture.run_parents(&second_run), inherited);
-    let history: i64 = fixture
-        .db()
-        .query_row(
-            "SELECT count(*) FROM session_events WHERE kind='captured' AND session_id=?1",
-            [&id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        history, 2,
-        "the replaced capture stays in the conversation's history"
-    );
-    let stale = inside(&first_run, &["session", "ready", "Late answer"]);
-    assert!(!stale.status.success(), "{stale:?}");
-    assert_eq!(fixture.count("agent_sessions"), 2);
-
-    let completed = fixture.run(&["session", "complete", &id]);
-    assert!(completed.status.success(), "{completed:?}");
-    let answer = asking.wait_with_output().unwrap();
-    assert!(answer.status.success(), "{answer:?}");
-    assert_eq!(
-        String::from_utf8_lossy(&answer.stdout)
-            .matches("Ship to staging")
-            .count(),
-        1,
-        "{answer:?}"
-    );
-    assert!(feedback().3, "completion is a row update");
-    assert!(fixture
-        .sessions()
-        .iter()
-        .all(|session| session["id"] != id.as_str()));
-    let again = fixture.run(&["session", "complete", &id]);
-    assert!(!again.status.success(), "{again:?}");
-    assert!(
-        String::from_utf8_lossy(&again.stderr).contains("already complete"),
-        "{again:?}"
-    );
-
-    fixture.release(opened);
-    fixture.release(caller);
-}
-
 /// A store under a directory that cannot be written until `unlock`.
 struct LockedStore {
     directory: PathBuf,
@@ -1297,7 +1107,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
 }
 
 #[test]
-fn unavailable_store_starts_no_provider_or_ask() {
+fn unavailable_store_starts_no_provider() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     let store = LockedStore::new(&fixture);
@@ -1320,7 +1130,6 @@ fn unavailable_store_starts_no_provider_or_ask() {
             "batch",
             "--no-loopflow",
         ],
-        &["ask", "Which release target?"],
     ] {
         let mut launch = fixture.command(args);
         store.select(&mut launch);
@@ -1643,7 +1452,7 @@ fn invocation_inputs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
 }
 
 #[test]
-fn task_flow_retries_the_conversation_then_waits_for_review() {
+fn failure_without_ask_provider_retry_retains_task_conversation_and_review() {
     let fixture = Fixture::new(false);
     fixture.repo.create_branch("task-row-flow");
     saved_flow_stand_in(&fixture);
@@ -1916,6 +1725,91 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             assert!(String::from_utf8_lossy(&output.stderr).contains("exhausted after 3"));
         }
     }
+}
+
+#[test]
+fn failure_without_ask_stops_taskless_decision_until_explicit_retry() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
+    std::fs::write(fixture.repo.path().join(".lf/flows/work-then-decide.yaml"),
+        "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n- step:\n    id: review\n    name: review-proof\n    human: true\n").unwrap();
+    let mut command = fixture.command(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "--mode",
+        "batch",
+        "--no-loopflow",
+    ]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("blocked decision did not stop before the deadline");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(!status.success());
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let id: String = fixture
+        .db()
+        .query_row("SELECT id FROM flow_sessions", [], |row| row.get(0))
+        .unwrap();
+    let failed = store.flow(&id).unwrap().unwrap();
+    assert!(failed
+        .failure
+        .as_ref()
+        .unwrap()
+        .reason
+        .contains("Release target is missing"));
+    assert_eq!(failed.cursor.index, 1);
+    assert_eq!(failed.cursor.iteration, 0);
+    assert!(failed.claim.is_none());
+    assert!(fixture.sessions().is_empty());
+    let launches = fixture.launches();
+    assert_eq!(launches.len(), 2);
+    let input = failed.current_attempt.as_ref().unwrap();
+    let session = store.session_for_artifact(&input.run_id).unwrap().unwrap();
+    let history = fixture.json(&["session", "history", &session.id, "--json"]);
+    assert!(
+        history.to_string().contains("Release target is missing"),
+        "{history}"
+    );
+    for _ in 0..2 {
+        let resumed = fixture.run(&["flow", "resume", &id]);
+        assert!(!resumed.status.success());
+        let retained = store.flow(&id).unwrap().unwrap();
+        assert_eq!(retained.cursor, failed.cursor);
+        assert_eq!(retained.failure, failed.failure);
+        assert_eq!(fixture.launches(), launches);
+        assert!(fixture.sessions().is_empty());
+    }
+    let retried = fixture.run(&["flow", "resume", &id, "--retry"]);
+    assert!(
+        String::from_utf8_lossy(&retried.stderr).contains("waiting for human input"),
+        "{retried:?}"
+    );
+    let review = store.flow(&id).unwrap().unwrap();
+    assert_eq!(review.cursor.index, 2);
+    assert_eq!(review.cursor.iteration, 0);
+    assert!(review.failure.is_none());
+    assert_eq!(fixture.launches().len(), 3);
+    let sessions = fixture.sessions();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["kind"], "flow");
+    assert_eq!(store.session_inputs(&session.id).unwrap().len(), 2);
 }
 
 #[test]

@@ -226,7 +226,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false,
+          "completed": false, "state": "unstarted", "completed_at": null,
           "assignee": null
         },
         "reference": {
@@ -246,6 +246,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
+        "flow":{"recommended":"feature","record":{"kind":"none"},"controls":[]},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -370,7 +371,7 @@ struct RegistryQueryTests {
           },
           "runs": {
             "state": "unavailable",
-            "reason": "run ledger unavailable: disk is gone"
+            "reason": "Session history unavailable: disk is gone"
           },
           "metric_portfolio": {
             "metrics": [],
@@ -391,7 +392,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { _, _ in json }
 
         let result = try await query.status(wave: "goals", cwd: nil)
-        #expect(result.runs.unavailableReason == "run ledger unavailable: disk is gone")
+        #expect(result.runs.unavailableReason == "Session history unavailable: disk is gone")
         #expect(result.runs.items.isEmpty)
     }
 

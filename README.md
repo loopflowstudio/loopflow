@@ -21,6 +21,8 @@ lf schedule         # check at login and weekly (macOS)
 lf schedule daily   # also accepts weekly, hourly, 5min
 ```
 
+Run `lf install` from any checkout, including a Task checkout. Promotion checks
+the candidate release against the installed database before changing it.
 Use `lf task sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
@@ -36,9 +38,16 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
 It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
-terminal control conversation. On canonical main, it first carries local
+general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
+
+```bash
+lf                         # follow the conversation wherever it goes
+lf operate                 # review and operate this repository’s work
+lf repo/operate            # canonical name for the same skill
+lf --wave designer wave/operate  # operate one Wave
+```
 
 Give an external agent harness the Loopflow operating skill:
 
@@ -102,6 +111,7 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
+lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf arm -c                                          # request exact-head auto-merge and return
 lf land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges

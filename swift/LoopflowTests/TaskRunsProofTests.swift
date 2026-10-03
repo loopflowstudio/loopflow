@@ -24,8 +24,8 @@ struct TaskRunsProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell()
@@ -114,7 +114,7 @@ struct TaskRunsProofTests {
         try await settle(window)
         #expect(try find("task-runs-stale").text().string() == "May be out of date")
         _ = try find("task-run-run_a1:12")
-        #expect(try find("task-runs-status").text().string().contains("Run records unavailable"))
+        #expect(try find("task-runs-status").text().string().contains("Session history unavailable"))
 
         // A late read of A cannot publish into B; B reads only when expanded.
         await source.reply("W2-131", with: .held(["run_a3"]))
@@ -230,7 +230,7 @@ private actor RunSource {
                 await withCheckedContinuation { hold = $0 }
                 ids = chosen
             case .failure, nil:
-                throw RegistryQueryError("Run records unavailable in this fixture")
+                throw RegistryQueryError("Session history unavailable in this fixture")
             }
             let runs = ids.enumerated().map { index, id -> [String: Any] in
                 var run = template

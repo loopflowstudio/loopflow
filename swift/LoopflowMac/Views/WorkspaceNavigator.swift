@@ -108,7 +108,6 @@ struct WorkspaceNavigator: View {
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.listScrollOffset = offset }
-            orphanSection
             // Search sits below the data so the repository heads its outline.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
@@ -151,10 +150,8 @@ struct WorkspaceNavigator: View {
                     Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
                         .accessibilityIdentifier("workspace-repository-\(repo)")
                 }
-                if !repositoryActionsEmpty {
-                    Divider()
-                    repositoryActions
-                }
+                Divider()
+                repositoryActions
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
@@ -317,133 +314,27 @@ struct WorkspaceNavigator: View {
         }
     }
 
-    /// Exact open conversations on a Task, by name. Clicking the count inspects
-    /// the Task overview without entering any one of them.
+    /// Open an exact available conversation from its Task or collapsed Wave.
     private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
         let names = sessions.map(\.title).joined(separator: ", ")
-        return Button { model.select(work) } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "bubble.left").font(.system(size: 10))
-                Text("\(sessions.count)").monospacedDigit()
+        return Menu {
+            ForEach(sessions) { session in
+                Button(session.title) { onOpenSession(session) }
             }
-            .font(Typography.meta)
-            .foregroundStyle(palette.textTertiary)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .fixedSize()
-            .contentShape(Capsule())
+        } label: {
+            Label("\(sessions.count)", systemImage: "bubble.left")
+                .font(Typography.meta).foregroundStyle(palette.accentInk)
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
         .help(names)
-        .accessibilityLabel("\(sessions.count) open \(sessions.count == 1 ? "Session" : "Sessions"): \(names). Inspect Task")
+        .accessibilityLabel("\(sessions.count) Task Sessions: \(names)")
         .accessibilityIdentifier("workspace-session-count-\(work.id)")
     }
 
     // MARK: - Orphan Sessions
 
     private var orphans: [SessionRecord] { model.visibleWorkspace.orphanSessions(search: model.navigation.search) }
-
-    /// Collapsed beside planned Work; open when orphans are all this repository
-    /// shows, and while a search names them.
-    private var orphansDisclosed: Bool {
-        (model.navigation.orphansDisclosed ?? model.workspace.waves.isEmpty)
-            || !model.navigation.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// Sessions with no Work: one conditional section above search, absent at
-    /// zero. Their Task is never inferred from a checkout; S6 binds them by hand.
-    @ViewBuilder private var orphanSection: some View {
-        let orphans = orphans
-        if !orphans.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Divider().overlay(palette.border).padding(.bottom, 6)
-                HStack(spacing: 6) {
-                    Button {
-                        model.navigation.orphansDisclosed = !orphansDisclosed
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .rotationEffect(.degrees(orphansDisclosed ? 90 : 0))
-                            .foregroundStyle(palette.textTertiary)
-                            .frame(width: 14, height: 24)
-                    }
-                    .accessibilityLabel(orphansDisclosed ? "Hide orphan Sessions" : "Show orphan Sessions")
-                    .accessibilityIdentifier("workspace-orphans-toggle")
-                    Button { openOrphans(orphans) } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                            Text("Orphan sessions")
-                                .textCase(.uppercase)
-                                .font(Typography.label)
-                                .tracking(0.66)
-                            Text("· \(orphans.count)").font(Typography.meta).monospacedDigit()
-                        }
-                        .foregroundStyle(palette.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .help("Sessions launched without a Task or Wave. Open them together.")
-                    .accessibilityLabel("Orphan sessions, \(orphans.count)")
-                    .accessibilityIdentifier("workspace-orphans-open")
-                }
-                .padding(.horizontal, 6)
-                .frame(minHeight: 26)
-                if orphansDisclosed {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(orphans) { session in orphanRow(session) }
-                        }
-                    }
-                    .frame(maxHeight: 172)
-                    .accessibilityIdentifier("workspace-orphans")
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
-        }
-    }
-
-    /// The single seam S6 swaps for the control room.
-    private func openOrphans(_ orphans: [SessionRecord]) {
-        if let first = orphans.first { onOpenSession(first) }
-    }
-
-    private func orphanRow(_ session: SessionRecord) -> some View {
-        let selected = model.navigation.selectedSessionId == session.id
-        return HStack(spacing: 6) {
-            Image(systemName: "terminal").font(.system(size: 11))
-                .foregroundStyle(palette.textTertiary).frame(width: 14)
-            Button { onOpenSession(session) } label: {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(session.title).font(Typography.text).foregroundStyle(palette.text)
-                        .lineLimit(1).truncationMode(.tail)
-                    if let provider = session.provider {
-                        Text(provider).font(Typography.meta).foregroundStyle(palette.textTertiary)
-                    }
-                    Spacer(minLength: 0)
-                    if session.state == .active {
-                        Circle().fill(WorkspaceTone.running.ink).frame(width: 6, height: 6)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .help([session.title, session.workPath ?? session.cwd].joined(separator: " · "))
-            .accessibilityIdentifier("session-row-\(session.id)")
-        }
-        .padding(.horizontal, 6)
-        .frame(minHeight: 28)
-        .background(selected ? palette.selectionTint : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if selected {
-                RoundedRectangle(cornerRadius: 1).fill(palette.accentInk)
-                    .frame(width: 2).padding(.vertical, 7).offset(x: -10)
-            }
-        }
-        .contextMenu {
-            Button("Open \(session.title)") { onOpenSession(session) }
-            Divider()
-            repositoryActions
-        }
-    }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
         if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(wave: work) {
@@ -454,13 +345,20 @@ struct WorkspaceNavigator: View {
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    private var repositoryActionsEmpty: Bool {
-        onConversation == nil && onNewShell == nil && onShowTerminals == nil
-    }
-
     @ViewBuilder private var repositoryActions: some View {
+        Menu("Debug") {
+            Menu("Sessions") {
+                Menu("Orphan Sessions") {
+                    ForEach(orphans) { session in
+                        Button(session.title) { onOpenSession(session) }
+                            .accessibilityIdentifier("debug-orphan-session-\(session.id)")
+                    }
+                    if orphans.isEmpty { Text("No Sessions without a Task association") }
+                }
+            }
+        }
         if let onConversation { Button("New repository conversation") { onConversation(nil) } }
-        if let onNewShell { Button("New terminal", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
+        if let onNewShell { Button("New shell", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
         if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
     }
 

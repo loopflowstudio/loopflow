@@ -103,6 +103,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
+    public func localHomeId() async throws -> String {
+        struct HomeIdentity: Decodable { let id: String }
+        return try Self.decode(HomeIdentity.self, from: await run(["home", "id", "--json"], nil)).id
+    }
+
     public func userName() async throws -> String? {
         let stdout = try await run(["home", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
@@ -237,6 +242,15 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
+    /// One page of immediate directory entries in the Task checkout.
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil,
+                          showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
+        var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
+        if let cursor { args += ["--cursor", cursor] }
+        if showIgnored { args.append("--show-ignored") }
+        return try Self.decode(TaskDirectory.self, from: try await run(args, cwd))
+    }
+
     /// Current contents of one file, constrained to the Task worktree.
     public func taskFile(
         issue: String,
@@ -277,7 +291,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Give one Session a human-assigned name and return the authoritative
-    /// record. A Run ID reaches the Ask or Flow boundary that owns it.
+    /// record. A Run ID reaches the conversation or Flow boundary that owns it.
     public func renameSession(
         id: String,
         name: String,
@@ -297,7 +311,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete an interactive conversation, Flow review, or blocked Ask.
+    /// Complete an interactive conversation or Flow review.
     public func completeSession(
         id: String,
         cwd: String? = nil
@@ -402,6 +416,8 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let supersededByWaveId: String?
     public let retirementReason: String?
     public let home: Home
+
+    public var displayName: String { toWave().displayName }
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, goal, repo, home

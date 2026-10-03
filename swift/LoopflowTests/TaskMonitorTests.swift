@@ -81,7 +81,7 @@ struct TaskMonitorTests {
         #expect(store.layout.allPanes == [session, shell])
         store.undoClose()
         #expect(store.layout.allPanes == [session, shell, monitor])
-        store.reconcileSessions([])
+        store.removeSessions(["session"])
         #expect(store.layout.allPanes == [shell, monitor])
         store.load(sessionId: "another-session")
         #expect(store.layout.allPanes.contains(monitor))
@@ -93,8 +93,8 @@ struct TaskMonitorTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let store = registry.workspace(for: repo).multiplexer
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let store = registry.workspace(for: fixtureWorkspace(repo)).multiplexer
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             store.newShell()
@@ -113,6 +113,8 @@ struct TaskMonitorTests {
         session["id"] = "monitor-session"
         session["kind"] = "conversation"
         session["work"] = ["kind": "task", "id": "ts_now00000000000000000000000000000"]
+        session["workspace"] = ["home_id": fixtureHomeId, "worktree": repo,
+                                "task_id": "ts_now00000000000000000000000000000"]
         session["cwd"] = repo
         session["state"] = "active"
         session["actions"] = []
@@ -127,8 +129,11 @@ struct TaskMonitorTests {
         window.contentView = NSHostingView(rootView: view)
         defer { window.contentView = nil }
         try await settle(window)
-        // A Task with one open Session drills straight into that Session.
+        // Task entry retains the shell selection; opening a conversation is explicit.
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
+        try await settle(window)
+        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "monitor-session")
         #expect(window.firstResponder === terminals[0])
@@ -160,11 +165,14 @@ struct TaskMonitorTests {
         store.toggleZoom(monitor.id)
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
         try await settle(window)
+        #expect(store.focusedPaneId == monitor.id)
+        navigator.onOpenSession(try #require(model.sessions.value?.first))
+        try await settle(window)
         #expect(window.firstResponder === terminals[0])
-        // A started Task without Sessions opens its overview; terminals stay retained.
+        // Another Task opens its own retained workspace.
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
         try await settle(window)
-        #expect(model.navigation.content == .details)
+        #expect(model.navigation.content == .terminals)
         #expect(model.selection == .task(id: "issue-review"))
         #expect(window.firstResponder !== terminals[0])
         #expect(store.layout.allPanes.filter { $0.content == .shell } == shells)
@@ -230,8 +238,22 @@ struct TaskMonitorTests {
     }
 
     private func query(feed: ActiveSessionsTestFeed, sessions: String = "[]") throws -> RegistryQuery {
-        let text = String(decoding: try placingTaskWorktrees(
-            in: fixture("roadmap_snapshot"), at: "/src/loopflow"), as: UTF8.self)
+        var roadmap = try #require(JSONSerialization.jsonObject(with: try placingTaskWorktrees(
+            in: fixture("roadmap_snapshot"), at: "/src/loopflow")) as? [String: Any])
+        var waves = try #require(roadmap["waves"] as? [[String: Any]])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        for index in items.indices where (items[index]["task"] as? [String: Any])?["id"] as? String == "issue-review" {
+            var reference = try #require(items[index]["reference"] as? [String: Any])
+            var workspace = try #require(reference["workspace"] as? [String: Any])
+            workspace["worktree"] = "/src/loopflow.review"
+            reference["workspace"] = workspace
+            items[index]["reference"] = reference
+        }
+        tasks["items"] = items
+        waves[0]["tasks"] = tasks
+        roadmap["waves"] = waves
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         let initial = try activeSessions()
         return RegistryQuery(watchActiveSessions: { try await feed.open(initial: initial) }) { args, _ in
             switch args.first {

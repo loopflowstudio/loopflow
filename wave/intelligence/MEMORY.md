@@ -17,6 +17,54 @@ the app and inspect production views without launching windows; native window
 and terminal diagnostics are opt-in. The September 30 baseline and repeatable
 collector live in `performance/check-cost.md`.
 
+## Launch context ablation (2026-10-01)
+
+Jack Heart requested a study of which launch sources change outcomes (LOO-349).
+Findings, method and limits live in `performance/context-ablation.md`; the
+collector is `scripts/context_ablation.py`.
+
+- Verdicts from a 31-replay pilot: keep Wave memory at 16,000 tokens, keep the
+  Task's own scratch notes, trim older scratch (scratch budget now 12,000),
+  old steers and agent comments are already gone from launches. Resumed
+  history is unmeasured: every replayable launch is a fresh turn.
+- A launch is about 12k tokens since budgets and under a tenth of a turn's
+  peak input. Further launch trimming buys little; in-turn reads and resumed
+  history are the unmeasured cost.
+- Two identical replays share 40% of changed files and one in five loop-decide
+  pairs disagrees. No ablation result means anything without a repeat baseline.
+  The pilot compared size, verdict, checks and time, never correctness.
+- Agents fetch what the prompt omits: without inline memory or scratch they
+  read the files from disk. Removing a source moves its tokens into the turn.
+- Replay isolation needs an lf that keeps its store in `LF_HOME` (#1386).
+  Under lf 0.12.28, nested `lf` calls in a "disposable" Home read the real
+  store and Linear. Scrub ambient `LF_*`, put that lf first on `PATH`, and
+  clone without a remote.
+- Manifests do not record HEAD at launch. The worktree reflog recovers it only
+  while the worktree exists; a PR-head approximation made one record block in
+  every arm. Recording the launch commit is the cheapest capture repair.
+
+## Context cost instrument (2026-10-01)
+
+Jack Heart requested weekly context cost and turn latency (LOO-348). `lf usage
+--weekly` reads Session history from the store in seven-day weeks from
+2026-09-30 and publishes the latest complete week to the four
+`metrics/context-*.md` contracts; `telemetry-daily` runs it. Baselines and the
+KR/target plan live in `performance/context-cost.md`. The branch could not read
+Jack's Home: installed 0.12.28 predates `session_events`, so the first real
+reading and the chapter targets wait on a release carrying it. The hand
+baseline's silent hours cover 1,349 records, not one week; compare the report's
+own baseline row before treating 215 h as a weekly target.
+
+## Bind attribution comparison (2026-10-01)
+
+Jack Heart requested re-evaluating prospective usage attribution (LOO-336).
+`lf usage --binds` reads Session history and shows each bound Session's usage
+before, during and after its bind, with Task and Wave totals under both rules.
+The 2026-10-01 reading is empty: installed 0.12.28 has neither `lf session bind`
+nor Session tables, so no bind exists to measure. Prospective stays; the
+recommendation and the reports post-hoc would move are in
+`performance/bind-attribution.md`. The choice is Jack's once real binds appear.
+
 ## Attribution and feedback evidence (curated 2026-09-25)
 
 - A first-page GraphQL query captured author names while pagination fetched

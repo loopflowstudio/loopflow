@@ -30,8 +30,10 @@ pub(super) fn flow_ids(selector: &str) -> String {
 
 fn session_membership(session: &str) -> String {
     format!(
-        "{session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
-        WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({})))",
+        "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
+         AND scoped.primary_scope IS NOT NULL)
+         AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
+         WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
         checkout(&format!("{session}.cwd")),
         checkout(FLOW_CWD)
     )
@@ -161,6 +163,144 @@ mod tests {
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
 
+    #[tokio::test]
+    async fn task_and_orphan_filters_resolve_aliases_before_pagination() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let other = loopflow_test_support::TestRepo::new();
+        let dir = tempfile::tempdir().unwrap();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(repo.path(), &alias).unwrap();
+        std::fs::create_dir(repo.path().join("sub")).unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                dir.path().join("db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let home = store.local_home().await.unwrap().id;
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            conn.execute(
+                "INSERT INTO work_placements(task_id,home_id,placed_at) VALUES(?1,?2,1)",
+                params![task.as_str(), home.as_str()],
+            )
+            .unwrap();
+            for (id, path, scope) in [
+                ("a-alias", alias.join("sub"), None),
+                ("b-subdir", repo.path().join("sub"), None),
+                ("c-repo", repo.path().to_path_buf(), Some("repository")),
+                ("d-orphan", other.path().to_path_buf(), None),
+            ] {
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,0,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
+                super::super::sessions::test_capture(
+                    &conn,
+                    id,
+                    &crate::session_record::new_artifact_key(),
+                );
+            }
+        }
+        let mut filter = SessionFilter {
+            task: Some("PROOF-1".into()),
+            limit: 1,
+            after: Some(String::new()),
+            ..Default::default()
+        };
+        for expected in ["a-alias", "b-subdir"] {
+            let page = crate::ops::human_session::list(&store, &filter)
+                .await
+                .unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            assert_eq!(page[0].task_ids, vec![task.clone()]);
+            filter.after = Some(page[0].id.clone());
+        }
+        filter.task = None;
+        filter.orphan = true;
+        filter.after = Some(String::new());
+        for expected in ["c-repo", "d-orphan"] {
+            let page = crate::ops::human_session::list(&store, &filter)
+                .await
+                .unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            assert!(page[0].task_ids.is_empty());
+            filter.after = Some(page[0].id.clone());
+        }
+    }
+
+    #[test]
+    fn scoped_sessions_stay_out_of_tasks_and_orphan_pages_include_only_unassociated_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)",params![task.as_str(),project.as_str()]).unwrap();
+            for (id, scope, wave_id, cwd) in [
+                ("a-task", None, None, "/repo/task/sub"),
+                ("b-repo", Some("repository"), None, "/repo/task"),
+                ("c-wave", Some("wave"), Some(wave.as_str()), "/repo/task"),
+                ("d-orphan", None, None, "/repo/other"),
+                (
+                    "e-wave-attribution",
+                    None,
+                    Some(wave.as_str()),
+                    "/repo/task",
+                ),
+            ] {
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,wave_id,interactive) VALUES(?1,?1,'human',1,0,?2,?3,?4,1)",params![id,cwd,scope,wave_id]).unwrap();
+                super::super::sessions::test_capture(
+                    &conn,
+                    id,
+                    &crate::session_record::new_artifact_key(),
+                );
+            }
+        }
+        assert_eq!(
+            store.session_task_ids("a-task").unwrap(),
+            vec![task.clone()]
+        );
+        assert_eq!(
+            store.session_task_ids("e-wave-attribution").unwrap(),
+            vec![task]
+        );
+        for id in ["b-repo", "c-wave", "d-orphan"] {
+            assert!(store.session_task_ids(id).unwrap().is_empty());
+        }
+        let mut filter = SessionFilter {
+            orphan: true,
+            limit: 1,
+            after: Some(String::new()),
+            ..Default::default()
+        };
+        for expected in ["b-repo", "c-wave", "d-orphan"] {
+            let page = store.session_summaries(&filter).unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            filter.after = Some(page[0].id.clone());
+        }
+        assert!(store.session_summaries(&filter).unwrap().is_empty());
+    }
+
     #[test]
     fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership() {
         let dir = tempfile::tempdir().unwrap();
@@ -182,15 +322,15 @@ mod tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/missing/task%_',1)", params![task.as_str(), project.as_str()]).unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
-                ("ask", "/missing/task%_", false, false),
+                ("conversation", "/missing/task%_", false, false),
                 ("history", "/elsewhere", true, true),
                 ("sibling", "/missing/task%_-other", false, false),
                 ("wildcard", "/missing/taskAB", false, false),
             ] {
                 conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,kind,completed_at)
-                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),if id=="ask" {"ask"} else {"conversation"},complete.then_some(2)]).unwrap();
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),"conversation",complete.then_some(2)]).unwrap();
             }
-            for id in ["manual", "ask", "history", "sibling", "wildcard"] {
+            for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
@@ -232,7 +372,7 @@ mod tests {
                 .iter()
                 .map(|s| s.id.as_str())
                 .collect::<Vec<_>>(),
-            ["ask", "history", "manual"]
+            ["conversation", "history", "manual"]
         );
         assert_eq!(
             work.flows

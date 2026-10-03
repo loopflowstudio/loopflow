@@ -110,7 +110,6 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.state == .live)
 
         store.noteSurfaceClosed(.shell("native"))
-        store.noteSurfaceClosed(.taskTerminal("native"))
         #expect(item(store, "native")?.state == .live)
 
         store.noteSurfaceClosed(.session("native"))
@@ -171,34 +170,6 @@ struct SessionsStoreTests {
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
             ["session", "complete", "native"],
-        ])
-    }
-
-    @Test("Completing a ready Ask resumes its caller")
-    func completionRemovesAskSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "ask"] {
-                    return "Ask session completed: Ready for review"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([
-            session(id: "ask", state: "ready", kind: "ask"),
-        ]))
-
-        let completed = await store.complete("ask")
-
-        #expect(completed)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "ask"],
         ])
     }
 

@@ -83,6 +83,19 @@ impl SqliteStore {
             .collect()
     }
 
+    /// When each retained event of one input was observed, in input order.
+    pub(crate) fn input_event_times(&self, input: &str) -> StoreResult<Vec<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT unixepoch(json_extract(e.payload,'$.evidence.observed_at')) AS observed FROM session_events e
+             JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
+             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:' AND observed IS NOT NULL
+             ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
+        )?;
+        let rows = query.query_map([input], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<FinalAnswer>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -562,6 +575,48 @@ mod tests {
     }
 
     #[test]
+    fn event_times_follow_input_order_and_skip_untimed_events() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let input =
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        // Retained out of order: the later event is imported first.
+        for (seq, evidence) in [
+            (
+                2,
+                json!({"observed_at":"2026-10-01T00:20:00.5Z","type":"usage"}),
+            ),
+            (
+                0,
+                json!({"observed_at":"2026-10-01T00:00:00Z","type":"user_input"}),
+            ),
+            (1, json!({"unparsed":"partial historical event"})),
+        ] {
+            let source = format!("events.jsonl:{seq}");
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: input.clone(),
+                        source: source.clone(),
+                        observed_at: 1,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store.input_event_times(&input).unwrap(),
+            [1_790_812_800, 1_790_814_000]
+        );
+    }
+
+    #[test]
     fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -765,6 +820,161 @@ mod tests {
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].providers.len(), 1);
         assert_eq!(scoped[0].wave_id.as_ref(), Some(&wave));
+    }
+
+    #[test]
+    fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::work::task::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
+                rusqlite::params![project.as_str(), wave],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at) VALUES(?1,?2,'issue-proof','PROOF-1',1)",
+                rusqlite::params![task.as_str(), project.as_str()],
+            ).unwrap();
+        }
+        for (id, kind, primary, retired) in [
+            ("orphan", "conversation", None, true),
+            ("primary", "conversation", Some("repository"), false),
+            ("task", "conversation", None, false),
+            ("review", "flow_review", None, false),
+        ] {
+            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            let exec = crate::id::ExecId::new();
+            {
+                let conn = store.conn.lock().unwrap();
+                conn.execute(
+                    "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [exec.as_str()],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE agent_sessions SET kind=?2,primary_scope=?3 WHERE id=?1",
+                    rusqlite::params![id, kind, primary],
+                )
+                .unwrap();
+                if id == "task" {
+                    conn.execute(
+                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+                        rusqlite::params![id, task.as_str(), wave],
+                    )
+                    .unwrap();
+                }
+            }
+            let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+            store
+                .finish_session_driver(id, &driver, "interrupted")
+                .unwrap();
+            let saved = store.session(id).unwrap().unwrap();
+            assert_eq!(saved.completed_at.is_some(), retired);
+            assert_eq!(saved.captured, session.captured);
+            let summary = store.session_summary(id).unwrap().unwrap();
+            assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
+            let history = store.session_history(id, 0, 100).unwrap();
+            assert!(history
+                .iter()
+                .any(|event| event.payload["type"] == "driver_exit"
+                    && event.payload["outcome"] == "interrupted"));
+            assert!(!history
+                .iter()
+                .any(|event| event.kind == SessionEventKind::Completed));
+        }
+        assert!(!store
+            .session_summaries(&crate::session::SessionFilter::default())
+            .unwrap()
+            .iter()
+            .any(|session| session.id == "orphan"));
+    }
+
+    #[test]
+    fn stopped_turn_and_stale_driver_cannot_retire_a_resumed_conversation() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let first = crate::id::ExecId::new();
+        let second = crate::id::ExecId::new();
+        for exec in [&first, &second] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [exec.as_str()],
+                )
+                .unwrap();
+        }
+        let original = store
+            .claim_session_driver(&session.id, None, &first, true)
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Completed,
+                &json!({"status":"interrupted"}),
+            )
+            .unwrap();
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        assert_eq!(
+            store
+                .session_summary(&session.id)
+                .unwrap()
+                .unwrap()
+                .latest_turn
+                .as_deref(),
+            Some("interrupted")
+        );
+        let resumed = store
+            .claim_session_driver(&session.id, Some(&original), &second, true)
+            .unwrap();
+        assert!(store
+            .finish_session_driver(&session.id, &original, "interrupted")
+            .is_err());
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        assert_eq!(store.session_driver(&session.id).unwrap().unwrap(), resumed);
+        store
+            .finish_session_driver(&session.id, &resumed, "completed")
+            .unwrap();
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     #[test]

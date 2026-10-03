@@ -71,6 +71,8 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
     assert_eq!(snapshot.projects[0].flow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
+    assert_eq!(snapshot.items[0].state.as_deref(), Some("unstarted"));
+    assert_eq!(snapshot.items[0].completed_at, None);
     assert_eq!(
         snapshot.items[0].project_id.as_deref(),
         Some("project-gmail")
@@ -280,6 +282,27 @@ fn session_history_retains_receipts_and_unknown_driver() {
 }
 
 #[test]
+fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Files {
+        directory: loopflow::ops::task::TaskDirectory,
+        changes: loopflow::ops::task::TaskChangesSnapshot,
+        diff: loopflow::ops::task::TaskDiffSnapshot,
+        file: loopflow::ops::task::TaskFileSnapshot,
+        save: loopflow::ops::task::TaskFileSave,
+    }
+    let json = include_str!("../../../tests/fixtures/dto/task_files.json");
+    let files: Files = serde_json::from_str(json).unwrap();
+    assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
+    assert_eq!(
+        serde_json::to_value(files).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn exec_page_retains_outcomes_unknowns_and_continuation() {
     let json = include_str!("../../../tests/fixtures/dto/exec_page.json");
     let page: loopflow::exec::ExecPage = serde_json::from_str(json).unwrap();
@@ -389,6 +412,25 @@ fn flow_templates_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].template.is_some() && catalog[1].template.is_none());
+}
+
+#[test]
+fn prepared_checkout_retains_owning_home_without_starting_execution() {
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
+    let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        snapshot.home_id.as_ref().unwrap().as_str(),
+        "home_00000000000000000000000000000001"
+    );
+    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.execution.state,
+        loopflow::ops::task_execution::TaskExecutionState::Idle
+    );
+    assert_eq!(
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
 }
 
 #[test]

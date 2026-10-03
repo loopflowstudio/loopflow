@@ -108,11 +108,14 @@
           "description": "Surface one focused failure.",
           "rank": 1,
           "completed": false,
-          "assignee": "user-1"
+          "assignee": "user-1",
+          "state": "unstarted",
+          "completed_at": null
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
           "workspace": {
+            "home_id": "home_00000000000000000000000000000001",
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
             "worktree": "/src/loopflow.infrastructure.task",
@@ -308,7 +311,140 @@
                   ],
                   "paths": []
                 }
-              ]
+              ],
+              "interactions": {
+                "stages": [
+                  "4"
+                ],
+                "transitions": [
+                  {
+                    "from": "@start",
+                    "to": "4",
+                    "nodes": [
+                      "0",
+                      "1",
+                      "2",
+                      "3"
+                    ],
+                    "routes": [
+                      {
+                        "from": "@start",
+                        "to": "0",
+                        "condition": null
+                      },
+                      {
+                        "from": "0",
+                        "to": "1",
+                        "condition": null
+                      },
+                      {
+                        "from": "1",
+                        "to": "2",
+                        "condition": null
+                      },
+                      {
+                        "from": "2",
+                        "to": "3",
+                        "condition": null
+                      },
+                      {
+                        "from": "3",
+                        "to": "4",
+                        "condition": "advance"
+                      },
+                      {
+                        "from": "3",
+                        "to": "1",
+                        "condition": "repeat"
+                      }
+                    ]
+                  },
+                  {
+                    "from": "4",
+                    "to": "4",
+                    "nodes": [
+                      "1",
+                      "2",
+                      "3",
+                      "5"
+                    ],
+                    "routes": [
+                      {
+                        "from": "4",
+                        "to": "5",
+                        "condition": null
+                      },
+                      {
+                        "from": "5",
+                        "to": "1",
+                        "condition": "repeat"
+                      },
+                      {
+                        "from": "1",
+                        "to": "2",
+                        "condition": null
+                      },
+                      {
+                        "from": "2",
+                        "to": "3",
+                        "condition": null
+                      },
+                      {
+                        "from": "3",
+                        "to": "4",
+                        "condition": "advance"
+                      },
+                      {
+                        "from": "3",
+                        "to": "1",
+                        "condition": "repeat"
+                      }
+                    ]
+                  },
+                  {
+                    "from": "4",
+                    "to": "@end",
+                    "nodes": [
+                      "5",
+                      "6",
+                      "7",
+                      "8"
+                    ],
+                    "routes": [
+                      {
+                        "from": "4",
+                        "to": "5",
+                        "condition": null
+                      },
+                      {
+                        "from": "5",
+                        "to": "6",
+                        "condition": "advance"
+                      },
+                      {
+                        "from": "6",
+                        "to": "7",
+                        "condition": "fix"
+                      },
+                      {
+                        "from": "6",
+                        "to": "8",
+                        "condition": "skip"
+                      },
+                      {
+                        "from": "8",
+                        "to": "@end",
+                        "condition": null
+                      },
+                      {
+                        "from": "7",
+                        "to": "8",
+                        "condition": null
+                      }
+                    ]
+                  }
+                ]
+              }
             },
             "current": 4,
             "completed": [
@@ -375,7 +511,9 @@
           "description": "",
           "rank": 2,
           "completed": false,
-          "assignee": null
+          "assignee": null,
+          "state": "unstarted",
+          "completed_at": null
         },
         "reference": {
           "issue_url": null,

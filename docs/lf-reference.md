@@ -127,6 +127,8 @@ Show direct provider-authored usage from recorded Session inputs
 |---|---|
 | `--json` | Emit Session usage evidence as JSON Default: false. |
 | `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
+| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
 | `--parent` | Inputs issued by this Session or retained capture |
 | `--wave` | Limit to Session inputs attributed to one Wave |
 | `--project` | Limit to Session inputs attributed to one Project |
@@ -217,16 +219,6 @@ Inspect and continue Sessions
 |---|---|
 | `--help / -h` | Print help |
 
-## lf session ask
-
-Open a durable session and wait for the user to complete it
-
-| Argument | What it does |
-|---|---|
-| `--skill` | Named skill for the session |
-| `<question>` | What the session should work through |
-| `--help / -h` | Print help |
-
 ## lf session history
 
 Read this conversation's native start, usage and completion receipts
@@ -254,6 +246,7 @@ List Sessions
 | `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
 | `--after` | Previous page's next identity; keep the same filters |
 | `--task` | task |
+| `--orphan` | Only Sessions without a Task association Default: false. |
 | `--search` | search |
 | `--help / -h` | Print help |
 
@@ -291,7 +284,7 @@ Give a primary Session's scope a fresh conversation
 
 ## lf session complete
 
-Complete a review, blocked Ask, or interactive session
+Complete a review or interactive session
 
 | Argument | What it does |
 |---|---|
@@ -347,9 +340,9 @@ Internal command; invoked by the owning operation.
 | `<iteration>` | iteration |
 | `--help / -h` | Print help |
 
-## lf session serve-ask
+## lf session serve-conversation
 
-Run one prepared Ask or primary conversation in its durable terminal
+Run one prepared conversation in its durable terminal
 
 Internal command; invoked by the owning operation.
 
@@ -745,7 +738,7 @@ Internal command; invoked by the owning operation.
 
 ## lf home doctor
 
-Audit recorded Session inputs: continuity, vocabulary, attribution, identity, lineage, coverage
+Diagnose installation, storage, Exec integrity and scheduled receipts
 
 | Argument | What it does |
 |---|---|

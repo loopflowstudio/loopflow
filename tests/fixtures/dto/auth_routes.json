@@ -3,6 +3,8 @@
     "provider": "claude",
     "scope": "default",
     "ambient": false,
+    "isolated": true,
+    "active_account": null,
     "candidates": [
       {
         "account_id": "engineering",
@@ -20,6 +22,8 @@
     "provider": "codex",
     "scope": "automatic",
     "ambient": true,
+    "isolated": false,
+    "active_account": "personal",
     "candidates": [],
     "diagnostic": null
   }

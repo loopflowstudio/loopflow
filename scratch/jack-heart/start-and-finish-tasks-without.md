@@ -286,14 +286,25 @@ as execution authority, broad directory adoption or fake checkout creation.
 One coherent architectural change; these are internal steps, not compatibility
 stages to ship independently.
 
-Implementation status · 2026-10-02: post-creation confirmation and Task mutation
-confirmation now acquire the affected issue through normalized planning ingestion.
-They no longer refresh the entire Wave after the mutation. The existing current
-Project selection before filing remains unchanged. Stateful provider tests cover
-unrelated Wave acquisition failure, failed issue confirmation, creation-marker
-recovery, completion summary preservation and zero invented delivery objects.
-This completes only the narrow planning-confirmation portion of step 3; admission,
-placement, execution, requesting-conversation completion and Desktop remain below.
+Implementation status · reconciled 2026-10-02: three supporting cuts exist:
+
+- Issue-specific confirmation replaces whole-Wave acquisition after mutation.
+  Current-Project selection before filing remains. Stateful fixtures cover failed
+  confirmation, creation-marker recovery, original-summary preservation and zero
+  invented delivery objects for planning-only operations.
+- Flow launch cwd persists independently of Task placement. Released-frontier
+  migration and store tests cover retained paths, including absent placement;
+  the unplaced Task is seeded directly, not admitted through a public operation.
+- Task completion no longer ends the managed Flow. Recorded results settle
+  through the graph; new managed launches and review preparation retain planning
+  checks. Cleanup retains unfinished managed Flows. Compression shares the
+  validated Task lookup for launch and review preparation.
+
+None removes the remaining public admission dependency. Source inspection still
+finds mandatory `Task` placement, registration-dependent binding/context,
+Task-only `FlowCommand::Start`, and unconditional checkout inspection in
+`complete_task`. The next slice is step 1 below; the supporting cuts do not prove
+the no-delivery conversation outcome or Desktop parity.
 
 Review finding: a retry of `task create` still acquires current-Project routing
 before reusing the creation marker. The new confirmation path must not be described
@@ -377,4 +388,4 @@ weaken delivery. Start the remaining cut with registration and placement while
 preserving the gate's evidence obligations. The seeded-store Flow-directory proof
 does not establish public binding; no Task completion or acceptance follows.
 
-Check: `cargo test -p loopflow --lib task_completion` — 11 passed; `cargo test -p loopflow --lib lf::commands::flow::tests` — 4 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — passed; public admission/binding, active-conversation completion and Desktop acceptance remain with implementation/gate.
+Check: `git diff --check` passed; `lf context --wave infrastructure --json` fits memory/scratch limits; prior unchanged-code results retained: `cargo test -p loopflow --lib task_completion` 11 passed, `cargo test -p loopflow --lib lf::commands::flow::tests` 4 passed, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; remaining public-operation and Desktop checks belong to implementation/gate.

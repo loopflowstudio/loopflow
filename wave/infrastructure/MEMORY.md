@@ -168,20 +168,24 @@ Issue-specific confirmation replaces post-mutation whole-Wave refresh. Filing
 and marker recovery retain current-Project routing; failed confirmation remains
 explicit and registered completion retains pending writeback. Stateful fixtures
 prove planning-only completion/retries, not configured provider acceptance.
-Flows now persist launch cwd independently of Task placement; migration freezes
-previously inherited paths without inventing unknown history. Store/migration tests
-pass, but public admission/binding, shared explicit startup and working-conversation
-completion remain unimplemented. Task completion no longer ends managed Flows. Recorded results settle through
-the graph; managed planning gates new launches and review preparation. Terminal
-Tasks can consume their final results without launching another managed step. Cleanup retains unfinished
-Flows' checkouts even without a worker. Public admission and working-conversation completion remain unproven.
+
+Flows persist launch cwd independently of Task placement; migration freezes
+previously inherited paths without inventing unknown history. Task completion
+no longer ends managed Flows. Recorded results settle through the graph; managed
+planning gates new launches and review preparation. Cleanup retains unfinished
+Flows' checkouts even without a worker. Focused store, migration and completion
+tests cover these cuts. Public admission/binding, shared explicit startup,
+working-conversation completion and Desktop parity remain unimplemented. Nullable
+SQL columns do not establish optional placement in the Task API.
+
 Upstream #1415 is integrated: recovery can distinguish unrelated historical
 Execs without process receipts from current Session drivers, live processes and
 claims. The retained local optimization reads Session drivers only for recovery;
 completion, cleanup and abandonment still reject unknown execution. This grants
-no requesting-conversation exemption. As Release memory's entry-point failure
-shows, proof must cross the public operation: seeded-store tests cannot establish
-Session-binding admission or Taskless Flow startup.
+no requesting-conversation exemption. Release's entry-point failure reinforces
+the proof boundary: seeded-store tests cannot establish public Session binding or
+Taskless Flow startup. Later delivery allocation must preserve Task identity and
+conversation history.
 LOO-364 owns broader switching; LOO-366 owns Project availability/chapter resets.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)

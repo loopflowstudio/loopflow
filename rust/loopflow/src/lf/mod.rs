@@ -400,9 +400,9 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// Start or continue a Task through its saved Flow
+    /// Start an explicit Flow, or continue the selected Task Flow
     Start {
-        /// Template for a new Task Flow; existing saved progress remains authoritative
+        /// Explicit template starts an independent Flow with optional Task attribution
         template: Option<String>,
         #[arg(long)]
         name: Option<String>,

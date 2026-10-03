@@ -13,20 +13,29 @@ use loopflow_test_support::TestRepo;
 use time::OffsetDateTime;
 
 fn flow(store: &Store, task: &Task, review: bool) -> String {
-    fs::create_dir_all(task.worktree.join(".lf/flows")).unwrap();
+    fs::create_dir_all(task.workspace.as_ref().unwrap().worktree.join(".lf/flows")).unwrap();
     let steps = if review {
         "- step:\n    name: demo\n    id: review\n    human: true\n"
     } else {
         "- cmd: task sync --plan\n- step:\n    name: demo\n    id: review\n    human: true\n"
     };
-    fs::write(task.worktree.join(".lf/flows/proof.yaml"), steps).unwrap();
+    fs::write(
+        task.workspace
+            .as_ref()
+            .unwrap()
+            .worktree
+            .join(".lf/flows/proof.yaml"),
+        steps,
+    )
+    .unwrap();
     let flow = FlowSession {
-        invocation: QueuedInvocation::load(&task.worktree, "proof").unwrap(),
+        invocation: QueuedInvocation::load(&task.workspace.as_ref().unwrap().worktree, "proof")
+            .unwrap(),
         cursor: Default::default(),
         version: 0,
         task_id: Some(task.id.clone()),
         wave_id: Some(task.wave_id.clone()),
-        cwd: task.worktree.clone(),
+        cwd: task.workspace.as_ref().unwrap().worktree.clone(),
         message: None,
         model: None,
         current_attempt: None,

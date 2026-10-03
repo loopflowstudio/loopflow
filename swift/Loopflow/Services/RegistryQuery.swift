@@ -157,6 +157,10 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
+    public func completeTask(issue: String, summary: String, cwd: String?) async throws {
+        _ = try await run(["task", "complete", issue, "--summary", summary], cwd)
+    }
+
     /// Start (preparing when needed) the Task's managed Flow.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["--task", issue, "flow", "start"]

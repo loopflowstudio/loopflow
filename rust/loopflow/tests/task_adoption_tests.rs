@@ -195,9 +195,9 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             .unwrap()
             .unwrap();
         if !remote_only {
-            assert_eq!(task.worktree, checkout);
+            assert_eq!(task.workspace.as_ref().unwrap().worktree, checkout);
         }
-        checkout = task.worktree.clone();
+        checkout = task.workspace.as_ref().unwrap().worktree.clone();
         assert!(loopflow::engine::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
         if operation == "checkout" {
             assert_eq!(

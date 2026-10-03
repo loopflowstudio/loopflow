@@ -26,34 +26,31 @@ pub struct WorkBinding {
 pub(crate) fn render_task_context(
     task: &Task,
     project: &ProjectPlan,
-    pr: &TaskPr,
+    pr: Option<&TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
-    let placement = pr
-        .parent_pr_id
-        .as_ref()
-        .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
-        .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
-    format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
-        identifier = task.plan.identifier,
-        title = task.plan.title,
-        description = task.plan.description,
-        project = project.name,
-        project_id = project.id.as_str(),
-        project_context = project.prompt_context,
-        direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
-        project_snapshot_synced_at = project.pm_snapshot_synced_at,
-        wave = wave_name,
-        task_id = task.id,
-        worktree = task.worktree.display(),
-        pr_sequence = pr.sequence,
-        pr_branch = pr.branch,
-        base_commit = pr.base_commit,
-        placement = placement,
-    )
+    let mut context = format!(
+        "Linear Task {}: {}\n\n{}\n\nProject: {} (source {})\n{}\n\n{}\n\nTask directive snapshot synced at: {}\nProject snapshot synced at: {}\nWave: {}\nTask Work: {}",
+        task.plan.identifier, task.plan.title, task.plan.description, project.name,
+        project.id.as_str(), project.prompt_context, render_steers(steers),
+        task.plan.pm_snapshot_synced_at, project.pm_snapshot_synced_at, wave_name, task.id,
+    );
+    if let Some(workspace) = &task.workspace {
+        context.push_str(&format!("\nWorktree: {}", workspace.worktree.display()));
+    }
+    if let Some(pr) = pr {
+        let placement = pr
+            .parent_pr_id
+            .as_ref()
+            .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
+            .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
+        context.push_str(&format!(
+            "\nPR {}: {}\nBase commit: {}\n{placement}",
+            pr.sequence, pr.branch, pr.base_commit
+        ));
+    }
+    context
 }
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
@@ -120,11 +117,11 @@ pub async fn resolve_work_selection(
 
     if let Some(value) = selection.task {
         let value = value.trim();
-        let task = if let Ok(id) = TaskId::parse(value) {
-            store.get_task(&id).await.map_err(run_error)?
-        } else {
-            store.get_task_by_issue(value).await.map_err(run_error)?
+        let task = match TaskId::parse(value) {
+            Ok(id) => store.get_task(&id).await,
+            Err(_) => store.get_task_by_issue(value).await,
         }
+        .map_err(run_error)?
         .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
         let wave = store
             .get_wave(&task.wave_id)
@@ -145,22 +142,21 @@ pub async fn resolve_work_selection(
         }
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
-        let pr = store
-            .task_prs(&task.id)
-            .await
-            .map_err(run_error)?
-            .pop()
-            .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        let pr = store.task_prs(&task.id).await.map_err(run_error)?.pop();
+        let context = render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
             .as_deref()
-            == Some(pr.branch.as_str())
+            == pr.as_ref().map(|pr| pr.branch.as_str())
+            && pr.is_some()
         {
             crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
-            task.worktree.clone()
+            task.workspace
+                .as_ref()
+                .map(|workspace| workspace.worktree.clone())
+                .unwrap_or_else(|| repo.to_path_buf())
         };
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
@@ -407,8 +403,10 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree,
-            workspace_slug: "runtime-research".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree,
+                slug: "runtime-research".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -419,7 +417,7 @@ mod tests {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
-            slug: task.workspace_slug.clone(),
+            slug: task.workspace.as_ref().unwrap().slug.clone(),
             branch: "jack/runtime-research".to_string(),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,

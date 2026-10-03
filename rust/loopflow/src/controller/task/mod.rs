@@ -161,8 +161,11 @@ pub(crate) async fn park_at_review(
 /// may exist only in the local worktree while it waits. Failure to checkpoint
 /// (offline, no remote) must never block the park itself.
 async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
+    let Some(workspace) = &task.workspace else {
+        return;
+    };
     if let Err(error) = crate::ops::checkpoint_task_worktree(
-        task.worktree.clone(),
+        workspace.worktree.clone(),
         task.plan.identifier.clone(),
         format!("checkpoint: park at review node {node_id}"),
     )
@@ -175,12 +178,12 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
 fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
     Ok(FlowSession {
-        invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
+        invocation: QueuedInvocation::load(&task.require_workspace()?.worktree, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,
         task_id: Some(task.id.clone()),
         wave_id: Some(task.wave_id.clone()),
-        cwd: task.worktree.clone(),
+        cwd: task.require_workspace()?.worktree.clone(),
         message: None,
         model: None,
         current_attempt: None,
@@ -517,8 +520,10 @@ mod planning_tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree: worktree.clone(),
-            workspace_slug: "human-task-proof".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: worktree.clone(),
+                slug: "human-task-proof".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -529,7 +534,7 @@ mod planning_tests {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
-            slug: task.workspace_slug.clone(),
+            slug: task.workspace.as_ref().unwrap().slug.clone(),
             branch: "test/human-task-proof".to_string(),
             base_commit,
             parent_pr_id: None,
@@ -742,8 +747,16 @@ mod planning_tests {
     async fn task_agent_survives_refresh_and_selects_autonomous_and_human_steps() {
         let _guard = super::TestLfBinGuard::pin();
         let (store, task, mut flow) = human_task_fixture().await;
-        std::fs::create_dir_all(task.worktree.join(".lf")).unwrap();
-        std::fs::write(task.worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        std::fs::create_dir_all(task.workspace.as_ref().unwrap().worktree.join(".lf")).unwrap();
+        std::fs::write(
+            task.workspace
+                .as_ref()
+                .unwrap()
+                .worktree
+                .join(".lf/config.yaml"),
+            "agent: codex\n",
+        )
+        .unwrap();
         let crate::engine::ConcreteStep::Skill(step) = &mut flow.invocation.steps[1] else {
             panic!("review skill");
         };
@@ -887,8 +900,8 @@ mod planning_tests {
         .unwrap();
         let selected = accounts.activate().unwrap();
         let (store, task, _) = human_task_fixture().await;
-        let flow_dir = task.worktree.join(".lf/flows");
-        let skill_dir = task.worktree.join(".lf/skills");
+        let flow_dir = task.workspace.as_ref().unwrap().worktree.join(".lf/flows");
+        let skill_dir = task.workspace.as_ref().unwrap().worktree.join(".lf/skills");
         std::fs::create_dir_all(&flow_dir).unwrap();
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
@@ -1022,7 +1035,7 @@ mod planning_tests {
                         harness: "codex".into(),
                         model: None,
                         surface: "tui".into(),
-                        cwd: task.worktree.clone(),
+                        cwd: task.workspace.as_ref().unwrap().worktree.clone(),
                         repo: None,
                         worktree: None,
                         skill: None,
@@ -1228,7 +1241,7 @@ mod planning_tests {
             harness: "codex".into(),
             model: None,
             surface: "tui".into(),
-            cwd: task.worktree.clone(),
+            cwd: task.workspace.as_ref().unwrap().worktree.clone(),
             repo: None,
             worktree: None,
             skill: None,
@@ -1380,7 +1393,7 @@ mod planning_tests {
             harness: "codex".into(),
             model: None,
             surface: "tui".into(),
-            cwd: task.worktree.clone(),
+            cwd: task.workspace.as_ref().unwrap().worktree.clone(),
             repo: None,
             worktree: None,
             skill: None,
@@ -1684,7 +1697,7 @@ mod planning_tests {
                 )
                 .await;
                 assert!(result.unwrap_err().to_string().contains("unsettled PR"));
-                assert!(task.worktree.exists());
+                assert!(task.workspace.as_ref().unwrap().worktree.exists());
             } else {
                 assert!(finish(&mut position).unwrap());
                 assert_eq!(position.cursor.iteration, 3);
@@ -1806,7 +1819,12 @@ mod planning_tests {
         assert!(super::complete_human_flow_step(&store, &token, &expected)
             .await
             .is_err());
-        let notes = task.worktree.join("scratch/search");
+        let notes = task
+            .workspace
+            .as_ref()
+            .unwrap()
+            .worktree
+            .join("scratch/search");
         std::fs::create_dir_all(&notes).unwrap();
         let observation = "The human lost their place when clearing a search. Agreed: keep results on one screen. Next: implement clearing without a navigation change and prove focus stays in the search field.";
         std::fs::write(
@@ -2045,8 +2063,10 @@ mod planning_tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
-            workspace_slug: "ship-it".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: "/tmp/task".into(),
+                slug: "ship-it".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -2081,12 +2101,12 @@ mod planning_tests {
             prompt_context: "Current project definition".to_string(),
             pm_snapshot_synced_at: 22,
         };
-        let seed = task_seed(&task, &project, &pr, "wave", &[]);
+        let seed = task_seed(&task, &project, Some(&pr), "wave", &[]);
 
         assert!(seed.contains("Current project name"));
         assert!(seed.contains("Current project definition"));
         assert!(seed.contains("Task directive snapshot synced at: 11"));
-        assert!(seed.contains("Chapter plan snapshot synced at: 22"));
+        assert!(seed.contains("Project snapshot synced at: 22"));
         assert!(!seed.contains("metric-portfolio"));
         assert!(!seed.contains("project-owned-metrics"));
     }

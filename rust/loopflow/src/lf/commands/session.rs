@@ -143,7 +143,10 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 } else {
                     println!(
                         "{} → {} ({}) [{}]. Not assigned.",
-                        preview.session_id, preview.identifier, preview.title, preview.task_id
+                        preview.session_id,
+                        preview.identifier,
+                        preview.title,
+                        preview.task_id.as_deref().unwrap_or("not yet admitted")
                     );
                 }
                 return Ok(());

@@ -422,7 +422,10 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.home_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
-    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.worktree.as_deref(),
+        Some("/src/loopflow.workspace")
+    );
     assert_eq!(
         snapshot.execution.state,
         loopflow::ops::task_execution::TaskExecutionState::Idle
@@ -478,4 +481,18 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
         .iter()
         .all(|usage| usage.tokens.is_none()));
     assert_eq!(ContextReport::new(report.steps.clone()), report);
+}
+
+#[test]
+fn task_without_delivery_wire_placement_and_binding_preview_are_explicitly_absent() {
+    let task: loopflow::ops::task::TaskSnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_unplaced.json"
+    ))
+    .unwrap();
+    assert!(task.worktree.is_none() && task.workspace_slug.is_none());
+    assert!(task.prs.is_empty());
+    assert_eq!(
+        task.actions.recommended,
+        Some(loopflow::ops::task_actions::TaskAction::Complete)
+    );
 }

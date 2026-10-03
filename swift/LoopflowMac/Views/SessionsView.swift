@@ -971,9 +971,7 @@ struct SessionsContentView: View {
             command: ConversationLaunch(scope: scope).arguments(lf: lf))
     }
 
-    /// An independent conversation with Task context in the Task's checkout.
-    /// Resolving the checkout prepares Task Work only; it never starts the
-    /// managed Flow or replaces another Session.
+    /// Use retained Task placement when present; otherwise keep the current repository.
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
@@ -981,6 +979,8 @@ struct SessionsContentView: View {
         let checkout: WorkspaceIdentity
         if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
             checkout = identity
+        } else if found.task.reference.workspace == nil {
+            checkout = WorkspaceIdentity(homeId: homeId, worktree: store.repoPath)
         } else {
             let repo = store.repoPath
             checkout = try await Task.detached(priority: .userInitiated) {

@@ -16,7 +16,7 @@ use super::{block_on_task, owning_wave, task_error, task_store};
 
 /// Completion is durable before cleanup; failure never reverses the outcome.
 pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if super::task_work_status(store, task).await? != WorkStatus::Done {
+    if task.workspace.is_none() || super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
     let blockers = associated_work_blockers(store, task)?;
@@ -41,8 +41,9 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let result = async {
         let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
-        if task.worktree.exists()
-            && std::fs::canonicalize(&task.worktree)? == std::fs::canonicalize(&repo)?
+        if task.require_workspace()?.worktree.exists()
+            && std::fs::canonicalize(&task.require_workspace()?.worktree)?
+                == std::fs::canonicalize(&repo)?
         {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
@@ -51,9 +52,10 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
             return Ok(());
         }
         let _mutation = task
+            .require_workspace()?
             .worktree
             .exists()
-            .then(|| super::lock_task_pr_mutation(&task.worktree))
+            .then(|| super::lock_task_pr_mutation(&task.require_workspace()?.worktree))
             .transpose()?;
         let mut deletions = Vec::new();
         for pr in store.task_prs(&task.id).await.map_err(task_error)? {
@@ -79,7 +81,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         for deletion in deletions {
             crate::ops::wt::apply_delete(deletion, &NullProgress)?;
         }
-        if task.worktree.exists() {
+        if task.require_workspace()?.worktree.exists() {
             return Err(task_error(
                 "checkout is on a different branch; retained it for explicit wt delete",
             ));
@@ -510,8 +512,20 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
 
 /// Completion cannot implicitly settle another Flow's work.
 pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    associated_blockers(store, task, ExecutionCheck::RetainWork)
+}
+
+pub(super) fn completion_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    associated_blockers(store, task, ExecutionCheck::Complete)
+}
+
+fn associated_blockers(
+    store: &SharedStore,
+    task: &Task,
+    check: ExecutionCheck,
+) -> OpsResult<Vec<String>> {
     let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    let mut blockers = execution_blockers(store, &work, ExecutionCheck::RetainWork)?;
+    let mut blockers = execution_blockers(store, &work, check)?;
     for flow in work.flows.iter().filter(|flow| !flow.managed) {
         if flow.summary.state == crate::session::FlowSummaryState::Current {
             blockers.push(format!(
@@ -550,6 +564,7 @@ pub(super) fn recovery_execution_blockers(
 enum ExecutionCheck {
     RetainWork,
     ResumeFlow,
+    Complete,
 }
 
 fn execution_blockers(
@@ -557,13 +572,18 @@ fn execution_blockers(
     work: &crate::task_work::TaskWork,
     check: ExecutionCheck,
 ) -> OpsResult<Vec<String>> {
+    let requesting = if matches!(check, ExecutionCheck::Complete) {
+        requesting_conversation(store)?
+    } else {
+        None
+    };
     let mut blockers = Vec::new();
     let mut managed_execs = HashSet::new();
     let mut session_execs = HashSet::new();
     // A missing historical receipt differs from an observed process whose
     // liveness query failed. Only the former can be unrelated history.
     let observed_execs: HashSet<String> = match check {
-        ExecutionCheck::RetainWork => HashSet::new(),
+        ExecutionCheck::RetainWork | ExecutionCheck::Complete => HashSet::new(),
         ExecutionCheck::ResumeFlow => {
             crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
                 .map_err(task_error)?
@@ -597,6 +617,11 @@ fn execution_blockers(
         }
     }
     for session in work.sessions.iter().filter(|session| !session.managed) {
+        if session.kind == crate::session::SessionKind::Conversation
+            && requesting.as_ref().is_some_and(|(id, _)| id == &session.id)
+        {
+            continue;
+        }
         if matches!(check, ExecutionCheck::ResumeFlow) && session.completed_at.is_none() {
             if let Some(driver) = store
                 .sqlite
@@ -630,14 +655,19 @@ fn execution_blockers(
     }
     let caller = crate::journal::current_exec_id();
     for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
-        if caller.as_ref() == Some(&exec.id) || managed_execs.contains(&exec.id) {
+        if caller.as_ref() == Some(&exec.id)
+            || managed_execs.contains(&exec.id)
+            || requesting.as_ref().is_some_and(|(_, driver)| {
+                driver.exec_id.as_ref() == Some(&exec.id) || driver.provider_exec_id == exec.id
+            })
+        {
             continue;
         }
         let blocks = match crate::journal::exec_process_evidence(&store.sqlite, &exec.id) {
             crate::journal::ProcessIdentityEvidence::Dead => false,
             crate::journal::ProcessIdentityEvidence::Live => true,
             crate::journal::ProcessIdentityEvidence::Unknown => {
-                matches!(check, ExecutionCheck::RetainWork)
+                matches!(check, ExecutionCheck::RetainWork | ExecutionCheck::Complete)
                     || observed_execs.contains(exec.id.as_str())
                     || session_execs.contains(&exec.id)
                     || exec.caller_session_id.as_ref().is_some_and(|id| {
@@ -655,4 +685,42 @@ fn execution_blockers(
         }
     }
     Ok(blockers)
+}
+
+/// Only the current provider generation's direct command identifies the requester.
+fn requesting_conversation(
+    store: &SharedStore,
+) -> OpsResult<Option<(String, crate::exec::SessionDriver)>> {
+    let Some(id) = crate::journal::current_exec_id() else {
+        return Ok(None);
+    };
+    let Some(exec) = store.sqlite.exec(&id).map_err(task_error)? else {
+        return Ok(None);
+    };
+    let (Some(session), Some(generation)) =
+        (exec.caller_session_id, exec.caller_provider_generation)
+    else {
+        return Ok(None);
+    };
+    if exec.via_agent != Some(true) {
+        return Ok(None);
+    }
+    let Some(driver) = store.sqlite.session_driver(&session).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if driver.provider_generation != generation
+        || !driver
+            .exec_id
+            .as_ref()
+            .is_some_and(|id| exec.parent_exec_id.as_ref() == Some(id))
+    {
+        return Ok(None);
+    }
+    let Some(record) = store.sqlite.session(&session).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if record.kind != crate::session::SessionKind::Conversation {
+        return Ok(None);
+    }
+    Ok(Some((session, driver)))
 }

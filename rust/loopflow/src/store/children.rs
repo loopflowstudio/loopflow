@@ -14,6 +14,11 @@ impl Store {
     pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
         run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
     }
+    pub async fn admit_task(&self, task: &Task) -> StoreResult<Task> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.admit_task(&task)).await
+    }
+
     pub async fn create_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();

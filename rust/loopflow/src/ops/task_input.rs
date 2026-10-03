@@ -53,19 +53,18 @@ pub(crate) async fn read_seed(
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
-    let pr = store
-        .task_prs(&task.id)
-        .await?
-        .pop()
-        .ok_or_else(|| anyhow!("Task {} has no recorded PR", task.id))?;
+    let pr = store.task_prs(&task.id).await?.pop();
     let project = store
         .get_project(&task.project_id)
         .await?
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project.plan, &pr, wave, &steers),
-        crate::ops::task::task_workspace_context(task, &pr)?
+        task_seed(task, &project.plan, pr.as_ref(), wave, &steers),
+        pr.as_ref()
+            .map(|pr| crate::ops::task::task_workspace_context(task, pr))
+            .transpose()?
+            .unwrap_or_default()
     );
     Ok(TaskSeed {
         task: task.clone(),
@@ -233,7 +232,7 @@ async fn handle_attachment(
 pub(crate) fn task_seed(
     task: &Task,
     project: &ProjectPlan,
-    pr: &crate::work::task::TaskPr,
+    pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {

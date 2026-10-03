@@ -164,28 +164,30 @@ and unresolved delivery remain blockers. Membership alone grants no exemption,
 Flow settlement or process control. This refines the LOO-358 completion rule below;
 it does not weaken cleanup or abandonment protections.
 
-Issue-specific confirmation replaces post-mutation whole-Wave refresh. Filing
-and marker recovery retain current-Project routing; failed confirmation remains
-explicit and registered completion retains pending writeback. Stateful fixtures
-prove planning-only completion/retries, not configured provider acceptance.
+Issue-specific confirmation replaces post-mutation whole-Wave refresh; filing
+and marker recovery still require their current-Project routing. Failed confirmation
+stays explicit, and registered completion retains pending writeback.
 
-Flows persist launch cwd independently of Task placement; migration freezes
-previously inherited paths without inventing unknown history. Task completion
-no longer ends managed Flows. Recorded results settle through the graph; managed
-planning gates new launches and review preparation. Cleanup retains unfinished
-Flows' checkouts even without a worker. Focused store, migration and completion
-tests cover these cuts. Public admission/binding, shared explicit startup,
-working-conversation completion and Desktop parity remain unimplemented. Nullable
-SQL columns do not establish optional placement in the Task API.
+October 3 branch implementation admits Tasks with optional placement through public
+Session binding and CLI execution. Binding preview and generic Work readers remain
+observational. A path/slug pair distinguishes no delivery from lost placement;
+explicit binds retain history without adopting the caller directory. Transactional
+later allocation keeps identity and events. Public binding and store allocation are
+proven separately; configured public allocation/retention remains acceptance work.
 
-Upstream #1415 is integrated: recovery can distinguish unrelated historical
-Execs without process receipts from current Session drivers, live processes and
-claims. The retained local optimization reads Session drivers only for recovery;
-completion, cleanup and abandonment still reject unknown execution. This grants
-no requesting-conversation exemption. Release's entry-point failure reinforces
-the proof boundary: seeded-store tests cannot establish public Session binding or
-Taskless Flow startup. Later delivery allocation must preserve Task identity and
-conversation history.
+The requesting conversation allowance uses its current provider generation and
+exact driver parent, solely during completion. Stale callers and review Sessions
+remain blocked; cleanup and abandonment keep their retention checks. Stateful
+fixtures prove no-delivery completion, retry and a post-completion provider event,
+not native-provider acceptance. Explicit attributed/unattributed CLI Flows share
+the driver and leave the Task open. Desktop has nullable placement and outcome entry;
+managed startup/replacement and independent-Flow presentation still need reconciliation.
+
+Flows persist launch cwd independently of placement. Migration freezes retained
+paths without inventing unknown history. Task completion never ends a Flow; recorded
+results settle through the graph and managed planning gates new launches. Cleanup
+retains unfinished Flows' checkouts. Upstream #1415's historical-Exec recovery remains
+separate: completion, cleanup and abandonment still reject unknown execution.
 LOO-364 owns broader switching; LOO-366 owns Project availability/chapter resets.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
@@ -668,19 +670,11 @@ implementation, not another chapter plan.
 
 ### Draft PR readiness (branch evidence, 2026-09-28)
 
-Jack requested draft-by-default `lf pr open`, preserving an already-ready PR.
-Publish/submit/arm/land promote drafts; opening the browser has no readiness
-effect. CLI and headless Flow operations share the existing create/update path.
-Promotion owns its local readiness update after GitHub succeeds, so a failed
-promotion cannot advance Task state or publish ready copy over a draft.
-
-The [preserved realign design](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
-records stateful local GitHub/browser proofs for new drafts, repeated opens,
-ready-PR opens, promotion failure and retry, plus focused Task-copy and delivery
-checks. The final 27 selected builtin/export/draft tests and all-target Clippy
-passed. These are recorded branch checks, not fresh checks from this curation,
-real PR mutations, installed acceptance, or proof of Task completion. Historical
-links identify local commits; remote availability was not checked.
+Jack requested draft-by-default `lf pr open`, preserving already-ready PRs.
+Publish/submit/arm/land promote only after GitHub succeeds. Browser opening has
+no readiness effect. Current mechanics belong in CLI and delivery documentation.
+The dated branch checks and unresolved installed acceptance remain at
+`528625dc17ba4dd6440d7365c1a3073e1c71d205:wave/infrastructure/MEMORY.md`.
 
 ## PR landing recovery (branch evidence, 2026-09-25)
 

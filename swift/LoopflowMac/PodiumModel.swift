@@ -718,6 +718,11 @@ final class PodiumModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
+    func completeTask(_ task: RoadmapTask, wave: WaveSnapshot, summary: String) async throws {
+        try await query.completeTask(issue: task.task.identifier, summary: summary, cwd: WaveOrigin.resolve(wave.repo))
+        await refresh()
+    }
+
     /// Run one Rust-owned Task Flow control, then refresh the shared reading.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
@@ -808,7 +813,7 @@ final class PodiumModel {
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
-            let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
+            let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId ?? preview.identifier, cwd: repo)
             sessionsGeneration &+= 1
             replaceSession(record, repo: repo)
             if owner.selectedSessionId == record.id { owner.selection = record.work }

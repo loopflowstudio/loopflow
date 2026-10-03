@@ -320,8 +320,10 @@ fn register_task_fixture(
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: worktree.to_path_buf(),
-        workspace_slug: "task-pr-proof".to_string(),
+        workspace: Some(loopflow::work::task::TaskWorkspace {
+            worktree: worktree.to_path_buf(),
+            slug: "task-pr-proof".to_string(),
+        }),
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -332,7 +334,7 @@ fn register_task_fixture(
         id: TaskPrId::new(),
         task_id: task.id.clone(),
         sequence: 1,
-        slug: task.workspace_slug.clone(),
+        slug: task.workspace.as_ref().unwrap().slug.clone(),
         branch: branch.to_string(),
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
@@ -416,8 +418,8 @@ pub fn register_sibling_task(
     task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
-    task.workspace_slug = branch.to_string();
-    task.worktree = worktree.to_path_buf();
+    task.workspace.as_mut().unwrap().slug = branch.to_string();
+    task.workspace.as_mut().unwrap().worktree = worktree.to_path_buf();
     task.created_at = now;
     task.updated_at = now;
     let pr = TaskPr {

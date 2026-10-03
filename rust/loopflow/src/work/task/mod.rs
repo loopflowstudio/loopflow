@@ -1,7 +1,7 @@
 //! Durable state for one Linear Task.
 //!
-//! A Task owns one durable worktree, serial PR chain, and Flow progression.
-//! Runs are transient executors of that state.
+//! Purpose and continuity do not require delivery placement. A Task may retain
+//! a checkout and serial PR chain; its managed Flow is one associated Flow.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -610,6 +610,12 @@ pub enum Observation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkspace {
+    pub worktree: PathBuf,
+    pub slug: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
     /// Current planning facts from the PM system.
@@ -620,8 +626,7 @@ pub struct Task {
     /// Required runtime parent. Every Task reports through one durable Project
     /// Work; its Wave retains root inspection and override authority.
     pub project_id: ProjectId,
-    pub worktree: PathBuf,
-    pub workspace_slug: String,
+    pub workspace: Option<TaskWorkspace>,
     /// Explicit choice for every Flow step; None uses the step/config defaults.
     pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
@@ -635,8 +640,19 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn require_workspace(&self) -> Result<&TaskWorkspace, TaskDataError> {
+        self.workspace.as_ref().ok_or_else(|| {
+            TaskDataError::InvalidInvariant(format!(
+                "Task {} has no checkout; allocate one with `lf task checkout {}`",
+                self.plan.identifier, self.plan.identifier
+            ))
+        })
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.workspace_slug.trim().is_empty() {
+        if self.workspace.as_ref().is_some_and(|workspace| {
+            workspace.slug.trim().is_empty() || workspace.worktree.as_os_str().is_empty()
+        }) {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task {} requires a workspace slug",
                 self.id
@@ -807,8 +823,10 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
-            workspace_slug: "ship-it".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: "/tmp/task".into(),
+                slug: "ship-it".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,

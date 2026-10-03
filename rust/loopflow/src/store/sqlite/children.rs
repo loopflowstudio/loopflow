@@ -33,7 +33,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.home_id
-             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id",
+             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id WHERE t.worktree IS NOT NULL",
         )?;
         let rows = statement.query_map([], |row| {
             let home: Option<String> = row.get(4)?;
@@ -54,10 +54,28 @@ impl SqliteStore {
     // Durable Tasks: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
+    pub fn admit_task(&self, task: &Task) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = transaction
+            .query_row(
+                &format!("{TASK_COLUMNS} WHERE t.external_issue_id=?1"),
+                [task.plan.id.as_str()],
+                map_task_row,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            return Ok(existing);
+        }
+        insert_initial_task(&transaction, task, None)?;
+        transaction.commit()?;
+        Ok(task.clone())
+    }
+
     pub fn insert_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, task, pr)?;
+        insert_initial_task(&transaction, task, Some(pr))?;
         transaction.commit()?;
         Ok(())
     }
@@ -65,7 +83,32 @@ impl SqliteStore {
     pub fn insert_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, task, pr)?;
+        let registered: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+            [task.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if registered {
+            validate_task(task)?;
+            require_task_not_deleted(&transaction, task)?;
+            validate_initial_task_pr(task, pr)?;
+            validate_task_project(&transaction, task)?;
+            super::durable::require_ready_work(
+                &transaction,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            )?;
+            let workspace = task
+                .require_workspace()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            let changed = transaction.execute("UPDATE tasks SET worktree=?2, workspace_slug=?3 WHERE id=?1 AND worktree IS NULL AND workspace_slug IS NULL AND external_issue_id=?4 AND project_id=?5",
+                params![task.id.as_str(), workspace.worktree.display().to_string(), workspace.slug, task.plan.id.as_str(), task.project_id.as_str()])?;
+            if changed != 1 {
+                return Err(StoreError::InvalidData("Task already has placement".into()));
+            }
+            insert_task_pr(&transaction, pr)?;
+        } else {
+            insert_initial_task(&transaction, task, Some(pr))?;
+        }
         insert_task_event_in(
             &transaction,
             &task.id,
@@ -73,7 +116,12 @@ impl SqliteStore {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
                 branch: pr.branch.clone(),
-                path: task.worktree.display().to_string(),
+                path: task
+                    .require_workspace()
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                    .worktree
+                    .display()
+                    .to_string(),
                 base_commit: pr.base_commit.clone(),
             },
         )?;
@@ -1041,25 +1089,28 @@ fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
 fn insert_initial_task(
     conn: &rusqlite::Transaction<'_>,
     task: &Task,
-    pr: &TaskPr,
+    pr: Option<&TaskPr>,
 ) -> StoreResult<()> {
     validate_task(task)?;
-    validate_initial_task_pr(task, pr)?;
+    if let Some(pr) = pr {
+        validate_initial_task_pr(task, pr)?;
+    }
     validate_task_project(conn, task)?;
     require_task_not_deleted(conn, task)?;
-    let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND
+    if pr.is_some() {
+        let expired: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND
          (p.status != 'started' OR (SELECT count(*) FROM projects current
           WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
-        [task.project_id.as_str()],
-        |row| row.get(0),
-    )?;
-    if expired {
-        return Err(StoreError::InvalidData(
-            "cannot prepare a new Task in chapter history; refresh the Wave".into(),
-        ));
+            [task.project_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if expired {
+            return Err(StoreError::InvalidData(
+                "cannot prepare a new Task in chapter history; refresh the Wave".into(),
+            ));
+        }
     }
-
     let mut parameters = task_params(task);
     parameters.push(Box::new(task.agent.clone()));
     conn.execute(
@@ -1067,7 +1118,9 @@ fn insert_initial_task(
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
     create_task_work(conn, task)?;
-    insert_task_pr(conn, pr)?;
+    if let Some(pr) = pr {
+        insert_task_pr(conn, pr)?;
+    }
     seed_task_linear_observation(conn, task)
 }
 
@@ -1210,8 +1263,16 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
             serde_json::to_string(&task.pm_writeback)
                 .expect("Task PM writeback state must serialize"),
         ),
-        Box::new(task.worktree.display().to_string()),
-        Box::new(task.workspace_slug.clone()),
+        Box::new(
+            task.workspace
+                .as_ref()
+                .map(|workspace| workspace.worktree.display().to_string()),
+        ),
+        Box::new(
+            task.workspace
+                .as_ref()
+                .map(|workspace| workspace.slug.clone()),
+        ),
         Box::new(
             task.abandon_intent
                 .as_ref()
@@ -1586,8 +1647,22 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .map_err(|error| invalid_column(11, error))?,
         wave_id: row.get(5)?,
         project_id: ProjectId::from_raw(row.get::<_, String>(12)?),
-        worktree: PathBuf::from(row.get::<_, String>(6)?),
-        workspace_slug: row.get(7)?,
+        workspace: match (
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+        ) {
+            (Some(path), Some(slug)) => Some(crate::work::task::TaskWorkspace {
+                worktree: PathBuf::from(path),
+                slug,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(invalid_column(
+                    6,
+                    StoreError::InvalidData("incomplete Task placement".into()),
+                ))
+            }
+        },
         agent: row.get(15)?,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(8)?),

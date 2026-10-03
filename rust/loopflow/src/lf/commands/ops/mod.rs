@@ -2015,7 +2015,9 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(task.worktree);
+                    if let Some(workspace) = task.workspace {
+                        protected.insert(workspace.worktree);
+                    }
                 }
             }
         }

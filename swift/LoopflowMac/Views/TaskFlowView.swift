@@ -70,6 +70,9 @@ struct TaskFlowView: View {
     @State private var showsDetailedFlow = false
     @State private var inspectedTransition: InteractionTransition?
     @State private var hovering = false
+    @State private var outcome = ""
+    @State private var completing = false
+    @State private var completionError: String?
     /// Clock for the running status line's elapsed time; ticks while running.
     @State private var now = Date()
     @FocusState private var focus: HeaderFocus?
@@ -134,6 +137,28 @@ struct TaskFlowView: View {
                     .accessibilityIdentifier("task-flow-status")
             }
             .padding(.leading, 2)
+        }
+        .safeAreaInset(edge: .bottom) {
+            if !task.task.completed {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    TextField("Task outcome", text: $outcome, axis: .vertical)
+                        .accessibilityIdentifier("task-outcome")
+                    Button("Complete Task") {
+                        completing = true
+                        completionError = nil
+                        Task {
+                            defer { completing = false }
+                            do { try await model.completeTask(task, wave: wave, summary: outcome) }
+                            catch { completionError = error.localizedDescription }
+                        }
+                    }
+                    .disabled(completing || outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("task-complete")
+                    if let completionError {
+                        Text(completionError).foregroundStyle(WorkspaceTone.blocked.ink).textSelection(.enabled)
+                    }
+                }.padding()
+            }
         }
         .id("task-flow-anchor")
         .task { await model.loadFlowCatalog() }

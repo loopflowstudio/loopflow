@@ -12,10 +12,10 @@ are internal process boundaries and are marked below.
 
 ## Selection and output
 
-`--task` selects a Task checkout; `--wt` selects an existing worktree.
+`--task` uses retained Task placement or the caller directory; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
-owning Wave. Named direct Flows are independent contributions; `flow start`
-selects the Task's saved managed Flow. Saved state, identity and feedback
+owning Wave. Explicit templates create independent Flows; bare Task `flow start`
+selects the saved managed Flow. Saved state, identity and feedback
 survive continuation. `task restart` explicitly replaces that workflow.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
@@ -1494,11 +1494,11 @@ Run or inspect authored flows
 
 ## lf flow start
 
-Start or continue a Task through its saved Flow
+Start an explicit Flow, or continue the selected Task Flow
 
 | Argument | What it does |
 |---|---|
-| `<template>` | Template for a new Task Flow; existing saved progress remains authoritative |
+| `<template>` | Explicit template starts an independent Flow with optional Task attribution |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |

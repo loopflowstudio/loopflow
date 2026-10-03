@@ -355,9 +355,13 @@ fn build_prompt_at(
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
-        Some((_, seed)) => {
-            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
-        }
+        Some((_, seed)) => seed
+            .task
+            .workspace
+            .as_ref()
+            .map(|workspace| std::fs::canonicalize(&workspace.worktree))
+            .transpose()?
+            .is_some_and(|path| std::fs::canonicalize(&repo_root).is_ok_and(|repo| path == repo)),
         None => false,
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);

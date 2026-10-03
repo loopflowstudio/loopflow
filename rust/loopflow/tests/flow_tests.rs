@@ -40,6 +40,83 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
 }
 
 #[test]
+fn task_without_delivery_explicit_flow_uses_shared_driver_and_keeps_task_open() {
+    for attributed in [false, true] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        write_flow(
+            repo.path(),
+            "ordinary",
+            "- cmd: task sync --plan\n- cmd: task sync --plan\n",
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let task = attributed.then(|| {
+            let fixture =
+                support::register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+            let mut task = fixture.task.clone();
+            task.id = loopflow::durable::TaskId::new();
+            task.plan.id = loopflow::planning::LinearIssueId::new("research-issue").unwrap();
+            task.plan.identifier = "RESEARCH-1".into();
+            task.workspace = None;
+            runtime.block_on(fixture.store.admit_task(&task)).unwrap()
+        });
+        let mut args = vec!["flow", "start", "ordinary"];
+        if attributed {
+            args.extend(["--task", "RESEARCH-1"]);
+        }
+        let output = lf_command(repo.path(), home.path(), &args, None)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let store = runtime
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+            ))
+            .unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let (state, cwd, associated): (String, String, Option<String>) = conn
+            .query_row("SELECT state,cwd,task_id FROM flow_sessions", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(state, "completed");
+        assert_eq!(
+            Path::new(&cwd).canonicalize().unwrap(),
+            repo.path().canonicalize().unwrap()
+        );
+        assert_eq!(associated, task.as_ref().map(|task| task.id.to_string()));
+        let completed: i64 = conn.query_row("SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed'", [], |row| row.get(0)).unwrap();
+        assert_eq!(completed, 2);
+        if let Some(task) = task {
+            assert_eq!(
+                runtime
+                    .block_on(store.work_status(&loopflow::durable::WorkRef::Task(task.id.clone())))
+                    .unwrap(),
+                loopflow::durable::WorkStatus::Ready
+            );
+            assert!(runtime
+                .block_on(store.get_task(&task.id))
+                .unwrap()
+                .unwrap()
+                .workspace
+                .is_none());
+            assert!(runtime
+                .block_on(store.task_prs(&task.id))
+                .unwrap()
+                .is_empty());
+            assert!(runtime
+                .block_on(store.task_flow(&task.id))
+                .unwrap()
+                .is_none());
+        }
+    }
+}
+
+#[test]
 fn flow_steps_use_explicit_binary_and_retain_effects_after_experimental_schema_changes() {
     for upgrade in [false, true] {
         let repo = loopflow_test_support::TestRepo::new();
@@ -714,7 +791,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 FlowSession {
                     task_id: Some(child.task.id.clone()),
                     wave_id: Some(child.task.wave_id.clone()),
-                    cwd: child.task.worktree.clone(),
+                    cwd: child.task.workspace.as_ref().unwrap().worktree.clone(),
                     message: None,
                     model: None,
                     current_attempt: None,
@@ -2000,7 +2077,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
                 version: 0,
                 task_id: Some(task.task.id.clone()),
                 wave_id: Some(task.task.wave_id.clone()),
-                cwd: task.task.worktree.clone(),
+                cwd: task.task.workspace.as_ref().unwrap().worktree.clone(),
                 message: None,
                 model: None,
                 current_attempt: None,
@@ -2522,7 +2599,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
                 version: 0,
                 task_id: Some(task.task.id.clone()),
                 wave_id: Some(task.task.wave_id.clone()),
-                cwd: task.task.worktree.clone(),
+                cwd: task.task.workspace.as_ref().unwrap().worktree.clone(),
                 message: None,
                 model: None,
                 current_attempt: None,

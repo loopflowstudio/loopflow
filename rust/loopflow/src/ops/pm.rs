@@ -1666,8 +1666,12 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 eprintln!("Retained PR history: {}", github.url);
             }
         }
-        if task.worktree.exists() {
-            eprintln!("Retained checkout: {}", task.worktree.display());
+        if let Some(workspace) = task
+            .workspace
+            .as_ref()
+            .filter(|workspace| workspace.worktree.exists())
+        {
+            eprintln!("Retained checkout: {}", workspace.worktree.display());
         }
     }
     Ok(identifier)

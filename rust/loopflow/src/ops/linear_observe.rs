@@ -51,7 +51,8 @@ pub(crate) async fn publish_task_steer(
     task: &Task,
     text: &str,
 ) -> OpsResult<String> {
-    let client = super::pm::issue_client(&task.worktree).await?;
+    let wave = super::task::owning_wave(store, task).await?;
+    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
     let comment_id = publish_direction(&client, task.plan.id.as_str(), text).await?;
     refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
         "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
@@ -122,7 +123,8 @@ pub(crate) async fn publish_comment(
 }
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let client = super::pm::issue_client(&task.worktree).await?;
+    let wave = super::task::owning_wave(store, task).await?;
+    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
     let observation = client
         .observe_issue(task.plan.id.as_str())
         .await
@@ -439,8 +441,10 @@ pub(crate) mod tests {
             pm_writeback: crate::work::task::PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
-            workspace_slug: "ship-it".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: "/tmp/task".into(),
+                slug: "ship-it".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,

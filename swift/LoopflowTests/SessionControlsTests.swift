@@ -15,7 +15,7 @@ import Testing
         #expect(preview.identifier == "INF-123")
         let original = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
         #expect(try JSONSerialization.jsonObject(with: JSONEncoder().encode(preview)) as? [String: String] == original)
-        for key in original.keys {
+        for key in original.keys where key != "task_id" {
             var missing = original
             missing.removeValue(forKey: key)
             #expect(throws: DecodingError.self) {

@@ -164,7 +164,7 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                         .block_on(store.get_task(task_id))?
                         .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;
                     crate::ops::task::task_run(
-                        &task.worktree,
+                        &task.require_workspace()?.worktree,
                         &task.plan.identifier,
                         crate::ops::task::TaskExecOptions {
                             retry: *retry,

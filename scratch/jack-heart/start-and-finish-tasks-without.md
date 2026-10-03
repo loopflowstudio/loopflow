@@ -53,103 +53,56 @@ This serves Infrastructure's dependable self-hosting and architecture reduction
 objectives and the chapter KR about advancing a Task from an ordinary Session
 without plumbing blockers. No quantitative chapter targets were supplied.
 
-## Current source findings · reconciled 2026-10-02
+## Current implementation · reconciled 2026-10-03
 
-- `ops/task.rs::task_create` already supports filing without execution. Its
-  `options: None` branch creates no runtime Task, checkout, PR or Flow.
-  `task_complete` already routes an unregistered issue to
-  `ops/pm.rs::complete_planning_task`. Keep both paths.
-- Planning completion validates nonempty summary, checks provider outcome,
-  confirms completion and publishes one marker-keyed summary. Existing
-  `ops/pm/task_planning_tests.rs` covers original-summary preservation,
-  lost responses, pending writeback and conflicting terminal outcomes. The
-  recorded focused suite result below covers the current confirmation slice.
-- `task_pm::create_and_load_task` and `pm_update_async` now confirm mutations
-  through affected-issue lookup and normalized ingestion. Current-Project routing
-  still precedes filing and creation-marker recovery. The no-delivery fixture
-  seeds fresh planning for that routing; it proves post-mutation independence
-  from whole-Wave acquisition, not filing during arbitrary planning outages.
-- `work/task/mod.rs::Task` requires `worktree` and `workspace_slug`;
-  `create_prepared_task` creates the Task and first PR together. This is the
-  admission coupling to remove. A fake empty path would make absent placement
-  ambiguous and risks associating unrelated cwd history.
-- `ops/run.rs::resolve_work_selection` requires a registered Task, its Project
-  and a PR before constructing context. `human_session::binding_target` also
-  requires registration. Thus a planning-only issue cannot yet accumulate normal
-  bound execution through those paths without delivery preparation.
-- `bin/lf.rs` routes `FlowCommand::Start` through `task_run` and rejects a
-  missing Task. However `lf/commands/flow.rs::execute` already persists optional
-  Task attribution and uses the shared `drive`. Resume already distinguishes the
-  marked managed Flow from independent attributed Flows. There is no engine to add.
-- `complete_task` unconditionally inspects checkout cleanliness. Its existing
-  `task_completion_gate` protects associated unfinished work, open/publishing
-  PRs and committed follow-up. `store/sqlite/task_work.rs` already unions
-  explicit binds with checkout membership, including absent-checkout history.
-  Retain that reader and managed Flow distinction from LOO-358.
-- `cleanup_completed_task` already runs after durable completion and retains the
-  checkout when associated work blocks cleanup. It now retains the checkout for an unfinished managed Flow even after its worker
-  exits. Cleanup no longer ends that Flow. The new requesting-conversation
-  allowance must remain separate from this retention check.
-- `task_actions::derive_task_actions` applies launch refusal before considering
-  completion; its no-PR case recommends resuming a saved Flow. `task_flow` owns
-  shared control explanations. Desktop's `RegistryQuery`, `PodiumModel` and
-  `TaskFlowView` consume these operations, while the local Session launcher
-  obtains Task checkout placement. UI-only relaxation would leave CLI and agents
-  blocked and would misrepresent permissions.
-- Recovery distinguishes unknown historical Execs from current execution without
-  recording their exit. Session-driver reads serve only that resumption exception;
-  cleanup and abandonment block unknown Execs without needing those extra reads.
-  Upstream #1415 is included through the current base; it already owns this
-  recovery distinction and missing-PR discovery. The retained local edit only
-  avoids Session-driver reads in retention checks; it grants no completion
-  exemption. Existing `task_work` tests cover recovery versus retention. Preserve
-  these behaviors while removing unrelated delivery prerequisites.
+Task placement is now `Option<TaskWorkspace>` (path and slug together). The store
+reads/writes NULL for absent placement, rejects half-present rows, excludes absent
+placement from checkout inventory, and admits one Task by issue identity without
+creating a PR or setting Started. Later delivery allocation attaches its first PR
+and placement transactionally to that same Task. Existing events and identity remain.
+The released columns were already nullable; the existing Flow cwd draft remains
+the only migration for this Task.
 
-Relevant retained memory: planning and completion have separate writers; bind is
-write-once and can target done/landed Tasks; membership grants no execution
-control; missing observations are unknown; Flow completion is not Task completion.
-The dated continuation and Task-deletion sections of the full supplied memory
-were read along with LOO-358 and current Wave guidance.
+Public Session binding admits an owned planning issue. Binding preview reads that
+issue without admission, and generic Work resolution stays read-only; CLI execution
+explicitly admits before requesting context. Task context and captured input render
+without a PR or workspace. An unplaced Task uses the caller directory without
+adopting its unrelated files or directory membership. Live steer context can use
+its owning repository without delivery placement.
 
-## Persistence and completion counterexamples · 2026-10-02
+Registered completion checks cleanliness only for retained placement. Associated
+work and PR promises still pass through the existing gate. The requesting
+conversation allowance is confined to completion: its current Exec must identify
+the provider generation recorded for that Session and its exact driver parent. Review Sessions,
+stale callers and unrelated execution receive no exemption. Cleanup and abandonment
+retain their previous blockers. A stateful test completes inside a recorded calling
+conversation, then records that same conversation's terminal provider event.
+This is simulated authoritative history, not a configured native-provider demo.
 
-Source inspection found two dependencies missing from the proposed deletion cut.
+Explicit `flow start TEMPLATE` uses the existing capture/driver with or without
+Task attribution. The public CLI regression runs two operations, checks persisted
+cwd and attribution, and proves Flow completion leaves the Task open without
+inventing placement or a PR. Bare managed startup and managed replacement still
+use their existing delivery-oriented paths; that remaining cut is listed below.
 
-- `store/sqlite/flows.rs::insert_flow_in` discarded cwd whenever Task attribution
-  was present, and released SQLite triggers enforced that restriction. The reader
-  then derived cwd from Task placement. Optional placement alone would make a new
-  Flow unreadable, and later allocation would change its historical directory.
-  The branch now records every Flow's launch cwd and removes that fallback and
-  its two triggers. The single `optional_task_workspace` draft freezes existing
-  inherited paths; unknown historical placement stays NULL. A released-frontier
-  migration test and persistent Flow test cover this cut. The latter seeds the
-  unplaced Task row directly: it does not establish public Task admission or binding.
-- Task completion previously ended the managed Flow in both the driver and
-  cleanup. Both shortcuts are removed. The driver consumes recorded step results
-  through the ordinary checkpoint/graph path, and checks managed planning only
-  before a new agent/operation launch or review preparation. A recorded final
-  result can finish its graph after the Task becomes Done; an unexecuted later
-  step remains unfinished and receives the existing terminal-Task refusal.
-  Cleanup retains the checkout while its managed Flow is unfinished, including
-  an idle Flow with no claim. Regression tests cover these boundaries without
-  granting completion authority to a seeded Task or starting a real provider.
+Rust/Swift DTOs represent absent placement and an unregistered binding preview.
+Desktop offers outcome entry through `task complete`; New Session uses the current
+repository when no placement exists, while a lost retained checkout still uses
+restoration. Review launch paths read the Flow's captured cwd. Optional-placement
+snapshots, Session controls and the affected Swift modules compile headlessly.
 
-Review finding: removing only the Done shortcut stranded even a recorded final
-operation because `resolve_managed_task_planning` rejects terminal Tasks before
-result consumption. Moving that check to launch boundaries preserves the existing
-terminal launch rule and exact receipt fencing. Task completion neither fabricates
-Flow success nor discards a real successful step. Public requesting-conversation
-completion and native-turn acceptance remain unimplemented/unproven.
+Earlier supporting cuts remain: issue-specific provider confirmation instead of
+whole-Wave refresh; Flow launch cwd independent of Task placement; no Task-Done-driven
+Flow settlement. Recorded results settle through the graph, while new managed
+launches retain planning checks. Cleanup retains unfinished managed Flows.
 
-Compression reuses `resolve_launch_task`'s validated managed Task for review
-preparation, deleting the repeated selection and Task lookup. Recorded-result
-consumption remains outside that check. The issue-confirmation Task-plan write
-remains necessary: normalized planning ingestion does not update that retained row.
-
-Task placement columns are already nullable in the released schema. The required
-migration concerns the Flow cwd dependency, not converting non-null Task columns.
-Rust decoding still requires placement, and admission remains coupled to the first
-PR. Continue editing this Task's one draft rather than adding another migration.
+Review findings fixed on October 3: admission in a generic context reader would
+have mutated inspection; moving it to execution/binding avoids that side effect.
+An absent placement is not a missing checkout. A requesting-conversation exemption
+must never enter cleanup. The fixture's PM database differs from its journal Home,
+so the current Exec evidence is explicitly seeded in the PM fixture; it cannot be
+presented as a real provider turn. Older detailed source findings remain at
+`528625dc17ba4dd6440d7365c1a3073e1c71d205:scratch/jack-heart/start-and-finish-tasks-without.md`.
 
 ## Chosen architecture
 
@@ -246,25 +199,14 @@ Remove tests that assert these obsolete prerequisites, replacing them with
 behavior proofs. Correct the Task module's claim that every Task owns Flow
 progression and a PR chain.
 
-Remaining targets at their existing owners:
+Removed: mandatory Task placement, PR-dependent context and Session binding,
+unconditional checkout inspection during completion, whole-Wave post-mutation
+confirmation, inherited Flow cwd, and Task-completion-driven Flow settlement.
 
-- `Task::{worktree, workspace_slug}` as mandatory placement; replace together
-  with optional `TaskWorkspace`, including store and DTO consumers.
-- `create_prepared_task` as the admission prerequisite in attribution and binding;
-  retain it only for explicit delivery preparation.
-- `resolve_work_selection`'s unconditional PR requirement and
-  `FlowCommand::Start`'s Task-only dispatch.
-- `complete_task`'s unconditional checkout inspection and
-  `derive_task_actions`' launch refusal as a prerequisite to completion.
-- Task-Done-driven `end_flow` in `lf/commands/flow.rs::drive` and cleanup's
-  implicit managed-Flow settlement: removed, with recorded-result and idle-Flow
-  retention regressions. Actual graph completion still owns Flow settlement.
-- The Task-bound Flow cwd restriction and read-time placement fallback: removed
-  in this branch, with retained-path migration and focused tests.
-
-The implemented confirmation cut already removes `load_wave_async` and the
-post-mutation `refresh_pm_snapshot` calls. Keep current-Project filing selection
-and the shared completion writer; neither is a deletion target.
+Remaining deletion targets are managed launch/restart's unconditional checkout,
+checkpoint and no-active-PR prerequisites, plus Desktop's assumption that every
+started Task Flow is the marked managed Flow. Preserve the exact managed claims,
+review boundaries and captured graph while completing those cuts.
 
 Keep `task_complete`, `complete_planning_task`, the existing gate, PR settlement,
 managed claim fencing, LOO-355 checkout/rotation operations and LOO-358 membership.
@@ -286,53 +228,27 @@ as execution authority, broad directory adoption or fake checkout creation.
 One coherent architectural change; these are internal steps, not compatibility
 stages to ship independently.
 
-Implementation status · reconciled 2026-10-02: three supporting cuts exist:
+The core admission, context, explicit startup, completion and optional-placement
+consumer changes exist. This remains one architectural PR, not a completed Task.
 
-- Issue-specific confirmation replaces whole-Wave acquisition after mutation.
-  Current-Project selection before filing remains. Stateful fixtures cover failed
-  confirmation, creation-marker recovery, original-summary preservation and zero
-  invented delivery objects for planning-only operations.
-- Flow launch cwd persists independently of Task placement. Released-frontier
-  migration and store tests cover retained paths, including absent placement;
-  the unplaced Task is seeded directly, not admitted through a public operation.
-- Task completion no longer ends the managed Flow. Recorded results settle
-  through the graph; new managed launches and review preparation retain planning
-  checks. Cleanup retains unfinished managed Flows. Compression shares the
-  validated Task lookup for launch and review preparation.
-
-None removes the remaining public admission dependency. Source inspection still
-finds mandatory `Task` placement, registration-dependent binding/context,
-Task-only `FlowCommand::Start`, and unconditional checkout inspection in
-`complete_task`. The next slice is step 1 below; the supporting cuts do not prove
-the no-delivery conversation outcome or Desktop parity.
-
-Review finding: a retry of `task create` still acquires current-Project routing
-before reusing the creation marker. The new confirmation path must not be described
-as eliminating all filing reads. Failed issue acquisition remains an explicit
-failure; registered completion retains its existing pending-writeback state.
-
-1. **Next implementation slice:** remove mandatory placement from admission and membership,
-   update readers/writers and DTO consumers while preserving existing rows.
-   The Flow cwd migration is already present; Task placement columns are already
-   nullable and need no redundant schema conversion. Add a focused
-   `task_without_delivery` test: bind an existing conversation to an admitted Task,
-   read membership, and prove zero PR/checkout/Flow creation; then allocate the
-   existing delivery path and prove identity/history survive.
-2. Cut over context and explicit Flow startup to shared execution. Compare attributed
-   and unattributed captures/cursors, review waits, failures and retry counters.
-   Switching the managed selection retains independent work and rejects late writes
-   from the replaced worker. Completed Flow leaves Task open.
-3. Remove remaining completion/action dependencies. Narrow planning confirmation
-   and its stateful failure/retry coverage are implemented. A registered no-placement Task completes with
-   evidence through the existing writer, once its associated work is settled.
-   Apply Jack Heart's requesting-conversation decision: its own active turn may
-   remain open, while other associated work and delivery obligations must settle.
-   Separate completion eligibility from destructive cleanup eligibility at their
-   existing owners; preserve the requesting Session and checkout across completion.
-4. Cut over Desktop controls, Session launch placement, CLI/help and agent guidance.
-   Update `docs/lf.md`, architecture reference and relevant builtin skills. Keep
-   stored historical skill wording historical. Complete migration and consumer
-   tests before removing obsolete assertions.
+1. Finish bare managed startup and replacement without implicit delivery allocation.
+   `task_run`, `continue_task_async`, `exec_task_process`, controller startup and
+   `restart_task_async` still contain placement/checkpoint assumptions. Capture the
+   actual launch cwd in the existing Flow; checkpoint only retained Task placement.
+   Keep exact replacement fencing and the current-Project checks specific to managed
+   progression. Do not solve this by fabricating a checkout or weakening delivery.
+2. Reconcile Desktop Flow selection with explicit independent starts. Its Flow pane
+   still projects the managed selection; starting an explicit independent Flow must
+   visibly expose its captured progress and resume path without pretending it acquired
+   the managed marker. LOO-364 continues to own broader Session switching UX.
+3. Cross the public allocation boundary with the bound conversation: current tests
+   prove public binding and store allocation separately. Prove identity/history through
+   `task checkout`, then completion from a running conversation in that checkout and
+   later safe cleanup. Add the independent live/unknown execution counterexamples.
+4. Gate owns the remaining provider/review/retry and Desktop interaction scenarios
+   below, including fresh null DTO fixtures. The operation-only shared-driver test
+   does not establish native provider or review acceptance. No configured installation,
+   external provider mutation, publication or Task completion is claimed.
 
 Remaining acceptance checks on the finished tree:
 
@@ -382,10 +298,9 @@ identity. Failure would be an apparently successful completion hiding live work
 or an unknown provider result. Explicit absent placement, preserved membership,
 per-operation checks and confirmation/retry proofs are the safeguards.
 
-Simulated review finding: merely relaxing `task_completion_gate` would neither
-admit a research Session nor fix the context reader's PR requirement, and could
-weaken delivery. Start the remaining cut with registration and placement while
-preserving the gate's evidence obligations. The seeded-store Flow-directory proof
-does not establish public binding; no Task completion or acceptance follows.
+Simulated review: the domain pair removes invented empty paths, admission has one
+transactional owner, and completion keeps destructive retention separate. Remaining
+managed startup and Desktop Flow selection are substantial implementation work;
+passing the no-delivery fixtures does not settle those obligations.
 
-Check: `git diff --check` passed; `lf context --wave infrastructure --json` fits memory/scratch limits; prior unchanged-code results retained: `cargo test -p loopflow --lib task_completion` 11 passed, `cargo test -p loopflow --lib lf::commands::flow::tests` 4 passed, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; remaining public-operation and Desktop checks belong to implementation/gate.
+Check: focused no-delivery tests (7), completion tests (11), action tests (10), explicit CLI Flow proof (1), and Swift selected tests (34) passed; DTO fixtures (1), all-target Clippy and formatting passed; remaining managed/allocation/interaction acceptance belongs to implementation and gate.

@@ -68,13 +68,20 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         .unwrap()
     };
     checkout();
-    assert!(!child.worktree.join("scratch").exists());
+    assert!(!child
+        .workspace
+        .as_ref()
+        .unwrap()
+        .worktree
+        .join("scratch")
+        .exists());
     assert_eq!(
-        loopflow::engine::git::rev_parse(&child.worktree, "HEAD^").unwrap(),
+        loopflow::engine::git::rev_parse(&child.workspace.as_ref().unwrap().worktree, "HEAD^")
+            .unwrap(),
         parent_head
     );
     let subject = Command::new("git")
-        .current_dir(&child.worktree)
+        .current_dir(&child.workspace.as_ref().unwrap().worktree)
         .args(["log", "-1", "--format=%s"])
         .output()
         .unwrap();
@@ -83,16 +90,36 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         String::from_utf8_lossy(&subject.stdout).trim(),
         "Clear inherited scratch"
     );
-    let child_head = loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap();
-    fs::create_dir(child.worktree.join("scratch")).unwrap();
-    fs::write(child.worktree.join("scratch/design.md"), "child design").unwrap();
+    let child_head =
+        loopflow::engine::git::rev_parse(&child.workspace.as_ref().unwrap().worktree, "HEAD")
+            .unwrap();
+    fs::create_dir(child.workspace.as_ref().unwrap().worktree.join("scratch")).unwrap();
+    fs::write(
+        child
+            .workspace
+            .as_ref()
+            .unwrap()
+            .worktree
+            .join("scratch/design.md"),
+        "child design",
+    )
+    .unwrap();
     checkout();
     assert_eq!(
-        loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(&child.workspace.as_ref().unwrap().worktree, "HEAD")
+            .unwrap(),
         child_head
     );
     assert_eq!(
-        fs::read_to_string(child.worktree.join("scratch/design.md")).unwrap(),
+        fs::read_to_string(
+            child
+                .workspace
+                .as_ref()
+                .unwrap()
+                .worktree
+                .join("scratch/design.md")
+        )
+        .unwrap(),
         "child design"
     );
     assert_eq!(repo.head_sha(), parent_head);
@@ -114,7 +141,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         "test/checkout-recovery",
         &repo.head_sha(),
     );
-    fixture.task.worktree = target.path().join("checkout");
+    fixture.task.workspace.as_mut().unwrap().worktree = target.path().join("checkout");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime
         .block_on(fixture.store.update_task(&fixture.task))
@@ -143,11 +170,21 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(
+            &fixture.task.workspace.as_ref().unwrap().worktree,
+            "HEAD"
+        )
+        .unwrap(),
         fixture.pr.base_commit
     );
     fs::write(
-        fixture.task.worktree.join("work.txt"),
+        fixture
+            .task
+            .workspace
+            .as_ref()
+            .unwrap()
+            .worktree
+            .join("work.txt"),
         "committed Task work",
     )
     .unwrap();
@@ -156,15 +193,19 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         vec!["commit", "-m", "Preserve Task work"],
     ] {
         assert!(Command::new("git")
-            .current_dir(&fixture.task.worktree)
+            .current_dir(&fixture.task.workspace.as_ref().unwrap().worktree)
             .args(args)
             .output()
             .unwrap()
             .status
             .success());
     }
-    let head = loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap();
-    fs::remove_dir_all(&fixture.task.worktree).unwrap();
+    let head = loopflow::engine::git::rev_parse(
+        &fixture.task.workspace.as_ref().unwrap().worktree,
+        "HEAD",
+    )
+    .unwrap();
+    fs::remove_dir_all(&fixture.task.workspace.as_ref().unwrap().worktree).unwrap();
     let restored = checkout();
     assert!(
         restored.status.success(),
@@ -172,18 +213,34 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&restored.stderr)
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(
+            &fixture.task.workspace.as_ref().unwrap().worktree,
+            "HEAD"
+        )
+        .unwrap(),
         head
     );
     assert_eq!(
-        fs::read_to_string(fixture.task.worktree.join("work.txt")).unwrap(),
+        fs::read_to_string(
+            fixture
+                .task
+                .workspace
+                .as_ref()
+                .unwrap()
+                .worktree
+                .join("work.txt")
+        )
+        .unwrap(),
         "committed Task work"
     );
     let persisted = runtime
         .block_on(fixture.store.get_task(&fixture.task.id))
         .unwrap()
         .unwrap();
-    assert_eq!(persisted.worktree, fixture.task.worktree);
+    assert_eq!(
+        persisted.workspace.as_ref().unwrap().worktree,
+        fixture.task.workspace.as_ref().unwrap().worktree
+    );
     assert_eq!(
         runtime
             .block_on(fixture.store.active_task_pr(&fixture.task.id))
@@ -201,14 +258,33 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
             .count(),
         1
     );
-    fs::remove_dir_all(&fixture.task.worktree).unwrap();
-    fs::create_dir(&fixture.task.worktree).unwrap();
-    fs::write(fixture.task.worktree.join("notes"), "unregistered work").unwrap();
+    fs::remove_dir_all(&fixture.task.workspace.as_ref().unwrap().worktree).unwrap();
+    fs::create_dir(&fixture.task.workspace.as_ref().unwrap().worktree).unwrap();
+    fs::write(
+        fixture
+            .task
+            .workspace
+            .as_ref()
+            .unwrap()
+            .worktree
+            .join("notes"),
+        "unregistered work",
+    )
+    .unwrap();
     let occupied = checkout();
     assert!(!occupied.status.success());
     assert!(String::from_utf8_lossy(&occupied.stderr).contains("occupied"));
     assert_eq!(
-        fs::read_to_string(fixture.task.worktree.join("notes")).unwrap(),
+        fs::read_to_string(
+            fixture
+                .task
+                .workspace
+                .as_ref()
+                .unwrap()
+                .worktree
+                .join("notes")
+        )
+        .unwrap(),
         "unregistered work"
     );
     assert_eq!(
@@ -231,7 +307,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     repo.create_branch(branch);
     let mut task = register_unrun_task(home.path(), repo.path(), branch, &base);
     let missing_worktree = home.path().join("not-yet-created-worktree");
-    task.task.worktree = missing_worktree.clone();
+    task.task.workspace.as_mut().unwrap().worktree = missing_worktree.clone();
     let runtime = tokio::runtime::Runtime::new().expect("initialization fixture runtime");
     runtime
         .block_on(task.store.update_task(&task.task))

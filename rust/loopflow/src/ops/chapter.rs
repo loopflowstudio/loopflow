@@ -879,10 +879,12 @@ async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
             .iter()
             .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
         if let Some(pr) = prs.last() {
-            evidence.authored = is_clean(&task.worktree).ok().and_then(|clean| {
-                rev_parse(&task.worktree, "HEAD")
-                    .ok()
-                    .map(|head| !clean || head != pr.base_commit)
+            evidence.authored = task.workspace.as_ref().and_then(|workspace| {
+                is_clean(&workspace.worktree).ok().and_then(|clean| {
+                    rev_parse(&workspace.worktree, "HEAD")
+                        .ok()
+                        .map(|head| !clean || head != pr.base_commit)
+                })
             });
         }
     }

@@ -657,9 +657,15 @@ process-control authority.
 
 ## Task delivery algorithm
 
-A Task binds planning to one active PR branch and managed Git worktree. A
-checkout on that branch identifies the Task regardless of its upstream; the
-stored path supplies placement for explicit Task selection. The current delivery
+Task admission records purpose and ownership without delivery placement. `Task.workspace`
+is an optional path/slug pair; absent placement stays SQL NULL. Explicit Session
+binding and Task attribution share admission, which neither starts work nor creates
+a PR, Flow or checkout. Inspection and binding preview remain observational.
+
+Delivery allocation attaches a worktree and first PR to that same Task. A checkout
+on its active PR branch identifies the Task regardless of upstream; retained
+placement routes explicit Task selection. Without placement, attribution retains
+the caller's directory without adopting its unrelated files or history. The current delivery
 implementation can rotate a settled Task onto a later serial branch. Once that happens, the old branch no
 longer identifies the Task. Collapsing the Task lifetime to one Linear-associated
 branch remains a separate delivery simplification.

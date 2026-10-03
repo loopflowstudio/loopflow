@@ -1366,8 +1366,10 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree: PathBuf::from("/repo.inf-123"),
-            workspace_slug: format!("task-{}", &id.as_str()[3..11]),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: PathBuf::from("/repo.inf-123"),
+                slug: format!("task-{}", &id.as_str()[3..11]),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -1381,8 +1383,8 @@ mod tests {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: format!("jack/{}", task.workspace_slug),
+            slug: task.workspace.as_ref().unwrap().slug.clone(),
+            branch: format!("jack/{}", task.workspace.as_ref().unwrap().slug),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -1410,7 +1412,7 @@ mod tests {
             version: 0,
             task_id: Some(task.id.clone()),
             wave_id: Some(task.wave_id.clone()),
-            cwd: task.worktree.clone(),
+            cwd: task.workspace.as_ref().unwrap().worktree.clone(),
             message: None,
             model: None,
             current_attempt: None,
@@ -1510,7 +1512,10 @@ mod tests {
         store.update_task(&task).await.unwrap(); // stale worker snapshot
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(moved.project_id, successor.id);
-        assert_eq!(moved.worktree, task.worktree);
+        assert_eq!(
+            moved.workspace.as_ref().unwrap().worktree,
+            task.workspace.as_ref().unwrap().worktree
+        );
         assert_eq!(moved.plan, task.plan);
         assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), claimed);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
@@ -1610,8 +1615,16 @@ mod tests {
             crate::durable::WorkStatus::Abandoned
         );
         assert_eq!(
-            store.get_task(&task.id).await.unwrap().unwrap().worktree,
-            task.worktree
+            store
+                .get_task(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .workspace
+                .as_ref()
+                .unwrap()
+                .worktree,
+            task.workspace.as_ref().unwrap().worktree
         );
     }
 
@@ -1967,6 +1980,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_without_delivery_allocation_preserves_admission_and_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        let workspace = task.workspace.take();
+        let admitted = store.admit_task(&task).await.unwrap();
+        assert_eq!(admitted, task);
+        let mut contender = task.clone();
+        contender.id = TaskId::new();
+        assert_eq!(store.admit_task(&contender).await.unwrap().id, task.id);
+        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+        assert!(store.task_checkouts().await.unwrap().is_empty());
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Progress {
+                    summary: "Research retained".into(),
+                },
+            )
+            .await
+            .unwrap();
+        task.workspace = workspace;
+        let pr = make_task_pr(&task);
+        store.create_task_with_worktree(&task, &pr).await.unwrap();
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr.clone()]);
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(&event.kind, TaskEventKind::Progress { summary } if summary == "Research retained")));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Started)));
+        assert!(store.create_task_with_worktree(&task, &pr).await.is_err());
+        assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
+    }
+
+    #[tokio::test]
     async fn task_deletion_confirmation_serializes_with_registration() {
         for registration_first in [false, true] {
             let directory = tempfile::tempdir().unwrap();
@@ -2025,7 +2082,8 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.worktree = directory.path().join("uncreated-child-worktree");
+        task.workspace.as_mut().unwrap().worktree =
+            directory.path().join("uncreated-child-worktree");
         let pr = make_task_pr(&task);
 
         store
@@ -2067,12 +2125,18 @@ mod tests {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
                 branch: pr.branch.clone(),
-                path: task.worktree.display().to_string(),
+                path: task
+                    .workspace
+                    .as_ref()
+                    .unwrap()
+                    .worktree
+                    .display()
+                    .to_string(),
                 base_commit: pr.base_commit.clone(),
             }
         );
         assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
-        assert!(!task.worktree.exists());
+        assert!(!task.workspace.as_ref().unwrap().worktree.exists());
     }
 
     #[tokio::test]
@@ -2099,7 +2163,7 @@ mod tests {
         let mut sibling = make_task(&wave, &project);
         sibling.plan.id = LinearIssueId::new("sibling-issue-uuid").unwrap();
         sibling.plan.identifier = "INF-124".to_string();
-        sibling.worktree = PathBuf::from("/repo.inf-124");
+        sibling.workspace.as_mut().unwrap().worktree = PathBuf::from("/repo.inf-124");
         store
             .create_task(&sibling, &make_task_pr(&sibling))
             .await
@@ -2533,7 +2597,7 @@ mod tests {
         let mut running = make_task(&wave, &project);
         running.plan.id = LinearIssueId::new("issue-running").unwrap();
         running.plan.identifier = "W2-9".to_string();
-        running.worktree = PathBuf::from("/repo.running");
+        running.workspace.as_mut().unwrap().worktree = PathBuf::from("/repo.running");
         store
             .create_task(&running, &make_task_pr(&running))
             .await
@@ -2682,7 +2746,10 @@ mod tests {
             task_id: task.id.clone(),
             sequence: 2,
             slug: "released-proof".to_string(),
-            branch: format!("jack/{}-released-proof", task.workspace_slug),
+            branch: format!(
+                "jack/{}-released-proof",
+                task.workspace.as_ref().unwrap().slug
+            ),
             base_commit: "main-after-101".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -2835,13 +2902,13 @@ mod tests {
         let mut child = make_task(&wave, &project);
         child.plan.id = LinearIssueId::new("issue-child").unwrap();
         child.plan.identifier = "INF-124".to_string();
-        child.worktree = PathBuf::from("/repo.child-task");
+        child.workspace.as_mut().unwrap().worktree = PathBuf::from("/repo.child-task");
         let now = OffsetDateTime::now_utc();
         let child_pr = TaskPr {
             id: TaskPrId::new(),
             task_id: child.id.clone(),
             sequence: 1,
-            slug: child.workspace_slug.clone(),
+            slug: child.workspace.as_ref().unwrap().slug.clone(),
             branch: "jack/child-task".to_string(),
             base_commit: "parent-tip".to_string(),
             parent_pr_id: Some(parent.id.clone()),

@@ -7,6 +7,16 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Task placement and binding admission may be absent")
+    func unplacedTaskFixture() throws {
+        let task = try JSONDecoder().decode(TaskStatusExecution.self, from: loadFixtureData("task_unplaced.json"))
+        #expect(task.worktree == nil)
+        #expect(task.workspaceSlug == nil)
+        #expect(task.actions.recommended == .complete)
+        let preview = try JSONDecoder().decode(SessionBindingPreview.self, from: loadFixtureData("session_binding_preview_unplaced.json"))
+        #expect(preview.taskId == nil)
+    }
+
     @Test("Task work retains conversations, managed Flows and command history")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")

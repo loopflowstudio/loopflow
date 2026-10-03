@@ -877,8 +877,10 @@ mod durable_store_tests {
             pm_writeback: PmWritebackState::Current,
             wave_id,
             project_id,
-            worktree: PathBuf::from("/repo.probe"),
-            workspace_slug: "probe".to_string(),
+            workspace: Some(crate::work::task::TaskWorkspace {
+                worktree: PathBuf::from("/repo.probe"),
+                slug: "probe".to_string(),
+            }),
             agent: None,
             abandon_intent: None,
             created_at: now,

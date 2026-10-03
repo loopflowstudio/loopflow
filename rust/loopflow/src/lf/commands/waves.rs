@@ -870,7 +870,11 @@ fn snapshot_task_runtime(
     status: WorkStatus,
     started: bool,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
+    let config = crate::engine::config::load_config_or_default(
+        task.workspace
+            .as_ref()
+            .map(|workspace| workspace.worktree.as_path()),
+    );
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
@@ -1261,7 +1265,7 @@ fn task_local_progress(
     active_pr: Option<&TaskPr>,
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
-    let Some(task) = task else {
+    let Some(workspace) = task.and_then(|task| task.workspace.as_ref()) else {
         return LocalProgressEvidence {
             state: LocalProgressEvidenceState::NotApplicable,
             unsettled: Some(false),
@@ -1275,7 +1279,7 @@ fn task_local_progress(
         runtime
             .map(|runtime| &runtime.status)
             .expect("Task runtime exists when the durable Task exists"),
-        &task.worktree,
+        &workspace.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         worktree_blocker,
     )
@@ -1451,27 +1455,29 @@ fn task_reference(
     home_id: Option<crate::durable::HomeId>,
     local_home: &crate::durable::HomeId,
 ) -> TaskReferenceSnapshot {
-    let workspace = task.map(|task| {
-        let branch = active_pr
-            .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
-            .map(|pr| pr.branch.clone());
-        let local = home_id.as_ref() == Some(local_home);
-        let worktree = if local {
-            crate::engine::git::worktree_root(&task.worktree)
-                .ok()
-                .and_then(|root| root.canonicalize().ok())
-                .unwrap_or_else(|| task.worktree.clone())
-        } else {
-            task.worktree.clone()
-        };
-        TaskWorkspaceSnapshot {
-            home_id,
-            slug: task.workspace_slug.clone(),
-            branch,
-            worktree: worktree.display().to_string(),
-            local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
-        }
-    });
+    let workspace = task
+        .and_then(|task| task.workspace.as_ref())
+        .map(|workspace| {
+            let branch = active_pr
+                .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
+                .map(|pr| pr.branch.clone());
+            let local = home_id.as_ref() == Some(local_home);
+            let worktree = if local {
+                crate::engine::git::worktree_root(&workspace.worktree)
+                    .ok()
+                    .and_then(|root| root.canonicalize().ok())
+                    .unwrap_or_else(|| workspace.worktree.clone())
+            } else {
+                workspace.worktree.clone()
+            };
+            TaskWorkspaceSnapshot {
+                home_id,
+                slug: workspace.slug.clone(),
+                branch,
+                worktree: worktree.display().to_string(),
+                local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
+            }
+        });
     TaskReferenceSnapshot {
         issue_url: item.url.clone(),
         workspace,
@@ -1479,14 +1485,14 @@ fn task_reference(
 }
 
 fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
-    if !task.worktree.exists() {
+    if !task.workspace.as_ref()?.worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(&task.worktree).ok()?;
+    let clean = crate::engine::git::is_clean(&task.workspace.as_ref()?.worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(&task.worktree, "HEAD").ok()?;
+    let head = crate::engine::git::rev_parse(&task.workspace.as_ref()?.worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 

@@ -411,7 +411,7 @@ pub(crate) async fn select_review_agent(
     })?;
     let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
     let agent = crate::ops::task::resolve_task_agent(
-        &task.worktree,
+        &position.cwd,
         task.agent.as_deref(),
         skill.as_ref().map(|step| &step.skill),
     );
@@ -878,7 +878,7 @@ pub(crate) async fn completion_worktree(
         .await?
         .ok_or_else(|| session_not_found(session_id))?
     {
-        SessionTarget::Flow { task, .. } => Ok(Some(task.worktree.clone())),
+        SessionTarget::Flow { position, .. } => Ok(Some(position.cwd.clone())),
         SessionTarget::Row { session } => {
             Ok((session.kind == crate::session::SessionKind::FlowReview).then_some(session.cwd))
         }
@@ -898,7 +898,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession)
         if home.route == "local" {
             return stop_session_client(&run_id);
         }
-        let repo = crate::engine::wave_home::resolve_home_relative_repo(&task.worktree)
+        let repo = crate::engine::wave_home::resolve_home_relative_repo(&position.cwd)
             .map_err(anyhow::Error::msg)?;
         let command = vec![
             "lf".to_string(),
@@ -999,7 +999,7 @@ async fn serve_flow_locked(
             task.id.as_str(),
         ])
         .args(["skill", "--", &token.skill.name, &message])
-        .current_dir(&task.worktree)
+        .current_dir(&position.cwd)
         .env(HUMAN_SESSION_ENV, serialized)
         .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?)
         .env(
@@ -1743,7 +1743,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionBindingPreview {
     pub session_id: String,
-    pub task_id: String,
+    pub task_id: Option<String>,
     pub identifier: String,
     pub title: String,
 }
@@ -1753,26 +1753,44 @@ pub(crate) async fn preview_binding(
     id: &str,
     task: &str,
 ) -> Result<SessionBindingPreview> {
-    let (session, task) = binding_target(store, id, task).await?;
+    let session = binding_session(store, id).await?;
+    let registered = match crate::durable::TaskId::parse(task) {
+        Ok(id) => store.get_task(&id).await?,
+        Err(_) => store.get_task_by_issue(task).await?,
+    };
+    if let Some(task) = registered {
+        return Ok(SessionBindingPreview {
+            session_id: session.id,
+            task_id: Some(task.id.to_string()),
+            identifier: task.plan.identifier,
+            title: task.plan.title,
+        });
+    }
+    let resolved = crate::ops::task_pm::resolve_task_async(
+        &session.cwd,
+        task,
+        crate::ops::pm::PmRefresh::Auto,
+    )
+    .await?;
     Ok(SessionBindingPreview {
         session_id: session.id,
-        task_id: task.id.to_string(),
-        identifier: task.plan.identifier,
-        title: task.plan.title,
+        task_id: None,
+        identifier: resolved.item.identifier,
+        title: resolved.item.name,
     })
 }
 
-async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
-    let owned = match crate::session_record::parse_artifact_key(id) {
+async fn binding_session(store: &SharedStore, id: &str) -> Result<AgentSession> {
+    match crate::session_record::parse_artifact_key(id) {
         Ok(run_id) => store.session_for_artifact(&run_id).await?,
         Err(_) => store.session(id).await?,
-    };
-    let session = owned.ok_or_else(|| session_not_found(id))?;
-    let task = match crate::durable::TaskId::parse(task) {
-        Ok(id) => store.get_task(&id).await?,
-        Err(_) => store.get_task_by_issue(task).await?,
     }
-    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
+    .ok_or_else(|| session_not_found(id))
+}
+
+async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
+    let session = binding_session(store, id).await?;
+    let task = crate::ops::task::admit_task(store, &session.cwd, task).await?;
     Ok((session, task))
 }
 
@@ -2027,7 +2045,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         step.step,
         position.cursor.iteration.to_string(),
     ];
-    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv).await
+    start_durable_session(&flow_background_name(position)?, &position.cwd, &argv).await
 }
 
 #[cfg(not(test))]
@@ -3042,13 +3060,18 @@ mod binding_preview_tests {
 
     #[test]
     fn binding_preview_requires_exact_identity_and_label() {
+        let unplaced: SessionBindingPreview = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_binding_preview_unplaced.json"
+        ))
+        .unwrap();
+        assert!(unplaced.task_id.is_none());
         let value: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/session_binding_preview.json"
         ))
         .unwrap();
         let preview: SessionBindingPreview = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(preview).unwrap(), value);
-        for key in ["session_id", "task_id", "identifier", "title"] {
+        for key in ["session_id", "identifier", "title"] {
             let mut missing = value.clone();
             missing.as_object_mut().unwrap().remove(key);
             assert!(serde_json::from_value::<SessionBindingPreview>(missing).is_err());

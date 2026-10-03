@@ -581,7 +581,11 @@ fn execute_target(
     }
 }
 
-fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow::ops::WorkBinding> {
+fn prepare_work_binding(
+    selector: &str,
+    repo: &Path,
+    executing: bool,
+) -> anyhow::Result<loopflow::ops::WorkBinding> {
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?;
     runtime.block_on(async {
@@ -591,6 +595,11 @@ fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow:
                 anyhow::anyhow!("cannot resolve {selector}: planning registry unavailable")
             })?;
         let store = Arc::new(store);
+        if executing {
+            if let Some(task) = selector.strip_prefix("task:") {
+                loopflow::ops::task::admit_task(&store, repo, task).await?;
+            }
+        }
         loopflow::ops::resolve_work_binding(&store, repo, selector)
             .await
             .map_err(anyhow::Error::from)
@@ -728,7 +737,7 @@ fn print_task_snapshot(
             status,
             snapshot.task_id,
             body,
-            snapshot.worktree,
+            snapshot.worktree.as_deref().unwrap_or("(no checkout)"),
             branch,
             pm_writeback,
         );
@@ -1517,17 +1526,18 @@ fn dispatch(
             &loopflow::lf::commands::ops::resolve_worktree(name)?,
         )?);
     }
-    if let Some(task) = cli.task.as_ref().filter(|_| {
-        !matches!(
-            cli.command,
-            Some(Commands::Flow {
-                cmd: FlowCommand::Start { .. }
-            })
-        )
-    }) {
+    if let Some(task) = cli.task.as_ref() {
         let directory = loopflow::repo::working_directory()?;
-        let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
-        let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+        let executing = matches!(
+            &cli.command,
+            None | Some(Commands::External(_))
+                | Some(Commands::Run { .. })
+                | Some(Commands::Skill { .. })
+                | Some(Commands::Flow {
+                    cmd: FlowCommand::Start { .. } | FlowCommand::External(_)
+                })
+        );
+        let mut binding = prepare_work_binding(&format!("task:{task}"), &directory, executing)?;
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
         }
@@ -1823,6 +1833,20 @@ fn execute_command(
         }) => {
             let directory = loopflow::repo::working_directory()?;
             let implicit = loopflow::lf::commands::run::implicit_binding(cli)?;
+            if let Some(template) = template.as_deref().filter(|_| {
+                name.is_none()
+                    && stack_on.is_none()
+                    && directive.is_none()
+                    && reason.is_none()
+                    && !retry
+            }) {
+                let selected = binding.or(implicit.as_ref());
+                let cwd = selected
+                    .map(|binding| binding.cwd.as_path())
+                    .unwrap_or(&directory);
+                let flow = loopflow::engine::flow::load_authored_flow(template, cwd)?;
+                return loopflow::lf::commands::flow::run(&flow, None, cli, cwd, selected);
+            }
             let task = cli
                 .task
                 .clone()
@@ -1836,7 +1860,7 @@ fn execute_command(
                 })
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "flow start needs a Task; pass --task <issue> or enter its checkout"
+                        "taskless flow start requires an explicit template; Task placement options require --task"
                     )
                 })?;
             let repo = loopflow::ops::task::task_repository(&directory, Some(&task))?;
@@ -1920,7 +1944,7 @@ mod tests {
         std::fs::create_dir(directory.path().join("loopflow.db")).unwrap();
         let _home = EnvGuard::set("LF_HOME", directory.path().display().to_string());
 
-        let error = super::prepare_work_binding("task:LOO-265", directory.path())
+        let error = super::prepare_work_binding("task:LOO-265", directory.path(), false)
             .expect_err("--as must not degrade to raw attribution");
         assert!(error.to_string().contains("planning registry unavailable"));
     }

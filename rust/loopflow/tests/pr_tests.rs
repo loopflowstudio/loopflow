@@ -1348,7 +1348,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         version: 0,
         task_id: Some(task.task.id.clone()),
         wave_id: Some(task.task.wave_id.clone()),
-        cwd: task.task.worktree.clone(),
+        cwd: task.task.workspace.as_ref().unwrap().worktree.clone(),
         message: None,
         model: None,
         current_attempt: None,

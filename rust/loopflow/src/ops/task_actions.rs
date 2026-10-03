@@ -52,6 +52,16 @@ pub struct TaskActionEvidence<'a> {
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
+    if evidence.status == WorkStatus::Ready
+        && !evidence.abandon_intent
+        && evidence.latest_pr_phase.is_none()
+        && evidence.completion_refusal.is_none()
+    {
+        return action(
+            TaskAction::Complete,
+            "record an outcome and complete the Task",
+        );
+    }
     if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
         && !evidence.abandon_intent
     {
@@ -61,9 +71,6 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         {
             return action(TaskAction::NoAction, &execution.reason);
         }
-        if let Some(refusal) = evidence.launch_refusal {
-            return action(TaskAction::NoAction, refusal);
-        }
     }
     let model = if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
@@ -72,6 +79,14 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     } else {
         phase_action(evidence)
     };
+    if matches!(
+        model.recommended,
+        Some(TaskAction::Resume | TaskAction::StartNextPr)
+    ) {
+        if let Some(refusal) = evidence.launch_refusal {
+            return action(TaskAction::NoAction, refusal);
+        }
+    }
     let model = apply_predecessor(model, evidence.predecessor_phase);
     apply_resume_refusal(model, evidence.resume_refusal)
 }

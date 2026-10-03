@@ -480,8 +480,10 @@ async fn local_task(
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: parent.id,
-        worktree: worktree.into(),
-        workspace_slug: issue.into(),
+        workspace: Some(crate::work::task::TaskWorkspace {
+            worktree: worktree.into(),
+            slug: issue.into(),
+        }),
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -915,7 +917,10 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                         let moved = store.get_task(&task.id).await.unwrap().unwrap();
                         assert_ne!(moved.project_id, task.project_id);
                         assert_eq!(moved.id, task.id);
-                        assert_eq!(moved.worktree, task.worktree);
+                        assert_eq!(
+                            moved.workspace.as_ref().unwrap().worktree,
+                            task.workspace.as_ref().unwrap().worktree
+                        );
                         assert_eq!(moved.plan, task.plan);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
                         assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
@@ -1075,7 +1080,10 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
             assert_ne!(moved.project_id, task.project_id);
             assert_eq!(moved.id, task.id);
             assert_eq!(moved.wave_id, task.wave_id);
-            assert_eq!(moved.worktree, task.worktree);
+            assert_eq!(
+                moved.workspace.as_ref().unwrap().worktree,
+                task.workspace.as_ref().unwrap().worktree
+            );
             assert_eq!(moved.plan, task.plan);
         }
     }
@@ -1338,7 +1346,10 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         rotate(&repo, "next", false).await.unwrap();
                         let moved = store.get_task(&task.id).await.unwrap().unwrap();
                         assert_ne!(moved.project_id, task.project_id);
-                        assert_eq!(moved.worktree, task.worktree);
+                        assert_eq!(
+                            moved.workspace.as_ref().unwrap().worktree,
+                            task.workspace.as_ref().unwrap().worktree
+                        );
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
                         assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
                     })

@@ -84,8 +84,8 @@ public struct TaskStatusExecution: Decodable, Sendable {
     public let issueId: String
     public let issueIdentifier: String
     public let status: WorkStatus
-    public let worktree: String
-    public let workspaceSlug: String
+    public let worktree: String?
+    public let workspaceSlug: String?
     public let actions: TaskActionModel
 
     enum CodingKeys: String, CodingKey {

@@ -409,6 +409,96 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
 }
 
 #[test]
+fn task_without_delivery_binds_existing_conversation_and_completes_without_checkout() {
+    assert_bound_task_completion(false);
+}
+
+#[test]
+fn task_without_delivery_requesting_conversation_completes_and_retains_pending_turn() {
+    assert_bound_task_completion(true);
+}
+
+fn assert_bound_task_completion(active: bool) {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        crate::ops::task::task_create(&repo, Some("product"), Some("Research".into()), Some("Retain the finding".into()), None).unwrap();
+        let original = runtime.block_on(fixture.store.create_session(crate::session::AgentSession {
+            captured: None, caller_artifact_key: None,
+            id: "research-conversation".into(), artifact_key: crate::session_record::new_artifact_key(),
+            input_published: true, cwd: repo.clone(), skill: None, provider: None, model: None,
+            node: None, iterations: None, task_id: None, wave_id: None, flow_session_id: None,
+            work_source: None, bound_at: None, kind: crate::session::SessionKind::Conversation,
+            interactive: true, repo: Some(repo.display().to_string()), title: "Research".into(),
+            title_source: crate::session::TitleSource::Generated, request: None,
+            ready_summary: None, completed_at: None, created_at: now(),
+        }, None)).unwrap();
+        let preview = runtime.block_on(crate::ops::human_session::preview_binding(&fixture.store, &original.id, "FIX-1")).unwrap();
+        assert!(preview.task_id.is_none());
+        assert!(runtime.block_on(fixture.store.get_task_by_issue("FIX-1")).unwrap().is_none());
+        let _bound = runtime.block_on(crate::ops::human_session::bind(&fixture.store, &original.id, "FIX-1")).unwrap();
+        let task = runtime.block_on(fixture.store.get_task_by_issue("FIX-1")).unwrap().unwrap();
+        assert!(task.workspace.is_none());
+        let work = fixture.store.sqlite.task_work(&task.id).unwrap();
+        assert_eq!(work.sessions.len(), 1);
+        assert_eq!(work.sessions[0].id, original.id);
+        assert!(work.flows.is_empty());
+        assert!(runtime.block_on(fixture.store.task_prs(&task.id)).unwrap().is_empty());
+        let binding = runtime.block_on(crate::ops::run::resolve_work_selection(&fixture.store, &repo,
+            crate::ops::run::WorkSelection { task: Some("FIX-1"), wave: None })).unwrap();
+        assert_eq!(binding.cwd, repo);
+        assert!(binding.context.contains("Research"));
+        assert!(!binding.context.contains("Base commit:"));
+        std::fs::write(repo.join("unrelated.txt"), "not Task-owned").unwrap();
+        runtime.block_on(async { state.lock().await.fail_snapshot = true; });
+        let completed = if active {
+            let connection = rusqlite::Connection::open(&fixture.database).unwrap();
+            let driver_exec = crate::id::ExecId::new();
+            connection.execute("INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?2,1)", rusqlite::params![driver_exec.as_str(), crate::id::TraceId::new().as_str()]).unwrap();
+            let driver = fixture.store.sqlite.claim_session_driver(&original.id, None, &driver_exec, false).unwrap();
+            fixture.store.sqlite.record_session_turn_origin(&original.id, "research-thread", "turn", driver.provider_generation, &driver_exec).unwrap();
+            assert!(crate::ops::task::task_complete(&repo, "FIX-1", "Premature".into()).is_err());
+            crate::journal::with_runtime(&repo, &["lf".into(), "task".into(), "complete".into(), "FIX-1".into()], || {
+                let current = crate::journal::current_exec_id().unwrap();
+                connection.execute("INSERT OR IGNORE INTO execs(id,trace_id,started_at) VALUES(?1,?2,1)", rusqlite::params![current.as_str(), crate::id::TraceId::new().as_str()]).unwrap();
+                connection.execute("UPDATE execs SET via_agent=1, caller_session_id=?2, caller_provider_generation=?3, parent_exec_id=?4 WHERE id=?1",
+                    rusqlite::params![current.as_str(), original.id, driver.provider_generation - 1, driver_exec.as_str()]).unwrap();
+                assert!(crate::ops::task::task_complete(&repo, "FIX-1", "Stale caller".into()).is_err());
+                connection.execute("UPDATE execs SET caller_provider_generation=?2 WHERE id=?1", rusqlite::params![current.as_str(), driver.provider_generation]).unwrap();
+                Ok(crate::ops::task::task_complete(&repo, "FIX-1", "Measured startup".into())?.unwrap())
+            }).unwrap()
+        } else {
+            crate::ops::task::task_complete(&repo, "FIX-1", "Measured startup".into()).unwrap().unwrap()
+        };
+        if active {
+            assert!(fixture.store.sqlite.session_has_pending_turn(&original.id).unwrap());
+            fixture.store.sqlite.record_session_event(&original.id, "research-thread", "turn", crate::session::SessionEventKind::Completed, &json!({"status":"completed","text":"Task complete; findings retained"})).unwrap();
+            assert!(!fixture.store.sqlite.session_has_pending_turn(&original.id).unwrap());
+        }
+        let retry = crate::ops::task::task_complete(&repo, "FIX-1", "Must not replace".into()).unwrap().unwrap();
+        assert_eq!(completed.id, task.id);
+        assert_eq!(retry.id, task.id);
+        let retained = runtime.block_on(fixture.store.session(&original.id)).unwrap().unwrap();
+        assert_eq!(retained.artifact_key, original.artifact_key);
+        assert_eq!(retained.task_id, Some(task.id.clone()));
+        assert!(retained.completed_at.is_none());
+        assert!(repo.join("unrelated.txt").exists());
+        assert!(runtime.block_on(fixture.store.task_prs(&task.id)).unwrap().is_empty());
+        let events = runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap();
+        assert_eq!(events.iter().filter(|event| matches!(&event.kind, TaskEventKind::Progress { summary } if summary == "Measured startup")).count(), 1);
+        assert!(fixture.store.sqlite.task_work(&task.id).unwrap().flows.is_empty());
+    });
+    server.abort();
+}
+
+#[test]
 fn task_without_delivery_creation_and_edit_ignore_unrelated_snapshot_failure() {
     assert_task_without_delivery(false);
 }
@@ -922,8 +1012,10 @@ fi
                 pm_writeback: PmWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
-                worktree: repo.clone(),
-                workspace_slug: "completion".into(),
+                workspace: Some(crate::work::task::TaskWorkspace {
+                    worktree: repo.clone(),
+                    slug: "completion".into(),
+                }),
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -1386,8 +1478,10 @@ esac
                 pm_writeback: PmWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
-                worktree: checkout.clone(),
-                workspace_slug: "cancel-me".into(),
+                workspace: Some(crate::work::task::TaskWorkspace {
+                    worktree: checkout.clone(),
+                    slug: "cancel-me".into(),
+                }),
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -1422,7 +1516,7 @@ esac
                     crate::durable::FlowSession {
                         task_id: Some(task.id.clone()),
                         wave_id: Some(task.wave_id.clone()),
-                        cwd: task.worktree.clone(),
+                        cwd: task.workspace.as_ref().unwrap().worktree.clone(),
                         message: None,
                         model: None,
                         finished: false,

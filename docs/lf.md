@@ -28,17 +28,18 @@ repair or preserve them. Use a fresh directory when its schema changes.
 ## Select where work happens
 
 ```bash
-lf --task EXP-12 skill design       # contribute in the Task's checkout
+lf --task EXP-12 skill design       # use Task context and retained placement
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
 lf --task EXP-12 flow start          # start or continue its managed Flow
-lf --task EXP-12 flow start incident # choose a template for new work
+lf --task EXP-12 flow start incident # start an independent attributed Flow
 ```
 
-`--task` and `--wt` select a location. `--wave` supplies context and identity;
-it cannot override a Task's owning Wave. A named direct Flow creates an
-independent FlowSession. `flow start` preserves the Task's selected Flow and
-saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
+`--task` uses retained placement when present; an unplaced Task keeps the caller's
+directory without adopting it. `--wt` selects a checkout. `--wave` supplies context
+and identity; it cannot override a Task's owning Wave. `flow start TEMPLATE`
+creates an independent FlowSession with optional Task attribution. Bare
+`--task … flow start` continues the selected managed Flow. `flow resume ID --retry` retries a saved boundary; `task restart`
 explicitly replaces the Task's workflow.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
@@ -68,6 +69,13 @@ lf task create --wave exports --title "Investigate export latency"
 lf task status EXP-13 --json
 lf task complete EXP-13 --summary "Recorded the bottleneck and recommended fix"
 ```
+
+`lf session bind SESSION --task EXP-13` admits the existing Task and associates
+the conversation without allocating delivery. Binding does not mark work Started.
+Later `lf checkout EXP-13` allocates its checkout and first PR under the same identity.
+A conversation can complete its own Task while its current turn remains open;
+other unfinished work and unresolved delivery still block completion. Cleanup
+retains any checkout still in use.
 
 Planning-only Tasks need no agent, checkout, PR or Flow. Filing selects the current
 Project; confirmation after creation, edits and completion reads the affected

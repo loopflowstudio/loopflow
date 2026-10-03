@@ -37,18 +37,18 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-`a60ac0281` fixes observation-time retry; original dues retain adjacency.
-`02d6b3c00` implements atomic same-Home coverage after due materialization,
-superseding “continuation unimplemented” feedback. Shared readers preserve
-original ownership/provenance; firing segments own telemetry/retry. Home changes
-break continuation. Synthetic tests cover interruption, late writers and recovery
-without republishing. Physical overlaps now use retained calendar/closure continuation; history keeps
-old attempt and overlap receipts. Integrated proof, gate, Jack Heart's review
-and configured settlements remain open. `f7a3769dc` integrates
-v0.12.32 metadata, not installed accounting acceptance.
+`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
+across same-Home segments. Original ownership/provenance survives; firing segments
+own telemetry/retry, and Home changes break continuation. Synthetic tests cover
+interruption, late writers and recovery without republishing. `95643bd50` adds
+calendar/closure overlap continuation and retains old physical receipts. Save
+physical failure before accounting; an accounting error must not erase lock loss.
+Repeated overlap adds no settlement. Integrated proof, gate, Jack Heart's review
+and configured settlements remain open. `f7a3769dc` adds v0.12.32 metadata,
+not installed accounting acceptance.
 
-Release’s September 28 incident proves scheduled entry points need operation-level recovery: an
-agent reported failure successfully, producing a misleading green cron receipt.
+Release's September 28 incident proves entry points need operation-level recovery:
+an agent reported failure successfully, producing a misleading green cron receipt.
 Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
 without proving this accounting branch is installed or either qualifying outcome.
@@ -56,10 +56,10 @@ Release-specific detail remains in [release memory](release/MEMORY.md).
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated
-scorecard source consumes SessionHistory. No configured current pass or accepted
-Intelligence handoff is established. Reproduce any remaining failure before
-commissioning duplicate analytics repair. Doctor still requires natural Scheduled
-evidence; Recovery cannot erase missing firings. Required UI/public proof and
+scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
+regression proves Recovery cannot replace natural Scheduled evidence. No installed
+pass or accepted Intelligence handoff is established; reproduce current failure
+before commissioning duplicate analytics repair. Required UI/public proof and
 actual automatic settlement observations remain outstanding. The working plan
 owns remaining implementation; no production release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.

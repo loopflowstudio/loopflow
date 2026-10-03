@@ -1,9 +1,10 @@
 # Account for scheduled release opportunities and settle product outcomes
 
-LOO-285 · accepted outcome; same-Home persistence revision implemented locally.
-Reconciled October 2 against `02d6b3c00` (atomic same-Home coverage) and
-`f7a3769dc` (main integration through v0.12.32). The supplied continuation feedback
-predates that implementation; the complete Task outcome remains unproved.
+LOO-285 · accepted outcome; same-Home coverage and overlap consumers implemented locally.
+Reconciled October 2 against `02d6b3c00` (atomic coverage), `f7a3769dc`
+(main integration through v0.12.32) and `95643bd50` (overlap consumers and
+telemetry regression). The latest feedback's two consumer gaps are resolved;
+integrated recovery proof and the complete Task outcome remain open.
 
 ## Outcome and accepted decisions
 
@@ -191,23 +192,37 @@ current-state prerequisites cannot borrow yesterday's pass. Legacy missing UI
 proof requires the exact-source gate. Headless capability belongs to gate/CI;
 missing capability never silently waives required acceptance.
 
+### Overlap and telemetry proof (`95643bd50`)
+
+The job-lock loser records retained calendar/closure continuation. History keeps
+physical attempt and overlap-only receipt IDs outside its display window.
+Repeated same-due overlaps preserve the active attempt and add no settlement;
+closed-segment continuation names repair instead of a future due. The initial
+physical failure is saved before accounting, preserving lock-loss evidence if
+accounting fails. No public DTO or persistence schema changed.
+
+The real doctor/scorecard Flow regression exercises missing-natural-receipt
+failure with a successful Recovery receipt; restoring the fixture's Scheduled
+receipt permits the current SessionHistory scorecard. This establishes isolated
+source behavior, not an installed telemetry pass. Release is the only immediate
+child Wave; its complete goal and memory were read during reconciliation. Its
+September 28 entry-point recovery lesson remains relevant, with later activation
+evidence and its limits retained above.
+
 ## Remaining implementation and proof
 
-1. **Physical overlap reporting implemented locally.** The job-lock loser now
-   records the retained calendar/closure continuation returned by accounting.
-   History retains physical attempt and overlap-only receipt IDs outside its
-   display window. Repeated overlaps preserve the active attempt and add no
-   settlement. Closed-segment continuation names repair instead of a future due.
-2. **Integrated interruption/verification proof.** The real doctor/scorecard Flow regression now exercises
-   missing-natural-receipt failure with a successful Recovery receipt; restoring
-   the fixture's Scheduled receipt permits the current SessionHistory scorecard.
-   This is isolated source evidence, not an installed telemetry pass. Retain
-   truthful blockers and dated disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
-   Task compensation beyond pre-push and release materialization boundaries as
-   justified by the final call graph. Closed continuation now has the synthetic
-   post-publication/pre-settlement recovery proof described below. Review command
-   dispatch/descriptor retention through merged Session/Exec/Home/Flow paths.
-3. **Affected-suite gate and configured acceptance.** Focused passes are not the
+1. **Integrated interruption/verification proof.** Remaining boundaries are
+   candidate-ref/workflow recovery, interruption during public reconciliation,
+   Task compensation beyond pre-push and release materialization. Existing
+   pre-push revocation proof includes retry through a successful push; it does
+   not cover every later compensation boundary. Closed continuation already has
+   synthetic post-publication/pre-settlement recovery proof. The public verifier
+   passes both target and checkout descriptors to the reconciliation child;
+   source inspection alone does not prove survival after controller death.
+   Remaining tests should follow these actual boundaries and merged
+   Session/Exec/Home/Flow dispatch, preserving caller bytes, exact candidate,
+   frozen coverage and independent physical/product outcomes.
+2. **Affected-suite gate and configured acceptance.** Focused passes are not the
    final affected-suite gate or hosted matrix. After code proof and authorized
    delivery, supported installed acceptance still needs telemetry, UI-host/public
    proof and the actual two-execution pair. No branch binary may repair the main
@@ -421,10 +436,6 @@ Earlier focused implementation and reconciliation results remain at
 Full affected gate, hosted/UI/public proof and configured two-execution acceptance
 remain outstanding.
 
-Review (October 2 overlap consumers): preserve the first physical failure write
-before accounting so an accounting error cannot erase the observed lock loss.
-History also retains overlap-only receipts: repeated same-due contenders need
-not create attempts. Neither physical receipt inclusion nor deferral qualifies
-as product settlement. No public DTO or persistence schema changed.
+Recorded overlap checks remain at `95643bd504de3364587c60801895a6a582a14f3e:scratch/account-for-scheduled-release-opportunities.md`: 45 cron unit tests, focused doctor and scheduled-overlap regressions, all-target Clippy and formatting passed. This prose-only reconciliation reuses those results without claiming a full gate.
 
-Check (October 2 overlap consumers): isolated `cargo test -p loopflow --lib ops::cron::` (45), focused `doctor_tests copied_production_history_does_not_block_the_telemetry_scorecard` (1) and `scheduled_release_tests release_overlap_records_exact_next_firing_without_mutation` (1), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` and `lf context --skill implement` passed; broader interruption proofs, gate and configured acceptance remain outstanding.
+Check (October 2 realign): `git diff --check` and `lf context --skill realign` passed; recorded focused tests reused for prose-only edits; broader interruption proofs, gate and configured acceptance remain outstanding.

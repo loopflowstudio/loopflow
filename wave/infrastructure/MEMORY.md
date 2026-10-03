@@ -176,14 +176,15 @@ PR settlement, the requesting conversation completes its Task while retaining th
 checkout; a later settled retry cleans it up. Unknown and live independent Execs
 still block. Provider-turn and merge evidence are fixtures, not native acceptance.
 
-Managed startup/replacement now avoid implicit allocation. The caller directory
-becomes the new Flow's captured cwd; continuation and replacement retain it, while
-managed planning resolves the owning repository. Checkpoint and PR recovery apply
-only to retained placement. Explicit attributed/taskless Flows share the driver and
-leave Tasks open. Desktop shows independent Flow progress/resume alongside the
-managed selection. A failed managed-launch/replacement proof retains identity and
-both captures without delivery objects; successful native-worker and Desktop
-interaction acceptance remain with gate.
+Managed startup/replacement now avoid implicit allocation. Capture owns execution
+cwd; the owning repository supplies managed planning. Continuation and replacement
+retain that cwd, while checkpoint and PR recovery apply only to retained placement.
+Attributed/taskless Flows share the driver and leave Tasks open. Desktop exposes
+independent Flow progress/resume alongside the managed selection. The October 3
+follow-up supersedes earlier feedback that these two cuts were unimplemented.
+Failed-launch fixtures retain identity and both captures without delivery objects;
+they do not prove successful worker launch or Desktop interaction. Those remain
+with gate, along with CLI lifecycle and provider/review/retry acceptance.
 
 Completion never ends a Flow or grants process control. The requesting allowance
 matches current provider generation and exact driver parent, solely for completion;

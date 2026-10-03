@@ -1,23 +1,22 @@
 # Start and finish Tasks without unrelated workflow prerequisites
 
-Draft implementation design · LOO-367 · 2026-10-02
+Implementation plan · LOO-367 · drafted 2026-10-02, reconciled 2026-10-03
 
 Jack Heart's accepted direction is recorded in the Task brief and
 [Task workspace review](../../docs/reviews/task-workspace.md): Task supplies
 purpose, context and continuity; execution and delivery are optional. There is
-no Task workflow to introduce. The mechanisms below are proposed implementation
-choices, not additional product approval.
+no Task workflow to introduce. The mechanisms below describe branch implementation;
+acceptance remains incomplete and implementation does not imply additional product approval.
 
 ## Review decision · 2026-10-02
 
 Jack Heart confirmed that the conversation doing the work can complete its Task.
 It need not finish its own Session or provider turn before requesting completion.
-Task completion preserves that conversation and its history. Implementation details
-remain proposed; this review does not claim implementation or acceptance proof.
-The current Exec is exempted by the associated-work checker, but a non-managed
-Session's pending turn still blocks. Cleanup shares that checker: keep any new
-completion allowance separate from cleanup and abandonment protections. The
-unrelated color-scheme message was withdrawn and contributes no requirement.
+Task completion preserves that conversation and its history. At review time, the
+current Exec was exempt but a non-managed Session's pending turn still blocked.
+The branch now recognizes the exact requesting conversation for completion only;
+cleanup and abandonment retain their protections. Jack's review accepted the
+behavior, not implementation or acceptance evidence.
 
 The earlier output-schema blocker is resolved by #1401, included in installed
 0.12.31 according to Jack Heart's steer. Jack authorized recovery; supplied step
@@ -225,7 +224,7 @@ cleanup and their tests retain one workspace reference. PR observation again tak
 its mutation lock before reading the PR, preventing a stale pre-lock row from
 replacing a concurrent publication. PR observation acquires no checkout lock for unplaced Tasks.
 
-Removed in the remaining cut: managed launch/restart's unconditional delivery
+The follow-up implementation removed: managed launch/restart's unconditional delivery
 allocation, checkpoint and no-active-PR prerequisites; saved-Flow resumption's
 workspace lookup; and Desktop's managed-only Flow display. Exact managed claims,
 review boundaries, captured graphs and placed-Task delivery recovery remain.
@@ -262,26 +261,28 @@ stages to ship independently.
 The core admission, context, explicit startup, completion and optional-placement
 consumer changes exist. This remains one architectural PR, not a completed Task.
 
-Implementation and focused preservation proofs cover the requested cuts. Gate
+Commits `f656edf5f` and `25d339fb1` address the prior feedback about managed
+placement and independent Flow display; that feedback no longer describes missing
+implementation. Local main is the already-integrated `8c72e591e` (v0.12.32),
+including #1415 recovery; no newer upstream facts were fetched. Gate
 owns the provider/review/retry and Desktop interaction scenarios below. The failed
 managed-launch regression proves capture, replacement, retained identity and zero
 delivery allocation after a missing driver identity; it does not prove a successful
 native worker launch. No configured installation, external provider mutation,
 publication or Task completion is claimed.
 
-Remaining acceptance checks on the finished tree:
+Gate acceptance on the finished tree (reuse applicable focused results; add missing
+behavior coverage rather than treating the command names as proof):
 
-- `cargo test -p loopflow task_without_delivery`: add behavior coverage across
-  persistent store, real CLI dispatch and shared snapshots. Cover file → inspect →
-  bind → finish → complete, no provider agent available, unrelated coordination
-  failure, lost response and retry. Assert zero invented delivery objects,
-  readable original outcome, stable identities and no duplicate terminal event.
-  Invoke completion inside the bound running conversation, then prove that the
-  same conversation can report success. Repeat with an allocated checkout and
-  settled delivery: retain its files while in use, then safely retry cleanup after
-  execution settles. A lost completion response preserves the original summary
-  and terminal event. Unrelated live or unknown execution remains a blocker;
-  Task completion supplies no Flow settlement or process-control authority.
+- `cargo test -p loopflow task_without_delivery`: existing stateful proofs cover
+  filing/inspection, unrelated snapshot failure, failed issue confirmation/retry,
+  public binding, requesting-conversation completion, first allocation, retained
+  checkout and settled cleanup retry, plus independent live/unknown Exec refusal.
+  These invoke public Rust operations with seeded driver and merge evidence.
+  Remaining: exercise that lifecycle through real CLI dispatch and shared snapshots,
+  including unavailable agent configuration and lost completion response. Confirm
+  the original outcome and terminal event survive retry, and the requesting
+  conversation can report success after completion without Flow settlement.
 - `cargo test -p loopflow task_completion`: retain existing planning-only and
   delivery regression tests, plus open/publishing PR refusal, dirty/follow-up work,
   pending Ask, independent unfinished Flow and unknown/live Exec. Resolve each
@@ -326,4 +327,4 @@ confirmed that an unpublished PR blocks completion until delivery settles. A sta
 controller test still expected Task completion to end its Flow; it is replaced by
 separate preservation/new-launch-refusal and final-step-completion proofs.
 
-Check: `cargo test -p loopflow --lib task_without_delivery` (9), `cargo test -p loopflow --lib ops::run::tests` (8), `cargo test -p loopflow --test dto_fixtures independent_flow_detail` (1), `swift test --package-path swift --filter DTOFixtureTests` (23), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; prior focused evidence remains at `f656edf5f:scratch/jack-heart/start-and-finish-tasks-without.md`; gate owns provider/review/retry and Desktop interaction acceptance.
+Check: `git diff --check` passed for this prose-only realignment; reused `25d339fb1` results: `cargo test -p loopflow --lib task_without_delivery` (9), `cargo test -p loopflow --lib ops::run::tests` (8), `cargo test -p loopflow --test dto_fixtures independent_flow_detail` (1), `swift test --package-path swift --filter DTOFixtureTests` (23), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; prior focused evidence remains at `f656edf5f:scratch/jack-heart/start-and-finish-tasks-without.md`; gate owns provider/review/retry and Desktop interaction acceptance.

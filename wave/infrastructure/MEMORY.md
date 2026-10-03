@@ -43,10 +43,10 @@ own telemetry/retry, and Home changes break continuation. Synthetic tests cover
 interruption, late writers and recovery without republishing. `95643bd50` adds
 calendar/closure overlap continuation and retains old physical receipts. Save
 physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. October 2 local interruption tests prove
+Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
 public reconciliation retains target/checkout locks after controller death;
 retry preserves the failed cron receipt, candidate, coverage and caller bytes
-without republishing. Cron exit can precede orphaned verifier lock release.
+without republishing. Cron exit cannot establish orphaned verifier lock release.
 Candidate-ref/workflow lost acknowledgements, verifier materialization and
 post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
 review and configured settlements remain open.

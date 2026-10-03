@@ -2,8 +2,8 @@
 
 LOO-285 · accepted outcome; same-Home coverage and overlap consumers implemented locally.
 Reconciled October 2 against `02d6b3c00` (atomic coverage), `f7a3769dc`
-(main integration through v0.12.32) and `95643bd50` (overlap consumers and
-telemetry regression). The consumer gaps and selected local interruption proofs are resolved;
+(main integration through v0.12.32), `95643bd50` (overlap consumers and
+telemetry regression) and `d60d254ef` (interruption proofs). The consumer gaps and selected local interruption proofs are resolved;
 affected gate, review and configured Task acceptance remain open.
 
 ## Outcome and accepted decisions
@@ -213,8 +213,9 @@ evidence and its limits retained above.
 
 1. **Affected-suite gate.** The selected local interruption boundaries now have
    focused proofs, described below. Gate still owns the affected suites and
-   automated acceptance against the complete final tree; these focused passes
-   do not establish that gate or hosted matrix.
+   automated acceptance against the complete final tree, including shared Git,
+   worktree, PR and Task mutation paths as well as cron/release and publisher
+   behavior. These focused passes do not establish that gate or hosted matrix.
 2. **Review and configured acceptance.** Jack Heart's review remains open. After
    authorized delivery, supported installed acceptance still needs telemetry,
    UI-host/public proof and the actual two-execution pair. No branch binary may
@@ -465,4 +466,11 @@ remain outstanding.
 
 Recorded overlap checks remain at `95643bd504de3364587c60801895a6a582a14f3e:scratch/account-for-scheduled-release-opportunities.md`: 45 cron unit tests, focused doctor and scheduled-overlap regressions, all-target Clippy and formatting passed. This prose-only reconciliation reuses those results without claiming a full gate.
 
-Check (October 2 implement): focused public reconciliation, verifier materialization, candidate acknowledgement recovery and Task compensation tests passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed; full affected gate and configured acceptance deferred to their owners.
+The October 2 implementation results are preserved at
+`d60d254ef440f32ee2593bb2d13f7f9732662e12:scratch/account-for-scheduled-release-opportunities.md`:
+focused public reconciliation, verifier materialization, candidate acknowledgement
+recovery and Task compensation tests, formatting and all-target Clippy passed.
+This reconciliation checked their assertions against the retained production
+owners and reused those results without rerunning behavioral tests.
+
+Check (October 2 realign): `git diff --check` and `lf context --skill realign` passed; prose-only changes; affected gate and configured acceptance remain deferred to their owners.

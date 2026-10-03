@@ -267,7 +267,7 @@ async fn planning_graphql(
         state
             .issues
             .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
-            "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,
+            "title":vars["title"], "description":vars["description"], "completedAt": null, "prioritySortOrder":0.0,
             "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1","name":"Chapter"}}));
         return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));

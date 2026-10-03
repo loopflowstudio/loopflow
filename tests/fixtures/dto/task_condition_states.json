@@ -7,7 +7,9 @@
       "description": "",
       "rank": 5,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -67,7 +69,9 @@
       "description": "",
       "rank": 6,
       "completed": true,
-      "assignee": null
+      "assignee": null,
+      "state": "completed",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -140,7 +144,9 @@
       "description": "",
       "rank": 7,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -500,7 +506,9 @@
       "description": "",
       "rank": 8,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -572,7 +580,9 @@
       "description": "",
       "rank": 2,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -933,7 +943,9 @@
       "description": "",
       "rank": 3,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,
@@ -1005,7 +1017,9 @@
       "description": "",
       "rank": 4,
       "completed": false,
-      "assignee": null
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null
     },
     "reference": {
       "issue_url": null,

@@ -69,7 +69,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
         .create_session(
             AgentSession {
                 captured: None,
-                id: uuid::Uuid::new_v4().simple().to_string(),
+                id: format!("session_{}", uuid::Uuid::new_v4().simple()),
                 artifact_key: crate::session_record::new_artifact_key(),
                 caller_artifact_key: None,
                 input_published: false,

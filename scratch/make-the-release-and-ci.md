@@ -51,7 +51,7 @@ implementation, and no replacement live worker is launched by this plan.
 
 ## Chosen approach
 
-### 1. This slice: bounded release reads
+### 1. Bounded release reads
 
 Keep `gh` as the transport and the existing release state machine as the owner.
 Add a small internal bounded-read function at the operations layer, shared only
@@ -76,7 +76,11 @@ cleanup. Use owned child termination/reaping with concurrently drained output;
 the current `Command::output` wrapper alone supplies no timeout. Implement this
 at the read helper, reusing the existing process-group cleanup primitives, not
 by changing every subprocess in the program. Test timeout cleanup with a local
-child that never exits. Log operation, attempt and terminal cause without signed
+child that never exits and a descendant holding an output pipe open after its
+parent exits. The deadline covers output collection as well as process exit;
+cleanup must not wait indefinitely for pipe EOF. A locally enforced read deadline
+is a retryable timeout within the same three-attempt budget. Log operation,
+attempt and terminal cause without signed
 URLs, credentials or full sensitive transport output.
 
 Retry an individual check page. Accumulated pages are usable only while each
@@ -114,6 +118,10 @@ Bare restart is the required offline operation. Supplying new advice continues
 to require successful publication before replacement; on failure, preserve the
 old worker and Flow and clearly say the direction was not delivered. Do not add
 a second local steer source, outbox, silently discarded advice or success claim.
+The current command checkpoints and updates the Project snapshot before advice
+publication. A failed publication therefore preserves execution but may leave a
+local checkpoint; diagnostics and tests must not promise a completely unchanged
+checkout. This repair does not require transactional rollback of that checkpoint.
 
 Proof must cross the public restart command and replacement execution, not only
 the store method: a previously acquired valid Task with an old observation,
@@ -141,6 +149,10 @@ container without external networking; macOS test-process sandbox), with an
 explicit denial probe before the test run. Unsupported isolation is reported as
 deferred evidence, never a passing network-free claim. Do not remove behavioral
 coverage or add retries to flaky tests to achieve this.
+Prove both external denial and working loopback inside the exact test-process
+boundary. The existing Desktop sandbox denies WindowServer, not network access;
+reuse its headless path without treating it as an egress-denial proof. Include
+the descendant processes launched by fixtures in the isolation audit.
 
 ## Ownership, alternatives and exclusions
 
@@ -183,8 +195,10 @@ Run headlessly once on the implemented tree:
   valid cached work restarts and reaches review with Linear unavailable; all
   invalid-state preservation cases and advice failure pass.
 - `cargo test -p loopflow --test doctor_tests` and
-  `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel`:
-  retain the telemetry behavior and full real transport cancellation proof.
+  `scripts/test_desktop.sh --filter ActiveSessionsObservationTests`:
+  retain the telemetry behavior and complete transport suite, including real
+  CLI cancellation, through the headless path. Display-dependent native tests
+  remain optional capable-runner diagnostics, not headless prerequisites.
 - `uv run python scripts/test.py --all` on capable CI with prepared dependencies
   and external egress denied for test execution: no test waits on an external
   service. Record any platform isolation gap explicitly; container image pulls

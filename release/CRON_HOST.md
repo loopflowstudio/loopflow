@@ -169,7 +169,9 @@ Release overlap records the exact next configured due time, obligation and Home
 observed by the contender. The active execution keeps its frozen coverage.
 If closure is already observed, the continuation points to the original Home's
 opportunity disposition command. A later schedule change can supersede a saved
-retry time; history retains it as an observation, not a reservation.
+retry time; history retains it as an observation, not a reservation. History
+keeps physical attempt and overlap receipts linked to retained opportunities,
+even outside the display window. An overlap never adds a successful settlement.
 
 A repair disposition references an existing registered Task and records local
 repair ownership. It does not start work, assign a remote issue, or erase the

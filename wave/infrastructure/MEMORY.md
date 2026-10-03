@@ -42,12 +42,12 @@ replace a held lock inode; explicit source selection avoids that failure class.
 superseding “continuation unimplemented” feedback. Shared readers preserve
 original ownership/provenance; firing segments own telemetry/retry. Home changes
 break continuation. Synthetic tests cover interruption, late writers and recovery
-without republishing. Physical overlap reporting, integrated proof, gate,
-Jack Heart's review and configured settlements remain open. `f7a3769dc` integrates
+without republishing. Physical overlaps now use retained calendar/closure continuation; history keeps
+old attempt and overlap receipts. Integrated proof, gate, Jack Heart's review
+and configured settlements remain open. `f7a3769dc` integrates
 v0.12.32 metadata, not installed accounting acceptance.
 
-Release is the only immediate child; its memory and goal were read. Its September
-28 incident proves scheduled entry points need operation-level recovery: an
+Release’s September 28 incident proves scheduled entry points need operation-level recovery: an
 agent reported failure successfully, producing a misleading green cron receipt.
 Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,

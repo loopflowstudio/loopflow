@@ -338,7 +338,7 @@ pub(crate) fn record_overlap(
     home: &Path,
     obligation: &str,
     receipt: &CronReceipt,
-) -> OpsResult<()> {
+) -> OpsResult<String> {
     let _lock = lock(home)?;
     let mut record = read(home)?
         .into_iter()
@@ -386,7 +386,16 @@ pub(crate) fn record_overlap(
             due.overlapping_receipts.push(receipt.id.clone());
         }
     }
-    save(home, &record)
+    let subject = record
+        .opportunities
+        .iter()
+        .rev()
+        .find(|due| !due.settled())
+        .map(|due| due.id.as_str())
+        .unwrap_or(receipt.id.as_str());
+    let continuation = retry_continuation(&record, subject, receipt.started_at)?;
+    save(home, &record)?;
+    Ok(continuation)
 }
 
 pub(crate) fn preflight_failure(
@@ -1714,6 +1723,9 @@ mod tests {
         let job = spec(temp.path());
         let home = &job.host.lf_home;
         let id = observe(&job, 0, 0, "UTC").unwrap();
+        let early = super::record_overlap(home, &id, &receipt(&job, 0)).unwrap();
+        assert!(early.contains("next configured release due 36000"));
+        assert!(read(home).unwrap()[0].opportunities.is_empty());
         let wake = receipt(&job, 36000);
         let owner = begin(home, &id, &wake).unwrap().unwrap();
         let original = read(home).unwrap().remove(0).opportunities;
@@ -1731,7 +1743,8 @@ mod tests {
             assert!(continuation.contains(job.host.home_id.as_str()));
         }
         let blocked = receipt(&job, 122400);
-        super::record_overlap(home, &id, &blocked).unwrap();
+        let physical = super::record_overlap(home, &id, &blocked).unwrap();
+        assert!(physical.contains("next configured release due 208800"));
         let record = read(home).unwrap().remove(0);
         assert_eq!(record.opportunities[0], original[0]);
         let ScheduledReleaseOutcome::Deferred {
@@ -1744,6 +1757,9 @@ mod tests {
         assert!(reason.contains(wake.id.as_str()));
         assert!(continuation.contains("next configured release due 208800"));
         close(&job, 122401).unwrap();
+        let physical = super::record_overlap(home, &id, &receipt(&job, 300000)).unwrap();
+        assert!(physical.contains("closed at 122401"));
+        assert!(!physical.contains("next configured release due"));
         let continuation = super::overlap_continuation(home, wake.id.as_str(), 300000).unwrap();
         assert!(continuation.contains("closed at 122401"));
         assert!(continuation.contains(&format!("lf cron disposition {owner}")));

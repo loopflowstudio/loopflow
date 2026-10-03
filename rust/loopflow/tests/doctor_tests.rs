@@ -214,6 +214,34 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         ))
         .unwrap();
 
+    // Recovery success cannot stand in for the missing natural firing, even
+    // when the current SessionHistory scorecard can run after continuity passes.
+    let receipt_path = fs::read_dir(
+        home.path()
+            .join("cron/receipts/infrastructure/telemetry-daily"),
+    )
+    .unwrap()
+    .next()
+    .unwrap()
+    .unwrap()
+    .path();
+    let original_receipt = fs::read(&receipt_path).unwrap();
+    let mut recovery: CronReceipt = serde_json::from_slice(&original_receipt).unwrap();
+    recovery.source = CronSource::Recovery;
+    fs::write(&receipt_path, serde_json::to_vec(&recovery).unwrap()).unwrap();
+    let missing = run_lf(home.path(), &["doctor", "--json"]);
+    assert_eq!(continuity_check(&missing)["status"], "fail");
+    let blocked = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
+    assert!(!blocked.status.success());
+    assert!(!String::from_utf8_lossy(&blocked.stdout).contains("Lifecycle scorecard"));
+    assert_eq!(
+        serde_json::from_slice::<CronReceipt>(&fs::read(&receipt_path).unwrap())
+            .unwrap()
+            .source,
+        CronSource::Recovery
+    );
+    fs::write(&receipt_path, original_receipt).unwrap();
+
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         doctor.status.success(),

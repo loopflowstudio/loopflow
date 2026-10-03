@@ -162,19 +162,18 @@ pub fn release_history(
     let obligations = accounting::history(home, repo, wave, now)?;
     let window_start = now.saturating_sub(i64::from(days) * 86400);
     let repo = repo.canonicalize()?;
-    let linked: HashSet<_> = obligations
-        .iter()
-        .flat_map(|o| &o.opportunities)
-        .flat_map(|o| &o.attempts)
-        .filter_map(|a| a.telemetry.as_ref())
-        .flat_map(|t| {
-            t.original
-                .iter()
-                .flat_map(|d| &d.receipts)
-                .chain(&t.current_receipts)
-                .chain(t.recovery_receipt.iter())
-        })
-        .collect();
+    let mut linked = HashSet::new();
+    for opportunity in obligations.iter().flat_map(|o| &o.opportunities) {
+        linked.extend(&opportunity.overlapping_receipts);
+        for attempt in &opportunity.attempts {
+            linked.insert(&attempt.receipt_id);
+            if let Some(telemetry) = &attempt.telemetry {
+                linked.extend(telemetry.original.iter().flat_map(|due| &due.receipts));
+                linked.extend(&telemetry.current_receipts);
+                linked.extend(&telemetry.recovery_receipt);
+            }
+        }
+    }
     let receipts: Vec<_> = read_receipts(&receipt_root(home), wave, None)?
         .into_iter()
         .filter(|r| {

@@ -193,18 +193,16 @@ missing capability never silently waives required acceptance.
 
 ## Remaining implementation and proof
 
-1. **Physical overlap reporting.** The cron job-lock loser still records generic
-   “next configured firing” text in `ops/cron.rs`. The release controller's
-   observation-time continuation already uses the retained calendar, including
-   closure and DST; physical overlap receipts need equally truthful continuation.
-   `release_history` retains out-of-window telemetry references, but does not
-   include release attempt receipt IDs in its linked set. Preserve those physical
-   receipts when their retained attempts remain visible, without counting an
-   overlap as a settlement. These consumer gaps are separate from atomic coverage.
-2. **Integrated interruption/verification proof.** Exercise actual telemetry's
-   missing-natural-receipt path against current SessionHistory analytics without
-   relabeling Recovery or weakening doctor. Retain truthful blockers and dated
-   disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
+1. **Physical overlap reporting implemented locally.** The job-lock loser now
+   records the retained calendar/closure continuation returned by accounting.
+   History retains physical attempt and overlap-only receipt IDs outside its
+   display window. Repeated overlaps preserve the active attempt and add no
+   settlement. Closed-segment continuation names repair instead of a future due.
+2. **Integrated interruption/verification proof.** The real doctor/scorecard Flow regression now exercises
+   missing-natural-receipt failure with a successful Recovery receipt; restoring
+   the fixture's Scheduled receipt permits the current SessionHistory scorecard.
+   This is isolated source evidence, not an installed telemetry pass. Retain
+   truthful blockers and dated disposition. Complete unexercised candidate-ref/workflow, public-reconciliation,
    Task compensation beyond pre-push and release materialization boundaries as
    justified by the final call graph. Closed continuation now has the synthetic
    post-publication/pre-settlement recovery proof described below. Review command
@@ -279,6 +277,8 @@ Final check results appear once below.
 
 ### Delete — do not maintain
 
+- Removed generic release job-overlap continuation and telemetry-only receipt
+  retention; the existing accounting calendar and history join own both paths.
 - Removed segment-local validation and owner/telemetry/history joins.
 - Removed persisted collapse-link writes and copied intervention provenance;
   shared coverage projection owns both relationships.
@@ -416,6 +416,15 @@ source, and repetitive completed slices with remaining work. The reconciled plan
 separates these boundaries and retains the full acceptance criteria. That earlier reconciliation changed prose only; the current implementation and
 its focused checks are described above.
 
-Recorded implementation checks: isolated `cargo test -p loopflow --lib ops::cron::` passed 45 tests (changed intervention regression rechecked); `cargo test -p loopflow --test scheduled_release_tests` passed eight cases and the repaired/extended replacement regression passed separately; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement` passed. Full affected gate, hosted/UI/public proof and configured two-execution acceptance remain outstanding.
+Earlier focused implementation and reconciliation results remain at
+`0cdf5f43697a008665de0dce1428cf0a44b2a756:scratch/account-for-scheduled-release-opportunities.md`.
+Full affected gate, hosted/UI/public proof and configured two-execution acceptance
+remain outstanding.
 
-Check (October 2 realign): `git diff --check` and `lf context --skill realign` passed; prose-only reconciliation reused recorded focused results; full affected gate and configured acceptance remain deferred.
+Review (October 2 overlap consumers): preserve the first physical failure write
+before accounting so an accounting error cannot erase the observed lock loss.
+History also retains overlap-only receipts: repeated same-due contenders need
+not create attempts. Neither physical receipt inclusion nor deferral qualifies
+as product settlement. No public DTO or persistence schema changed.
+
+Check (October 2 overlap consumers): isolated `cargo test -p loopflow --lib ops::cron::` (45), focused `doctor_tests copied_production_history_does_not_block_the_telemetry_scorecard` (1) and `scheduled_release_tests release_overlap_records_exact_next_firing_without_mutation` (1), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` and `lf context --skill implement` passed; broader interruption proofs, gate and configured acceptance remain outstanding.

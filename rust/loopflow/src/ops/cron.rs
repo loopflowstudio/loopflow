@@ -589,12 +589,12 @@ pub(crate) fn run_cron_recorded(
         if lease.is_none() {
             receipt.finished_at = Some(Utc::now().timestamp());
             receipt.outcome = CronOutcome::Failed;
-            receipt.error = Some(
-                "cron execution already active; continuation is the next configured firing".into(),
-            );
+            receipt.error = Some("cron execution already active".into());
             write_receipt(&root, &receipt)?;
             if let Some(id) = &release_obligation {
-                accounting::record_overlap(&spec.host.lf_home, id, &receipt)?;
+                let continuation = accounting::record_overlap(&spec.host.lf_home, id, &receipt)?;
+                receipt.error = Some(format!("cron execution already active; {continuation}"));
+                write_receipt(&root, &receipt)?;
             }
             if source == CronSource::Recovery {
                 return Err(OpsError::ReleaseDeferred {
@@ -2395,5 +2395,43 @@ mod tests {
             attempts[0].outcome,
             accounting::ScheduledReleaseOutcome::Unverified { .. }
         ));
+
+        // A competing physical wake cannot add an attempt to this frozen owner.
+        let _owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        for _ in 0..2 {
+            let error = run_cron(
+                &agents,
+                &spec.wave,
+                &spec.flow,
+                &spec.host.home_id,
+                &spec.host.home_id,
+                CronSource::Scheduled,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("next configured release due"));
+        }
+        let report =
+            history::release_history(&spec.host.lf_home, temp.path(), &spec.wave, 0, now + 86400)
+                .unwrap();
+        assert_eq!(report.receipts.len(), 3);
+        assert!(report.receipts.iter().any(|r| r.id == receipt.id));
+        for physical in report.receipts.iter().filter(|r| r.id != receipt.id) {
+            assert_eq!(physical.outcome, CronOutcome::Failed);
+            assert!(physical
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("next configured release due"));
+        }
+        assert_eq!(
+            report.obligations[0]
+                .opportunities
+                .iter()
+                .map(|o| o.attempts.len())
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(report.summary.published + report.summary.no_change, 0);
+        assert!(report.summary.qualifying_pairs.is_empty());
     }
 }

@@ -163,6 +163,7 @@ enum AccountRouteAuthority {
         store: SharedStore,
         home: PathBuf,
         cause: activation::SwitchCause,
+        launched_at: i64,
     },
     Direct {
         home: PathBuf,
@@ -253,12 +254,33 @@ impl ProviderAccountRoute {
                 } else {
                     activation::SwitchCause::Exhaustion
                 },
+                launched_at: now_unix(),
             },
         }
     }
 
     pub(crate) fn account_id(&self) -> &ProviderAccountId {
         &self.account_id
+    }
+
+    /// The account this route's usage belongs to now. A launch's account is
+    /// where a shared agent began; the switch log says where a provider that
+    /// follows its native login has moved it since.
+    async fn used_account(&self) -> Result<ProviderAccountId, ProviderAccountError> {
+        if let AccountRouteAuthority::Shared {
+            store, launched_at, ..
+        } = &self.authority
+        {
+            if activation::running_agents_follow_native_login(self.provider) {
+                let moved = store
+                    .provider_account_switched_since(self.provider, *launched_at)
+                    .await?;
+                if let Some(account_id) = moved {
+                    return Ok(account_id);
+                }
+            }
+        }
+        Ok(self.account_id.clone())
     }
 
     pub(crate) fn resume_requested_session(&self) -> bool {
@@ -479,7 +501,8 @@ impl ProviderAccountRoute {
         match &self.authority {
             AccountRouteAuthority::Local { store, .. }
             | AccountRouteAuthority::Shared { store, .. } => {
-                record_rate_limit_signal(store, self.provider, &self.account_id, signal, "stream")
+                let account_id = self.used_account().await?;
+                record_rate_limit_signal(store, self.provider, &account_id, signal, "stream")
                     .await?;
             }
             AccountRouteAuthority::Lease { client, .. } => {
@@ -528,7 +551,7 @@ impl ProviderAccountRoute {
                         store
                             .record_provider_account_credential_invalidated(
                                 route.provider.as_str(),
-                                &route.account_id,
+                                &route.used_account().await?,
                                 &reason,
                             )
                             .await?
@@ -834,6 +857,21 @@ pub(crate) async fn resolve_provider_account_exact(
     exact_account_id: Option<&ProviderAccountId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
+    // A shared conversation resumes under whichever account is active; the
+    // account it began under is history, not a pin.
+    let began_shared = match provider_session_id {
+        Some(session_id) => match route_store().await? {
+            Some(store) => {
+                store
+                    .provider_session_isolated(provider, session_id)
+                    .await?
+                    == Some(false)
+            }
+            None => false,
+        },
+        None => false,
+    };
+    let exact_account_id = exact_account_id.filter(|_| !began_shared);
     let client = lease::AccountLeaseClient::from_env()?;
     if client.is_some() || !lease::AccountSelection::from_env()?.is_default() {
         return resolve_merged_provider_account(
@@ -1036,6 +1074,11 @@ async fn resolve_merged_provider_account(
     else {
         return Ok(None);
     };
+    let mut candidates = candidates;
+    if let Some(index) = active_candidate(provider, provider_session_id, &candidates).await? {
+        let active = candidates.remove(index);
+        candidates.insert(0, active);
+    }
     let mut last_forwarded_error = None;
     for (candidate, explicit) in candidates {
         match &candidate.authority {
@@ -1109,6 +1152,31 @@ async fn resolve_merged_provider_account(
         provider,
         accounts: "no healthy local or forwarded account remains".to_string(),
     })
+}
+
+/// A shared launch stays on the active account where its own choice allows:
+/// among the accounts it named, or among all of them when it named none.
+async fn active_candidate(
+    provider: Provider,
+    provider_session_id: Option<&str>,
+    candidates: &[(AccountCandidate, bool)],
+) -> Result<Option<usize>, ProviderAccountError> {
+    let native = activation::native_home(provider, None);
+    let named = candidates.iter().any(|(_, explicit)| *explicit);
+    for (index, (candidate, explicit)) in candidates.iter().enumerate() {
+        let AccountCandidateAuthority::Local { store, home } = &candidate.authority else {
+            continue;
+        };
+        if *explicit == named
+            && candidate.credential_available
+            && !candidate.is_strained(now_unix())
+            && identity::same_codex_login(&native, home)
+        {
+            let shared = !route_isolated(store, provider, provider_session_id).await?;
+            return Ok(shared.then_some(index));
+        }
+    }
+    Ok(None)
 }
 
 async fn ordered_merged_candidates(
@@ -3005,6 +3073,85 @@ mod account_first_tests {
         assert!(resumed.is_shared());
         assert_eq!(resumed.account_id().as_str(), "second");
         assert!(resumed.resume_requested_session());
+
+        // The account it began under is history: resuming does not switch back.
+        let began = parse_account_id("first").unwrap();
+        let resumed =
+            resolve_provider_account_exact(Provider::Codex, Some("conversation"), Some(&began))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(resumed.account_id().as_str(), "second");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_named_account_list_keeps_the_active_account_it_includes() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[lease::ACCOUNT_SELECTION_ENV]);
+        let (_store, native) = shared_codex_home(temp.path(), "second").await;
+        let listed = |accounts: &[&str]| {
+            let accounts: Vec<String> = accounts.iter().map(|id| format!("codex={id}")).collect();
+            let selection = lease::AccountSelection::from_flags(&accounts, &[]).unwrap();
+            std::env::set_var(lease::ACCOUNT_SELECTION_ENV, selection.env_value().unwrap());
+        };
+
+        listed(&["first", "second"]);
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(route.is_shared());
+        assert_eq!(route.account_id().as_str(), "second");
+
+        // Naming only another account is a request to move to it.
+        listed(&["first"]);
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "first");
+        assert!(route
+            .launch_as(&mut Command::new("codex"))
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(codex_login(&native), "first@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn usage_follows_the_switch_log_only_where_a_running_agent_does() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_codex_home(temp.path(), "first").await;
+        let first = parse_account_id("first").unwrap();
+        let second = parse_account_id("second").unwrap();
+        let launched = |provider| {
+            ProviderAccountRoute::shared(
+                provider,
+                first.clone(),
+                Arc::clone(&store),
+                temp.path().join("first"),
+                false,
+            )
+        };
+        let (codex, claude) = (launched(Provider::Codex), launched(Provider::Claude));
+        assert_eq!(claude.used_account().await.unwrap(), first);
+
+        for provider in [Provider::Codex, Provider::Claude] {
+            store
+                .record_provider_account_switch(provider, &second, "from_now_on", "person")
+                .await
+                .unwrap();
+        }
+
+        // Claude adopts the new login while running; Codex keeps its own.
+        assert_eq!(claude.used_account().await.unwrap(), second);
+        assert_eq!(codex.used_account().await.unwrap(), first);
     }
 
     #[allow(clippy::await_holding_lock)]

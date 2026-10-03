@@ -914,6 +914,17 @@ impl Store {
         .await
     }
 
+    pub async fn provider_account_switched_since(
+        &self,
+        provider: Provider,
+        since: i64,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_account_switched_since(provider, since)
+        })
+        .await
+    }
+
     pub async fn provider_session_account(
         &self,
         provider: Provider,

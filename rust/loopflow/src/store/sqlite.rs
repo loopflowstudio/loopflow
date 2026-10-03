@@ -1604,6 +1604,28 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The account the provider's native home was last switched to at or
+    /// after `since`; `None` when it has not changed account since then.
+    pub fn provider_account_switched_since(
+        &self,
+        provider: Provider,
+        since: i64,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT account_id FROM provider_account_switches
+             WHERE provider = ?1 AND switched_at >= ?2
+             ORDER BY switched_at DESC, id DESC LIMIT 1",
+            params![provider.as_str(), since],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
+    }
+
     pub fn provider_session_account(
         &self,
         provider: Provider,

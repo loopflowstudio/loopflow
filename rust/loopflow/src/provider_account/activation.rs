@@ -96,6 +96,13 @@ pub(crate) fn launch_isolated(provider: Provider) -> bool {
     })
 }
 
+/// Whether a running agent adopts a login installed after it started. Claude
+/// re-reads its stored login; Codex keeps the one it started with until it
+/// is resumed.
+pub(crate) fn running_agents_follow_native_login(provider: Provider) -> bool {
+    provider == Provider::Claude
+}
+
 /// The stored account the native credential identifies.
 pub(crate) fn active_account<'a>(
     native: &Path,

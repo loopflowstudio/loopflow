@@ -1,3 +1,4 @@
+import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -11,6 +12,20 @@ def test_navbar_links_exist(homepage: Page):
 def test_navbar_docs_link(homepage: Page, base_url: str):
     homepage.locator("nav").locator("a", has_text="Docs").click()
     assert "/docs" in homepage.url
+
+
+@pytest.mark.parametrize("path", ["/", "/docs"])
+def test_features_navigation(page: Page, base_url: str, path: str) -> None:
+    page.goto(f"{base_url}{path}")
+    page.get_by_role("navigation", name="Main navigation").get_by_role(
+        "link", name="Features", exact=True
+    ).click()
+    expect(page).to_have_url(f"{base_url}/#features")
+    heading = page.locator("#features h2")
+    expect(heading).to_be_in_viewport()
+    heading_box = heading.bounding_box()
+    nav_box = page.get_by_role("navigation", name="Main navigation").bounding_box()
+    assert heading_box["y"] >= nav_box["y"] + nav_box["height"]
 
 
 def test_navbar_install_link(homepage: Page, base_url: str):

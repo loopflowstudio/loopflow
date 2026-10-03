@@ -1,5 +1,14 @@
 # Capture Tasks
 
+## Current entry-point decision
+
+Jack Heart selected **New Session** in the Linear-style compose row beneath the
+repository header, and explicitly requested keeping the existing opening prompt.
+Use the same label for the Wave menu action. Compact row spacing and the compose
+icon implement that visual direction; final appearance still needs review.
+This supersedes historical provisional naming below; capture behavior is unchanged.
+
+
 Accepted by Jack Heart — 2026-10-01. Scope, conversation behavior, and Desktop
 interaction were initially agreed. Jack Heart authorized filing under Product
 and launching the work on 2026-10-01. Review clarifications below supersede the
@@ -385,3 +394,31 @@ Remaining review/demo work:
   demo owns appearance, native drafts and the real capture-to-owner handoff.
 
 Check: 2026-10-02 `cargo test -p loopflow --lib engine::builtins` 14 passed; `scripts/test_desktop.sh --filter TaskCapture` 4 passed (including production launch subprocess); `scripts/test_desktop.sh --filter WorkspaceNavigationTests` 26 passed; `swift build --package-path swift`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; native menu/provider handoff deferred to gate/demo as above.
+
+## Approved next implementation: configurable session skill
+
+Jack Heart requested a pursue Flow to implement the reviewed New Session skill
+picker. The self-contained accepted prototype is [session-picker.html](session-picker.html),
+now retained in this Task checkout. Read [capture-task-demo.md](capture-task-demo.md)
+for the acceptance history and exact final styling.
+
+Implement the compact split row: New Session launches the selected skill;
+the adjacent skill name and chevron open a searchable picker. Selection updates
+the next launch without launching. Start with capture-tasks and remember the
+selection per repository. Use real lf-owned skill discovery, not the prototype's
+illustrative hardcoded inventory. Keep existing repository/Wave scope inference,
+Task selection and retained panes. Preserve the existing opening prompt; do not
+add the proposed “What would you like to work on?” greeting.
+
+Match the accepted readable label weight, tight left-aligned spacing and chevron
+alignment. Provide keyboard search/navigation/selection and Escape dismissal.
+The prototype's browser storage and simulated launch are only demonstration aids;
+use the native app's existing state and launch ownership. An Edit skill action
+was discussed as a possibility, not accepted required scope.
+
+Verify actual configured Desktop launch as well as focused headless behavior.
+The current machine has a temporary ~/.lf/skills/capture-tasks.md symlink to the
+Task's builtin source to unblock demo discovery; that is not shipped packaging
+or proof that the released runtime contains the skill. Preserve authored pursue
+review boundaries. Jack's launch request does not constitute demo acceptance of
+unimplemented native picker behavior.

@@ -1,6 +1,8 @@
 # Open design questions
 
-2026-10-01 — capture behavior is agreed; the Desktop button label remains open.
+Current decision: Jack Heart selected **New Session**, with the Linear-style
+compose row, and requested preserving the existing opening prompt. Naming is
+resolved; the historical discussion below records how that decision developed.
 
 Jack Heart accepted the design on 2026-10-01: **Create Task** launches the
 single **capture-tasks** skill from repository or Wave scope. Exploration adapts

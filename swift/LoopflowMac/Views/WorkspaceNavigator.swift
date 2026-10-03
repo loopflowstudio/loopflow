@@ -48,11 +48,12 @@ struct WorkspaceNavigator: View {
             header
             if let onCaptureTask, let launch = model.taskCaptureLaunch {
                 Button { onCaptureTask(launch) } label: {
-                    Label("Create Task", systemImage: "plus.bubble")
+                    Label("New Session", systemImage: "square.and.pencil")
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
                 }
-                .background(palette.surface, in: RoundedRectangle(cornerRadius: 7))
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("workspace-create-task")
@@ -412,7 +413,7 @@ struct WorkspaceNavigator: View {
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
         if work.kind == .wave, let onCaptureTask, let launch = model.taskCaptureLaunch(wave: work) {
-            Button("Create Task · \(title)") { onCaptureTask(launch) }
+            Button("New Session · \(title)") { onCaptureTask(launch) }
                 .accessibilityIdentifier("workspace-capture-wave-\(work.id)")
         }
         Button("Inspect \(title)") { model.select(work) }

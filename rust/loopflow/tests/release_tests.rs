@@ -1342,6 +1342,81 @@ exit 2
 }
 
 #[test]
+fn release_download_retries_with_fresh_artifacts_for_the_same_candidate() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    let download = r#"'run download')
+    [ "$3" = 84 ] || exit 91
+    directory="$5"
+    if [ ! -f "$log.partial" ]; then
+      echo broken > "$directory/partial"
+      echo "$directory" > "$log.partial"
+      echo 'read timeout' >&2
+      exit 1
+    fi
+    [ ! -e "$(cat "$log.partial")" ] || exit 92
+    [ ! -e "$directory/partial" ] || exit 93
+    echo complete > "$directory/artifact"
+    exit 0;;"#;
+    let script = fixture
+        .gh_script
+        .replace("'run download') exit 0;;", download);
+    let publisher = repo.path().join("publisher.sh");
+    let body = fs::read_to_string(&publisher).unwrap()
+        .replace("--output) output=", "--artifacts) artifacts=\"$2\"; shift 2 ;;\n        --output) output=")
+        .replace("    expected=", "    [ ! -e \"$artifacts/partial\" ] || exit 94\n    [ \"$(cat \"$artifacts/artifact\")\" = complete ] || exit 95\n    expected=");
+    fs::write(publisher, body).unwrap();
+    git(&repo, &["add", "publisher.sh"]);
+    git(
+        &repo,
+        &["commit", "-m", "Check downloaded artifact contents"],
+    );
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = repo.head_sha();
+    let _env = EnvGuard::new(&[("gh", &script)]);
+    let ReleaseRunOutcome::Released(receipt) =
+        release_run(repo.path(), "patch", None, &NullProgress).unwrap()
+    else {
+        panic!("expected released candidate")
+    };
+    assert_eq!(receipt.commit, head);
+    assert_eq!(receipt.workflow_run_id, 84);
+    assert_eq!(fs::read_to_string(fixture.attempts).unwrap(), "prepare\n");
+}
+
+#[test]
+fn failed_download_never_prepares_or_tags_a_candidate() {
+    for (failure, attempts) in [("HTTP 403: Forbidden", 1), ("HTTP 503: unavailable", 3)] {
+        let repo = TestRepo::new();
+        let state = tempfile::tempdir().unwrap();
+        let fixture = configure_candidate_publisher(&repo, state.path());
+        let script = fixture.gh_script.replace(
+            "'run download') exit 0;;",
+            &format!("'run download') echo '{failure}' >&2; exit 1;;"),
+        );
+        let _env = EnvGuard::new(&[("gh", &script)]);
+        let error = release_run(repo.path(), "patch", None, &NullProgress).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&format!("after {attempts} attempt")));
+        assert!(!fixture.attempts.exists());
+        assert!(git_output_bare(
+            &repo,
+            &["for-each-ref", "--format=%(refname)", "refs/tags/v0.9.2"]
+        )
+        .is_empty());
+        let log = fs::read_to_string(state.path().join("gh.log")).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.starts_with("run download 84 "))
+                .count(),
+            attempts
+        );
+    }
+}
+
+#[test]
 fn release_run_owns_each_interrupted_candidate_preparation_materialization() {
     for interrupted in [
         InterruptedWorktree::EmptyPath,

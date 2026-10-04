@@ -184,6 +184,24 @@ run-records work identified by Jack at `424958e9d`; this Task does not redesign
 them. Live releases, tmux startup repair, installation selection and global
 network/SSH settings are excluded.
 
+## Implementation reconciliation — 2026-10-04
+
+Jack Heart explicitly authorized autonomous publication and landing with Task
+completion, without an interactive review. Existing authored work and the dormant
+old review client remain preserved. No real release or installation replacement.
+
+Implemented bounded GitHub download/check reads and cached planning at restart,
+continuation and managed admission. Focused release proof recovers partial bytes
+in one invocation and prepares the original candidate once. Public restart proof
+reaches review through a mechanical step with unreachable Linear, retains identity
+and history, and rejects invalid/removed/terminal/moved planning and failed advice.
+A mechanical step exercises worker admission without unnecessary provider setup.
+
+Network isolation uses per-process macOS sandbox or Linux network namespace;
+loopback and denial probes run inside each boundary. Dependencies/builds precede
+test execution. Remaining work: repair concrete suite failures under isolation,
+finish headless gate, prepare accurate PR copy and land through typed operations.
+
 ## Done when / gate
 
 Run headlessly once on the implemented tree:
@@ -213,4 +231,10 @@ worker admission has its own refresh. The acceptance scenario therefore reaches
 the authored review boundary and inspects retained history. A recovered release
 must also preserve artifact identity and exact-head evidence, not merely exit 0.
 
-Check (2026-10-02): ancestor/source reconciliation confirmed both landed fixes; `env GIT_ALLOW_PROTOCOL=file git ls-remote https://example.invalid/loopflow.git` refused HTTPS immediately (exit 128); behavioral suites deferred to implementation/gate, no production edits.
+Check (2026-10-04): read retry (3), partial-artifact release (1), public restart (6 scenarios), PR checks (37) passed; isolated Python repaired 5 of 6 failures and corrected the final command-plan assertion; full gate twice stopped before tests (resource probe timeout, then 29.7 GiB below 32 GiB reserve), so final Rust/Swift/Python matrix and Clippy defer to hosted CI.
+
+Review findings fixed: the read deadline includes pipe EOF and child reaping;
+restart admission now has one cached-policy owner; failed advice names preservation
+explicitly. macOS network isolation reuses the fixed ps reader exception required
+by Desktop. Local evidence predates final small diagnostic/cleanup edits; CI must
+validate the landing candidate. No product release or installed Home was touched.

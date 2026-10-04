@@ -247,6 +247,8 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
+    runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
+    test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
     return [
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
         Command(
@@ -297,7 +299,14 @@ def _python_commands(changed: list[str]) -> list[Command]:
         argv = ["uv", "run", "pytest", *test_files]
     else:
         argv = ["uv", "run", "pytest", "python/tests/"]
-    return [Command(argv, REPO_ROOT, "python")]
+    return [
+        Command(["uv", "sync"], REPO_ROOT, "python-dependencies"),
+        Command(
+            ["uv", "run", "--no-sync", "python", "scripts/test_network.py", *argv],
+            REPO_ROOT,
+            "python",
+        ),
+    ]
 
 
 def _website_commands(_changed: list[str]) -> list[Command]:
@@ -365,7 +374,19 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
 
 def _e2e_commands(_changed: list[str]) -> list[Command]:
     return [
-        Command(["tests/e2e/test_smoke.sh"], REPO_ROOT, "e2e-smoke"),
+        Command(["cargo", "build", "-p", "loopflow", "--bins"], REPO_ROOT, "e2e-build"),
+        Command(
+            [
+                "uv",
+                "run",
+                "--no-sync",
+                "python",
+                "scripts/test_network.py",
+                "tests/e2e/test_smoke.sh",
+            ],
+            REPO_ROOT,
+            "e2e-smoke",
+        ),
     ]
 
 
@@ -1317,6 +1338,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                 start_new_session=True,  # own process group for a clean group-kill
                 bufsize=1,
                 text=True,
+                env={**os.environ, "GIT_ALLOW_PROTOCOL": "file"},
             )
         except FileNotFoundError:
             return _finish(

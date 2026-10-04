@@ -315,7 +315,7 @@ def test_changed_aware_runner_includes_ci_static_checks():
     assert "cargo fmt --all -- --check" in result.stdout
     assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
     assert "scripts/materialize_rust_tests.py -- cargo" in result.stdout
-    assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
+    assert "nextest run --all" in result.stdout or "test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
 
     full = subprocess.run(
@@ -332,5 +332,5 @@ def test_changed_aware_runner_includes_ci_static_checks():
         text=True,
         capture_output=True,
     )
-    assert "$ uv run pytest python/tests/" in full.stdout
+    assert "scripts/test_network.py uv run pytest python/tests/" in full.stdout
     assert "python/tests/test_release_automation.py" not in full.stdout.split("Plan:", 1)[1]

@@ -79,6 +79,28 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## External network isolation
+
+```bash
+uv sync
+uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
+```
+
+Prepare dependencies and compile binaries before isolating test execution.
+The test runner and CI use `test_network.py` for Python, Rust test executables,
+Swift tests, website tests and smoke tests. Each invocation proves loopback works
+and an external connection is denied; the OS boundary covers descendants too.
+Git transport is file-only. Local bare remotes and loopback protocol fixtures
+remain available. No developer shell or global Git configuration changes.
+
+macOS uses `sandbox-exec`; Linux uses passwordless sudo, `unshare --net` and `ip`
+to create a private network namespace, enable loopback and restore the caller's
+user identity. macOS permits only the fixed `/bin/ps` system reader outside the
+sandbox, matching Desktop's existing headless profile; it cannot launch fixture
+children or open service connections. Unsupported isolation fails explicitly. Installation-container
+proofs disconnect their external Docker network after compiling, then run the
+same denial/loopback probes before executing tests. Display diagnostics remain opt-in.
+
 ## Changed-Aware Runner
 
 ```bash

@@ -1298,10 +1298,10 @@ fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
     Ok(())
 }
 
+/// Existing work consumes validated local facts; refresh and provider writes own acquisition.
 pub(crate) async fn resolve_managed_task_planning(
     store: &SharedStore,
     task: &Task,
-    refresh: crate::ops::pm::PmRefresh,
 ) -> OpsResult<crate::ops::task_pm::ResolvedTask> {
     if task_work_status(store, task).await? != WorkStatus::Ready {
         return Err(task_error(format!(
@@ -1309,9 +1309,12 @@ pub(crate) async fn resolve_managed_task_planning(
             task.plan.identifier
         )));
     }
-    let resolved =
-        crate::ops::task_pm::resolve_task_async(&task.worktree, task.plan.id.as_str(), refresh)
-            .await?;
+    let resolved = crate::ops::task_pm::resolve_task_async(
+        &task.worktree,
+        task.plan.id.as_str(),
+        crate::ops::pm::PmRefresh::Never,
+    )
+    .await?;
     require_startable_issue(&resolved.item)?;
     let project = store
         .get_project(&task.project_id)
@@ -5117,8 +5120,7 @@ async fn restart_task_async(
         load_task_flow(&task.worktree, flow)?;
     }
 
-    let resolved =
-        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Force).await?;
+    let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow =
         select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
     let mut project = store
@@ -5158,7 +5160,9 @@ async fn restart_task_async(
     task.updated_at = now;
 
     if let Some(advice) = advice.as_deref() {
-        super::linear_observe::publish_task_steer(&store, &task, advice).await?;
+        super::linear_observe::publish_task_steer(&store, &task, advice).await.map_err(|error| {
+            task_error(format!("Restart advice was not published; the existing Flow and worker are preserved: {error}"))
+        })?;
     }
     let stopped = stop_task_worker(&store, &task).await?;
     select_task_agent(&store, &mut task, agent.as_deref()).await?;
@@ -5186,8 +5190,7 @@ pub(crate) async fn continue_task_async(
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     let saved = store.task_flow(&task.id).await.map_err(task_error)?;
-    let resolved =
-        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Auto).await?;
+    let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow = match saved.as_ref() {
         Some(position) => {
             if let Some(flow) = requested_flow

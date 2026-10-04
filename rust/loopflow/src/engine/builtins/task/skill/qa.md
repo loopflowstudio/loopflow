@@ -24,10 +24,10 @@ prerequisite to assessing the change.
 3. Preserve counterexamples and revise the explanation when a check contradicts
    it. Record reproduction, consequence and evidence; distinguish defects from
    uncertain concerns and optional improvements.
-4. Repair clear defects within the authorized scope and verify the original
+4. Repair clear defects within the task scope and verify the original
    failure plus relevant regressions. When asked for an independent audit or
    read-only review, leave fixes as findings. A consequential design change
-   remains a decision for the participant, not permission to broaden the work.
+   remains a scope decision for the participant.
 5. Update findings at their existing owner. Keep unresolved issues, exact blockers
    and evidence limits where the next worker can use them. Write a separate report
    only when its reader needs one; no findings means no invented report.

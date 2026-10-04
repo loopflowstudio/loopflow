@@ -1,5 +1,5 @@
 ---
-requires: a reviewable change and authority to merge
+requires: a reviewable change
 produces: recorded PR delivery with auto-merge requested
 ---
 Land the current change through Loopflow's delivery operation.

@@ -20,7 +20,7 @@ and needed to proceed; no particular input format or Task is required.
    that distinguishes them. When evidence contradicts an explanation, revise it
    before making dependent changes.
 3. Make the smallest useful repair. Preserve data, existing work and evidence;
-   a migration failure is not permission to discard state. A temporary workaround
+   preserve state when repairing a migration failure. A temporary workaround
    can unblock someone, but keep the underlying failure explicit. Avoid unrelated
    refactoring or a broad prevention project during recovery.
 4. Replay the original workflow through the reported surface and run the relevant

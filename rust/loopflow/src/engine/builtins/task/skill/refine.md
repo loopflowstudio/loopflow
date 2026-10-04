@@ -25,7 +25,7 @@ Each session starts fresh. Don't assume you know the user's preferences — let 
 
 The point of iteration is to learn enough about the text's purpose, audience,
 and voice to make the whole source more true. Each option and preference is
-evidence for a working model, not permission to project a style onto the user.
+evidence for a working model; do not project a style onto the user.
 Explore with choices that differ meaningfully, then test what you learned on
 new passages before applying it broadly.
 

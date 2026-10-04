@@ -50,12 +50,6 @@ When the user brings an idea, explore it with them and write it under
 choices the user has accepted, with dates and names. Create or reuse Tasks only
 once the direction is ready and the user has agreed.
 
-## Limits
-
-This conversation grants no authority beyond the user's existing authorization.
-Inspection is read-only. Ask before pushing, merging, external messages or
-destructive operations unless already authorized.
-
 ## Persistent workspace and document publication
 
 Keep accepted decisions in the repository guide or the documentation that owns the subject, with names and dates.

@@ -3,7 +3,7 @@ description: Operate one Wave through delivery, coordination, capacity, adaptati
 action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, and exit. Aim for one or two
-useful authorized moves; let the evidence determine how much is worthwhile.
+useful moves; let the evidence determine how much is worthwhile.
 No action is a valid result. No chat or schedule is required.
 
 ## Scope and evidence
@@ -22,7 +22,7 @@ claim, conflict or missing fact matters; do not ingest every transcript.
 Keep source links/paths, dates and freshness with consequential findings;
 separate observations, hypotheses and proposals. Rereading cached content does
 not refresh it. Failed reads, stale plans, missing outcomes and unknown liveness
-cannot establish an empty backlog, health, approval or permission to close work.
+cannot establish an empty backlog, health, or a completed outcome.
 Continue independent work from available evidence without repairing auth or
 waiting indefinitely.
 
@@ -61,9 +61,9 @@ affected Waves and who needs to decide. Repository synthesis participates in
 identity without owning it alone.
 
 Within accepted direction, reconcile the Wave plan or memory. Changes beyond
-current authority stay proposals for review; never silently rewrite another
+current direction stay proposals for review; never silently rewrite another
 Wave's objective. Return accepted decisions, their source and practical
-consequence to affected Task briefs or authorized discussions, retaining
+consequence to affected Task briefs or discussions, retaining
 disagreement. A draft or failed delivery leaves the handoff pending.
 
 ## The hierarchy is an intent graph, not a control plane
@@ -73,18 +73,18 @@ is an approval prerequisite. Each Task's selected Flow carries its work through
 landing; do not perform that Flow's steps or create another cursor here. Preserve selected Flows, review gates,
 worktrees, placement and execution history.
 
-- Start selected authorized work with `lf --task <issue-id> flow start`; use the
+- Start selected work with `lf --task <issue-id> flow start`; use the
   current Project's Flow unless an explicit choice is warranted. Existing
   execution is reconciled through Task operations, never a duplicate driver.
-- Inspect `lf task status` and existing logs before recovery. Resolve authorized
+- Inspect `lf task status` and existing logs before recovery. Resolve
   impediments; discuss missing judgment in the ongoing Wave chat when present.
   Headless operation stops with the reason when it cannot proceed. Retry failed
   work with `lf --task <issue> flow start --reason "<what changed>"` only when new
   evidence warrants it. Unknown liveness is not idle. Authored Task review
   Sessions retain their own feedback and completion contract.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
-  when execution is intended and authorized. Give work an observable outcome.
-- Update an authorized plan through `lf update-plan --wave <wave> --plan
+  when execution is intended. Give work an observable outcome.
+- Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `flow` and `krs`; for example
@@ -101,14 +101,13 @@ without introducing a long-running process or another execution cursor.
 A chapter boundary previews the whole repository with
 `lf repo new-chapter <name> --dry-run --json`. Apply with
 `lf repo new-chapter <name> --json` only after repository direction and disposition
-review gates are satisfied; existing authorization remains valid. An ordinary
-Wave pass does not authorize rotation. The operation has no per-Wave selector
-or plan input. Started work moves intact, proven untouched backlog is canceled
+review gates are satisfied. Chapter rotation is a separate operation with no
+per-Wave selector or plan input. Started work moves intact, proven untouched backlog is canceled
 with history retained, and predecessors become Completed. Uncertain evidence
 blocks automatic retirement. Retry the same name after interruption.
 
 Planned and Completed Projects retain future and past plans. Future plan edits
-need an authorized Linear writer; `update-plan` cannot target a Planned successor.
+need a Linear writer; `update-plan` cannot target a Planned successor.
 Judge prior chapters using dated evidence, not current metric readings or
 reconstructed starting membership. Do not introduce competing current Projects.
 
@@ -117,8 +116,8 @@ reconstructed starting membership. Do not introduce competing current Projects.
 Reply in this conversation with the decisive source, judgment, action/result
 and unresolved decisions or evidence gaps. If no move is useful, say why briefly.
 Persist only changed decisions, durable learning and unresolved concerns at
-their existing owners. External posting requires authorization and confirmed
-delivery; this skill does not automatically send the reply to a channel.
+their existing owners. Report external posts only after confirming delivery;
+this skill does not automatically send the reply to a channel.
 
 When reporting more than one Task, use the status/roadmap reads above and render
 operational rows as
@@ -154,9 +153,8 @@ Mark possible solutions as tentative. Keep architecture, implementation steps,
 and detailed proof in the design, linked and available to the worker.
 
 Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments when posting
-is authorized. A comment should say what changed and what it means; link detailed
-receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Draft
+changes, launch attempts, and verification updates in Task comments.
+A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Draft
 proposed comments without posting.
 Do not use a description update or worker steering as a substitute log channel.
 

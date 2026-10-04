@@ -363,10 +363,10 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         let session = loopflow::session::AgentSession {
             captured: None,
             caller_artifact_key: None,
-            task_id: (index == 112).then(|| task.task.id.clone()),
+            task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
             flow_session_id: None,
-            work_source: (index == 112).then_some(loopflow::session::WorkSource::Declared),
+            work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone(),
             artifact_key: uuid::Uuid::new_v4().simple().to_string(),
@@ -412,10 +412,20 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .unwrap();
     }
     fixture.db().execute("UPDATE agent_sessions SET ready_summary='Review this',interactive=0 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
+    assert!(
+        fixture
+            .json(&["session", "list", "--needs-me", "--json"])
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "attention must not broaden participation"
+    );
     let attention = fixture.json(&[
         "session",
         "list",
         "--needs-me",
+        "--interactive",
+        "all",
         "--json",
         "--page",
         "--limit",
@@ -428,6 +438,8 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "session",
         "list",
         "--needs-me",
+        "--interactive",
+        "all",
         "--json",
         "--page",
         "--limit",
@@ -509,6 +521,44 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "0",
     ]);
     assert_eq!(everywhere.as_array().unwrap().len(), 113);
+
+    // All three local conversations belong to this Task, but only unfinished
+    // interactive participation belongs in its ordinary Session list.
+    let completed = runtime
+        .block_on(task.store.session("inventory-110"))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(
+            task.store
+                .complete_session(&completed.id, completed.captured),
+        )
+        .unwrap();
+    let list = [
+        "session",
+        "list",
+        "--task",
+        &task.task.plan.identifier,
+        "--json",
+    ];
+    for _ in 0..2 {
+        let current = fixture.json(&list);
+        assert_eq!(current.as_array().unwrap().len(), 1);
+        assert_eq!(current[0]["id"], "inventory-111");
+    }
+    let history = fixture.json(&[
+        "session",
+        "list",
+        "--task",
+        &task.task.plan.identifier,
+        "--interactive",
+        "all",
+        "--history",
+        "--json",
+    ]);
+    assert_eq!(history.as_array().unwrap().len(), 3);
+    assert_eq!(history[0]["state"], "closed");
+    assert_eq!(fixture.count("agent_sessions"), 113);
 }
 
 #[test]

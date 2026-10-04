@@ -249,6 +249,34 @@ fn read_summary(
 }
 
 impl SqliteStore {
+    pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{SESSION_SELECT}
+            WHERE s.interactive=1 AND (s.kind!='flow_review' OR
+                (s.completed_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions f
+                 WHERE f.pending_session_id=s.id AND f.state='current'
+                 AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id
+                    AND t.work_state IN ('done','abandoned')))))"
+        ))?;
+        let sessions = query
+            .query_map([], read_session)?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut openings = conn.prepare(
+            "SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+            FROM session_events WHERE session_id=?1 AND kind='observed'
+            AND json_extract(payload,'$.type')='interactive_opened'",
+        )?;
+        sessions
+            .into_iter()
+            .map(|session| {
+                let session = session?;
+                let opened = openings.query_row([&session.id], |row| row.get(0))?;
+                Ok((session, opened))
+            })
+            .collect()
+    }
+
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
@@ -1569,6 +1597,54 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn resume_candidates_keep_completed_conversations_and_original_opening_times() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let background =
+            store.test_session("background", &crate::session_record::new_artifact_key());
+        let review = store.test_session("review", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET completed_at=10 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                [&background.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET kind='flow_review' WHERE id=?1",
+                [&review.id],
+            )
+            .unwrap();
+        }
+        for (source, opened) in [("first", 30_000), ("recovered-earlier", 20_000)] {
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: session.artifact_key.clone(),
+                        source: source.into(),
+                        observed_at: 999_999,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"type":"interactive_opened", "opened_at_ms":opened}),
+                    },
+                )
+                .unwrap();
+        }
+        let candidates = store.resume_candidates().unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].0.id, session.id);
+        assert_eq!(candidates[0].1, Some(30_000));
+    }
 
     #[test]
     fn retained_sessions_without_repo_use_their_recorded_wave() {

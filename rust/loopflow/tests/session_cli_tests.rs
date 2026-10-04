@@ -257,7 +257,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             )
             .unwrap();
             db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                SELECT id,'observed','fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
                 FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
@@ -691,5 +691,222 @@ fn session_inventory_pages_are_explicit_bounded_and_complete() {
             !run(home.path(), args).status.success(),
             "accepted {args:?}"
         );
+    }
+}
+
+#[test]
+fn resume_shorthand_help_and_empty_worktree() {
+    let home = tempfile::tempdir().unwrap();
+    for args in [&["resume", "--help"][..], &["session", "resume", "--help"]] {
+        let output = run(home.path(), args);
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
+    }
+    let flow = run(home.path(), &["flow", "resume", "--help"]);
+    assert!(flow.status.success(), "{flow:?}");
+    for args in [&["resume"][..], &["session", "resume"]] {
+        let output = command(home.path(), args)
+            .current_dir(home.path())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("No interactive session found in this worktree"),
+            "{output:?}"
+        );
+    }
+}
+
+fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+        [id, native],
+    )
+    .unwrap();
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
+        FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let home = tempfile::tempdir().unwrap();
+    let repo = home.path().join("repo");
+    let sibling = home.path().join("sibling");
+    std::fs::create_dir_all(repo.join("subdir")).unwrap();
+    std::fs::create_dir(&sibling).unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--quiet"])
+        .arg(&repo)
+        .status()
+        .unwrap()
+        .success());
+    let link = home.path().join("link");
+    symlink(&repo, &link).unwrap();
+    let (a, input_a, _) = prepare_conversation(home.path(), &link.join("subdir"), "codex", "A");
+    let (b, input_b, _) = prepare_conversation(home.path(), &repo, "codex", "B");
+    let (background, _, _) = prepare_conversation(home.path(), &repo, "codex", "Background");
+    let (other, _, _) = prepare_conversation(home.path(), &sibling, "codex", "Other");
+    let (review, _, _) = prepare_conversation(home.path(), &repo, "codex", "Stale review");
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET interactive=0,created_at=9999999999 WHERE id=?1",
+        [&background],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET created_at=9999999999 WHERE id=?1",
+        [&other],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET kind='flow_review',created_at=9999999999 WHERE id=?1",
+        [&review],
+    )
+    .unwrap();
+    db.execute("UPDATE agent_sessions SET completed_at=2 WHERE id=?1", [&a])
+        .unwrap();
+    record_native(home.path(), &a, &input_a, "native-a");
+    record_native(home.path(), &b, &input_b, "native-b");
+    let codex = home.path().join("codex");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::write(
+        codex.join("history.jsonl"),
+        "{\"session_id\":\"native-b\",\"ts\":10}\n{\"session_id\":\"native-a\",\"ts\":20}\n",
+    )
+    .unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("codex");
+    std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$CODEX_HOME/opened\"\n").unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let resume = |args: &[&str]| {
+        command(home.path(), args)
+            .current_dir(repo.join("subdir"))
+            .env("PATH", &path)
+            .env("CODEX_HOME", &codex)
+            .output()
+            .unwrap()
+    };
+    let result = resume(&["resume"]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        std::fs::read_to_string(codex.join("opened")).unwrap(),
+        input_a
+    );
+    let openings: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type')='interactive_opened'", [&a], |row| row.get(0)).unwrap();
+    assert_eq!(openings, 1);
+    // No native input: the recorded opening supplies recency, including completed conversations.
+    std::fs::remove_file(codex.join("history.jsonl")).unwrap();
+    let result = resume(&["session", "resume"]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        std::fs::read_to_string(codex.join("opened")).unwrap(),
+        input_a
+    );
+    for selector in [&b, "native-b"] {
+        let result = resume(&["resume", selector]);
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(
+            std::fs::read_to_string(codex.join("opened")).unwrap(),
+            input_b
+        );
+    }
+    // An unavailable provider must not add another opening receipt.
+    std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+    let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
+    assert!(!resume(&["resume", &b]).status.success());
+    let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
+    assert_eq!(before, after);
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
+    use std::os::unix::fs::PermissionsExt;
+    for provider in ["claude", "codex"] {
+        let home = tempfile::tempdir().unwrap();
+        let native = home.path().join(provider);
+        let id = uuid::Uuid::new_v4().to_string();
+        let transcript = if provider == "codex" {
+            native
+                .join("sessions/2026/10/04")
+                .join(format!("rollout-2026-10-04T00-00-00-{id}.jsonl"))
+        } else {
+            native.join("projects/test").join(format!("{id}.jsonl"))
+        };
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(
+            &transcript,
+            serde_json::json!({"cwd":home.path()}).to_string(),
+        )
+        .unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let executable = bin.join(provider);
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
+        let resume = |args: &[&str]| {
+            command(home.path(), args)
+                .current_dir(home.path())
+                .env("PATH", &path)
+                .env("CODEX_HOME", home.path().join("codex"))
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .output()
+                .unwrap()
+        };
+        for args in [
+            vec!["resume", id.as_str()],
+            vec!["session", "resume", id.as_str()],
+        ] {
+            let output = resume(&args);
+            assert!(output.status.success(), "{provider}: {output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&id));
+        }
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT count(DISTINCT session_id) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // The same UUID in both providers must remain ambiguous, with no admission.
+        let ambiguous = uuid::Uuid::new_v4().to_string();
+        for relative in [
+            format!("claude/projects/test/{ambiguous}.jsonl"),
+            format!("codex/sessions/2026/10/04/rollout-time-{ambiguous}.jsonl"),
+        ] {
+            let file = home.path().join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "{}").unwrap();
+        }
+        let output = resume(&["resume", &ambiguous]);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("ambiguous"),
+            "{output:?}"
+        );
+        let count: i64 = db
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

@@ -151,6 +151,8 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 
 ```bash
 lf session list
+lf resume                         # last interactive Session in this worktree
+lf resume SESSION                 # Loopflow, Claude, or Codex ID
 lf session list --interactive false --history --json
 lf session connect SESSION
 lf session history SESSION --json
@@ -164,6 +166,11 @@ A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones. `--all` means all repositories.
+
+`lf resume` is short for `lf session resume`. It selects the latest human message
+in this worktree, falling back per Session to its last opening when native input
+history is unavailable. Assistant output and background work do not change that
+order. Use `lf flow resume` to resume a Flow.
 
 Ready saves feedback. Complete ends an Ask or review; a Flow's following decision
 chooses navigation. Closing a pane or exiting a provider does not complete a review.

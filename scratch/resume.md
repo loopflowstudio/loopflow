@@ -15,6 +15,7 @@ Placement unresolved: no Wave supplied. One PR, no follow-up Tasks.
 ## Findings and decisions
 
 - `lf resume --help` currently resolves to Flow resume. `lf/navigation.rs::resolve_child` drives normalization and help. Add one exact preferred root shorthand there before descendant ambiguity: `resume` → `session resume`. No root handler or generic routing registry; Flow resume remains explicit.
+- Implementation finding (2026-10-04): `owned_target` rejected completed conversations before driver admission. Opening now permits completed Conversation targets; all other operations and closed Flow reviews retain their completion checks. A completed conversation without saved native history still returns the existing connection error.
 - `ops/human_session/provider_conversation.rs::{recorded,admit}` already handles recorded and native Claude/Codex IDs, ambiguity, and account routing. Reuse it through `human_session::open`.
 - Inventory sorts by title and normally hides completed conversations. Add a separate resume candidate query; preserve list behavior. Scope by `cwd`, not repository identity, which is shared across worktrees.
 - Captured `user_input` includes injected prompts and steer receipts; Claude's mapper discards text echoes. SQL turn starts and generic activity cannot prove human input.
@@ -60,12 +61,14 @@ Replace examples/assertions using bare `lf resume` for Flow progression with `lf
 
 Forbidden: sibling selection, background Sessions winning, duplicate launch/resolution authority, synthetic input treated as human, passive inspection recording openings, or selection granting Flow authority.
 
-## Internal slices and acceptance
+## Remaining review and delivery
 
-1. **This slice:** candidate scope, timestamp readers, opening writer/projection. Extend provider-conversation and Session-store tests with synthetic files: human input beats later output; missing input uses opening time; synthetic records do not count; late reading preserves source time.
-2. Wire canonical command and shorthand through existing connection. Extend `session_cli_tests` using isolated stores/fake providers: full demo, native Claude/Codex admission, identity/account preservation, sibling/subdirectory/symlink scoping, completed conversations, review exclusion, no match, ambiguity, and launch failure. Verify canonical/shorthand help and explicit Flow resume.
-3. Update README and review for duplicated authority and unrelated history scans.
+Implementation covers the command/shorthand, recorded and native IDs, physical checkout selection, human-input readers, opening receipts, completed conversations and README guidance. No schema or DTO change. The simulated code review found the shared completed-Session rejection; opening now admits completed conversations while mutation/review checks remain intact. The existing launch fixture also needed its native observation keyed to its input so it exercises native resume.
 
-Gate: `cargo test -p loopflow --test session_cli_tests --test documented_commands`; `cargo test -p loopflow --lib`; `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings`. All pass headlessly. Implement runs its focused tests/build; gate owns broader verification once.
+Continue the authored pursue Flow through compress, refresh, decision and publication preparation, then stop at Jack Heart's human demo. Demo the A/B/current-worktree scenario above and native Claude/Codex IDs in real terminals. Jack's demo has not occurred. No publication or review completion has been performed by implementation.
 
-Check result: `lf resume --help` confirmed current Flow routing; local/upstream source inspection completed; no production edits or tests run.
+Limits: missing/unsupported native input evidence falls back per Session to opening time, then creation time for older Sessions without opening receipts. Completed conversations need saved native history. IDE dispatch and provider UI readiness have not been exercised in this headless environment; the opening boundary remains successful process/IDE handoff.
+
+Gate owns the broader acceptance commands: `cargo test -p loopflow --test session_cli_tests --test documented_commands`; `cargo test -p loopflow --lib`. Reuse unchanged formatting/Clippy results.
+
+Check result: focused resume CLI (4) and provider-conversation tests (6) pass; opening-projection (1) and existing review-boundary regressions (2) pass; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` pass. Broader suites remain with gate/publication preparation.

@@ -220,14 +220,14 @@ pub(crate) async fn activate(
 }
 
 /// A home's login, as its provider stores it.
-pub(super) fn read_login(provider: Provider, home: &Path) -> Option<Vec<u8>> {
+fn read_login(provider: Provider, home: &Path) -> Option<Vec<u8>> {
     match provider {
         Provider::Claude => claude_login(home).map(String::into_bytes),
         _ => fs::read(home.join("auth.json")).ok(),
     }
 }
 
-pub(super) fn write_login(
+fn write_login(
     provider: Provider,
     home: &Path,
     credential: &[u8],
@@ -241,26 +241,8 @@ pub(super) fn write_login(
         .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))
 }
 
-/// `home`'s login carrying `access_token` and no refresh token.
-pub(super) fn lendable_login(
-    provider: Provider,
-    home: &Path,
-    access_token: &str,
-) -> Option<String> {
-    let mut login: serde_json::Value = serde_json::from_slice(&read_login(provider, home)?).ok()?;
-    let (tokens, access, refresh) = match provider {
-        Provider::Claude => ("claudeAiOauth", "accessToken", "refreshToken"),
-        _ => ("tokens", "access_token", "refresh_token"),
-    };
-    let tokens = login.get_mut(tokens)?.as_object_mut()?;
-    tokens.insert(access.into(), access_token.into());
-    // Both providers read an empty refresh token as a login they cannot renew.
-    tokens.insert(refresh.into(), "".into());
-    Some(login.to_string())
-}
-
 /// Whether a stored profile holds a login worth installing.
-pub(super) fn has_login(provider: Provider, home: &Path) -> bool {
+fn has_login(provider: Provider, home: &Path) -> bool {
     match provider {
         Provider::Claude => claude_login(home).is_some(),
         _ => codex_identity_from_home(home).is_some(),

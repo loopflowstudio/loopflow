@@ -25,7 +25,7 @@ details{margin:22px 0}summary{cursor:pointer;color:#5a5a54;font-size:15px}
 </style></head><body><a class="skip" href="#map">Skip to review</a><main>
 <h1>One provider home, several stored logins</h1>
 <p>Loopflow conversations now live in Codex’s and Claude’s ordinary home, so the provider’s own CLI sees them. One command changes which stored account that home is signed in as. A Codex engine closes when the interface that owns it exits, unless another interface took the conversation over first.</p>
-<p class="meta">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1416">#1416</a> · base <code>a278d6bc1</code> · published head <code>a79921045</code>. The switch command’s new spelling, <code>lf account &lt;provider&gt; use &lt;email&gt;</code>, and the collapse of account routes to two kinds are unpublished working-tree changes and are marked where shown. Not built: moving running agents (“everyone now”).</p>
+<p class="meta">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1416">#1416</a> · base <code>a278d6bc1</code> · published head <code>a79921045</code>. The switch command’s new spelling, <code>lf account &lt;provider&gt; use &lt;email&gt;</code>, and the split of account routes into home and login are unpublished working-tree changes and are marked where shown. Not built: moving running agents (“everyone now”).</p>
 <nav aria-label="Sections"><a href="#map">Map</a><a href="#launch">1 Launch</a><a href="#switch">2 Switch</a><a href="#resume">3 Resume</a><a href="#exit">4 Exit</a><a href="#takeover">5 Takeover</a><a href="#open">Open decisions</a><a href="#evidence">Evidence</a></nav>
 
 <h2 id="map">What you do, and what happens</h2>
@@ -38,72 +38,83 @@ details{margin:22px 0}summary{cursor:pointer;color:#5a5a54;font-size:15px}
 </tbody></table>
 
 <h2 id="launch"><small>1</small>A launch names no home and no credential</h2>
-<p>A route is how one launch reaches one account, and there are two. <code>Shared</code> is new and the default. <code>Isolated</code> is the previous behavior, now reached with <code>--isolate</code>, <code>isolate: true</code>, replaying a recorded run, or an account lent over <code>lf ssh</code>. The published head still has four variants; collapsing them is an unpublished working-tree change.</p>
-<figure><figcaption><b>enum AccountRouteAuthority, enum AccountLedger</b> <span>rust/loopflow/src/provider_account.rs:153–182</span> · working tree, unpublished</figcaption><pre><code>/// The two ways a conversation reaches its account.
+<p>A route answers two independent questions about one launch. Where does the conversation run: <code>Shared</code>, new and the default, or <code>Isolated</code>, the previous behavior. And who holds the login: this machine, a recorded run being replayed, or the origin of an <code>lf ssh</code> session. The published head has one four-way enum; splitting it is an unpublished working-tree change.</p>
+<figure><figcaption><b>enum RouteHome, enum AccountLogin</b> <span>rust/loopflow/src/provider_account.rs:153–187</span> · working tree, unpublished</figcaption><pre><code>/// Where a conversation runs.
 #[derive(Clone)]
-enum AccountRouteAuthority {
-    /// The conversation runs in the account&#x27;s own home.
-    Isolated {
-        home: PathBuf,
-        ledger: AccountLedger,
-    },
-    /// The conversation runs in the provider&#x27;s native home, signed in as
-    /// this account. `home` is the stored profile.
+enum RouteHome {
+    /// In a home of the account&#x27;s own.
+    Isolated,
+    /// In the provider&#x27;s native home.
     Shared {
-        store: SharedStore,
-        home: PathBuf,
         cause: activation::SwitchCause,
         launched_at: i64,
     },
 }
 
-/// Whose account record an isolated route checks and reports to.
+/// Who holds the account&#x27;s login. Independent of [`RouteHome`]: a lent
+/// account runs shared or isolated like a stored one.
 #[derive(Clone)]
-enum AccountLedger {
-    /// This Home&#x27;s catalog.
-    Store(SharedStore),
-    /// A recorded Run&#x27;s catalog, read to check identity. Replay names the
-    /// account it requires and records nothing.
-    Replay(SharedStore),
-    /// The origin of an `lf ssh` session, which owns the account and lent
-    /// this home its login.
-    Origin(lease::AccountLeaseClient),
+enum AccountLogin {
+    /// A profile in this Home&#x27;s catalog. A shared launch signs the native
+    /// home in from it.
+    Stored {
+        store: SharedStore,
+        profile: PathBuf,
+    },
+    /// A profile in a recorded Run&#x27;s catalog, read to check identity. Replay
+    /// names the account it requires and records nothing.
+    Replayed {
+        catalog: SharedStore,
+        profile: PathBuf,
+    },
+    /// The origin of an `lf ssh` session owns the login and lends one access
+    /// token, which lives only in the provider&#x27;s environment.
+    Lent {
+        client: lease::AccountLeaseClient,
+        access_token: String,
+    },
 }</code></pre></figure>
-<figure><figcaption><b>ProviderAccountRoute::apply, launch_as</b> <span>rust/loopflow/src/provider_account.rs:434–475</span> · working tree, unpublished</figcaption><pre><code>fn apply(&amp;self, command: &amp;mut Command) {
-    if matches!(self.authority, AccountRouteAuthority::Shared { .. }) {
-        // A shared launch names neither a home nor a credential. Only a
-        // home inherited from an isolated parent is cleared, so the
-        // provider falls back to its native one.
-        for name in PROVIDER_CREDENTIAL_ENV_VARS {
-            let is_home = matches!(name, &quot;CODEX_HOME&quot; | &quot;CLAUDE_CONFIG_DIR&quot;);
-            let inherited_account_home = launch_env(command, name)
-                .is_some_and(|home| activation::is_account_home(Path::new(&amp;home)));
-            if !is_home || inherited_account_home {
-                command.env_remove(name);
-            }
-        }
-        return;
-    }
+<figure><figcaption><b>ProviderAccountRoute::apply, launch_as</b> <span>rust/loopflow/src/provider_account.rs:436–483</span> · working tree, unpublished</figcaption><pre><code>fn apply(&amp;self, command: &amp;mut Command) {
     for name in PROVIDER_CREDENTIAL_ENV_VARS {
-        command.env_remove(name);
-    }
-    if let AccountRouteAuthority::Isolated { home, .. } = &amp;self.authority {
-        if let Some(name) = activation::home_env(self.provider) {
-            command.env(name, home);
+        // A shared launch keeps the home its caller chose. A home inherited
+        // from an isolated parent is cleared, so the provider falls back to
+        // its native one.
+        let kept_home = matches!(self.home, RouteHome::Shared { .. })
+            &amp;&amp; matches!(name, &quot;CODEX_HOME&quot; | &quot;CLAUDE_CONFIG_DIR&quot;)
+            &amp;&amp; !launch_env(command, name)
+                .is_some_and(|home| activation::is_account_home(Path::new(&amp;home)));
+        if !kept_home {
+            command.env_remove(name);
         }
+    }
+    if let (RouteHome::Isolated, Some(name)) = (&amp;self.home, activation::home_env(self.provider))
+    {
+        command.env(name, self.account_home());
+    }
+    if let AccountLogin::Lent { access_token, .. } = &amp;self.login {
+        match self.provider {
+            Provider::Claude =&gt; command.env(&quot;CLAUDE_CODE_OAUTH_TOKEN&quot;, access_token),
+            _ =&gt; command.env(&quot;CODEX_ACCESS_TOKEN&quot;, access_token),
+        };
     }
 }
 
-/// The one place a launch takes on an account. An isolated or forwarded
-/// route configures `command`; a shared route signs the native home in as
-/// its account first, doing nothing when that account is already active.
+/// The one place a launch takes on an account. Every route configures
+/// `command`; a shared route on a stored login first signs the native home
+/// in as its account, doing nothing when that account is already active.
 /// Hold the returned lock until the child has spawned.
 pub(crate) async fn launch_as(
     &amp;self,
     command: &amp;mut Command,
 ) -&gt; Result&lt;Option&lt;fs::File&gt;, ProviderAccountError&gt; {
     self.apply(command);
-    let AccountRouteAuthority::Shared { store, cause, .. } = &amp;self.authority else {
+    if let (RouteHome::Isolated, AccountLogin::Lent { .. }) = (&amp;self.home, &amp;self.login) {
+        let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from(&quot;.&quot;));
+        ensure_account_home_at(&amp;operator_home, &amp;self.account_home(), self.provider)?;
+    }
+    let (RouteHome::Shared { cause, .. }, AccountLogin::Stored { store, .. }) =
+        (&amp;self.home, &amp;self.login)
+    else {
         return Ok(None);
     };
     let launch_home =
@@ -112,31 +123,7 @@ pub(crate) async fn launch_as(
     activation::activate(store, self.provider, &amp;self.account_id, &amp;native, *cause).await
 }</code></pre></figure>
 <p class="note">All five launch sites call <code>launch_as</code>. The returned lock is held until the child has spawned, so a concurrent switch cannot swap the login mid-launch. Nothing records the launch as a running shared agent; that record is what “everyone now” still needs.</p>
-<p>An account lent over <code>lf ssh</code> used to be a third way in: the target exported the origin’s access token as <code>CLAUDE_CODE_OAUTH_TOKEN</code> or <code>CODEX_ACCESS_TOKEN</code>. It is now an isolated home like any other. The origin sends the login with its refresh token blanked, and the target writes it into a home for that account.</p>
-<figure><figcaption><b>ProviderAccountRoute::forwarded</b> <span>rust/loopflow/src/provider_account.rs:304–326</span> · working tree, unpublished</figcaption><pre><code>/// An account home on this machine, signed in with a login its origin lent.
-pub(crate) fn forwarded(
-    client: lease::AccountLeaseClient,
-    provider: Provider,
-    resolution: &amp;lease::LeaseResolution,
-) -&gt; Result&lt;Self, ProviderAccountError&gt; {
-    let home = crate::store::lf_home_dir()
-        .join(&quot;accounts&quot;)
-        .join(provider.as_str())
-        .join(format!(&quot;forwarded-{}&quot;, resolution.account_id));
-    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from(&quot;.&quot;));
-    ensure_account_home_at(&amp;operator_home, &amp;home, provider)?;
-    activation::write_login(provider, &amp;home, resolution.login().as_bytes())?;
-    Ok(Self {
-        provider,
-        account_id: resolution.account_id.clone(),
-        resume_requested_session: resolution.resume_requested_session,
-        authority: AccountRouteAuthority::Isolated {
-            home,
-            ledger: AccountLedger::Origin(client),
-        },
-    })
-}</code></pre></figure>
-<p class="note">This changes what the SSH target holds. The token used to exist only in the environment; it is now a file under the target’s <code>~/.lf/accounts</code>, readable by that user until the token expires, and nothing removes it when the session ends. It cannot be renewed from the target. Both providers were probed with synthetic logins and accept an empty refresh token; no real SSH session was run.</p>
+<p class="note">A lent account runs shared or isolated like a stored one, and its token exists only in the provider’s environment: nothing is written to the SSH target. For Codex that variable is <code>CODEX_ACCESS_TOKEN</code>, which the code elsewhere records as the wrong credential type for a ChatGPT login. That is unchanged from the base and has never been exercised over a real SSH session.</p>
 <p class="note">No terminal transcript here: a real launch spends a real account. The Codex fixture ran it against a synthetic provider and observed that the engine received neither <code>CODEX_HOME</code> nor a credential variable, and that plain Codex listed and resumed the conversation. See <a href="#evidence">Evidence</a>.</p>
 
 <h2 id="switch"><small>2</small>Switching saves the old login before installing the new one</h2>
@@ -295,7 +282,7 @@ Error: managed codex login &#x27;nobody@example.com&#x27; does not exist
 
 <h2 id="resume"><small>3</small>Reopening follows how the conversation was started</h2>
 <p><code>recorded</code> is <code>Some(false)</code> for a shared conversation, <code>Some(true)</code> for an isolated one, and <code>None</code> for a new one, which takes the launch’s mode. Rows from before this change default to isolated, so old conversations open where they were captured.</p>
-<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:883–903</span> · working tree, unpublished</figcaption><pre><code>pub(crate) async fn resolve_provider_account_exact(
+<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:882–902</span> · working tree, unpublished</figcaption><pre><code>pub(crate) async fn resolve_provider_account_exact(
     provider: Provider,
     provider_session_id: Option&lt;&amp;str&gt;,
     exact_account_id: Option&lt;&amp;ProviderAccountId&gt;,
@@ -523,8 +510,9 @@ let connected = async {
 <table><thead><tr><th>Question</th><th>Where it stands</th></tr></thead><tbody>
 <tr><td data-label="Question">Moving running agents to the new account (“everyone now”)</td><td data-label="Where it stands">Not built; the switch log already allows <code>everyone_now</code>. Interrupting a turn moves sooner but risks a tool running twice; waiting for the turn to end delays the move. The research on what an interrupted session feels like has not been done.</td></tr>
 <tr><td data-label="Question">Should the other account verbs also put the provider first?</td><td data-label="Where it stands">Jack named <code>lf account codex use …</code>. The other four verbs were left as they are, so the namespace is currently mixed.</td></tr>
-<tr><td data-label="Question">A lent login left on the SSH target</td><td data-label="Where it stands">Written to disk and not removed at session end. Deleting it when the SSH session exits would break a second session to the same target that is using the same account. Not decided.</td></tr>
-<tr><td data-label="Question">SSH from an origin with no stored accounts</td><td data-label="Where it stands">Unchanged: <code>lf ssh</code> still exports the origin’s own token as an environment variable in that case. The plan drops environment tokens; this path still uses one.</td></tr>
+<tr><td data-label="Question">A switch while a Codex turn is in flight</td><td data-label="Where it stands">New finding. In 3 of 4 fixture runs today, a running Codex turn died with “application network permission was revoked” in the same second the switch rewrote <code>auth.json</code>. Three runs earlier in the day passed. So “a running Codex process keeps the login it started with” is not safe to rely on mid-request. One failing run was traced.</td></tr>
+<tr><td data-label="Question">A lent Codex account</td><td data-label="Where it stands">Gets an environment variable Codex probably does not accept for a ChatGPT login. The environment-only fix would be supplying the token to the Codex app-server over its protocol; not built. Writing a login file works but puts the token on the target’s disk, which Jack rejected.</td></tr>
+<tr><td data-label="Question">Resuming a lent isolated conversation</td><td data-label="Where it stands">The origin’s record of the conversation does not say whether it was shared or isolated, so a resume follows the launch’s mode and can look in the wrong home.</td></tr>
 <tr><td data-label="Question">A login Loopflow has never seen</td><td data-label="Where it stands">Kept as a new account marked <code>explicit_only</code>, as the transcript shows. An implementation choice awaiting confirmation.</td></tr>
 <tr><td data-label="Question">A Wave-level isolation default</td><td data-label="Where it stands">Repository and Home <code>isolate: true</code> work, with <code>--shared</code> to override. Whether a Wave needs its own is open.</td></tr>
 <tr><td data-label="Question">An isolated launch on the active account</td><td data-label="Where it stands">It runs on the stored copy of a login whose other copy is in the native home. If Codex rotates refresh tokens the two could invalidate each other. Unproven either way.</td></tr>
@@ -532,12 +520,12 @@ let connected = async {
 
 <h2 id="evidence">Evidence</h2>
 <table><thead><tr><th>Check</th><th>What it supports</th></tr></thead><tbody>
-<tr><td data-label="Check">Provider-account unit tests (50), <code>agent_tests</code>, <code>auth_tests</code>, rerun after the route collapse</td><td data-label="What it supports">All pass. The lease tests now assert that a forwarded route sets an account home holding a login with an empty refresh token, and exports no token.</td></tr>
-<tr><td data-label="Check">Codex shared-home fixture, rerun on this working tree, exit 0</td><td data-label="What it supports">Synthetic logins and a local provider. A Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
+<tr><td data-label="Check">Provider-account unit tests (50), <code>agent_tests</code>, <code>auth_tests</code>, rerun after the route collapse</td><td data-label="What it supports">All pass. The lease test asserts that a lent account runs shared with only a token in its environment, and isolated with a home that holds no login.</td></tr>
+<tr><td data-label="Check">Codex shared-home fixture, rerun on this working tree: intermittent</td><td data-label="What it supports">Passed 3 of 3 before the route split and 1 of 4 after. Every failure is the same step: the agent held mid-turn across a switch exits 1. The traced failure is Codex aborting the turn, described under open decisions. When it passes it shows, with synthetic logins and a local provider: a Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
 <tr><td data-label="Check">Transcripts above</td><td data-label="What it supports">Captured in this session from the working-tree binary. They exercise the switch command only, not a provider.</td></tr>
 <tr><td data-label="Check">Parse test for the new command spelling; <code>cargo clippy --all-targets -- -D warnings</code></td><td data-label="What it supports">Run in this session on the working tree; both pass.</td></tr>
 <tr><td data-label="Check">Public-connect fixture; Session, Exec and lifecycle tests; Claude fixture</td><td data-label="What it supports">Recorded as passing at <code>a79921045</code> or earlier. Not rerun here.</td></tr>
-<tr><td data-label="Check">Not verified</td><td data-label="What it supports">A real <code>lf ssh</code> session with a lent login, against either provider’s real service; rendered Desktop and terminal takeover; plain <code>claude --resume</code> of a Loopflow conversation and Claude IDs in <code>lf session</code>; the Claude fixture with the renamed command; closing during a tool with side effects.</td></tr>
+<tr><td data-label="Check">Not verified</td><td data-label="What it supports">A real <code>lf ssh</code> session with a lent account; rendered Desktop and terminal takeover; plain <code>claude --resume</code> of a Loopflow conversation and Claude IDs in <code>lf session</code>; the Claude fixture with the renamed command; closing during a tool with side effects.</td></tr>
 </tbody></table>
 <details><summary><code>lf account route --json</code> after the run above</summary><figure class="term"><figcaption>Same run. <code>active_account</code> is derived from the login in the provider’s home.</figcaption><pre><code><span class="cmd">$ lf account route --json</span>
 [

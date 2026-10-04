@@ -129,7 +129,7 @@ stored identity at a time, and launches there.
 |---|---|---|
 | Shared (default) | the provider's ordinary home | no home and no credential variable; inherited ones are removed, except a home the caller chose |
 | `--isolate` | the identity's own home | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
-| Forwarded over `lf ssh` | a home for that identity under the target's `~/.lf/accounts` | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
+| Forwarded over `lf ssh` | shared or isolated, as the target launch chooses; an isolated one runs in a home for that identity under the target's `~/.lf/accounts` | the leased access token, and the home when isolated; no login is written to disk |
 
 Switching the shared identity writes one login into the provider's own store:
 Codex's `auth.json`, replaced by atomic rename, or Claude's Keychain item on
@@ -155,7 +155,7 @@ account service.
 
 ### What crosses SSH for a subscription account
 
-`lf ssh` does not copy an account home, refresh token, browser profile,
+`lf ssh` does not copy an account home, refresh credential, browser profile,
 or database row. The origin runs a short-lived broker for the foreground SSH
 process:
 
@@ -166,19 +166,15 @@ process:
 3. When a provider launch chooses a forwarded account, the target asks the
    origin broker for that account.
 4. The origin refreshes only the selected credential when necessary and sends
-   that login without its refresh token through an SSH-forwarded, owner-only
-   socket.
-5. The target writes it, owner-only, into
-   `~/.lf/accounts/<provider>/forwarded-<identity>` and runs the selected
-   Claude or Codex child in that home, exactly as an `--isolate` launch.
+   one access token through an SSH-forwarded, owner-only socket.
+5. The target passes that access token to the selected Claude or Codex child.
 6. Health results and session pins return to the origin database that owns the
    identity.
 
-The access token really does enter the target, and it is written to disk
-there. It is not put in argv, the environment, logs, or a Loopflow database,
-and it cannot be renewed from the target. The file stays after the SSH session
-ends, usable until the token expires; the target `lf`, the provider child, and
-other code running as the same remote OS user can read it. Use a dedicated
+The access token really does enter the target's process boundary. It is not put
+in argv, logs, a remote account home, or a durable Loopflow store, but the
+target `lf`, the provider child, and other code running as the same remote OS
+user are inside the trust boundary while the broker lives. Use a dedicated
 user, container, or VM when same-user code should not receive that authority.
 
 The broker closes with the foreground SSH process. Its handle stops working,

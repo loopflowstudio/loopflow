@@ -23,7 +23,7 @@
 
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
 - A conversation started under A resumes under B across different workspaces or plans.
-- A login lent over `lf ssh` working against each provider's real service: only synthetic probes were run.
+- Whether a lent Codex account authenticates at all through `CODEX_ACCESS_TOKEN`; never exercised against a real `lf ssh` session.
 
 ## Assumptions made while building slice 2
 

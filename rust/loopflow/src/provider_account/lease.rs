@@ -492,8 +492,7 @@ enum BrokerOperation {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct LeaseResolution {
     pub(crate) account_id: ProviderAccountId,
-    /// The account's login without its refresh token.
-    login: String,
+    access_token: String,
     pub(crate) resume_requested_session: bool,
 }
 
@@ -509,14 +508,14 @@ impl std::fmt::Debug for LeaseResolution {
         formatter
             .debug_struct("LeaseResolution")
             .field("account_id", &self.account_id)
-            .field("login", &"[REDACTED]")
+            .field("access_token", &"[REDACTED]")
             .finish()
     }
 }
 
 impl LeaseResolution {
-    pub(crate) fn login(&self) -> &str {
-        &self.login
+    pub(crate) fn access_token(&self) -> &str {
+        &self.access_token
     }
 }
 
@@ -541,14 +540,14 @@ struct BrokerState {
 }
 
 impl BrokerState {
-    async fn login(
+    async fn access_token(
         &mut self,
         provider: Provider,
         account_id: &ProviderAccountId,
     ) -> Result<String, ProviderAccountError> {
         let key = (provider, account_id.clone());
-        if let Some(login) = self.prepared.credentials.get(&key) {
-            return Ok(login.clone());
+        if let Some(access_token) = self.prepared.credentials.get(&key) {
+            return Ok(access_token.clone());
         }
         let accounts = self
             .prepared
@@ -562,10 +561,12 @@ impl BrokerState {
                 provider,
                 accounts: format!("'{account_id}'"),
             })?;
-        match crate::provider_account::prepare_lendable_login(provider, account, &accounts).await {
-            Ok(login) => {
-                self.prepared.credentials.insert(key, login.clone());
-                Ok(login)
+        match crate::provider_account::prepare_account_access_token(provider, account, &accounts)
+            .await
+        {
+            Ok(access_token) => {
+                self.prepared.credentials.insert(key, access_token.clone());
+                Ok(access_token)
             }
             Err(error) => {
                 self.prepared.unavailable_credentials.insert(key);
@@ -684,11 +685,11 @@ impl BrokerState {
                     false,
                 )
             };
-            match self.login(provider, &selected).await {
-                Ok(login) => {
+            match self.access_token(provider, &selected).await {
+                Ok(access_token) => {
                     return Ok(LeaseResolution {
                         account_id: selected,
-                        login,
+                        access_token,
                         resume_requested_session,
                     });
                 }
@@ -712,7 +713,7 @@ impl BrokerState {
         provider_session_id: Option<&str>,
     ) -> Result<LeaseResolution, ProviderAccountError> {
         self.grant_contains(provider, account_id)?;
-        let login = self.login(provider, account_id).await?;
+        let access_token = self.access_token(provider, account_id).await?;
         let resume_requested_session = match provider_session_id {
             Some(session_id) => self
                 .prepared
@@ -726,7 +727,7 @@ impl BrokerState {
             .insert((provider, account_id.clone()));
         Ok(LeaseResolution {
             account_id: account_id.clone(),
-            login,
+            access_token,
             resume_requested_session,
         })
     }
@@ -1290,19 +1291,6 @@ mod tests {
         account.updated_at = 1;
         account
     }
-    /// A login as the origin lends it: an access token and no refresh token.
-    fn lent(provider: Provider, access_token: &str) -> String {
-        match provider {
-            Provider::Claude => serde_json::json!({"claudeAiOauth": {
-                "accessToken": access_token, "refreshToken": "",
-                "expiresAt": 4_102_444_800_000_i64, "scopes": ["user:inference"],
-            }}),
-            _ => serde_json::json!({"tokens": {
-                "access_token": access_token, "refresh_token": "", "id_token": "h.e30.s",
-            }}),
-        }
-        .to_string()
-    }
     fn selection_from(flag: &str) -> AccountSelection {
         AccountSelection::from_flags(&[flag.to_string()], &[]).unwrap()
     }
@@ -1597,11 +1585,11 @@ mod tests {
             credentials: HashMap::from([
                 (
                     (Provider::Claude, forwarded.account_id.clone()),
-                    lent(Provider::Claude, "forwarded-access-token"),
+                    "forwarded-access-token".to_string(),
                 ),
                 (
                     (Provider::Claude, shared.account_id.clone()),
-                    lent(Provider::Claude, "shared-access-token"),
+                    "shared-access-token".to_string(),
                 ),
             ]),
             unavailable_credentials: HashSet::new(),
@@ -1682,7 +1670,7 @@ mod tests {
             },
             credentials: HashMap::from([(
                 (Provider::Codex, forwarded_codex.account_id.clone()),
-                lent(Provider::Codex, "codex-access-token"),
+                "codex-access-token".to_string(),
             )]),
             unavailable_credentials: HashSet::new(),
             store: origin_store,
@@ -1750,10 +1738,7 @@ mod tests {
                 store.upsert_provider_account(&account).await.unwrap();
                 credentials.insert(
                     (grant.provider, account_id.clone()),
-                    lent(
-                        grant.provider,
-                        &format!("{}-{account_id}-secret", grant.provider),
-                    ),
+                    format!("{}-{account_id}-secret", grant.provider),
                 );
             }
         }
@@ -1943,21 +1928,40 @@ mod tests {
         let mut command = std::process::Command::new("claude");
         command.env("CODEX_ACCESS_TOKEN", "ambient-secret");
         route.apply(&mut command);
-        // The lent login is installed in an account home; no token is exported.
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "CLAUDE_CODE_OAUTH_TOKEN"
+                && value.is_some_and(|value| {
+                    let value = value.to_string_lossy();
+                    value.starts_with("claude-") && value.ends_with("-secret")
+                })
+        }));
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "CODEX_ACCESS_TOKEN" && value.is_none()));
+        // A lent account runs shared or isolated like a stored one. Either
+        // way its token stays in the environment and no login is written.
+        assert!(route.is_shared());
+        assert!(command
+            .get_envs()
+            .all(|(name, _)| name != "CLAUDE_CONFIG_DIR"));
+        let _isolation = RestoreEnv::capture("LF_ACCOUNT_ISOLATION");
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
+        let isolated = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut command = std::process::Command::new("claude");
+        isolated.launch_as(&mut command).await.unwrap();
         let home = command
             .get_envs()
             .find(|(name, _)| *name == "CLAUDE_CONFIG_DIR")
             .and_then(|(_, home)| home.map(PathBuf::from))
-            .expect("a forwarded route runs in its own home");
-        assert!(home.starts_with(temp.path().join("accounts/claude")));
-        let login = std::fs::read_to_string(home.join(".credentials.json")).unwrap();
-        assert!(login.contains("-secret") && login.contains(r#""refreshToken":"""#));
+            .unwrap();
+        assert!(home.starts_with(temp.path().join("accounts/claude")) && home.is_dir());
+        assert!(!home.join(".credentials.json").exists());
         assert!(command
             .get_envs()
-            .all(|(name, value)| name != "CLAUDE_CODE_OAUTH_TOKEN" || value.is_none()));
-        assert!(command
-            .get_envs()
-            .any(|(name, value)| name == "CODEX_ACCESS_TOKEN" && value.is_none()));
+            .any(|(name, value)| name == "CLAUDE_CODE_OAUTH_TOKEN" && value.is_some()));
         probe_forwarded_authority().unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, "malformed");
         assert!(probe_forwarded_authority().is_err());

@@ -5847,15 +5847,35 @@ mod tests {
     async fn restart_waits_for_review_launch_before_retiring_or_reading_owners() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let fixture = task_fixture("RESTART-LAUNCH").await;
-        let claimed = claim_stop_fixture_for(
-            &fixture,
-            999_999,
-            crate::durable::test_flow_invocation("review", 0, "demo", Some("review"), true),
-        )
-        .await;
         let flow = fixture
             .store
-            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .start_task_flow(
+                &fixture.task.id,
+                crate::durable::FlowSession {
+                    invocation: crate::durable::test_flow_invocation(
+                        "review",
+                        0,
+                        "demo",
+                        Some("review"),
+                        true,
+                    ),
+                    task_id: Some(fixture.task.id.clone()),
+                    wave_id: Some(fixture.task.wave_id.clone()),
+                    cwd: fixture.task.worktree.clone(),
+                    cursor: Default::default(),
+                    version: 0,
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    finished: false,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
             .await
             .unwrap();
         let flow = fixture

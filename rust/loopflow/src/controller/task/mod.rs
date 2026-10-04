@@ -1583,6 +1583,12 @@ mod planning_tests {
             step.id.as_deref(),
             true,
         );
+        let current = store.task_flow(&task.id).await.unwrap().unwrap();
+        store.sqlite.retire_task_review(&current).unwrap();
+        store
+            .sqlite
+            .review_execution_stopped(current.pending_session_id.as_ref().unwrap())
+            .unwrap();
         store
             .restart_task_flow(
                 &task,

@@ -48,5 +48,11 @@ Checks: `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkspaceNavigat
 
 ## Remaining work
 
-No remaining implementation within the authorized local repair. The change is
-unpublished. LOO-371's Task-opening performance work remains separate.
+Gate found no further implementation defects. Existing unchanged-code checks above
+are reused; architecture and Swift multiplatform boundary checks passed October 4.
+Publication, merge and supported Task-completion reconciliation remain.
+
+Read-only coordination confirmed LOO-371 owns direct opening and LOO-304 owns
+projection/refresh performance. Their plans preserve this filtering contract and
+require later integrated measurements; neither checkout was edited. This repair
+makes no latency or sustained-use claim.

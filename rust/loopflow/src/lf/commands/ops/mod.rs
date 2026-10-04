@@ -4,7 +4,7 @@ use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
-    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_with_default,
+    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
     sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
     WorktreeSegment,
@@ -1824,6 +1824,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { json, sync } => wt_list(*json, *sync),
+        WtCommand::Timing { json } => wt_timing(*json),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
@@ -1952,9 +1953,68 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn wt_timing(json: bool) -> Result<()> {
+    let report = crate::ops::wt_timing::report(&crate::store::lf_home_dir())?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    if report.groups.is_empty() {
+        println!("No `lf wt list` invocations recorded in {}", report.path);
+        return Ok(());
+    }
+    let seconds = |ms: u64| format!("{:.2}s", ms as f64 / 1000.0);
+    let phase = |spread: Option<crate::ops::wt_timing::Spread>| {
+        spread.map_or_else(
+            || "-".to_string(),
+            |spread| format!("{} / {}", seconds(spread.median), seconds(spread.p95)),
+        )
+    };
+    for group in &report.groups {
+        let mode = match (group.json, group.sync) {
+            (false, false) => "text",
+            (true, false) => "json",
+            (false, true) => "text --sync",
+            (true, true) => "json --sync",
+        };
+        println!("{}  lf {}  {mode}", group.repo, group.version);
+        println!(
+            "  samples {}   median {}   p95 {}   max {}",
+            group.samples,
+            seconds(group.total_ms.median),
+            seconds(group.total_ms.p95),
+            seconds(group.total_ms.max)
+        );
+        println!(
+            "  median / p95:  startup {}   local git {}   remote {}   receipts {}",
+            phase(Some(group.startup_ms)),
+            phase(group.local_git_ms),
+            phase(group.remote_ms),
+            phase(group.receipt_ms)
+        );
+        println!(
+            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}   receipts unrecorded {}",
+            group.failed,
+            group.interrupted,
+            group.remote_timed_out,
+            group.remote_unavailable,
+            group.receipts_unrecorded
+        );
+    }
+    println!(
+        "{} samples in {} (at most {} kept)",
+        report.samples, report.path, report.retained_limit
+    );
+    if report.unreadable > 0 {
+        println!("{} lines unreadable by this lf", report.unreadable);
+    }
+    Ok(())
+}
+
 fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
+    crate::ops::wt_timing::begin(&main_repo, json, sync);
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
     // self-owned mutation that fetches origin and integrates main first — a
@@ -1963,7 +2023,9 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
     if sync {
         crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
     }
-    let (default_branch, worktrees) = list_worktrees_with_default(&main_repo)?;
+    let listing = list_worktrees_timed(&main_repo)?;
+    crate::ops::wt_timing::listed(&listing);
+    let (default_branch, worktrees) = (listing.default_branch, listing.worktrees);
 
     if json {
         let json = serde_json::to_string_pretty(&worktrees)?;

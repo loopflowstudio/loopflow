@@ -140,6 +140,18 @@ lf wt prune --dry-run                  # show clean terminal or week-stale workt
 lf wt prune                            # remove those worktrees and their branches
 ```
 
+```bash
+lf wt timing                           # count, median, p95 and failures per lf version
+lf wt timing --json
+```
+
+Every `lf wt list` appends its durations to `~/.lf/perf/wt-list.jsonl`: total,
+startup (launch through the start receipt), local Git, the remote call, and the
+time spent writing Exec receipts to SQLite. Local Git and the remote overlap.
+Interrupted runs are recorded; a run killed outright is not. The file holds
+durations, counts, the repository root and the `lf` version, and never more
+than 1,000 samples.
+
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.

@@ -229,15 +229,17 @@ killed. Two separate causes, both measured on this branch; neither is shipped.
   timeout. The write is now timed on its own thread and store work leaves the
   worker first (`harness/dispatch.rs`). OpenCode's fenced HTTP post still holds
   the fence up to 10 s on its own client; that is bounded, not a cycle.
-- **Receipts still serialize a command behind SQLite contention.** A 3 s foreign
-  write lock added 3 s to a listing; a permanent one cost two 15 s waits and a
-  warned, unrecorded Exec. Unchanged in this slice. Timing read from Exec rows
-  would therefore lose exactly the slowest samples.
+- **An Exec waits once for a contended store, not once per receipt.** A held
+  write lock now costs one 15 s wait (17.4 s measured, was 33.2 s) and a warned,
+  unrecorded Exec; the start receipt still precedes the command, because a child
+  must find its parent's row. Timing therefore lives beside the store, in
+  `<Home>/perf/wt-list.jsonl`: Exec rows lose exactly the slowest samples.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
-  benchmarks; on-machine experience is post-merge validation. Completion needs
-  production timing of real invocations and a report command (count, median/p95,
-  failures, version). Not built; every number so far came from a staged run on
-  a host at load 30–90.
+  benchmarks; on-machine experience is post-merge validation. `lf wt timing`
+  reports count, median/p95, failures and version from real invocations. It has
+  no ordinary-use samples until a release carrying it is installed; staged
+  numbers came from a host at load 30–90. Reading it after install is what
+  remains before completion.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
   admission or completion** when its turn lacks a completion receipt (Jack
   authorized this in the same PR). Closure alone is not enough: live or unknown

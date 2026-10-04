@@ -1648,6 +1648,11 @@ pub enum WtCommand {
         #[arg(long)]
         sync: bool,
     },
+    /// Report how long `lf wt list` has taken on this machine
+    Timing {
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove clean terminal or inactive worktrees
     Prune {
         /// Show what would be pruned without removing anything

@@ -6,7 +6,7 @@ use crate::engine::git::{
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,16 +381,45 @@ const REMOTE_LIMIT: Duration = Duration::from_secs(10);
 /// per-worktree and per-branch commands on this many threads.
 const GIT_WORKERS: usize = 16;
 
-/// Run a remote command to completion or stop it at the limit. `None` means it
-/// failed, timed out, or could not start.
-fn remote_stdout(command: &mut Command, limit: Duration) -> Option<String> {
+/// Why a remote gave no usable answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteFailure {
+    /// It failed, could not start, or answered something unreadable.
+    Unavailable,
+    /// It was stopped at its limit.
+    TimedOut,
+}
+
+/// How remote enrichment ended for one listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RemoteOutcome {
+    /// No branch needed remote facts.
+    NotAsked,
+    Answered,
+    Unavailable,
+    TimedOut,
+}
+
+impl From<RemoteFailure> for RemoteOutcome {
+    fn from(failure: RemoteFailure) -> Self {
+        match failure {
+            RemoteFailure::Unavailable => Self::Unavailable,
+            RemoteFailure::TimedOut => Self::TimedOut,
+        }
+    }
+}
+
+/// Run a remote command to completion or stop it at the limit.
+fn remote_stdout(command: &mut Command, limit: Duration) -> Result<String, RemoteFailure> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
+        .map_err(|_| RemoteFailure::Unavailable)?;
+    let mut stdout = child.stdout.take().ok_or(RemoteFailure::Unavailable)?;
     let (sender, receiver) = std::sync::mpsc::channel();
     // A transport helper can outlive its stopped parent and keep the pipe
     // open, so the reader is never joined.
@@ -402,13 +431,14 @@ fn remote_stdout(command: &mut Command, limit: Duration) -> Option<String> {
     match receiver.recv_timeout(limit) {
         Ok(bytes) => child
             .wait()
-            .ok()?
-            .success()
-            .then(|| String::from_utf8_lossy(&bytes).to_string()),
+            .ok()
+            .filter(|status| status.success())
+            .map(|_| String::from_utf8_lossy(&bytes).to_string())
+            .ok_or(RemoteFailure::Unavailable),
         Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
-            None
+            Err(RemoteFailure::TimedOut)
         }
     }
 }
@@ -701,13 +731,13 @@ struct GithubBranches {
 
 /// Read every branch's PR state and existence in one GitHub call.
 ///
-/// `None` means GitHub was unavailable, so callers must not infer that a
+/// A failure means GitHub was unavailable, so callers must not infer that a
 /// stale branch has no open PR.
 fn github_branches(
     repo: &Path,
     (owner, name): (String, String),
     branches: &[String],
-) -> Option<GithubBranches> {
+) -> Result<GithubBranches, RemoteFailure> {
     let mut heads = branch_heads(repo);
     let branch_heads = branches
         .iter()
@@ -738,10 +768,13 @@ fn github_branches(
         REMOTE_LIMIT,
     )?;
 
-    Some(GithubBranches {
-        pull_requests: parse_pull_request_states(&stdout, &branch_heads)?,
-        existing: parse_existing_branches(&stdout, &branch_heads)?,
-    })
+    parse_pull_request_states(&stdout, &branch_heads)
+        .zip(parse_existing_branches(&stdout, &branch_heads))
+        .map(|(pull_requests, existing)| GithubBranches {
+            pull_requests,
+            existing,
+        })
+        .ok_or(RemoteFailure::Unavailable)
 }
 
 fn parse_existing_branches(
@@ -802,25 +835,24 @@ fn parse_pull_request_states(
 }
 
 /// List all remote branch names via a single `git ls-remote --heads origin` call.
-/// Returns an empty set on failure (offline, no remote, etc.).
-fn list_remote_branches(repo: &Path) -> HashSet<String> {
-    remote_stdout(
+fn list_remote_branches(repo: &Path) -> Result<HashSet<String>, RemoteFailure> {
+    let stdout = remote_stdout(
         Command::new("git")
             .arg("-C")
             .arg(repo)
             .env("GIT_TERMINAL_PROMPT", "0")
             .args(["ls-remote", "--heads", "origin"]),
         REMOTE_LIMIT,
-    )
-    .unwrap_or_default()
-    .lines()
-    .filter_map(|line| {
-        line.split('\t')
-            .nth(1)?
-            .strip_prefix("refs/heads/")
-            .map(|b| b.to_string())
-    })
-    .collect()
+    )?;
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            line.split('\t')
+                .nth(1)?
+                .strip_prefix("refs/heads/")
+                .map(|b| b.to_string())
+        })
+        .collect())
 }
 
 /// Worktree states from local Git alone. No network calls.
@@ -902,6 +934,7 @@ struct RemoteFacts {
     pull_requests: Option<HashMap<String, PullRequestState>>,
     /// Empty when the remote could not be read.
     branches: HashSet<String>,
+    outcome: RemoteOutcome,
 }
 
 /// Ask the remote which branches exist and what PR state their heads have.
@@ -924,28 +957,36 @@ fn remote_facts(
         return RemoteFacts {
             pull_requests: Some(HashMap::new()),
             branches: HashSet::new(),
+            outcome: RemoteOutcome::NotAsked,
         };
     }
     let Some(nwo) = github_repo_nwo(repo) else {
         // A non-GitHub remote has no GitHub PR state: known, and empty.
+        let listed = list_remote_branches(repo);
         return RemoteFacts {
             pull_requests: Some(HashMap::new()),
-            branches: list_remote_branches(repo),
+            outcome: listed
+                .as_ref()
+                .map_or_else(|failure| (*failure).into(), |_| RemoteOutcome::Answered),
+            branches: listed.unwrap_or_default(),
         };
     };
     match github_branches(repo, nwo, &branches) {
-        Some(mut github) => {
+        Ok(mut github) => {
             // The listing compares against the default branch's remote head,
             // so a set naming no worktree branch still means "all gone".
             github.existing.insert(default_branch.to_string());
             RemoteFacts {
                 pull_requests: Some(github.pull_requests),
                 branches: github.existing,
+                outcome: RemoteOutcome::Answered,
             }
         }
-        None => RemoteFacts {
+        // PR state stays unknown whatever the fallback learns about branches.
+        Err(failure) => RemoteFacts {
             pull_requests: None,
-            branches: list_remote_branches(repo),
+            branches: list_remote_branches(repo).unwrap_or_default(),
+            outcome: failure.into(),
         },
     }
 }
@@ -988,32 +1029,63 @@ fn apply_network_enrichment(
 /// callers use that to retain stale branches whose open-PR state could not be
 /// checked. A remote that fails or does not answer leaves `remote_gone` false
 /// and `pull_request` unknown; it never fails or stalls the local listing.
-fn list_worktrees_enriched(repo: &Path) -> Result<(String, Vec<WorktreeState>, bool), GitError> {
+fn list_worktrees_enriched(repo: &Path) -> Result<(Listing, bool), GitError> {
+    let started = Instant::now();
     let default_branch = get_default_branch(repo)?;
     let items = list_porcelain(repo)?;
-    let (remote, mut states) = thread::scope(|scope| {
-        let remote = scope.spawn(|| remote_facts(repo, &default_branch, &items));
-        let states = local_states(repo, &default_branch, items.clone());
-        (remote.join().expect("listing worker panicked"), states)
+    let ((remote, remote_time), mut worktrees, local_git) = thread::scope(|scope| {
+        let remote = scope.spawn(|| {
+            let asked = Instant::now();
+            (remote_facts(repo, &default_branch, &items), asked.elapsed())
+        });
+        let worktrees = local_states(repo, &default_branch, items.clone());
+        let local_git = started.elapsed();
+        (
+            remote.join().expect("listing worker panicked"),
+            worktrees,
+            local_git,
+        )
     });
     let pull_requests_known = remote.pull_requests.is_some();
     apply_network_enrichment(
-        &mut states,
+        &mut worktrees,
         &default_branch,
         &remote.pull_requests.unwrap_or_default(),
         &remote.branches,
     );
-    Ok((default_branch, states, pull_requests_known))
+    Ok((
+        Listing {
+            default_branch,
+            worktrees,
+            local_git,
+            remote: remote_time,
+            remote_outcome: remote.outcome,
+        },
+        pull_requests_known,
+    ))
+}
+
+/// Every worktree's state, and what reading it cost.
+#[derive(Debug)]
+pub struct Listing {
+    /// The branch every worktree was compared against.
+    pub default_branch: String,
+    pub worktrees: Vec<WorktreeState>,
+    /// Wall time of the local Git reads, which run beside the remote.
+    pub local_git: Duration,
+    /// Wall time until the remote answered, failed, or was stopped.
+    pub remote: Duration,
+    pub remote_outcome: RemoteOutcome,
 }
 
 /// Full worktree listing with all checks (local + network).
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
-    list_worktrees_enriched(repo).map(|(_, states, _)| states)
+    list_worktrees_timed(repo).map(|listing| listing.worktrees)
 }
 
-/// Full worktree listing and the default branch it was compared against.
-pub fn list_worktrees_with_default(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
-    list_worktrees_enriched(repo).map(|(default_branch, states, _)| (default_branch, states))
+/// Full worktree listing with its phase timings.
+pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
+    list_worktrees_enriched(repo).map(|(listing, _)| listing)
 }
 
 fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
@@ -1158,7 +1230,14 @@ pub fn prune_worktrees(
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
-    let (default_branch, states, pull_requests_known) = list_worktrees_enriched(repo)?;
+    let (
+        Listing {
+            default_branch,
+            worktrees: states,
+            ..
+        },
+        pull_requests_known,
+    ) = list_worktrees_enriched(repo)?;
     let mut report = WorktreePruneReport::default();
     let now = SystemTime::now();
 
@@ -1962,11 +2041,15 @@ mod tests {
             Command::new("sh").args(["-c", "sleep 30; echo late"]),
             Duration::from_millis(200),
         );
-        assert_eq!(answer, None);
+        assert_eq!(answer, Err(super::RemoteFailure::TimedOut));
         assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(
             remote_stdout(Command::new("echo").arg("answer"), Duration::from_secs(10)),
-            Some("answer\n".to_string())
+            Ok("answer\n".to_string())
+        );
+        assert_eq!(
+            remote_stdout(&mut Command::new("false"), Duration::from_secs(10)),
+            Err(super::RemoteFailure::Unavailable)
         );
     }
 

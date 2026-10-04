@@ -10,3 +10,16 @@
 - When GitHub answers, branch existence comes from GitHub instead of
   `git ls-remote`. Assumes `origin` and the GitHub repository are the same
   remote, which `github_repo_nwo` derives from `origin`'s URL.
+- Production timing is a bounded JSON-lines file at `<Home>/perf/wt-list.jsonl`,
+  not Exec rows and not the Desktop `studio.loopflow`/`perf` signposts. Exec
+  rows are lost under exactly the contention that makes a listing slow, and
+  signposts need Instruments to read. The sample stores the repository root
+  path; the brief allows paths within the repository.
+- "One receipt deadline per process" is implemented as one 15 s wait shared by
+  an Exec's receipts, not a wall-clock deadline from process start: a long
+  command would otherwise reach its finish receipt with no wait left.
+- The report command is `lf wt timing`, a sibling of `lf wt list`, rather than
+  a flag on the listing or a general `lf perf` surface with one instrument.
+- The Flow's final step lands with `-c`. Completion still needs ordinary-use
+  timing read after an installed release; landing this PR should keep the Task
+  open.

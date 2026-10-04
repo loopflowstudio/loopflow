@@ -6,6 +6,14 @@ uv run python scripts/benchmarks/wt-list/profile.py --lf target/release/lf --rep
 uv run python scripts/benchmarks/wt-list/profile.py --lf ~/.local/bin/lf --repo ~/src/loopflow --home main   # installed CLI, main Home
 ```
 
+```sh
+lf wt timing            # real invocations on this machine: count, median/p95, failures, version
+lf wt timing --json
+```
+
+`profile.py` stages runs and counts processes. `lf wt timing` reports what
+ordinary use measured; see [Production timing](#production-timing).
+
 Each sample is one default (read-only) listing. Git's trace2 stream counts and
 times every Git process; a shim times `gh`; `lf home id` on the same executable
 and Home gives the cost of process start, Exec admission and both ledger writes
@@ -80,18 +88,41 @@ is met for JSON (0.80 s) and missed for text (1.31 s).
 Measured on the candidate with a fresh Home and a second connection holding
 `BEGIN IMMEDIATE`:
 
-| Foreign write lock held | Listing wall | Exec receipt |
-|---|---|---|
-| 3 s | 4.65 s | recorded |
-| 40 s | 33.2 s | not recorded, warned once |
+| Foreign write lock held | Listing wall, one wait per receipt | Listing wall, one wait per Exec | Exec receipt |
+|---|---|---|---|
+| 3 s | 4.65 s | not remeasured | recorded |
+| 40 s | 33.2 s | 17.4 s (one run, debug build) | not recorded, warned once |
 
-The listing waits for its start receipt before doing any work and for its
-finish receipt after, each up to the 15 s busy timeout. That is unchanged. What
-changed is the holder: the demonstrated lock was a Codex dispatch that held
+The listing waits for its start receipt before doing any work. An Exec now
+waits at most 15 s for the store across both receipts: a start receipt that
+used the whole wait leaves the finish receipt one attempt, which lands the
+whole row if the lock has cleared. A lock held throughout still costs 15 s and
+leaves the Exec unrecorded with one warning; the timing sample is written
+beside the store and survives. The holder changed too: the demonstrated lock was a Codex dispatch that held
 SQLite's write lock while waiting on a runtime its own reader had stopped, with
 no working deadline. It now releases within 2 s of real time whatever the
 runtime is doing (`harness/dispatch.rs`, two regression tests that fail against
 the previous dispatch).
+
+### Production timing
+
+Each real `lf wt list` appends one line to `<Home>/perf/wt-list.jsonl`:
+
+| Field | Measures |
+|---|---|
+| `total_ms` | process entry to exit, after the finish receipt was attempted |
+| `startup_ms` | process entry until the listing began: routing, Exec admission, start receipt |
+| `listing.local_git_ms`, `listing.remote_ms` | wall time of each; they run side by side |
+| `listing.remote` | `answered`, `unavailable`, `timed_out` or `not_asked` |
+| `receipts.wait_ms`, `receipts.unrecorded` | time writing Exec receipts to SQLite, and how many did not land |
+| `outcome`, `version`, `repo`, `json`, `sync`, `at` | `succeeded`, `failed` or `interrupted`; grouping keys |
+
+The file is trimmed to its newest 500 lines when it reaches 1,000. It is
+appended under a file lock, never through SQLite, so a contended store cannot
+lose the slow sample. Text-mode diff stats are `total − startup − listing`.
+A process killed with SIGKILL leaves no sample; time before `main` is not
+measured. No numbers from ordinary use exist yet: the only samples so far are
+four runs in a disposable Home while building this.
 
 ### Limits of this evidence
 

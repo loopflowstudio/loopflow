@@ -835,10 +835,12 @@ no owning Task (LOO-375 owns `wt list` only).
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
 - The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing. Agent runs have no Aqua session, so first frame, p95,
-  stalls and CPU remain unmeasured; the 400/1000 ms targets are not established.
-- Still true from June: a listener or Home process never gates a read. The
-  per-poll reductions of that branch are in `06e3fc455:wave/product/MEMORY.md`.
+  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
+  CPU and the 400/1000 ms targets are unmeasured.
+- Jack's delivery contract (2026-10-04): land on autonomous checks and honest
+  benchmark evidence; rendered startup is post-merge validation, not a gate.
+  Still owed on LOO-376 after PR #1425: recorded timing of real launches and
+  refreshes with a documented report command. Not complete without it.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

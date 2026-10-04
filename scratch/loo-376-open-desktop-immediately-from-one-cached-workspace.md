@@ -63,6 +63,19 @@ Before this Task every launch waited on all of these: the window body waited on
 
 ## Remaining work
 
+Jack Heart's delivery contract (Linear comment, 2026-10-04): land after the
+available autonomous checks and honest benchmark evidence; rendered startup and
+a quiet-host benchmark are post-merge validation, not a gate. The Task is not
+complete until item 0 ships.
+
+0. **Production launch timing (owed, not in PR #1425).** Record each real
+   launch and refresh locally at low overhead: first frame, usable saved
+   workspace, fresh workspace, cache hit/miss, read durations, failures and
+   timeouts, app version. Reuse the `cold_start` / `workspace_current`
+   signposts in `Perf.swift`. One documented command reports sample counts and
+   median/p95 on this machine. Bounded retention; no secrets or conversation
+   text. Keep launch latency, in-process restoration and background freshness
+   as separate figures.
 1. **Rendered startup runner** (acceptance, blocked in headless runs): agent
    runs have no Aqua session (`launchctl managername` = Background), so a window
    cannot be launched. Still owed on a capable host: launch the built app with a

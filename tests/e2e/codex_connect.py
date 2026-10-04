@@ -5,6 +5,8 @@
 """Exercise a real Codex engine with credential-free local Responses and private Homes."""
 
 import argparse
+import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -217,7 +219,9 @@ def main() -> None:
     parser.add_argument("--flow-blocked", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--flow-driver-loss", choices=("running", "completed", "both"))
+    parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
+    args.launch = args.launch or args.shared_provider_home
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
     if not args.launch:
@@ -232,7 +236,10 @@ def main() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="lf-connect-", dir="/tmp") as directory:
             root = Path(directory)
-            home, work = root / "codex", root / "work"
+            # The shared-home proof uses the provider's default home: nothing
+            # may need a home override to find a Loopflow conversation.
+            home = root / (".codex" if args.shared_provider_home else "codex")
+            work = root / "work"
             home.mkdir()
             work.mkdir()
             (home / "config.toml").write_text(f"""model = "gpt-5.4"
@@ -254,6 +261,8 @@ enabled = false
             # Never inherit credentials, execution authority, or the real provider Home.
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(root), CODEX_HOME=str(home), LF_HOME=str(root / "lf"))
+            if args.shared_provider_home:
+                del env["CODEX_HOME"]
             if args.launch:
                 # Pin bytes: another contributor may build the source path while
                 # this private-Home proof is running.
@@ -284,8 +293,14 @@ enabled = false
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
                 )
                 try:
+                    if args.shared_provider_home:
+                        _shared_provider_home_contract(
+                            binary, args.codex, root, work, env, server, results
+                        )
+                        return
                     if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(binary, work, env, server)
+                        results["public_connect"] = _live_driver_contract(binary, work, env, server, shared_engine=True)
+                        results["owner_exit"] = _live_driver_contract(binary, work, env, server, shared_engine=False)
                         return
                     if args.flow_blocked:
                         _flow_blocked_contract(binary, work, env, server, results)
@@ -400,11 +415,25 @@ enabled = false
         print(json.dumps(results), flush=True)
 
 
+PROVIDER_ENV = ("CODEX_HOME", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY")
+
+
 def _terminate(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
 def _provider_entry() -> None:
+    if record := os.environ.get("LF_PROBE_LAUNCHES"):
+        # What a launch handed the provider. A terminal resume is recorded and
+        # not run: this proof is headless.
+        launch = {
+            "argv": sys.argv[1:],
+            **{name: os.environ.get(name) for name in PROVIDER_ENV},
+        }
+        with open(record, "a") as log:
+            log.write(json.dumps(launch) + "\n")
+        if "resume" in sys.argv and "--remote" not in sys.argv:
+            return
     if "app-server" in sys.argv:
         pid = os.getpid()
         stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
@@ -479,6 +508,7 @@ def _public_connection_contract(
     server: Responses,
     results: dict,
     headless: subprocess.Popen,
+    shared_engine: bool,
 ) -> None:
     session = results["session_id"]
     processes = []
@@ -535,10 +565,10 @@ def _public_connection_contract(
         engine = Client(Path(endpoint))
         inspectors.append(engine)
         engine.call("thread/resume", {"threadId": thread})
-        sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
-            "thread"
-        ]["id"]
-        engine.start_turn(sibling, "held sibling")
+        sibling = None
+        if shared_engine:
+            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})["thread"]["id"]
+            engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
             _connect(label)
@@ -586,10 +616,8 @@ def _public_connection_contract(
         assert (
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
-        assert (
-            engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-            == "active"
-        )
+        if sibling:
+            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
         # Explicit client replacement must use the same live-engine path as
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
@@ -621,10 +649,8 @@ def _public_connection_contract(
         assert (
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
-        assert (
-            engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-            == "active"
-        )
+        if sibling:
+            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
         with sqlite3.connect(_database(env)) as database:
             retained_connection = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
@@ -671,6 +697,20 @@ def _public_connection_contract(
         call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
         replay = _command(history_command, work, env, timeout=15)
         assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
+        if not shared_engine:
+            # Closing the current native UI releases the engine; obsolete UIs
+            # and the original headless driver's exit could not release it.
+            (controls[2] / "2.request").write_text(json.dumps({"method": "exit"}))
+            _, error = processes[2].communicate(timeout=15)
+            assert processes[2].returncode == 0, error.decode()
+            with sqlite3.connect(_database(env)) as database:
+                closed = database.execute(
+                    "SELECT provider_endpoint,provider_thread,driver_exec_id FROM agent_sessions WHERE id=?",
+                    (session,),
+                ).fetchone()
+            assert closed == (None, thread, None), closed
+            assert not Path(endpoint).exists() or not engine.reader.is_alive()
+            results["owner_exit_closed_engine"] = True
         results["history"] = history
         results["public_connect"] = dict(
             provider_generation=generation,
@@ -697,23 +737,29 @@ def _public_connection_contract(
                     child.wait(timeout=5)
 
 
-def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses) -> dict:
+def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
     with sqlite3.connect(_database(env)) as database:
         existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
     server.held.clear()
     server.release.clear()
+    log = tempfile.TemporaryFile(mode="w+t")
     child = subprocess.Popen(
-        [str(binary), "-b", "--model", "codex", ":", "held conversation"],
+        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=log,
         text=True,
     )
     try:
-        assert server.held.wait(15), "headless provider never reached held upstream"
+        if not server.held.wait(15):
+            child.terminate()
+            stdout, stderr = child.communicate(timeout=10)
+            log.seek(0)
+            raise AssertionError(f"headless provider never reached held upstream: {stdout}\n{log.read()}")
         with sqlite3.connect(_database(env)) as database:
             sessions = [
                 row[0]
@@ -722,7 +768,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             ]
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
-        _public_connection_contract(binary, work, env, server, result, headless=child)
+        _public_connection_contract(binary, work, env, server, result, headless=child, shared_engine=shared_engine)
         return result
     finally:
         server.release.set()
@@ -733,6 +779,315 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.communicate(timeout=5)
+        log.close()
+
+
+def _login(name: str, refresh: str = "issued") -> str:
+    claims = json.dumps({"email": f"{name}@example.com", "sub": name}).encode()
+    claims = base64.urlsafe_b64encode(claims).rstrip(b"=").decode()
+    tokens = {
+        "access_token": f"fixture-{name}",
+        "refresh_token": f"{refresh}-{name}",
+        "id_token": f"h.{claims}.s",
+    }
+    last_refresh = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return json.dumps({"tokens": tokens, "last_refresh": last_refresh})
+
+
+def _shared_provider_home_contract(
+    binary: Path,
+    codex: Path,
+    root: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+    results: dict,
+) -> None:
+    """Loopflow and plain Codex share one home, signed in as one stored account."""
+    _init_repo(work, env)
+    native = root / ".codex"
+    profiles = Path(env["LF_HOME"]) / "accounts" / "codex"
+    record = root / "launches.jsonl"
+    record.touch()
+    env["LF_PROBE_LAUNCHES"] = str(record)
+    server.command = "true"
+
+    def lf(*args: str, timeout: int = 90) -> str:
+        done = _command([str(binary), *args], work, env, timeout)
+        assert done.returncode == 0, (args, done.stdout, done.stderr)
+        return done.stdout
+
+    def use(name: str) -> None:
+        lf("account", "codex", "use", f"{name}@example.com")
+
+    def rows(query: str, *values: object) -> list[tuple]:
+        with sqlite3.connect(_database(env)) as database:
+            return database.execute(query, values).fetchall()
+
+    def login(home: Path) -> str:
+        token = json.loads((home / "auth.json").read_text())["tokens"]["id_token"]
+        claims = token.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))["email"]
+
+    def launches() -> list[dict]:
+        return [json.loads(line) for line in record.read_text().splitlines()]
+
+    def conversations() -> dict[str, str]:
+        """Provider conversation id → Session id, as Loopflow recorded them."""
+        return dict(
+            rows(
+                "SELECT json_extract(payload,'$.evidence.provider_session_id'),session_id "
+                "FROM session_events WHERE kind='observed' "
+                "AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL"
+            )
+        )
+
+    def rollout(home: Path, conversation: str) -> bool:
+        return any(home.glob(f"sessions/*/*/*/rollout-*-{conversation}.jsonl"))
+
+    def converse(*flags: str, prompt: str = "say hi") -> tuple[str, list[dict]]:
+        """Run one headless conversation; its provider id and engine launches."""
+        known, before = conversations(), len(launches())
+        lf(*flags, "--mode", "batch", "--model", "codex", ":", prompt)
+        started = [id for id in conversations() if id not in known]
+        assert len(started) == 1, started
+        engines = [launch for launch in launches()[before:] if "app-server" in launch["argv"]]
+        assert engines, "the conversation launched no provider engine"
+        return started[0], engines
+
+    def shared(engines: list[dict]) -> bool:
+        return all(launch[name] is None for launch in engines for name in PROVIDER_ENV)
+
+    def switches() -> int:
+        return rows("SELECT COUNT(*) FROM provider_account_switches")[0][0]
+
+    lf("session", "list", "--json")
+    now = int(time.time())
+    with sqlite3.connect(_database(env)) as database:
+        for name in ("first", "second"):
+            profile = profiles / name
+            profile.mkdir(parents=True)
+            (profile / "auth.json").write_text(_login(name))
+            database.execute(
+                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
+                "credential_state,routing_state,created_at,updated_at) "
+                "VALUES('codex',?,?,?,'connected','automatic',?,?)",
+                (name, str(profile), f"{name}@example.com", now, now),
+            )
+
+    # A native login Loopflow has never seen is kept, not overwritten.
+    stranger = _login("stranger")
+    (native / "auth.json").write_text(stranger)
+    use("first")
+    assert login(native) == "first@example.com"
+    kept = rows(
+        "SELECT home,routing_state FROM provider_accounts WHERE login_email=?",
+        "stranger@example.com",
+    )
+    assert len(kept) == 1 and kept[0][1] == "explicit_only", kept
+    assert (Path(kept[0][0]) / "auth.json").read_text() == stranger
+    results["unknown_native_login_kept"] = kept[0][0]
+
+    # A launch naming no account, or the active one, changes nothing; neither
+    # hands the provider a home or a credential.
+    credential, switched = (native / "auth.json").read_bytes(), switches()
+    ours, engines = converse()
+    assert shared(engines), engines
+    _, engines = converse("--account", "codex=first@example.com")
+    assert shared(engines), engines
+    assert (native / "auth.json").read_bytes() == credential and switches() == switched
+    assert rollout(native, ours), "the conversation is not in the provider's own home"
+    results["shared_conversation"] = ours
+
+    # A provider's id names the same Session as Loopflow's own.
+    def session(id: str) -> dict:
+        return json.loads(lf("session", "connect", id, "--json"))
+
+    def history(id: str) -> list:
+        return json.loads(lf("session", "history", id, "--json"))
+
+    assert history(ours) and history(ours) == history(conversations()[ours])
+
+    @contextlib.contextmanager
+    def plain_codex(home: Path | None = None):
+        """Codex as a person runs it: no Loopflow, and no home unless given."""
+        plain = {key: value for key, value in env.items() if not key.startswith("LF_")}
+        if home:
+            plain["CODEX_HOME"] = str(home)
+        endpoint = root / f"plain-{len(list(root.glob('plain-*.log')))}.sock"
+        with endpoint.with_suffix(".log").open("w") as log:
+            engine = subprocess.Popen(
+                [str(codex), "app-server", "--listen", f"unix://{endpoint}"],
+                cwd=work,
+                env=plain,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=log,
+                start_new_session=True,
+            )
+            client = None
+            try:
+                deadline = time.monotonic() + 10
+                while (
+                    not endpoint.exists() and engine.poll() is None and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                client = Client(endpoint)
+                yield client
+            finally:
+                if client:
+                    client.close()
+                os.killpg(engine.pid, signal.SIGTERM)
+                engine.wait(timeout=10)
+
+    def start(client: Client) -> str:
+        thread = client.call(
+            "thread/start",
+            {
+                "cwd": str(work),
+                "model": "gpt-5.4",
+                "modelProvider": "fixture",
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+            },
+        )["thread"]["id"]
+        client.wait_turn(client.start_turn(thread))
+        return thread
+
+    # Batch exit closes its engine: plain Codex can immediately list and
+    # resume the saved conversation without fixture cleanup.
+    with plain_codex() as client:
+        assert ours in json.dumps(client.call("thread/list", {}))
+        assert client.call("thread/resume", {"threadId": ours})["thread"]["id"] == ours
+        theirs = start(client)
+    assert rollout(native, theirs) and theirs not in conversations()
+    results["plain_codex_conversation"] = theirs
+
+    # The id plain Codex gave its own conversation admits a Session for it,
+    # attributed to no Task, and opens it in the native home.
+    def resumed(id: str) -> dict:
+        before = len(launches())
+        lf("session", "connect", id)
+        resumes = [launch for launch in launches()[before:] if "resume" in launch["argv"]]
+        assert len(resumes) == 1 and resumes[0]["argv"][-1] == id, resumes
+        return resumes[0]
+
+    admitted = session(theirs)
+    assert admitted["task_ids"] == [] and admitted["work"] is None, admitted
+    assert session(theirs)["id"] == admitted["id"] == session(admitted["id"])["id"]
+    assert history(theirs) == history(admitted["id"])
+    lf("session", "rename", theirs, "Plain", "conversation")
+    assert session(admitted["id"])["title"] == "Plain conversation"
+    assert shared([resumed(theirs)]) and login(native) == "first@example.com"
+    unknown = _command(
+        [str(binary), "session", "connect", ours[:-4] + "0000", "--json"], work, env, 30
+    )
+    assert unknown.returncode != 0 and "was not found" in unknown.stderr, unknown
+    results["provider_ids_name_sessions"] = [conversations()[ours], admitted["id"]]
+
+    # A → B → A: the token the provider rotated while A was active survives.
+    rotated = _login("first", refresh="rotated")
+    (native / "auth.json").write_text(rotated)
+    use("second")
+    assert login(native) == "second@example.com"
+    assert (profiles / "first" / "auth.json").read_text() == rotated
+    moved, engines = converse()
+    assert shared(engines) and rollout(native, moved)
+    use("first")
+    assert (native / "auth.json").read_text() == rotated
+    results["rotated_login_survived"] = True
+
+    # A switch leaves a running shared agent's engine alone, and Codex holds a
+    # login for the life of the process. Codex may still fail the turn in
+    # flight; the headless run resumes it.
+    server.held.clear()
+    server.release.clear()
+    known, before = conversations(), len(launches())
+    log = tempfile.TemporaryFile(mode="w+t")
+    running = subprocess.Popen(
+        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        stdin=subprocess.DEVNULL,
+        cwd=work,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=log,
+        text=True,
+    )
+    try:
+        if not server.held.wait(30):
+            running.terminate()
+            stdout, stderr = running.communicate(timeout=10)
+            log.seek(0)
+            raise AssertionError(f"the running agent never reached the provider: {stdout}\n{log.read()}")
+
+        def alive() -> set[int]:
+            pids = {
+                json.loads(record.read_text())[0]
+                for record in Path(env["LF_PROBE_ENGINES"]).glob("*.json")
+            }
+            return {
+                pid
+                for pid in pids
+                if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0
+            }
+
+        engines = alive()
+        assert engines, "the running agent has no engine"
+        live = [id for id in conversations() if id not in known]
+        assert len(live) == 1 and session(live[0])["id"] == conversations()[live[0]], live
+        use("second")
+        assert login(native) == "second@example.com"
+        assert alive() == engines, "an engine did not survive the switch"
+        server.release.set()
+        stdout, stderr = running.communicate(timeout=60)
+        log.seek(0)
+        assert running.returncode == 0, (stdout, log.read())
+    finally:
+        server.release.set()
+        if running.poll() is None:
+            running.kill()
+            running.communicate()
+        log.close()
+    assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
+    results["running_agent_survived_switch"] = True
+
+    # An isolated conversation runs in its account's own home and stays
+    # there across a switch, whether isolation came from the flag or config.
+    use("first")
+    home = str(profiles / "second")
+    pinned, engines = converse("--account", "codex=second@example.com", "--isolate")
+    assert {launch["CODEX_HOME"] for launch in engines} == {home}, engines
+    assert rollout(profiles / "second", pinned) and not rollout(native, pinned)
+    assert login(native) == "first@example.com"
+    config = work / ".lf" / "config.yaml"
+    config.parent.mkdir(exist_ok=True)
+    config.write_text("isolate: true\n")
+    standing, engines = converse("--account", "codex=second@example.com")
+    assert {launch["CODEX_HOME"] for launch in engines} == {home}, engines
+    assert rollout(profiles / "second", standing) and not rollout(native, standing)
+    # `--shared` overrides the standing default for one launch.
+    override, engines = converse("--shared")
+    assert shared(engines) and rollout(native, override)
+    config.unlink()
+
+    def isolated(conversation: str) -> bool:
+        recorded = rows(
+            "SELECT isolated FROM provider_session_accounts WHERE provider_session_id=?",
+            conversation,
+        )
+        return recorded == [(1,)]
+
+    assert isolated(pinned) and isolated(standing)
+    assert not isolated(override) and not isolated(moved)
+    # A conversation that lives in an account's home is opened there, under
+    # that account, whichever account the native home has moved to.
+    with plain_codex(profiles / "second") as client:
+        apart = start(client)
+    use("second")
+    use("first")
+    assert resumed(apart)["CODEX_HOME"] == home
+    assert login(native) == "first@example.com"
+    results["isolated_conversations"] = [pinned, standing, apart]
 
 
 def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):

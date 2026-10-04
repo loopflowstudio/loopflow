@@ -910,7 +910,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
-        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
+        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .envs(flow.invocation.isolation_env());
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         if let Some((id, fd)) = cli.cron_receipt.as_ref().zip(cli.cron_lock_fd) {
             command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
@@ -930,6 +931,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         let mut step_cli = cli.exec_options();
         step_cli.account.clear();
         step_cli.only_account.clear();
+        step_cli.isolate = false;
+        step_cli.shared = false;
         command.args(step_cli.step_args());
         command.args([
             "--__flow-step",

@@ -1541,23 +1541,82 @@ impl SqliteStore {
         provider: Provider,
         provider_session_id: &str,
         account_id: &ProviderAccountId,
+        isolated: bool,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at
-             ) VALUES (?1, ?2, ?3, ?4)
+                provider, provider_session_id, account_id, created_at, isolated
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
-                created_at = excluded.created_at",
+                created_at = excluded.created_at,
+                isolated = excluded.isolated",
             params![
                 provider.as_str(),
                 provider_session_id,
                 account_id.as_str(),
                 now_unix(),
+                isolated,
             ],
         )?;
         Ok(())
+    }
+
+    /// The home a recorded conversation lives in: its account's own
+    /// (`true`) or the provider's native one.
+    pub fn provider_session_isolated(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<Option<bool>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT isolated FROM provider_session_accounts
+                 WHERE provider = ?1 AND provider_session_id = ?2",
+                params![provider.as_str(), provider_session_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn record_provider_account_switch(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        cause: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_account_switches (
+                provider, account_id, switched_at, cause
+             ) VALUES (?1, ?2, ?3, ?4)",
+            params![provider.as_str(), account_id.as_str(), now_unix(), cause],
+        )?;
+        Ok(())
+    }
+
+    /// The account the provider's native home was last switched to at or
+    /// after `since`; `None` when it has not changed account since then.
+    pub fn provider_account_switched_since(
+        &self,
+        provider: Provider,
+        since: i64,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT account_id FROM provider_account_switches
+             WHERE provider = ?1 AND switched_at >= ?2
+             ORDER BY switched_at DESC, id DESC LIMIT 1",
+            params![provider.as_str(), since],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
     }
 
     pub fn provider_session_account(
@@ -1568,7 +1627,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT account_id FROM provider_session_accounts
-             WHERE provider = ?1 AND provider_session_id = ?2",
+             WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
             params![provider.as_str(), provider_session_id],
             |row| row.get::<_, String>(0),
         )
@@ -1602,7 +1661,7 @@ impl SqliteStore {
             Some(session_id) => transaction
                 .query_row(
                     "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2",
+                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
                     params![provider.as_str(), session_id],
                     |row| row.get::<_, String>(0),
                 )

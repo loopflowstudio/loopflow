@@ -1,0 +1,264 @@
+{
+  "window_start": 0,
+  "observed_at": 122500,
+  "obligations": [
+    {
+      "schema_version": 1,
+      "id": "fixture",
+      "repo": "/repo",
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "release-run",
+      "schedule": "0 0 10 * * *",
+      "timezone": "UTC",
+      "installation_activated_at": 0,
+      "activated_at": 0,
+      "observed_at": 0,
+      "closed_at": null,
+      "opportunities": [
+        {
+          "id": "opportunity_0",
+          "due_at": 36000,
+          "due_local": "1970-01-01T10:00:00+00:00",
+          "next_due_at": 122400,
+          "historical_timezone_unknown": false,
+          "coalesced_into": null,
+          "attempts": [
+            {
+              "receipt_id": "cron_11111111111111111111111111111111",
+              "started_at": 36000,
+              "finished_at": 36015,
+              "source": "scheduled",
+              "covered": [
+                "opportunity_0"
+              ],
+              "selection": {
+                "tag": "v1.2.3",
+                "commit": "abc",
+                "workflow_run_id": 42
+              },
+              "telemetry": {
+                "schedule": "0 0 9 * * *",
+                "timezone": "UTC",
+                "activated_at": 0,
+                "observed_at": 36000,
+                "original": [
+                  {
+                    "opportunity_id": "opportunity_0",
+                    "obligation_id": "telemetry-fixture",
+                    "due_at": 32400,
+                    "uncertainty": null,
+                    "receipts": [
+                      "cron_33333333333333333333333333333333"
+                    ]
+                  }
+                ],
+                "current_due_at": 32400,
+                "current_receipts": [
+                  "cron_33333333333333333333333333333333"
+                ],
+                "recovery_receipt": "cron_55555555555555555555555555555555"
+              },
+              "verification": [
+                {
+                  "name": "scheduled-telemetry",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/scheduled-telemetry.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "repository-verification",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/repository-verification.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "public-release",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/public-release.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "hosted-workflow",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/hosted-workflow.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "outcome": {
+                "status": "published",
+                "tag": "v1.2.3",
+                "commit": "abc",
+                "workflow_run_id": 42
+              },
+              "target": "default",
+              "replacement": null,
+              "execution_obligation": null
+            }
+          ],
+          "overlapping_receipts": [],
+          "interventions": [],
+          "wait": null
+        },
+        {
+          "id": "opportunity_1",
+          "due_at": 122400,
+          "due_local": "1970-01-02T10:00:00+00:00",
+          "next_due_at": 208800,
+          "historical_timezone_unknown": false,
+          "coalesced_into": null,
+          "attempts": [
+            {
+              "receipt_id": "cron_22222222222222222222222222222222",
+              "started_at": 122400,
+              "finished_at": 122415,
+              "source": "scheduled",
+              "covered": [
+                "opportunity_1"
+              ],
+              "selection": null,
+              "telemetry": null,
+              "verification": [
+                {
+                  "name": "scheduled-telemetry",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/scheduled-telemetry.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "repository-verification",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/repository-verification.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "public-release",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/public-release.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "hosted-workflow",
+                  "subject": "abc",
+                  "passed": true,
+                  "evidence_path": "/proof/hosted-workflow.json",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "outcome": {
+                "status": "no_change",
+                "previous_tag": "v1.2.3",
+                "origin_commit": "abc"
+              },
+              "target": "default",
+              "replacement": null,
+              "execution_obligation": null
+            }
+          ],
+          "overlapping_receipts": [],
+          "interventions": [],
+          "wait": null
+        }
+      ],
+      "replaces": null
+    },
+    {
+      "schema_version": 1,
+      "id": "telemetry-fixture",
+      "repo": "/repo",
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "telemetry-daily",
+      "schedule": "0 0 9 * * *",
+      "timezone": "UTC",
+      "installation_activated_at": 0,
+      "activated_at": 0,
+      "observed_at": 0,
+      "closed_at": null,
+      "replaces": null,
+      "opportunities": []
+    }
+  ],
+  "receipts": [
+    {
+      "schema_version": 1,
+      "id": "cron_33333333333333333333333333333333",
+      "runner_pid": 1,
+      "runner_started_at": null,
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "telemetry-daily",
+      "target_kind": "flow",
+      "source": "scheduled",
+      "schedule": "0 0 9 * * *",
+      "repo": "/repo",
+      "lf_path": "/bin/lf",
+      "log_path": "/log/telemetry",
+      "started_at": 32400,
+      "finished_at": 32401,
+      "outcome": "failed",
+      "exit_code": 1,
+      "error": "missing agent_turns"
+    },
+    {
+      "schema_version": 1,
+      "id": "cron_55555555555555555555555555555555",
+      "runner_pid": 1,
+      "runner_started_at": null,
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "telemetry-daily",
+      "target_kind": "flow",
+      "source": "recovery",
+      "schedule": "0 0 9 * * *",
+      "repo": "/repo",
+      "lf_path": "/bin/lf",
+      "log_path": "/log/telemetry",
+      "started_at": 36001,
+      "finished_at": 36002,
+      "outcome": "succeeded",
+      "exit_code": 0,
+      "error": null
+    }
+  ],
+  "dispositions": [
+    {
+      "subject": "cron_33333333333333333333333333333333",
+      "owner": "task_44444444444444444444444444444444",
+      "reason": "repair obsolete scorecard query",
+      "recorded_at": 118802
+    }
+  ],
+  "summary": {
+    "due": 2,
+    "accounted": 2,
+    "historical_timezone_unknown": 0,
+    "collapsed": 0,
+    "executions": 2,
+    "published": 1,
+    "no_change": 1,
+    "unresolved": 0,
+    "closed_unsettled": [],
+    "failed_verifications": 1,
+    "undispositioned_failures": [],
+    "late_dispositions": [
+      "cron_33333333333333333333333333333333"
+    ],
+    "qualifying_pairs": [
+      [
+        "opportunity_0",
+        "opportunity_1"
+      ]
+    ],
+    "on_time": 2,
+    "caught_up": 0
+  },
+  "observation_frontier": 0
+}

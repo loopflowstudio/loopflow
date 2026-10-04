@@ -139,6 +139,120 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
+        ReleaseCommand::History { wave, days, json } => {
+            let repo = crate::engine::worktrees::main_repo_root(&find_repo_root()?)?;
+            let now = chrono::Utc::now().timestamp();
+            let history = crate::ops::cron::history::release_history(
+                &crate::store::lf_home_dir(),
+                &repo,
+                wave,
+                *days,
+                now,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&history)?);
+            } else {
+                println!("{} due, {} accounted, {} collapsed, {} executions; {} published, {} no-change, {} unresolved",
+                    history.summary.due, history.summary.accounted, history.summary.collapsed,
+                    history.summary.executions, history.summary.published, history.summary.no_change,
+                    history.summary.unresolved);
+                println!("{} failed telemetry targets, {} undispositioned failures, {} late dispositions; {} qualifying consecutive pairs",
+                    history.summary.failed_verifications, history.summary.undispositioned_failures.len(),
+                    history.summary.late_dispositions.len(), history.summary.qualifying_pairs.len());
+                if history.observation_frontier.is_none() {
+                    println!("Opportunity coverage unknown: no retained release obligation; sync the configured cron to begin observation. Historical receipts below remain evidence.");
+                }
+                for obligation in &history.obligations {
+                    println!(
+                        "{}/{} on {} ({})",
+                        obligation.wave, obligation.flow, obligation.home_id, obligation.timezone
+                    );
+                    for owner in obligation.closed_unsettled() {
+                        println!(
+                            "blocked {}: obligation {} closed at {}; no future firing on original Home {}. Retained candidate: {}",
+                            owner.id,
+                            obligation.id,
+                            obligation.closed_at.expect("closed owner has a closure timestamp"),
+                            obligation.home_id,
+                            owner.attempts.iter().rev().find_map(|a| a.selection.as_ref())
+                                .map(|s| format!("{} at {}", s.tag, s.commit))
+                                .unwrap_or_else(|| "none recorded".into())
+                        );
+                        if let Some(disposition) = history
+                            .dispositions
+                            .iter()
+                            .rev()
+                            .find(|d| d.subject == owner.id)
+                        {
+                            println!(
+                                "  repair owner {} at {}: {}",
+                                disposition.owner, disposition.recorded_at, disposition.reason
+                            );
+                        }
+                        println!("  Record repair on that Home: lf cron disposition {} --wave {} --owner <task-work-id> --reason <repair-plan>", owner.id, obligation.wave);
+                    }
+                    for opportunity in obligation
+                        .opportunities
+                        .iter()
+                        .filter(|o| o.due_at >= history.window_start)
+                    {
+                        let owner = opportunity
+                            .coalesced_into
+                            .as_ref()
+                            .and_then(|id| {
+                                history
+                                    .obligations
+                                    .iter()
+                                    .flat_map(|r| &r.opportunities)
+                                    .find(|o| &o.id == id)
+                            })
+                            .unwrap_or(opportunity);
+                        println!(
+                            "{} {} {}{}",
+                            opportunity.id,
+                            opportunity.due_local,
+                            owner
+                                .attempts
+                                .last()
+                                .map(|a| format!("last attempt: {:?}", a.outcome))
+                                .or_else(|| owner.wait.as_ref().map(|wait| {
+                                    if obligation.closed_at.is_some() {
+                                        format!(
+                                            "last wait: {}; previously expected firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    } else {
+                                        format!(
+                                            "deferred: {}; next firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    }
+                                }))
+                                .unwrap_or_else(|| "pending; no execution recorded".into()),
+                            opportunity
+                                .coalesced_into
+                                .as_ref()
+                                .map(|id| format!(" (collapsed into {id})"))
+                                .unwrap_or_default()
+                        );
+                    }
+                }
+                for receipt in history
+                    .receipts
+                    .iter()
+                    .filter(|r| r.outcome == CronOutcome::Failed)
+                {
+                    println!(
+                        "failed {} {}: {}",
+                        receipt.id,
+                        receipt.flow,
+                        receipt.error.as_deref().unwrap_or("inspect cron log")
+                    );
+                }
+            }
+            Ok(())
+        }
+
         ReleaseCommand::Run { version, target } => {
             release_run_cmd(version.as_deref(), target.as_deref(), &progress)
         }
@@ -499,7 +613,7 @@ pub(crate) fn land_repo(
     // The wave home stays put on land — no rotation, no cd.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_sync(repo, options, progress)
+            finish_arm_after_sync(repo, options, progress, &|_| {})
         } else {
             arm(repo, options, progress)
         }
@@ -640,6 +754,7 @@ pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&s
             ..CommitOptions::for_task("commit")
         },
         &CliProgress,
+        &|_| {},
     )?;
     Ok(())
 }
@@ -1006,6 +1121,32 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
 pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
     let launch_agents_dir = crate::ops::default_launch_agents_dir()?;
     match cmd {
+        CronCommand::Disposition {
+            subject,
+            wave,
+            owner,
+            reason,
+        } => {
+            let owner = crate::durable::TaskId::parse(owner)?;
+            tokio::runtime::Runtime::new()?.block_on(async {
+                let store = crate::store::open_registry_for_authority()
+                    .await
+                    .map_err(cron_registry_error)?;
+                if store.get_task(&owner).await?.is_none() {
+                    return Err(anyhow!("repair owner {owner} is not a registered Task"));
+                }
+                Ok(())
+            })?;
+            crate::ops::cron::history::disposition(
+                &crate::store::lf_home_dir(),
+                wave,
+                subject,
+                owner,
+                reason,
+                chrono::Utc::now().timestamp(),
+            )?;
+            println!("recorded repair disposition for {subject}; original evidence retained");
+        }
         CronCommand::Add {
             wave,
             flow,
@@ -1225,7 +1366,17 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let root = crate::ops::receipt_root(&authority.host.lf_home);
             let prior = crate::ops::cron_receipt_ids(&root, wave, flow)?;
             let triggered_at = chrono::Utc::now().timestamp();
-            crate::ops::trigger_cron(&SystemLaunchctl, wave, flow)?;
+            let request = crate::ops::cron::record_cron_trigger(&launch_agents_dir, wave, flow)?;
+            if let Err(error) = crate::ops::trigger_cron(&SystemLaunchctl, wave, flow) {
+                crate::ops::cron::record_cron_trigger_failure(
+                    &launch_agents_dir,
+                    wave,
+                    flow,
+                    &request,
+                    &error.to_string(),
+                )?;
+                return Err(error.into());
+            }
             println!("triggered {wave}/{flow} through launchd");
             if *wait {
                 let receipt = crate::ops::wait_for_cron_receipt(
@@ -1398,6 +1549,12 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
                 )
             })?;
             let target_kind = cron_target_kind(&authority.repo, &cron.flow)?;
+            if target_kind != CronTargetKind::Flow {
+                return Err(anyhow!(
+                    "configured cron flow {} is missing; refusing to replace it with a skill",
+                    cron.flow
+                ));
+            }
             Ok(CronSpec {
                 wave: wave.to_string(),
                 flow: cron.flow,
@@ -1409,6 +1566,49 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod cron_catalog_tests {
+    use super::{cron_specs, CronAuthority};
+    use crate::durable::HomeId;
+    use crate::ops::{CronHost, CronTargetKind};
+    use std::fs;
+
+    #[test]
+    fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::write(
+            repo.path().join("wave/infrastructure/GOAL.md"),
+            "---\ncrons:\n- flow: release-run\n  schedule: '0 0 10 * * *'\n---\n",
+        )
+        .unwrap();
+        let flow = repo.path().join(".lf/flows/release-run.yaml");
+        fs::write(&flow, "- cmd: lf release run patch\n").unwrap();
+        let home = HomeId::new();
+        let authority = CronAuthority {
+            host: CronHost {
+                home_id: home.clone(),
+                lf_home: repo.path().join("home"),
+                path_env: "/usr/bin:/bin".into(),
+            },
+            local_home: home.clone(),
+            placed_home: home,
+            repo: repo.path().to_path_buf(),
+        };
+        let specs = cron_specs(&authority, "infrastructure").unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
+        fs::remove_file(&flow).unwrap();
+        assert!(cron_specs(&authority, "infrastructure")
+            .unwrap_err()
+            .to_string()
+            .contains("refusing to replace it with a skill"));
+        fs::write(flow, "[").unwrap();
+        assert!(cron_specs(&authority, "infrastructure").is_err());
+    }
 }
 
 fn require_release_cron_binary() -> Result<()> {
@@ -1434,6 +1634,8 @@ fn cron_receipt_outcome(receipt: &crate::ops::CronReceipt) -> &'static str {
 fn cron_source_name(source: CronSource) -> &'static str {
     match source {
         CronSource::Scheduled => "scheduled",
+        CronSource::Triggered => "triggered",
+        CronSource::Recovery => "recovery",
         CronSource::Manual => "manual",
     }
 }
@@ -1480,7 +1682,9 @@ fn release_run_cmd(
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
     match release_run(&repo_root, input, target_name, progress)? {
-        crate::ops::ReleaseRunOutcome::NoChanges { target, latest_tag } => {
+        crate::ops::ReleaseRunOutcome::NoChanges {
+            target, latest_tag, ..
+        } => {
             let latest = latest_tag.as_deref().unwrap_or("(none)");
             println!("No release ({target}): no merged PRs since {latest}");
         }

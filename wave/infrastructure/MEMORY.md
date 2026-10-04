@@ -1,5 +1,67 @@
 # infrastructure wave memory
 
+
+## Scheduled release accounting (LOO-285, source reconciliation October 2)
+
+Jack Heart retained one execution per wake for frozen missed dues. Completion
+still requires two adjacent original configured dues, two automatic executions,
+at least one artifact publication, required verification and no manual repair.
+Collapsed misses supply accounting coverage, never additional settlements.
+
+At `fe36937fa`, main's Session/Exec/Home/Flow and release recovery are integrated.
+Exact saved-candidate inspection permits replacement only with affirmative
+unpublished evidence, preserving rejected candidate/proof and original due owner.
+Unknown or partial publication blocks replacement. CI-repair children now retain
+release target and checkout ownership. Reported focused passes and merged source
+are not a full affected gate, configured publication or Task completion.
+
+Separate durable facts: physical cron exit, product settlement, publisher stages,
+public artifact proof and dated repair ownership. Assigning a closed opportunity
+an owner does not resume it. Same-Home continuation is implemented locally;
+old-Home authority is never transferred by attribution. Child-held mutation locks
+and exact checkout leases protect different scopes; cleanup must independently
+reacquire after dropping the parent's shared handle. Parent death and elapsed
+wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
+replace a held lock inode; explicit source selection avoids that failure class.
+
+`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
+across same-Home segments. Original ownership/provenance survives; firing segments
+own telemetry/retry, and Home changes break continuation. Synthetic tests cover
+interruption, late writers and recovery without republishing. `95643bd50` adds
+calendar/closure overlap continuation and retains old physical receipts. Save
+physical failure before accounting; an accounting error must not erase lock loss.
+Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
+public reconciliation retains target/checkout locks after controller death;
+retry preserves the failed cron receipt, candidate, coverage and caller bytes
+without republishing. Cron exit cannot establish orphaned verifier lock release.
+Candidate-ref/workflow lost acknowledgements, verifier materialization and
+post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
+review and configured settlements remain open.
+
+Release's September 28 incident proves entry points need operation-level recovery:
+an agent reported failure successfully, producing a misleading green cron receipt.
+Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
+at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
+without proving this accounting branch is installed or either qualifying outcome.
+Release-specific detail remains in [release memory](release/MEMORY.md).
+
+All 36 telemetry failures, including the original 35, remain dated counterevidence
+from September 24. The missing `agent_turns` diagnosis is historical: integrated
+scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
+regression proves Recovery cannot replace natural Scheduled evidence. No installed
+pass or accepted Intelligence handoff is established; reproduce current failure
+before commissioning duplicate analytics repair. Required UI/public proof and
+actual automatic settlement observations remain outstanding. The working plan
+owns remaining implementation; no production release, install, schedule change,
+Home transfer or review completion is authorized by local reconciliation.
+
+
+On October 4, Jack Heart waived the interactive demo and authorized landing
+PR #1419. This supersedes the earlier review requirement for this delivery;
+installed acceptance and the two automatic settlement observations remain
+unproved. The branch’s prior memory curation remains in Git history at
+`e2eccdd257f0f3e2cf34db7583f7309eb0084394:wave/infrastructure/MEMORY.md`.
+
 ## Operator acceptance and account direction (2026-10-04)
 
 Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine

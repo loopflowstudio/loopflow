@@ -124,13 +124,14 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
       - name: Run Rust tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: /usr/bin/time -v cargo nextest run --all --no-fail-fast
+        run: |
+          /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run --all --no-fail-fast
       - name: Prove checkout refresh through the CLI
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           # Integration tests above already build this executable.
           test -x "$PWD/target/debug/lf"
-          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v uv run pytest python/tests/test_checkout_refresh.py
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_checkout_refresh.py
 
   task-installation:
     needs: [merge-proof, scratch-clear]
@@ -167,8 +168,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - name: Run Python tests
-        run: uv run pytest python/tests/
+      - run: uv sync
+      - name: Run Python tests without external networking
+        run: uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 
   website-test:
     needs: [merge-proof, scratch-clear]
@@ -199,7 +201,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run E2E smoke test
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: /usr/bin/time -v tests/e2e/test_smoke.sh
+        run: |
+          cargo build -p loopflow --bins
+          /usr/bin/time -v uv run --no-sync python scripts/test_network.py tests/e2e/test_smoke.sh
 
   swift-test:
     needs: [merge-proof, scratch-clear]

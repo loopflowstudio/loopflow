@@ -46,6 +46,14 @@ requests for the same document do not repeat its contents; distinct memory files
 remain separate even when their text matches. IDE launches with Wave documents
 use the assembled prompt so those references reach the provider.
 
+Existing Task restart and continuation use valid cached planning regardless of age.
+Known invalidation, removal, terminal state or ownership changes still block.
+`lf task restart ISSUE` works without Linear; adding advice requires successful
+Linear publication before replacing the worker. Failed advice publication preserves
+the old Flow but may already have checkpointed local edits. Status retains the
+planning observation's original age.
+
+
 ## Connect planning and create work
 
 ```bash

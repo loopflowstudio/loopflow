@@ -454,12 +454,8 @@ async fn drive_loop(
                 .is_some_and(|managed| managed.id() == flow.id())
             {
                 let task = store.get_task(task_id).await?.context("Task disappeared")?;
-                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
-                    &store,
-                    &task,
-                    crate::ops::pm::PmRefresh::Auto,
-                )
-                .await
+                if let Err(error) =
+                    crate::ops::task::resolve_managed_task_planning(&store, &task).await
                 {
                     if owned_claim.is_some() {
                         store

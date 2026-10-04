@@ -923,7 +923,7 @@ pub enum TaskCommand {
         json: bool,
     },
     /// Stop the pinned Flow and begin a new one in a fresh Task worker;
-    /// defaults to the chapter's currently recommended Flow
+    /// uses valid cached planning, even offline. New advice requires Linear publication.
     Restart {
         issue: String,
         advice: Option<String>,

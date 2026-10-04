@@ -1137,14 +1137,12 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
     if let Some(cursor) = cursor {
         command.args(["-f", &format!("endCursor={cursor}")]);
     }
-    let output = command.current_dir(repo).output()?;
-    // gh api fails on GraphQL errors even when the response has partial data.
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh api graphql [PR #{number} checks]"),
-            stderr: stderr_from_output(&output),
-        });
-    }
+    let output = super::read_retry::retry_read("GitHub check page", || {
+        super::read_retry::bounded_output(
+            command.current_dir(repo),
+            std::time::Duration::from_secs(30),
+        )
+    })?;
     serde_json::from_slice(&output.stdout).map_err(|error| {
         OpsError::Parse(format!(
             "could not parse GitHub checks for PR #{number}: {error}"
@@ -2009,6 +2007,11 @@ mod tests {
                 &script,
                 r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *endCursor=*)
     cat "$fixture/second.json"
@@ -2041,6 +2044,22 @@ esac
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
             }
+        }
+    }
+
+    #[test]
+    fn check_page_recovers_502_without_accepting_a_changed_head() {
+        for head in ["head-1", "head-2"] {
+            let fixture = CheckFixture::new(
+                page(
+                    head,
+                    vec![run("test", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+                    None,
+                ),
+                page(head, vec![], None),
+            );
+            std::fs::write(fixture.directory.path().join("transient"), "").unwrap();
+            assert_eq!(fixture.read().unwrap().is_some(), head == "head-1");
         }
     }
 
@@ -2151,6 +2170,11 @@ esac
             fixture.directory.path().join("gh"),
             r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *--disable-auto*) rm "$fixture/armed" ;;
   *) if [ -f "$fixture/armed" ]; then cat "$fixture/first.json"; else cat "$fixture/second.json"; fi ;;
@@ -2205,7 +2229,7 @@ esac
             .read()
             .unwrap_err()
             .to_string()
-            .contains("GitHub unavailable"));
+            .contains("GitHub check page: read failed after 1 attempt"));
     }
 
     #[test]

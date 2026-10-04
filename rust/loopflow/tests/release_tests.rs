@@ -258,9 +258,6 @@ JSON
 {open}
 JSON
     fi
-        ;;
-      *)  echo 'false';  ;;
-    esac
     exit 0;;
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
@@ -742,6 +739,7 @@ fn release_check_returns_merged_prs() {
     fs::write(repo.path().join("feature.txt"), "new stuff\n").unwrap();
     git(&repo, &["add", "feature.txt"]);
     git(&repo, &["commit", "-m", "Add feature"]);
+    repo.push();
     let sha = git_output(&repo, &["rev-parse", "HEAD"]);
     let old_sha = git_output(&repo, &["rev-parse", "v0.9.0"]);
     let pr_list = format!(
@@ -767,6 +765,7 @@ fn release_check_uses_direct_commits_as_release_truth() {
     fs::write(repo.path().join("direct.txt"), "shipped without a PR\n").unwrap();
     git(&repo, &["add", "direct.txt"]);
     git(&repo, &["commit", "-m", "Ship a direct commit"]);
+    repo.push();
 
     let changes = release_check(repo.path(), None).expect("check should succeed");
 

@@ -1586,7 +1586,7 @@ mod cron_catalog_tests {
         )
         .unwrap();
         let flow = repo.path().join(".lf/flows/release-run.yaml");
-        fs::write(&flow, "- op: release run patch\n").unwrap();
+        fs::write(&flow, "- cmd: lf release run patch\n").unwrap();
         let home = HomeId::new();
         let authority = CronAuthority {
             host: CronHost {

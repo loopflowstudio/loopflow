@@ -110,7 +110,12 @@ impl Drop for MutationParent {
 fn wait_for(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !path.exists() {
-        assert!(Instant::now() < deadline, "waiting for {}", path.display());
+        assert!(
+            Instant::now() < deadline,
+            "waiting for {}\n{}",
+            path.display(),
+            fs::read_to_string(path.parent().unwrap().join("controller.log")).unwrap_or_default()
+        );
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -151,7 +156,7 @@ exit 0
 #[test]
 fn surviving_source_inspector_excludes_replacement_after_controller_death() {
     let state = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::new(&[("gh", "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'release view') exit 1;; esac\nexit 91\n")]);
+    let _env = EnvGuard::new(&[("gh", "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'release view') echo 'release not found' >&2; exit 1;; esac\nexit 91\n")]);
     let repo = TestRepo::new();
     repo.create_file(
         ".lf/config.yaml",
@@ -288,7 +293,7 @@ fn surviving_publisher_keeps_its_checkout_after_controller_exit() {
         ("publish", false),
     ] {
         let state = tempfile::tempdir().unwrap();
-        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list') printf '[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"headSha\":\"%s\",\"status\":\"completed\",\"conclusion\":\"success\"}]' \"$(git rev-parse v0.9.1)\";;\n'run download') exit 0;;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list') printf '[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"headSha\":\"%s\",\"status\":\"completed\",\"conclusion\":\"success\"}]' \"$(git rev-parse v0.9.1)\";;\n'run download') exit 0;;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n";
         let _env = EnvGuard::new(&[("gh", gh)]);
         let repo = TestRepo::new();
         fs::create_dir_all(repo.path().join(".lf")).unwrap();
@@ -308,7 +313,7 @@ if [ "$1" = '{stage}' ]; then
 fi
 case "$1" in
   check) exit 0;;
-  inspect) echo '{{"preparation_required":[],"publications":null}}';;
+  inspect) echo '{{"preparation_required":[],"publications":null}}'; exit 0;;
   prepare)
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --output ]; then
@@ -464,7 +469,7 @@ esac"#,
 case "$1 $2" in
   '--version ') exit 0;;
   'run list') echo '[]'; exit 0;;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
   'pr create') : > '{state}/created'; echo 'https://example.com/pr/1176'; exit 0;;
   'pr edit'|'pr ready') exit 0;;
   'pr list')
@@ -480,13 +485,19 @@ case "$1 $2" in
     echo '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null}}'
     exit 0;;
   'api graphql')
-    case "$*" in *LoopflowPrMerge*) echo '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}'; exit 0;; esac
-    if [ '{phase}' = disable ] && [ -f '{state}/queried' ]; then
-      echo true
-    else
-      echo false
-    fi
-    : > '{state}/queried'
+    head="$(git rev-parse HEAD)"
+    case "$*" in
+      *LoopflowPrChecks*)
+        cat <<JSON
+{checks}
+JSON
+        ;;
+      *)
+        cat <<JSON
+{merge_state}
+JSON
+        ;;
+    esac
     exit 0;;
   'pr merge')
     case " $* " in
@@ -500,6 +511,14 @@ esac
 exit 94
 "#,
             state = state.path().display(),
+            checks = support::github_checks_page("$head", &[]),
+            merge_state = support::github_merge_response(
+                1176,
+                "$head",
+                "OPEN",
+                if phase == "disable" { "DIRTY" } else { "CLEAN" },
+                (phase == "disable").then_some("auto"),
+            ),
         );
         let notes = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\n";
         // Replacement needs a remote PR before finalization now that release
@@ -510,6 +529,18 @@ exit 94
         );
         let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
         let repo = TestRepo::new();
+        if phase == "disable" && !preparing {
+            let pushed = Command::new("git")
+                .args([
+                    "push",
+                    "origin",
+                    "HEAD:refs/heads/jack/release-default-v0-9-1",
+                ])
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(pushed.status.success(), "{pushed:?}");
+        }
         let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
@@ -569,6 +600,7 @@ exit 94
 fn surviving_release_pr_mutation_retains_target_and_checkout() {
     for phase in ["create", "retarget", "edit", "ready"] {
         for kill_controller in [true, false] {
+            eprintln!("PR {phase}, killed controller: {kill_controller}");
             let state = tempfile::tempdir().unwrap();
             let mutation = blocking_mutation(
                 state.path(),
@@ -590,7 +622,7 @@ fn surviving_release_pr_mutation_retains_target_and_checkout() {
 case "$1 $2" in
   '--version ') exit 0;;
   'run list') echo '[]'; exit 0;;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
   'pr list')
     if [ ! -f '{state}/created' ]; then echo '[]'; exit 0; fi
     case " $* " in
@@ -598,7 +630,12 @@ case "$1 $2" in
       *) echo '[]';;
     esac
     exit 0;;
-  'api graphql') echo false; exit 0;;
+  'api graphql')
+    head="$(git rev-parse HEAD)"
+    cat <<JSON
+{merge_state}
+JSON
+    exit 0;;
   'pr create')
     operation=create
     value="$(git rev-parse HEAD)"
@@ -623,7 +660,8 @@ fi
 [ "$operation" != create ] || echo 'https://example.com/pr/1176'
 exit 0
 "#,
-                state = state.path().display()
+                state = state.path().display(),
+                merge_state = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", None),
             );
             let notes = format!("#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\nif [ '{phase}' = retarget ]; then : > '{}/created'; fi\n", state.path().display());
             let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
@@ -756,7 +794,7 @@ exec '{real_git}' "$@"
 "#,
                 state = state.path().display()
             );
-            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n";
             let notes = format!(
                 r#"#!/bin/sh
 cat > RELEASE_NOTES.md <<'EOF'
@@ -871,7 +909,7 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
         } else {
             format!("#!/bin/sh\n{launch} > '{state}/notes.log' 2>&1 &\necho $! > '{state}/notes.pid'\nwhile [ ! -f '{state}/ready' ]; do [ -d '{state}' ] || exit 1; sleep 0.02; done\nexit 1\n", state=state.path().display())
         };
-        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n";
         let _env = EnvGuard::with_home(
             &[("lf", &lf), ("codex", &provider), ("gh", gh)],
             Some(home.path()),
@@ -1000,7 +1038,7 @@ fn surviving_release_lockfile_tool_retains_target_and_checkout() {
                     state.path().display()
                 )
             };
-            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n";
             let _env = EnvGuard::new(&[(tool, &script), ("gh", gh)]);
             let repo = TestRepo::new();
             let (manifest, lockfile, content, args) = if tool == "cargo" {
@@ -1119,7 +1157,7 @@ fn surviving_release_hook_retains_target_and_checkout_ownership() {
         ("prepare", false),
     ] {
         let state = tempfile::tempdir().unwrap();
-        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n";
         let _env = EnvGuard::new(&[("gh", gh)]);
         let repo = TestRepo::new();
         fs::create_dir_all(repo.path().join(".lf")).unwrap();
@@ -1281,7 +1319,7 @@ exec '{real_git}' "$@"
 case "$1 $2" in
   '--version ') exit 0;;
   'run list') echo '[]';;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
   'pr list')
     case " $* " in
       *' --head '*)
@@ -1290,7 +1328,7 @@ case "$1 $2" in
         else echo '[]'; fi;;
       *) echo '[]';;
     esac;;
-  'api graphql') echo '{{"data":{{"repository":{{"pullRequest":{{"number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
+  'api graphql') echo '{{"data":{{"repository":{{"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
   *) exit 91;;
 esac
 "#,
@@ -1450,7 +1488,7 @@ fn source_creation_mismatch_preserves_surviving_hook_and_its_work() {
     let state = tempfile::tempdir().unwrap();
     let _env = EnvGuard::new(&[(
         "gh",
-        "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n",
+        "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') echo 'release not found' >&2; exit 1;;\n*) exit 91;;\nesac\n",
     )]);
     let repo = TestRepo::new();
     let git = |args: &[&str]| {
@@ -1580,7 +1618,7 @@ fi
 case "$1 $2" in
 '--version ') exit 0;;
 'run list'|'pr list') echo '[]'; exit 0;;
-'release view') exit 1;;
+'release view') echo 'release not found' >&2; exit 1;;
 'api graphql')
   case "$*" in
     *LoopflowPrMerge*)

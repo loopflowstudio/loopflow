@@ -902,7 +902,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
-        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
+        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .envs(flow.invocation.isolation_env());
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
     } else {

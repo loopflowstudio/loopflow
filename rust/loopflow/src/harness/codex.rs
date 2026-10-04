@@ -940,10 +940,9 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
         if self.session_driver.is_some() && self.thread_id().is_some() {
-            // A driver's lifetime is not its engine's. Detach even if this is
-            // still the driver: transfer may race teardown, and the engine may
-            // contain another active conversation. Explicit turn interruption
-            // goes through the fenced socket writer.
+            // Managed engines close when the invocation settles its driver, under
+            // the same ownership transaction as takeover. Harness teardown
+            // only drops this connection; a replaced driver cannot stop work.
             self.child.take();
             self.child_group.store(0, Ordering::Release);
             if let Some(directory) = self.engine_directory.take() {

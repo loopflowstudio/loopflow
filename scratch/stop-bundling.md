@@ -46,32 +46,36 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 runtime by default. If Desktop or `lf session` takes over the conversation, the
 old interface's exit must leave it running under its new owner. Jack also
 proposed closing after batch invocation exit and after interactive Flow steps
-whose exit advances the Flow. Exact lifecycle APIs and policies remain in design;
-no runtime teardown change has been implemented.
+whose exit advances the Flow. The close-on-exit path is now implemented; remaining limits and proof are below.
 
 The durable conversation, a provider turn, the current driver, and the engine
 have separate lifetimes. Closing the runtime preserves saved history; it does
 not by itself mean completing a Task or settling a Flow. A handoff transfers
 control of the same live conversation rather than completing it.
 
-**Proposed API consequence:** make ordinary close and ownership transfer the
-normal operations, using the existing Session driver generation to serialize
-their race. If transfer wins, the old driver's close cannot stop the new
-owner's work. If close wins, a later opener resumes saved history. Avoid a
-retention flag per surface or a second remembered owner. Names and exact
-transaction boundaries are proposals, not accepted implementation decisions.
+**Implementation:** `session_record::finish_session_driver` closes the recorded
+Codex app-server through a callback inside `SqliteStore::finish_session_driver`'s
+existing driver transaction. That same transaction records exit and clears the
+live endpoint, preserving thread identity. Transfer makes old-driver exit stale;
+if close wins, connect falls through to saved-history resume. Client replacement
+claims before stopping old clients. Batch completion, connected UI exit and
+cooperative interruption use this path; harness teardown only drops its connection.
+There is no surface-specific retention flag or second ownership record.
 
-**Still open:** whether an engine should serve more than one conversation and
-what product benefit justifies that ownership complexity; whether Codex can
-release one loaded thread without stopping sibling conversations; accidental
-disconnect/crash behavior; how closure during a turn preserves completed tool
-effects. Batch-to-interactive handoff must also preserve the new owner's work.
+**Limits:** engine shutdown checks native loaded threads and preserves separately
+started conversations with a close error; provider subagents belong to their
+parent's runtime. Shutdown verifies PID/start and group ownership, sends SIGTERM,
+then SIGKILL if needed. Shared-engine thread release remains unresolved. SIGKILL
+cannot run cleanup; existing recovery still handles a surviving engine. Rendered
+Desktop/TUI continuity and closing during a side-effecting tool remain unproven.
 
-**Next proof:** normal exit releases the writer and permits native resume;
-handoff followed by old-driver exit preserves the running conversation; a
-close/transfer race has one owner and a recoverable conversation. Distinguish
-provider-history resumability from Loopflow's current refusal to connect some
-completed Sessions. These checks are not yet run.
+**Proof:** the native shared-home fixture now resumes after batch exit without
+manual engine cleanup. The native public-connect fixture covers headless-to-UI
+handoff, stale-client write exclusion, replacement while a sibling runs, and
+current-owner UI exit closing a single-conversation engine. Clients are controlled
+protocol fixtures, not rendered Desktop/TUI. Store tests prove current-owner
+shutdown and stale-owner preservation. Provider-history resumability remains
+distinct from Loopflow's refusal to connect some completed Sessions.
 
 ## Risk findings
 
@@ -87,7 +91,7 @@ completed Sessions. These checks are not yet run.
 
 **The lock does not need a readiness signal.** The earlier worry was a second launch swapping the credential before a just-started process read it. Chosen instead: install the credential by atomic rename, and hold the lock across activate and spawn; at “from now on” either account is then a correct outcome for a concurrent launch, and no per-launch-site signal is required. Built that far. Holding it across recording the launch as a shared agent too, so a concurrent “everyone now” sees and resumes the new agent, waits on slice 3's record of running shared agents.
 
-**Plain Codex cannot resume a conversation whose Loopflow engine is still alive.** Observed with Codex 0.160.0 through `app-server` (`thread/resume` from a second process): “thread … already has an active writer”. Current managed teardown detaches and retains the engine once a thread exists, including after a finished headless run; it has no eventual idle cleanup policy. So the demo's second line holds for listing at once, and for resuming only after that engine is gone; while it lives, `lf session connect <native-id>` is the way in. Whether the Codex terminal `codex resume` is refused the same way was not exercised. The accepted ordinary-exit versus handoff distinction above still needs implementation.
+**Plain Codex cannot resume a conversation whose Loopflow engine is still alive.** Observed with Codex 0.160.0 through `app-server` (`thread/resume` from a second process): “thread … already has an active writer”. The base retained that engine after a finished headless run, blocking plain resume; while it lives, `lf session connect <native-id>` is the way in. Whether the Codex terminal `codex resume` is refused the same way was not exercised. Normal owner exit now closes the engine; transfer preserves it. The native fixture no longer manually stops finished batch engines before plain resume.
 
 **An isolated launch on the active account shares its token lineage.** Activation copies one login into the native home, so the native copy and the stored profile descend from the same refresh token. Probes now read the native home for the active account, but an `--isolate` launch on that same account still runs on the profile copy. If Codex rotates refresh tokens, the two can invalidate each other. Unproven either way; no live credential was exercised.
 
@@ -190,7 +194,7 @@ Gate, headless:
 
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: clean.
 - `cargo test -p loopflow provider_account` and `cargo test -p loopflow --test agent_tests --test auth_tests --test flow_tests`: pass.
-- `uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf --output <dir> --shared-provider-home`: exits 0. With temporary homes and the fixture's synthetic provider it shows: a Loopflow conversation listed and resumed by plain Codex with no home override, once Loopflow's engine for it has stopped; A → B → A with A's rotated refresh token intact in its profile; an unknown native login preserved as a new profile; a launch naming no account, or the active one, changing nothing; no shared launch setting a provider home or credential variable; “from now on” leaving a running shared agent's engine running; an `--isolate` launch and a launch under `isolate: true` each running in their account's own home and recorded as isolated, and a conversation living in an account's home reopening there after a switch; `--shared` under an isolated default running in the native home; and `lf session connect`, `history` and `rename` with a native ID reaching the same Session as its Loopflow ID, for a conversation Loopflow started and for one started by plain Codex.
+- `uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf --output <dir> --shared-provider-home`: exits 0. With temporary homes and the fixture's synthetic provider it shows: a Loopflow conversation listed and resumed by plain Codex with no home override, immediately after batch exit closes its engine; A → B → A with A's rotated refresh token intact in its profile; an unknown native login preserved as a new profile; a launch naming no account, or the active one, changing nothing; no shared launch setting a provider home or credential variable; “from now on” leaving a running shared agent's engine running; an `--isolate` launch and a launch under `isolate: true` each running in their account's own home and recorded as isolated, and a conversation living in an account's home reopening there after a switch; `--shared` under an isolated default running in the native home; and `lf session connect`, `history` and `rename` with a native ID reaching the same Session as its Loopflow ID, for a conversation Loopflow started and for one started by plain Codex.
 - Owed to slice 3: “everyone now” leaving a running shared agent on B with its native ID unchanged.
 - Not shown by the fixture: a Loopflow-started isolated conversation reopening in its home. A finished headless conversation's Session is complete and `connect` refuses it under either ID, and a terminal conversation cannot run headless. `isolated_launch_and_its_conversation_stay_in_the_account_home` covers that routing.
 
@@ -200,6 +204,10 @@ Gate, headless:
 Claude's Keychain path is macOS-only and the fixture uses it there, the file elsewhere; neither fixture runs in CI today.
 
 ## Evidence
+
+Check, owner exit: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean; Session event tests 12 passed, Exec ownership 11 passed/2 ignored, lifecycle 18 passed/1 ignored before stopping a Keychain-blocked fixture; the repaired fixture and captured-isolation retry then passed separately. Both native Codex fixtures (`--shared-provider-home`, `--launch --public-connect`) passed with synthetic credentials; rendered Desktop/TUI and Claude resume remain unverified.
+
+Review repair: direct Flow retry now forwards captured isolation. Its fixture simulates an empty Keychain and uses an isolated profile, avoiding a macOS prompt; the first retry exposed the missing propagation.
 
 Check, realign at `5ccba23fb`: named functions, tests, the five `launch_as` sites, both fixtures and the docs read against the tree — all present; nothing rerun, the tree is unchanged since the compress check below.
 
@@ -211,6 +219,6 @@ Check, at `46eaa2bd4` merged with `main` v0.12.31: `cargo test -p loopflow --lib
 
 Check: Codex credential probe with synthetic credentials in a temporary home (start under A, replace native with B, query auth status on the running and a fresh process) — running process kept A, fresh process took B, native file unchanged; no live credential read or changed.
 
-Observed while building the fixture: its `--public-connect` and Flow modes pass `-b`, which `lf` rejects (“unexpected argument '-b'”); those modes were not run and are not repaired here. `docs/lf-reference.md` was edited by hand: no command that emits the Clap catalog for `scripts/generate_cli_reference.py` was found.
+Public-connect now uses `--mode batch` and writes long-running command diagnostics to files so an undrained pipe cannot block startup. Its proof has been run. Older Flow fixture modes still pass the rejected `-b`; they remain outside this lifecycle proof. `docs/lf-reference.md` was edited by hand: no command that emits the Clap catalog for `scripts/generate_cli_reference.py` was found.
 
 Observed on Jack's machine, 2026-10-02: Codex access-token lifetime 240 hours (lifetime only); about 3,011 Codex rollouts and 315 Claude transcripts in per-account homes against 3,595 and 58 native. Retained but unused: Codex 0.160.0's schema includes external-token login and refresh; [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server); [Claude environment documentation](https://code.claude.com/docs/en/env-vars).

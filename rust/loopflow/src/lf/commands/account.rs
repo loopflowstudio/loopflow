@@ -174,7 +174,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
 }
 
 /// The only command that changes which account a provider's shared home is
-/// signed in as. Running shared agents keep their login until they restart.
+/// signed in as. Running Codex agents keep their login until they restart.
 async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;

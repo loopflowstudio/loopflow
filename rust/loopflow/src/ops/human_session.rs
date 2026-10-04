@@ -1205,19 +1205,26 @@ pub(crate) async fn open(
             };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-                if mode == OpenMode::Replace {
-                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-                }
             }
             if resume
                 && native.provider == "codex"
-                && connect_live_codex(store, session, &native.dir, &provider_session).await?
+                && connect_live_codex(
+                    store,
+                    session,
+                    &native.dir,
+                    &provider_session,
+                    mode == OpenMode::Replace,
+                )
+                .await?
             {
                 let session = store
                     .sqlite
                     .session(&session.id)?
                     .ok_or_else(|| session_not_found(&session.id))?;
                 return surface(store, &session).await;
+            }
+            if resume && mode == OpenMode::Replace {
+                native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
             }
             if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
                 require_session_action(
@@ -1287,14 +1294,16 @@ pub(crate) async fn open(
 }
 
 /// Connect to one existing provider thread. Native UI traffic crosses the same
-/// driver fence as the headless writer; closing the UI releases only its claim.
+/// driver fence as the headless writer; closing the current UI closes the runtime.
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
     session: &AgentSession,
     dir: &Path,
     provider: &crate::session_record::ProviderSessionRef,
+    replace_clients: bool,
 ) -> Result<bool> {
+    let expected = store.sqlite.session_driver(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
@@ -1315,16 +1324,29 @@ async fn connect_live_codex(
     }
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
-    let expected = store.sqlite.session_driver(&session.id)?;
-    let driver = store
-        .sqlite
-        .claim_session_driver(&session.id, expected.as_ref(), &exec, false)?;
+    let driver =
+        match store
+            .sqlite
+            .claim_session_driver(&session.id, expected.as_ref(), &exec, false)
+        {
+            Ok(driver) => driver,
+            Err(crate::store::StoreError::InvalidAuthority(_))
+                if store.sqlite.session_connection(&session.id)?.is_none() =>
+            {
+                // Close won the race. The ordinary open path resumes saved history.
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
     crate::session_record::register_session_driver_interrupt(
         &store.sqlite,
         session.id.clone(),
         driver.clone(),
     );
     let connected = async {
+        if replace_clients {
+            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+        }
         store.sqlite.make_session_interactive(&session.id, &driver)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
@@ -1363,10 +1385,12 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match store
-        .sqlite
-        .finish_session_driver(&session.id, &driver, "detached")
-    {
+    match crate::session_record::finish_session_driver(
+        &store.sqlite,
+        &session.id,
+        &driver,
+        "completed",
+    ) {
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
     }

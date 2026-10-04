@@ -315,7 +315,7 @@ pub(crate) fn resume_session_with_env(
         } else {
             "failed"
         };
-        match store.finish_session_driver(&session, &driver, outcome) {
+        match crate::session_record::finish_session_driver(&store, &session, &driver, outcome) {
             Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
             Err(error) => return Err(error.into()),
         }

@@ -217,13 +217,18 @@ Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
 Connect transfers the driver while retaining the live conversation. Client
-replacement stops only the exact owned clients; it leaves the engine and sibling
+replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
 conversations running. Flow retry can resume the recorded native conversation on
 a new engine after confirmed engine exit. Missing process evidence remains unknown.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 
-An exact driver exit writes a generation-fenced Session receipt. An observed
+An exact driver exit closes its Codex engine and writes a Session receipt under
+the same transaction as driver transfer. An old driver's exit cannot stop a
+transferred engine. Shutdown verifies the recorded PID/start and process group;
+an engine serving other loaded conversations is left running with a close error.
+Closing clears the live endpoint and retains the native thread ID and history.
+Native terminal providers own their own process exit. An observed
 normal or interrupted exit retires an unbound, non-primary conversation only
 when that driver owns its provider engine. Task/Wave conversations, primary
 Sessions, Asks and Flow reviews remain available. A stopped turn or missing

@@ -299,7 +299,8 @@ enabled = false
                         )
                         return
                     if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(binary, work, env, server)
+                        results["public_connect"] = _live_driver_contract(binary, work, env, server, shared_engine=True)
+                        results["owner_exit"] = _live_driver_contract(binary, work, env, server, shared_engine=False)
                         return
                     if args.flow_blocked:
                         _flow_blocked_contract(binary, work, env, server, results)
@@ -507,6 +508,7 @@ def _public_connection_contract(
     server: Responses,
     results: dict,
     headless: subprocess.Popen,
+    shared_engine: bool,
 ) -> None:
     session = results["session_id"]
     processes = []
@@ -563,10 +565,10 @@ def _public_connection_contract(
         engine = Client(Path(endpoint))
         inspectors.append(engine)
         engine.call("thread/resume", {"threadId": thread})
-        sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
-            "thread"
-        ]["id"]
-        engine.start_turn(sibling, "held sibling")
+        sibling = None
+        if shared_engine:
+            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})["thread"]["id"]
+            engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
             _connect(label)
@@ -614,10 +616,8 @@ def _public_connection_contract(
         assert (
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
-        assert (
-            engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-            == "active"
-        )
+        if sibling:
+            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
         # Explicit client replacement must use the same live-engine path as
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
@@ -649,10 +649,8 @@ def _public_connection_contract(
         assert (
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
-        assert (
-            engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-            == "active"
-        )
+        if sibling:
+            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
         with sqlite3.connect(_database(env)) as database:
             retained_connection = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
@@ -699,6 +697,20 @@ def _public_connection_contract(
         call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
         replay = _command(history_command, work, env, timeout=15)
         assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
+        if not shared_engine:
+            # Closing the current native UI releases the engine; obsolete UIs
+            # and the original headless driver's exit could not release it.
+            (controls[2] / "2.request").write_text(json.dumps({"method": "exit"}))
+            _, error = processes[2].communicate(timeout=15)
+            assert processes[2].returncode == 0, error.decode()
+            with sqlite3.connect(_database(env)) as database:
+                closed = database.execute(
+                    "SELECT provider_endpoint,provider_thread,driver_exec_id FROM agent_sessions WHERE id=?",
+                    (session,),
+                ).fetchone()
+            assert closed == (None, thread, None), closed
+            assert not Path(endpoint).exists() or not engine.reader.is_alive()
+            results["owner_exit_closed_engine"] = True
         results["history"] = history
         results["public_connect"] = dict(
             provider_generation=generation,
@@ -725,23 +737,29 @@ def _public_connection_contract(
                     child.wait(timeout=5)
 
 
-def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses) -> dict:
+def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
     with sqlite3.connect(_database(env)) as database:
         existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
     server.held.clear()
     server.release.clear()
+    log = tempfile.TemporaryFile(mode="w+t")
     child = subprocess.Popen(
-        [str(binary), "-b", "--model", "codex", ":", "held conversation"],
+        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=log,
         text=True,
     )
     try:
-        assert server.held.wait(15), "headless provider never reached held upstream"
+        if not server.held.wait(15):
+            child.terminate()
+            stdout, stderr = child.communicate(timeout=10)
+            log.seek(0)
+            raise AssertionError(f"headless provider never reached held upstream: {stdout}\n{log.read()}")
         with sqlite3.connect(_database(env)) as database:
             sessions = [
                 row[0]
@@ -750,7 +768,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             ]
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
-        _public_connection_contract(binary, work, env, server, result, headless=child)
+        _public_connection_contract(binary, work, env, server, result, headless=child, shared_engine=shared_engine)
         return result
     finally:
         server.release.set()
@@ -761,6 +779,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.communicate(timeout=5)
+        log.close()
 
 
 def _login(name: str, refresh: str = "issued") -> str:
@@ -935,11 +954,8 @@ def _shared_provider_home_contract(
         client.wait_turn(client.start_turn(thread))
         return thread
 
-    # Plain Codex, given no home, lists and resumes that conversation, and
-    # starts one of its own that Loopflow has not seen. Codex allows a
-    # conversation one writer, and Loopflow keeps a finished conversation's
-    # engine for reconnection, so that engine is stopped first.
-    _stop_fixture_engines(Path(env["LF_PROBE_ENGINES"]))
+    # Batch exit closes its engine: plain Codex can immediately list and
+    # resume the saved conversation without fixture cleanup.
     with plain_codex() as client:
         assert ours in json.dumps(client.call("thread/list", {}))
         assert client.call("thread/resume", {"threadId": ours})["thread"]["id"] == ours
@@ -986,16 +1002,22 @@ def _shared_provider_home_contract(
     server.held.clear()
     server.release.clear()
     known, before = conversations(), len(launches())
+    log = tempfile.TemporaryFile(mode="w+t")
     running = subprocess.Popen(
         [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=log,
         text=True,
     )
     try:
-        assert server.held.wait(30), "the running agent never reached the provider"
+        if not server.held.wait(30):
+            running.terminate()
+            stdout, stderr = running.communicate(timeout=10)
+            log.seek(0)
+            raise AssertionError(f"the running agent never reached the provider: {stdout}\n{log.read()}")
 
         def alive() -> set[int]:
             pids = {
@@ -1017,12 +1039,14 @@ def _shared_provider_home_contract(
         assert alive() == engines, "an engine did not survive the switch"
         server.release.set()
         stdout, stderr = running.communicate(timeout=60)
-        assert running.returncode == 0, (stdout, stderr)
+        log.seek(0)
+        assert running.returncode == 0, (stdout, log.read())
     finally:
         server.release.set()
         if running.poll() is None:
             running.kill()
             running.communicate()
+        log.close()
     assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
     results["running_agent_survived_from_now_on"] = True
 

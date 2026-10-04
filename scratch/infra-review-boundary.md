@@ -11,3 +11,5 @@ then set the infrastructure Project default to `code`, preserving its KRs and
 targets. No shared default should select the old code semantics prematurely.
 
 Checks: `cargo test -p loopflow --lib engine::flow` — 55 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed.
+
+Sync check: `cargo test -p loopflow --lib engine::flow_graph::tests` — 10 passed after merging main; review boundaries retained with current command names.

@@ -4,30 +4,33 @@ October 4, 2026 — Jack Heart requested kickoff only. These are review question
 not unanswered prerequisites for this headless planning run. Accepted direction and
 required deletion scope are in [the design](focus-on-your-own-work.md).
 
-1. **Review lifetime:** accept one ordinary sleeping Flow process at an interactive
-   boundary, with its cursor only in memory? Recommended. Crash loses continuation;
-   the caller inspects evidence and launches new work. Exiting every boundary would
-   instead require newly authored segments or a durable continuation mechanism.
-2. **Conversation delivery:** Claude stream-json is accepted, but current source
-   does not establish review input in the retained native composer. Is adapting
-   the existing conversation surface to that single owned driver acceptable if
-   the native TUI cannot support it? No second provider or PTY injection is proposed.
-   This is the material implementation/experience risk, not a request for SDK/hooks.
-3. **Feedback result:** accept ordinary actionable feedback yielding a structured
-   result in that same review turn, referencing Jack's actual input? Questions and
-   ambiguous feedback stay discussion; no ready, complete, finish button or second
-   acknowledgment. Baseline loop-decide consumes that result as its next input.
+1. **Segment API — selected direction:** Jack Heart requested run-until-human and
+   start-at-step APIs, resilient to deep nested loops and repeated skill names.
+   Sleeping runners and replacement composers are superseded. Exact spelling and
+   immutable position representation remain implementation proposals.
+2. **Entry semantics:** distinguish starting at a node from continuing after a
+   reviewed occurrence. Preserve captured branch and nested loop state; a skill
+   name alone cannot address either. Arbitrary entry must expose skipped work.
+3. **Feedback and duplicate launches:** define how the native conversation agent
+   supplies authored feedback with an exact boundary reference through ordinary lf.
+   Idempotent explicit launch receipts must prevent duplicate effects without
+   restoring worker claims or automatic recovery. No ready/complete handshake.
 4. **Waiting:** accept immediate provider yield/pending-input signals plus the
    proposed 120-second quiet/no-outstanding-tools fallback, with one Waiting label?
 5. **Legacy cutover and conversation lifecycle:** accept historical pending reviews
    retained as unresolved evidence with caller-owned recovery after a quiescent
    conversion? Removed Session Complete will also stop retiring ordinary
    conversations; process stop and Close view retain their distinct meanings.
-6. **Optional looping direction:** prefer retaining loop-decide, or direct authored
-   review-edge results with an autonomous decider retained for implementation loops?
-   The design recommends the latter as the clearest alternative, but no option is
-   accepted. Retain current templates until selected; this choice does not block
-   the accepted conversation, Flow, Waiting or API-deletion work.
+6. **Looping split — selected direction:** Jack Heart confirmed distinct
+   conversational review and autonomous decisions, and requested renaming the
+   autonomous loop-decide skill to loop-or-next. XORs and loops each support human
+   or autonomous decisions. The native Task Session interprets conversational human
+   choices and executes authored edges. Annotation syntax and segment feedback
+   representation remain draft; no separate approval handshake.
+7. **Loop syntax:** Jack confirmed the decider runs last after the body. An
+   explicit loop node with a backward pointer is preferred initially; top-declared
+   regions remain an alternative Jack is open to. Settle canonical YAML while
+   preserving shared return targets, nested occurrence identity and minimal naming.
 
 Routine proposals: preserve SQLite invocation/events as history, choose the existing
 Task conversation under the scope lock (sole existing conversation, otherwise most

@@ -1,8 +1,17 @@
 # Task conversation and ordinary background Flows
 
-October 4, 2026. LOO-353, Product. **Draft implementation plan for review-design.**
-Jack Heart accepted the interaction direction below and requested kickoff only.
-Mechanisms and timeout proposed here are not implementation approval.
+October 4, 2026. LOO-353, Product. **Design review finished and approved by
+Jack Heart.** Jack requested a further kickoff pass, then explicitly requested
+marking this review finished and approved. Approval covers the decisions in this
+conversation; the implementation plan below is being reconciled to the final cut.
+
+Final approved direction supersedes the earlier single-graph/segment proposal:
+a higher-level human workflow has conversation-stage nodes and edges labeled with
+operational Flows. The ongoing native Task conversation owns navigation without a
+shared playhead or review-settlement API. Operational Flows contain autonomous
+loops and XORs only; they cannot contain human workflows. Zero-human defaults name
+ordinary operational work. Autonomous loops end with a decider, named loop-or-next
+by default. Internal IDs never require duplicate authored id/name fields.
 
 ## Outcome and demo
 
@@ -11,15 +20,13 @@ Headless work appears separately as Runs. Returning to a Task preserves the same
 conversation, files, drafts, shells and layout; understanding background work does
 not require finding a privileged Flow or opening a new review conversation.
 
-Demo: in a Task conversation, launch `lf -b flow <template>`, then a second Flow.
-Both appear with the same graph, step, output and history affordances. Continue
-working in another Task. When the first reaches review, its pending review appears
-on the original conversation without stealing focus. Return, discuss the captured
-review skill in that conversation, and give actionable feedback in ordinary prose. Only its
-exact occurrence returns feedback to the next authored step. The other Flow and conversation
-remain open. Kill a background runner: its evidence remains, it does not restart,
-and the conversation can inspect the uncertainty before launching replacement work.
-These are proposed commands and behavior, not a claim of a working demo.
+Demo: in a native Task conversation, launch two ordinary background Flow segments.
+Each exits before its next human step and returns its exact review position and
+results. The same conversation handles one review and launches its next segment
+with Jack's feedback; the other stays pending. Continue through nested loops with
+repeated skill names without confusing occurrences. Terminal choice does not change
+this contract. A mid-segment crash retains evidence but never restarts automatically.
+This is proposed behavior, not a claim of a working demo.
 
 ## Accepted decisions
 
@@ -91,141 +98,157 @@ remote, file and performance proof survives; its old Ask and mutable switching
 requirements do not. PR #1313/tag `backup/file-browser-20260930` is historical
 web-prototype evidence, not a second file-editor implementation to restore.
 
-## Chosen architecture — proposal
+## Chosen architecture — revised during review
 
-### One live runner; SQLite retains observations
+### Caller-launched segments and exact positions
 
-Keep `FlowSession` as the immutable invocation header: ID, captured graph and
-source provenance, cwd/Home/Work, launch options, caller Session and owning Exec.
-The ordinary `lf flow` process owns `ExecutionCursor`, nested return counters,
-selected attempt and exact awaited review in memory. Every authored agent step
-launches ordinary headless work; mechanical steps remain Execs. A Flow containing
-only commands does not gain an artificial AgentSession. `-b` detaches this same
-runner; it does not select another executor.
+On October 4, Jack Heart clarified that Loopflow launches native provider terminals;
+Task Sessions also run in a preferred external terminal. Jack requested an API to
+run a Flow until its first human step, and to start at a human or other step. Jack
+then required resilience to deeply nested loops and repeated uses of a skill.
+These decisions replace the sleeping-runner and automatic native-input proposals.
+The detailed API below remains a proposal; implementation is not yet approved.
 
-Retain SQLite `flow_sessions` and `flow_events`, reshaped as history. Append started,
-step-started, consumed successful Session-event references, mechanical outcome,
-review-requested, feedback-consumed and terminal outcome evidence. Record node ID,
-full nested occurrence/return tuple, Exec and Session IDs, timestamps and sequence.
-Retain the captured graph even after the source changes or disappears. Existing
-Session events own provider output, input, usage and feedback; Flow events reference
-them rather than copying a second transcript. Last-observed position is a derived
-read model, never a restart instruction. Indexed summary columns may be updated
-transactionally with their event for cheap inventory reads, not independently.
+One captured FlowSession retains the resolved graph and history across explicit
+segment launches. Each segment is an ordinary lf process with its own Exec; no
+Task worker, privileged managed Flow, supervisor or automatic restart exists.
+The live process traverses the captured graph until just before a human step,
+returns a boundary result and exits. The native conversation agent reads that
+result, follows the captured review instructions with Jack, and explicitly invokes
+the next segment with the feedback. Neither Desktop nor a harness owns the native
+composer. No injected turn, second provider or new review conversation is needed.
+Ordinary background output inspection supplies results to a caller that detached.
 
-The runner retains the existing process/driver lock for its lifetime. Remove worker
-claim generations and takeover/reclaim; preserve Session driver/provider fencing,
-Exec process evidence and native client ownership. No API accepts an observation
-row as authority to move the cursor. Reads cannot start a driver. `flow resume`,
-Task retry/restart/switch and automatic resume branches leave the runtime surface.
-Stopping an exact process remains ordinary process control, not Flow editing.
+Proposed API semantics (command spelling remains open):
 
-History has no new automatic pruning policy. Page inventory and output through
-existing readers; load one selected Flow's capture/details on demand. Session IDs,
-effect receipts and historical step evidence survive Task completion and schema
-conversion. Retaining tables for observation is intentional; deleting all Flow
-storage would require rebuilding the graph and effect history elsewhere.
+- Run from the beginning or an exact selected position, stopping before the next
+  human step. Return done, failed, or a human boundary with preceding result
+  references, captured review instructions and an opaque position reference.
+- Starting **at** a human step returns that boundary without executing it. Starting
+  **after** that boundary supplies the conversational feedback and follows the
+  captured successor, following its selected authored edge. No Session-completion API.
+- Starting at another step explicitly selects an entry point; it does not assert
+  skipped work succeeded. A new entry must establish its enclosing branch and loop
+  context. Reusing an existing boundary preserves that exact context.
+- A skill label is display text, never an execution address. Resolve an authored
+  node ID or a captured structural address; ambiguous shorthand shows the matching
+  occurrences rather than choosing the first. Returned opaque references require
+  no manual reconstruction by the agent or Jack.
 
-### Review handoff: suspend the runner, use the same conversation
+### Minimal authored config; internal execution identity
 
-**Proposal for Jack:** keep the ordinary runner sleeping at the review boundary.
-No provider remains busy waiting solely for feedback. The runner retains its in-
-memory continuation until feedback or process exit; no recovery supervisor exists.
-This preserves one Flow identity and its authored nested loops across normal review.
+Jack Heart suggested an ID/name split while rejecting mandatory duplicated fields
+such as `id: mywave` and `name: mywave`. Keep the existing minimal Flow syntax:
+skill references and composition express the work. Capture assigns internal node
+keys automatically; execution addresses never require authors to write those keys.
+Repeated uses of the same skill remain legal without added labels.
 
-At launch, capture the interactive caller's Session as review recipient. When a
-Task Flow is launched outside an interactive Session, select that Task's primary.
-Explicit New conversation remains independent; a Flow launched there returns there.
-For taskless callers, use the calling conversation. Without a recipient, a Flow
-containing interactive nodes fails admission with a useful explanation before
-running effects; it does not invent a new review Session. Pure headless Flows need
-no recipient. Selection is pinned to the Session, never whichever pane is focused.
+Proposal: allow one optional authored name only when it helps a person reference
+or read a particular occurrence. Do not require an authored ID alongside it.
+The exact YAML spelling needs the broader config-minimality pass; this design does
+not add a second naming field. Display falls back to the skill/operation label.
+Name lookup resolves to captured identity and reports ambiguity with structural
+context. The returned continuation reference already identifies the exact occurrence,
+so ordinary continuation needs no name lookup or new config annotation.
+Generated identity is stable within the immutable capture, not promised across
+source edits or independent captures. A human-readable name is not a loop counter
+or a unique execution identity.
 
-At a human node:
+An exact position carries the captured invocation/graph identity, unique node key,
+full enclosing execution path and loop/return state, and boundary event identity.
+Every nested frame identifies its structural node/edge and its iteration, outermost
+first; branch choices and each backward edge's counters are retained. Depth is a
+sequence, not a fixed number of fields. The same node in a later outer iteration is
+therefore distinct even when an inner counter has reset. Attempts/segment Execs
+remain separate from logical occurrence identity.
 
-1. Append a review request referencing `(Flow ID, node ID, nested occurrence,
-   owning Exec)` and the exact captured skill/context. Link it to the recipient
-   Session's existing input/history owner. Do not run the review skill headlessly
-   first and then spawn an interactive replacement.
-2. The existing conversation driver takes this input at an idle turn boundary.
-   If busy, retain it for the next turn; preserve unsent composer text and never
-   paste into a PTY. Multiple reviews remain individually selectable in that same
-   conversation. Display availability immediately; availability is not completion.
-3. Run the captured design/review skill as a turn of that conversation, preserving
-   provider identity and prior conversation. Discussion can span multiple turns.
-   Conversation events carry exact review references; the Session row cannot
-   carry a singular `flow_session_id` as its complete participation model.
-4. Jack gives feedback in the conversation: for example, “Use the second layout;
-   keep the sidebar collapsed.” The review turn returns that feedback as its
-   ordinary structured skill result when it answers the captured review, with
-   references to the actual authored input events. Extend the existing
-   `engine/flow_output.rs::FlowOutput` contract with a review-feedback value:
-   exact request/occurrence, source input event IDs, summary and artifact paths.
-   The driver binds the request from the captured turn context, not model-supplied
-   routing. Save the result in the existing successful Session output/completion
-   events; the Flow consumes that exact event. There is no ready state, second
-   confirmation, completion tool call or Complete button. Ordinary questions and
-   unfinished discussion produce ordinary replies with no boundary result.
-   An ambiguous “yes” with two unselected reviews remains discussion; the agent
-   clarifies inside the same conversation rather than choosing a Flow. Identical
-   event replay is idempotent; stale or mismatched results cannot answer a later
-   occurrence. Missing source feedback cannot be synthesized as Jack's approval.
-5. The sleeping runner consumes that reference once and advances to the next
-   authored step. In the required baseline, a following `loop-decide` still chooses
-   Advance/Iterate from this exact feedback. Its interpretation cannot invent
-   authorization or replace an unresolved question with approval.
-   Consuming review feedback neither completes the Task conversation nor rewrites
-   the Flow. A provider turn ending without a valid boundary result, Waiting,
-   pane close and silence cannot do this.
+Reuse the engine's captured traversal and graph keys rather than a second path
+parser in Desktop. `engine/flow_graph.rs` already distinguishes captured preorder
+keys from labels and includes XOR alternatives. Verify the existing execution
+cursor contains all state needed to reconstruct the exact successor; graph key
+plus a scalar iteration is insufficient. Composed copies of the same Flow and
+repeated skills must retain separate keys. Source edits never reinterpret an old
+reference. Pretty labels may show the path and iterations, but callers pass the
+opaque reference back unchanged.
 
-Feedback delivery is narrow input to a live authored boundary, not mutable Flow
-control. It cannot skip nodes, change a graph, retry effects or resume a dead runner.
-This reuses the existing successful-step output mechanism, not a new callable
-feedback API. A review result carries criticism/direction as well as acceptance;
-the next authored decider owns navigation. Where navigation needs permission,
-the original authored feedback must supply it. Mere readiness grants none.
-The runner can wait on the existing store/read notification path; a bounded one-
-second fallback poll reads only its exact request, without provider calls. There
-is no daemon and no per-Flow automatic relaunch job.
+This explicitly retains a serialized continuation at clean human boundaries.
+The earlier blanket rejection of saved positions is superseded by Jack's segment
+API direction. It does not retain the Task-worker controller: nothing observes
+that position and launches work automatically, and it cannot mutate a running
+segment. No special mutable Task pointer or worker claim/lease is retained.
 
-**Integration work, not an existing capability:** `serve_conversation` still
-launches a native conversation; headless harness `send_input` alone does not prove
-native input delivery. Add pending review input to the existing Session event/input
-owner and drain it only through that Session’s authoritative driver. Store append, delivery
-receipt and provider acknowledgment must be correlated. On uncertain delivery,
-retain uncertainty and inspect provider history before retransmission. A second
-Harness, native keystroke injection, or generic message/outbox service is forbidden.
+### Loop configuration under review
 
-For Claude the supported mechanism is the existing persistent binary stream-json
-input/output driver with the same native resume ID. Its interactive surface must
-submit ordinary user turns and review turns through that one owner. The provider
-TUI cannot be assumed to accept an injected review. This may require adapting the
-existing conversation surface for Claude; do not silently replace the retained
-native terminal experience. Review-design must settle that visible tradeoff before
-implementation if the existing surface cannot meet both requirements. Codex/OpenCode
-must likewise use their actual conversation owner, never a parallel provider process.
-The [Claude CLI reference](https://code.claude.com/docs/en/cli-reference) documents
-stream-json input/output; this supports the binary choice but does not prove the
-installed version, native composer retention or this end-to-end handoff.
+Jack Heart prefers an explicit loop node with a `step` naming its evaluator, and
+initially selected a pointer to its destination: a direct graph representation.
+Jack is also open to declaring the loop at the top. Jack confirmed that the decider
+executes last, after the repeated work, whether autonomous or human. Top declaration
+versus backward-pointer syntax is not yet settled; neither changes execution order.
 
-### Failure and recovery
+Pointer-form proposal:
 
-Known runner exit leaves a stopped/failed invocation and unresolved effects visible.
-Missing remote process evidence is Unknown, not Completed. Loss of a conversation
-client leaves the same review pending while the runner is alive; reopening resumes
-the conversation, not the Flow. App/window exit does not implicitly end the ordinary
-detached runner. If the runner dies, review notes remain readable but cannot advance
-it. A request accepted just before a crash can have saved feedback without a consumed
-receipt; show those separately. Never infer that the next side effect did not occur.
+```yaml
+- implement
+- compress
+- loop: implement
+  step: loop-or-next
+- loop: implement
+  step: demo
+  human: true
+```
 
-Caller recovery inspects captured history, exact successful agent completions and
-external-effect receipts, then launches a fresh ordinary invocation with explicit
-scope. No `--from-cursor` or serialized continuation token. The caller may author
-remaining work as an ordinary Flow; the old invocation stays stopped and linked as
-context, not imported as successful steps of the new one. PID existence cannot
-certify provider progress, and uncertain old children cannot be blindly duplicated.
-Headless failures return through their existing output; the Task conversation reads
-them through ordinary inspection. Do not add an escalation conversation or queue.
+Here each deciding node has a backward target and a forward successor. A plain
+skill reference can resolve a unique target; optional authored names disambiguate
+repeated skills. The two decisions may share a backward target. Preserve this graph
+expressiveness rather than assuming every loop region nests without overlap.
+
+Top-declaration alternative shown during review:
+
+```yaml
+- loop:
+    - implement
+    - compress
+  step: loop-or-next
+- step: demo
+  human: true
+```
+
+The enclosing `step` runs after that loop's body. This example has no demo return
+edge and is not equivalent to the two-pointer example. Nested regions are easier
+to scan, but shared/overlapping return targets need an explicit representation.
+Resolve the authoring choice before changing parsing; keep one canonical form
+unless both forms have a demonstrated purpose. Earlier `repeat` syntax examples
+below describe existing engine/template changes, not the selected new YAML spelling.
+
+### History, feedback and recovery
+
+Retain SQLite invocation and event history, exact Session/Exec references, graph
+captures, attribution and external-effect receipts. Each clean boundary records
+its immutable continuation and preceding results before the process exits.
+Session history owns the conversation; Flow history references feedback evidence
+without duplicating the transcript. The precise native feedback extraction and
+submission format remains to be designed; do not assume headless structured-output
+capture exists in a native terminal conversation.
+
+Questions, ambiguous feedback and “hold” remain discussion; the agent launches no
+next segment. Clear actionable feedback can supply the boundary result. The conversation chooses the authored review edge from that feedback. Autonomous
+loops retain a separate decision skill, named loop-or-next below. A position reference identifies
+work, not Jack's authorization to publish or land.
+
+Proposal: explicit next-segment admission records which boundary result and input
+it consumed, using ordinary execution exclusion and an idempotent receipt. Repeating
+the identical submission reports that execution; competing or changed feedback
+cannot silently launch a duplicate. This is an effect-safety requirement, not a
+Task worker claim or automatic recovery mechanism. Its concrete transaction must
+be reviewed alongside existing delivery receipts. Deliberate reruns create visibly
+new execution evidence rather than altering consumed history.
+
+A clean human boundary can be continued later without a sleeping process. A crash
+mid-segment is different: retained effects may be uncertain, and the last boundary
+is not permission to replay everything after it. The caller inspects results and
+effect receipts, then explicitly selects fresh work or an exact entry point.
+Unknown remote liveness stays unknown. Reading history, reopening the conversation,
+closing a pane and receiving a merge receipt never restart execution.
 
 ### Primary selection and Waiting
 
@@ -288,14 +311,35 @@ cut, not a reason to preserve the completion API. Task completion still belongs
 to its existing Task operation, with unresolved feedback/unknown execution kept
 explicit; it must not stamp every associated conversation complete.
 
-## Loop decisions — alternatives and recommendation for review
+## Loop decisions — separate autonomous and conversational decisions
 
-Jack Heart asked during kickoff whether `loop-decide` can be simplified or removed.
-No option is accepted. Jack subsequently clarified that a replacement must exist
-before removal and that exploration must not block the accepted work. **Required
-baseline: retain loop-decide and existing templates**, receiving conversational
-feedback instead of ready/complete receipts. The optional proposal below is a
-separate review choice, not part of the deletion cut or its acceptance dependency.
+During October 4 review, Jack Heart confirmed two distinct mechanisms: the Task
+conversation interprets review feedback; autonomous work retains a decision skill.
+Jack selected `loop-or-next` as the replacement name for `loop-decide`. The rename and
+selected split are design direction, not permission to begin implementation.
+Earlier proposals to keep a post-review decider as the required baseline are
+superseded. Exact template syntax and feedback submission remain proposals below.
+
+Jack also clarified that control structure and decision owner are independent:
+
+| Structure | Autonomous decision | Human decision |
+| --- | --- | --- |
+| XOR | An agent selects an authored alternative. | The Task Session interprets Jack's conversational choice and executes that alternative. |
+| Loop | loop-or-next chooses return or forward progression. | The Task Session interprets Jack's direction and executes the authored return or forward edge. |
+
+The Flow annotates human decision boundaries, including XORs and loops. Run-until-
+human stops before any such boundary, not only a skill marked as interactive.
+The returned position includes the captured alternatives or return edge. Autonomous
+XORs continue to use their branch-selection mechanism; loop-or-next names the
+binary loop decision, not a universal router. Exact annotation syntax remains draft
+and must preserve minimal authored config without mandatory ID/name duplication.
+
+The Task Session “softly listens” to ordinary conversation: clear direction supplies
+an exact choice and launches the next segment; a question stays discussion; unclear
+or competing references prompt clarification. No secret phrase, fixed approval form,
+extra confirmation or background listener process. The native conversation agent
+executes the decision through ordinary lf commands. A Flow defines available paths;
+it does not authorize the agent to infer approval from silence or unrelated text.
 
 Current main's `pursue.yaml` has an autonomous decider after
 implement → compress → refresh, and another after interactive demo. `task-design`
@@ -308,10 +352,10 @@ Those are implementation rules to change, not product constraints.
 | Task conversation decides everything | Every pass returns to the conversation, interrupting interactive work and coupling background progress to its availability. | Can interpret feedback, but must not substitute its preference for Jack's direction. |
 | Jack chooses through ordinary feedback | Makes unattended implementation require Jack on every pass. | Direct and sufficient when the feedback answers the pending boundary; no second confirmation or interpreting Run. |
 | Autonomous Flow decider chooses everything | Fits evidence-based autonomous iteration without touching the conversation. | Extra Run can reinterpret clear feedback, or mistake unresolved discussion for permission. |
-| **Recommended split** | Keep one explicit autonomous decider where independent judgment is needed. | The ongoing conversation turns Jack's feedback into the exact review outcome and authored edge directly. |
+| **Selected split** | Keep one explicit autonomous decider where independent judgment is needed. | The ongoing conversation turns Jack's feedback into the exact review outcome and authored edge directly. |
 
-The clearest optional direction is removing post-review `loop-decide` from authored templates, while retaining
-the standalone skill for autonomous loops. This is smaller than changing `realign`
+Remove post-review `loop-decide` from new authored templates; retain the autonomous
+skill under the chosen name `loop-or-next`. This is smaller than changing `realign`
 into an evaluator: its current skill explicitly supplies facts without selecting
 navigation, and `refresh` ends at realign, not QA. Folding that decision into the
 implementation agent would remove an independent judgment and change the process
@@ -319,7 +363,7 @@ without evidence. Full removal is possible only by giving another step those exp
 success/no-progress criteria; it is not achieved by hiding the same prompt elsewhere.
 No extra generic evaluator, timer, numeric pass limit or permanent Task supervisor.
 
-Optional template cut, only after Jack selects the replacement:
+Proposed template changes for the selected split:
 
 - `task-design`: give `review_kickoff` a backward edge to `kickoff`. Small wording
   changes stay in the ongoing review conversation; a needed fresh investigation
@@ -333,21 +377,21 @@ Optional template cut, only after Jack selects the replacement:
   Preserve any publication/review gates and their order. This change supplies no
   new authorization to publish, land or do work outside the accepted scope.
 
-For that optional replacement, extend the structured output contract to carry
+For conversational review, the explicit next-segment launch carries
 `advance`, `iterate` or `stop`, with the exact feedback input-event references.
 The conversation's agent interprets ordinary language within the selected review;
-the runtime validates identity, successful turn completion and legal captured edge,
-not semantic truth. “Looks good, continue” can advance; “Change the navigation and
+the runtime validates the exact boundary and legal captured edge, not semantic
+truth. Native feedback evidence must be supplied through the segment API; do not
+assume the native conversation has a harness structured-output contract. “Looks good, continue” can advance; “Change the navigation and
 show it again” can iterate; a question, unrelated message or ambiguous multi-Flow
-feedback yields no decision and the runner keeps waiting. The agent answers or
+feedback yields no decision and no next segment launches. The agent answers or
 clarifies naturally in the same conversation. A mere streamed mention of a decision
-cannot settle anything; only the successful turn's exact validated result can.
+cannot launch work; the explicit segment API supplies the exact decision and feedback.
 
 “Stop this work” returns stop for the selected invocation, records that outcome and
-ends its runner without completing the conversation. “Hold on, let's discuss” leaves
-the pending review intact with no terminal result. “Continue” later can answer that
-same boundary if its runner is still alive. After stop/crash, continuing requires a
-fresh caller-chosen invocation from inspected evidence, not resume. A request to
+ends further progression without completing the conversation. “Hold on, let's discuss” leaves
+the pending review intact with no terminal result. “Continue” later can explicitly launch from that same clean boundary. After a
+mid-segment crash, the caller inspects effects before choosing another entry point. A request to
 change work with no legal backward edge remains discussion with that limitation
 visible; it cannot invent an arbitrary cursor jump. Normal process interruption is
 still available independently when a runner is executing rather than at review.
@@ -358,7 +402,7 @@ or malformed output cannot imply advance. Keep existing same-Session output repa
 never rerun implementation just to repair decision JSON. Interactive ambiguous prose
 is normal conversation, not malformed output or a failed Flow.
 
-Optional replacement acceptance must include clear rejection, clear approval, an unresolved question,
+Acceptance for the selected split must include clear rejection, clear approval, an unresolved question,
 “hold”, stop then later continuation, two reviews with an ambiguous “yes”, repeated
 provider events, and autonomous progress/no-progress decisions. No Ready/Complete
 command, button, secret phrase or extra acknowledgment may appear in those paths.
@@ -431,30 +475,29 @@ how unfinished legacy reviews are recovered before rollout.
 
 | Mechanism | Consequence |
 | --- | --- |
-| Live runner suspended at review — proposed | Keeps exact graph/loop continuity with only in-memory progression; costs one sleeping process per waiting Flow and loses continuation on crash. |
-| Exit at every review and serialize successor | Reintroduces a durable continuation/controller under another name. Rejected. |
-| Exit and let the conversation author a fresh Flow after every review | Simplest process lifecycle, but loses automatic authored return edges and fragments one Flow's graph/history. A product alternative requiring Jack's choice. |
-| Keep database cursor but remove managed flag | Simplifies Task special cases but retains recovery/control architecture Jack wants removed. Rejected. |
-| New review chat or second provider attached to the conversation | Breaks the accepted experience or duplicates the execution owner. Forbidden. |
+| Explicit segments ending before human steps — selected direction | Preserves native conversations and exact captured continuation without a sleeping process or automatic recovery. |
+| Live runner suspended at review | Superseded by Jack's segment API direction. |
+| Fresh authored Flow after every review | Needlessly discards captured nested-loop continuity. |
+| Keep Task worker under a new name | Violates the complete deletion requirement. |
+| New review chat or replacement composer | Violates the native Task conversation contract. |
 
-Success means Jack can discuss two background efforts without tracking terminals,
-then return days later to the same files and useful history. Failure would be a
-hidden second controller, review feedback applied to the wrong loop, a native draft
-lost to injected input, or delivery duplicated after an uncertain crash. Exact event
-references, one conversation driver, authored review feedback and caller inspection
-address these independently. Simulated review caught two traps: a saved successor
-is a cursor, and `send_input` support is not native conversation integration.
+Review must catch addressing by skill label, losing outer-loop state, silently
+replaying effects after a crash, and interpreting a saved position as authorization.
+Clean boundary continuation and interrupted execution require different recovery.
 
-The optional loop replacement has separate deletion targets: post-review
-`decide_delivery`, the human-plus-repeat prohibition, and exclusive graph/output
-fixtures. Its full template/FlowOutput/transition changes are described above.
-They are not required for this runtime cut; no unconditional removal of the
-loop-decide skill or its autonomous use is planned.
+The selected split removes post-review `decide_delivery` and the human-plus-repeat
+prohibition, adapting exclusive graph/output fixtures. Rename the autonomous skill
+and its catalog, templates, docs and tests together; do
+not leave a duplicate skill or alias. Preserve historical captured graphs and step
+evidence. The live catalog rename must not make an old captured segment impossible
+to continue; captured skill content/provenance must remain resolvable independently
+of the current catalog name.
 
 ## Internal slices and remaining workspace scope
 
-**This slice: kickoff only.** Source/read-contract review and draft design; no
-production or migration changes. Interactive review-design precedes implementation.
+**Status: interactive design review.** Jack selected caller-launched segments and
+exact positions. API spelling, feedback representation and admission semantics
+remain draft; no production or migration changes are approved by this document.
 
 After acceptance, one coherent runtime/UI change:
 
@@ -462,10 +505,10 @@ After acceptance, one coherent runtime/UI change:
    authority at its deepest store/driver boundary while converting invocation/event
    ownership and the minimum DTO/consumer set together. Prove ordinary mechanical
    and agent Flows, effect receipts and crash-without-resume on a disposable Home.
-2. Extend existing Task primary selection and conversation input ownership. Prove
-   two reviews and draft retention in one existing provider conversation before
-   connecting all authored human steps. A native-delivery failure is not grounds
-   to restore separate review Sessions. Remove the old review-launch paths.
+2. Extend Task primary selection and implement exact segment boundaries and explicit
+   continuation. Prove two reviews in one native provider conversation, including
+   an external terminal, without changing its composer or losing drafts. Remove
+   separate review-launch paths; prove deep nesting and repeated skill addressing.
 3. Cut all Flow views over to the same lazy detail/graph renderer and implement
    Waiting through shared Rust projection and provider mappings. Keep pure selection
    local; no layout/attention refresh launches work. Finish removal of managed DTOs,
@@ -514,11 +557,11 @@ Commands below are the concrete target check plan; added cases are not present y
 
 | Check command | Required observable result |
 | --- | --- |
-| `cargo test -p loopflow --test flow_tests` | Extend public CLI cases: ordinary foreground/detached Flows use the same engine; two associated Flows; exact nested review feedback; duplicate/stale feedback; discussion without a result stays pending; removed ready/complete commands are rejected; runner death before/after effect receipt; no automatic restart or new review Session. |
+| `cargo test -p loopflow --test flow_tests` | Extend public CLI cases: ordinary foreground/detached Flows use the same engine; two associated Flows; clean segment exit and explicit exact continuation; deep nested/repeated-skill addressing; duplicate/stale feedback; discussion without a next launch stays pending; removed ready/complete commands are rejected; runner death before/after effect receipt; no automatic restart or new review Session. |
 | `cargo test -p loopflow --test session_lifecycle_tests` | Same Session/provider identity through review and mode changes; Task primary remains a member; repo/Wave exclusions, explicit bindings and remote owning-Home identity retained. |
 | `cargo test -p loopflow --lib ops::human_session::tests` | Waiting at 120 seconds using an injected clock; immediate yield/pending input, new activity, closed/failed/unknown states; filtering before pagination. |
 | `cargo test -p loopflow --lib harness::` | Recorded provider traces prove tool correlation, duplicate/out-of-order events, reconnect uncertainty and new-activity clearing; Claude binary stream-json only. |
-| `cargo test -p loopflow --lib engine::flow_graph::tests` | Every Flow shares exact captured traversal, nested return edges and occurrence identity, including feedback to the following decider and autonomous outcomes; direct review edges only if separately selected. |
+| `cargo test -p loopflow --lib engine::flow_graph::tests` | Every Flow shares exact captured traversal, nested return edges and occurrence identity, including human and autonomous XORs and loops, direct conversational review edges and autonomous loop-or-next outcomes. |
 | `cargo test -p loopflow --test dto_fixtures` | Session, Task and Flow fixture shapes agree with shared Swift consumers; no compatibility defaults or managed fields. |
 | `cargo test -p loopflow --test pr_tests` | Exact external-effect and landing receipts survive controller deletion; no duplicate publication/landing on observation or feedback event replay. |
 | `uv run python scripts/materialize_rust_tests.py -- cargo test -p loopflow --lib store::` | Populated released frontier converts directly to the final draft, retaining captures, Sessions, pending legacy review evidence and effect history without resumable controller state. Run from disposable source. |
@@ -526,23 +569,23 @@ Commands below are the concrete target check plan; added cases are not present y
 | `uv run python scripts/test.py --loopflow` | Both supported Mac build paths and configured headless checks compile. Unavailable platform checks go to capable CI; no display/Automation prerequisite. |
 | `uv run python scripts/check_architecture.py` and `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` | Ownership map, docs and static checks contain one implementation. |
 
-Cross-layer gate scenario: a real compiled CLI in a disposable Home creates one
-Task conversation and two Flows with simulated provider transport. Both stop at
-different captured reviews. Shared list/detail JSON is decoded by the production
-Swift readers; the headless view model selects one review and submits ordinary conversational
-feedback through the existing input surface. The simulated provider returns its
-correlated review result through the real Session event recorder. Exactly one Flow consumes its exact Session feedback event;
-its authored successor/decider runs, the other waits, and the original conversation ID and
-file/layout state remain. Kill the first runner, reread through both consumers and
-prove retained history plus no child restart. Extend existing flow and Swift
-transport fixtures; no test-only production factory or independent UI state machine.
+Cross-layer gate scenario: the compiled CLI in a disposable Home runs two captured
+Flows with simulated headless providers to different human boundaries. Both segment
+processes exit. Production Swift readers display their exact pending positions and
+history. An explicit CLI continuation with fixture feedback advances only one Flow;
+the other stays pending. Repeated submission does not launch duplicate effects.
+Continue through at least three nested loops, repeated skill names, repeated composed
+Flows and both human/autonomous XOR and loop decisions; compare the full visit sequence to uninterrupted engine
+traversal. Include inner-counter reset on outer return and edits to source YAML after
+capture. Arbitrary entry exposes skipped prerequisites rather than fabricating success.
+Kill a segment before/after an effect receipt and prove no automatic child restart.
 
-Configured demo remains separate: one actual supported provider through launch,
-review delivery, multiple discussion turns, conversational feedback and continued
-background work in the same Task conversation, then remote/Home and retained-draft
-scenarios above. Native
-surface judgment and compositor measurements belong to the configured demo, not
-headless test substitutes. Other providers require their own continuity evidence.
+Configured demo remains separate: an actual native provider conversation in Desktop
+and in an external terminal launches work, reads its boundary, discusses the review
+across multiple turns and explicitly continues it. Preserve Session/provider identity,
+composer drafts, files and layout. No custom composer or injected review turn.
+Remote/Home, retained-draft and compositor proof remain required; simulated native
+feedback is not configured provider proof. Other providers need continuity evidence.
 
 The supplied chapter has no metric targets. Its KRs require Jack's confirmation of
 three consecutive working days mostly in Desktop and three real sessions of at

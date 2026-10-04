@@ -1275,15 +1275,15 @@ pub(crate) async fn pm_update_async(
         apply_update(&ctx, &options, progress).await?;
     }
     let reconcile = async {
-        progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
-        let snapshot = refresh_pm_snapshot(repo, &wave, &ctx).await?;
-        let item = snapshot
-            .items
-            .iter()
-            .find(|updated| updated.id == item.id)
-            .ok_or_else(|| {
-                OpsError::Message("updated issue is absent from the refreshed snapshot".into())
-            })?;
+        progress.status(&format!("confirming Linear task {}", item.identifier));
+        let record = crate::ops::task_pm::resolve_task_async(repo, &item.id, PmRefresh::Force).await?;
+        if record.wave != wave {
+            return Err(OpsError::Message(format!(
+                "updated issue moved from wave/{wave} to wave/{}; reconcile its ownership before continuing",
+                record.wave
+            )));
+        }
+        let item = &record.item;
         if matches!(options.update, PmTaskUpdate::Complete { .. }) {
             validate_completion_outcome(item)?;
         }
@@ -1294,12 +1294,18 @@ pub(crate) async fn pm_update_async(
             )));
         }
         let store = pm_store().await?;
+        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        super::chapter::sync_projects(&store, &registered, &PmSnapshot {
+            projects: vec![record.project.clone()],
+            items: vec![item.clone()],
+        }).await?;
         if let Some(task) = store
             .get_task_by_issue(&item.id)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            let row = read_pm_snapshot(repo, &wave).await?;
             store
                 .update_task_plan(
                     &task.id,
@@ -1308,7 +1314,7 @@ pub(crate) async fn pm_update_async(
                         identifier: item.identifier.clone(),
                         title: item.name.clone(),
                         description: item.description.clone(),
-                        pm_snapshot_synced_at: row.synced_at,
+                        pm_snapshot_synced_at: record.observed_at,
                     },
                 )
                 .await

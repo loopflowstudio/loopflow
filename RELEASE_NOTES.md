@@ -1,74 +1,48 @@
-# v0.13.0
+# v0.13.1
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.13.1 makes conversations easier to continue and delivery failures easier to recover. Claude and Codex conversations use their native homes by default, Desktop keeps unfinished interactive work visible, and New Session can capture ideas as Tasks without disturbing existing work. Scheduled releases now retain the evidence needed to distinguish verified publication from deferred or failed attempts.
 
-v0.13.0 brings the completed 0.12 cycle together around keeping work intact through planning changes, review, recovery, and delivery. Conversations and Flows resume from durable Session records, Desktop brings Tasks and their files beside the conversation, and publication failures preserve the work needed to continue. These notes cover progress since v0.12.0, including features already delivered in patches.
+## Continue conversations across Loopflow and native CLIs
 
-## Continue work without reconstructing it
+Conversations no longer need separate account homes by default. Loopflow shares Claude and Codex history with their ordinary CLIs while retaining explicit isolation and the original home mode when resuming existing work.
 
-Tasks can continue through review and revision using their saved Flow, while durable Session records bring conversation identity, command outcomes, and Flow progress together. Recovery increasingly preserves the existing work instead of requiring another launch to rebuild its context.
+- Switch the shared login with `lf account <provider> use <email>`, preserving refreshed and previously unknown credentials.
+- Choose `--isolate` or `--shared`, or set the `isolate` configuration default. Existing account-pinned conversations remain isolated.
+- Use native conversation IDs in `lf session` commands; connecting imports previously untracked conversations.
+- Close owned Codex engines when their driver exits while preserving saved history, live takeovers, and unrelated conversations.
 
-- Resume conversations without injecting a new participant-update prompt.
-- Keep a Task’s selected agent and retain account choices across Flow resumes; stalled work is more visible.
-- Route Task direction through Linear comments and keep routine agent progress out of that steering channel.
-- Inspect Linear Tasks before starting work and adopt existing branches.
-- Finish or cancel Tasks with coordinated PR and branch cleanup.
+## Find unfinished work and capture the next idea
 
-## Keep the conversation and its work together
+Ordinary Desktop and CLI Session lists now focus on unfinished interactive conversations and current authored reviews. New Session adds a repository-local skill picker so exploring an idea can lead to Tasks while existing work stays in place.
 
-The Mac workspace evolved from separate activity and Session surfaces into one repository → Wave → Task → Session outline. Navigation, Flow inspection, and file editing now support working from the conversation itself.
+- Choose a skill beside New Session. The default is `capture-tasks`, and the choice is remembered per repository; selecting a skill does not launch it.
+- Launch from the repository sidebar or a Wave context menu. A selected Task supplies its parent Wave as context while Task selection and existing terminal layouts are preserved.
+- Use `capture-tasks` to explore ownership across Waves and repositories and file self-contained Tasks without starting workers or binding the capture conversation. The guidance preserves successful filings and reconciles uncertain writes before retrying.
+- Keep navigation counts aligned with the filtered Session list. Filtering preserves selection, prepared commands, drafts, and retained native surfaces; a finished turn does not explicitly complete a Session.
+- Enable Show headless Sessions or use `lf session list --interactive all --history` for full inspection. `--needs-me` narrows the selected mode.
 
-- Find work with ⌘K and Task links.
-- Inspect Task Flows, Monitor, comments, and named Sessions in the shared workspace.
-- Read and edit Task files beside the conversation.
-- Preserve live terminals while navigating, with shell command blocks for terminal work.
-- Inspect composed Flow templates in a folded preview instead of opening every step at once.
+## Recover launches and delivery without losing evidence
 
-## Change plans and preserve direction
+This patch addresses failures where one stalled operation could block unrelated work or hide a retained delivery. Release accounting now follows each scheduled opportunity through execution, verification, and its product outcome.
 
-Resumable chapters replace project selection, with chapter review and plan-start skills supporting explicit planning boundaries. Later changes simplify Wave operation: resident controllers give way to bounded Task workers, and the resident Wave service and chat surfaces are removed.
-
-- Review chapter evidence and reset plans through dedicated skills.
-- Keep chapter sweeps and planning refresh working around other Teams’ Projects.
-- Consolidate planning commands and delete Linear Tasks through `lf`.
-- Realign plans and code before publishing Task work, and preserve useful learnings in Wave memory.
-- Use the manual S1–S5 operation skills for Wave coordination and governance.
-
-## Deliver without losing the branch or PR
-
-Delivery recovery now retains more of the identity and evidence needed to continue after failure. Integration also shifts toward preserving authored history, while queued PRs keep their existing heads and CI progress.
-
-- Merge Task branch updates without rewriting authored history.
-- Retain Task PR identity through publication failures and preserve published descriptions during final preparation.
-- Recover blocked landing operations on the same commit while exposing the repair agent’s concrete blocker.
-- Continue watching queued PRs without redundant rebase recovery, and preserve CI while armed PRs await queue entry.
-- Reuse the merge queue’s exact CI proof on main.
-
-## Spend less time waiting and diagnosing launches
-
-The cycle reduces repeated verification work and makes launch inputs and account state easier to inspect. Desktop acceptance checks run headlessly, with acceptance consolidated at gate.
-
-- Discover commands, skills, and Flows without launching them.
-- Inspect and configure context budgets before launching agents.
-- Use an installed coding agent for unconfigured runs, replacing the earlier unconditional Codex default.
-- Unify account authentication, remember browser profiles, refresh account status, and keep managed Codex accounts tied to the intended login.
-- Improve prompt-cache reuse and expose cache hit rates alongside retained usage evidence.
-- Reuse Rust, Swift, and Xcode build work in CI; reduce repeated migration bookkeeping and bound busy cache cleanup.
+- Prevent stalled native dispatch from holding SQLite across provider I/O. Session-scoped locking retains stale-driver rejection while allowing unrelated database writes.
+- Confirm Linear creation, edits, and completion against the exact issue and its Project association, avoiding a full-Wave refresh as a prerequisite for local preparation and retaining duplicate-safe retries.
+- Preserve pending PR deliveries when retiring obsolete Home supervision, including delivery intent, failures, CI state, and terminal history.
+- Start detached workers in their requested checkout even when the tmux server was left in a deleted directory. Spawn errors identify the requested directory.
+- Inspect verified publication, verified no-change, deferred work, and failures with `lf release history`; record repair ownership through `lf cron disposition`.
+- Catch up missed release times with one execution per wake, retaining original timing and unfinished candidates. Multiple missed opportunities covered by one execution do not become multiple successful releases.
+- Recover interrupted release checks using process and lock evidence. Publication settlement requires the exact candidate, public artifact read-back, and installer smoke checks; retained artifacts support retries of missing publication stages.
 
 ## Operational notes
 
-Upgrade and release recovery receive corresponding safeguards. Branch builds use private data, installed Tasks stay on their owning runtime, and saved Session launches remain tied to their original installation.
+Shared account switching also changes the login used by plain Claude and Codex. Running Codex engines retain their original login until restarted; an in-flight turn may fail once, with automatic recovery for headless runs. Shared Codex switching requires file-based credential storage. Forwarded Codex login uses an experimental protocol and requires Loopflow’s engine.
 
-- Failed install switches fall back to the prior installation. Release downloads are pinned, and the legacy refresh entry point remains available for older installed CLIs.
-- Installation and machine commands work independently of a repository checkout.
-- Minor releases pair with a closing patch and summarize the completed cycle’s product snapshot.
-- Release recovery handles same-tag publisher worktrees and withdrawn release PRs. Scheduled release CI failures reach the landing repair supervisor, and cron retains failure outcomes.
-- macOS release checks verify that app resources are self-contained.
+Release locks and checkout leases now extend through Git, PR, hook, CI-repair, and publisher children, preventing controller exit from permitting overlapping publication or premature checkout removal. Schedule replacements on the same Home retain unfinished candidates; changing Homes leaves unresolved work available for repair without transferring execution authority.
+
+Upgrade running binaries to receive the dispatch fix. Desktop’s new skill launch requires a CLI with `capture-tasks` and explicit skill launch support. Automated regressions cover the release recovery paths, but installed acceptance, public artifact and installer proof, and repeated automatic release execution remain follow-up validation. Native picker interaction and live cross-repository Task capture also remain unverified end to end.
 
 ## Small changes
 
-- Terminal catalog output stays aligned.
-- Failed searches no longer falsely block Task handoff, and saved plans avoid activating unrelated skills.
-- Requests and saved artifacts preserve people’s names.
-- Recent execution queries avoid parsing unrelated historical events.
-- CI job logs record CPU and memory use.
+- Passing Dependabot updates now enter the required merge queue through a dedicated repository token, with retries after successful CI and required checks preserved.
+- Update Ruff, thiserror, tiktoken-rs, tokio-tungstenite, and dirs.
+- Generated PR reviews focus on behavior, data models, and APIs.

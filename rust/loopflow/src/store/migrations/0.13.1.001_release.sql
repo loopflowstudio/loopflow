@@ -1,3 +1,4 @@
+-- draft: retire_home_landing_supervisors
 -- Retain obsolete authority on its landing, without treating a Home PID as local.
 ALTER TABLE pr_landings ADD COLUMN retired_supervisor_json TEXT
     CHECK (retired_supervisor_json IS NULL OR json_valid(retired_supervisor_json));

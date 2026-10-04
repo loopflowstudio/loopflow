@@ -1,7 +1,12 @@
+use std::fs::{File, OpenOptions};
 use std::num::NonZeroU32;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
+use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
+use sha2::{Digest, Sha256};
 
 use crate::exec::{
     AgentCaller, Exec, ExecCursor, ExecFilter, ExecOutcomeFilter, ExecPage, ExecWorkFilter,
@@ -387,24 +392,69 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Serialize native dispatch with driver transfer. The bounded transport
-    /// write finishes before a replacement can acquire the same Session.
+    // Dispatch and driver changes share a per-Session OS lock, never a SQLite
+    // transaction across provider I/O. Do not unlink lock files: another process
+    // may already have the inode open. Process exit releases ownership.
+    fn lock_session_driver(&self, session: &str) -> StoreResult<File> {
+        let database = self
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .path()
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                StoreError::InvalidData("Session dispatch requires a file-backed store".into())
+            })?;
+        let root = Path::new(&database)
+            .canonicalize()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .with_extension("session-locks");
+        std::fs::create_dir_all(&root)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        // A synchronous caller must never wait indefinitely on a dispatch whose
+        // reactor it might be driving. This bound uses the OS clock, not Tokio.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(file),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(StoreError::InvalidData(format!(
+                            "Session {session} dispatch is still busy; retry after the current send finishes"
+                        )));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(StoreError::InvalidData(error.to_string())),
+            }
+        }
+    }
+
+    /// Serialize native dispatch with driver transfer without blocking history
+    /// or unrelated database writes while the bounded transport write runs.
     pub(crate) fn with_session_driver<T>(
         &self,
         session: &str,
         expected: &SessionDriver,
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if expected.exec_id.is_none() || driver_in(&tx, session)?.as_ref() != Some(expected) {
-            return Err(StoreError::InvalidAuthority(
-                "Session driver changed".into(),
-            ));
+        let _dispatch = self.lock_session_driver(session)?;
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            if expected.exec_id.is_none() || driver_in(&conn, session)?.as_ref() != Some(expected) {
+                return Err(StoreError::InvalidAuthority(
+                    "Session driver changed".into(),
+                ));
+            }
         }
-        let result = write()?;
-        tx.commit()?;
-        Ok(result)
+        write()
     }
 
     /// Read current conversation attribution and exact retained client membership.
@@ -487,6 +537,7 @@ impl SqliteStore {
         exec: &ExecId,
         replace_provider: bool,
     ) -> StoreResult<SessionDriver> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = driver_in(&tx, session)?;
@@ -531,6 +582,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionDriver,
     ) -> StoreResult<SessionDriver> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut current = driver_in(&tx, session)?.ok_or(StoreError::NotFound)?;
@@ -556,6 +608,7 @@ impl SqliteStore {
         expected: &SessionDriver,
         outcome: &str,
     ) -> StoreResult<()> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if driver_in(&tx, session)?.as_ref() != Some(expected) {

@@ -4,9 +4,10 @@ use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
-    create_from_placement_plan, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
-    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, PullRequestState,
-    WorktreePrunePolicy, WorktreeSegment,
+    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_with_default,
+    main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
+    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
+    WorktreeSegment,
 };
 use crate::engine::{
     prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
@@ -1750,7 +1751,6 @@ fn cd_directive(path: &Path) -> Result<()> {
 fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
     // self-owned mutation that fetches origin and integrates main first — a
@@ -1759,7 +1759,7 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
     if sync {
         crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
     }
-    let worktrees = list_worktrees(&main_repo)?;
+    let (default_branch, worktrees) = list_worktrees_with_default(&main_repo)?;
 
     if json {
         let json = serde_json::to_string_pretty(&worktrees)?;
@@ -1785,6 +1785,13 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
         diff_stat: String,
     }
 
+    let branches: Vec<&str> = worktrees
+        .iter()
+        .filter_map(|wt| wt.branch.as_deref())
+        .filter(|branch| *branch != default_branch)
+        .collect();
+    let diff_stats = diff_shortstats(&main_repo, &default_branch, &branches);
+
     let mut rows: Vec<Row> = worktrees
         .iter()
         .map(|wt| {
@@ -1807,11 +1814,13 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
                 (name.clone(), name)
             };
             let is_current = wt.path == repo_root;
-            let diff_stat = if is_main {
-                String::new()
-            } else {
-                wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
-            };
+            // "3 files changed, 10 insertions(+), 5 deletions(-)" → "+10 -5 (3 files)"
+            let diff_stat = wt
+                .branch
+                .as_deref()
+                .and_then(|branch| diff_stats.get(branch))
+                .map(|raw| parse_shortstat(raw))
+                .unwrap_or_default();
             Row {
                 label,
                 sort_key,
@@ -1895,28 +1904,6 @@ fn wt_delete(name: &str, force: bool) -> Result<()> {
     crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
     println!("Deleted {name}");
     Ok(())
-}
-
-/// Get a compact diff stat for a branch vs default branch.
-fn wt_diff_stat(repo: &std::path::Path, branch: Option<&str>, default_branch: &str) -> String {
-    let branch = match branch {
-        Some(b) => b,
-        None => return String::new(),
-    };
-    let target = format!("origin/{default_branch}");
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["diff", "--shortstat", &format!("{target}...{branch}")])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => {
-            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            // "3 files changed, 10 insertions(+), 5 deletions(-)" → "+10 -5 (3 files)"
-            parse_shortstat(&raw)
-        }
-        _ => String::new(),
-    }
 }
 
 fn parse_shortstat(raw: &str) -> String {

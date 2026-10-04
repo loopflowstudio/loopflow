@@ -110,125 +110,46 @@ exist. Custom Homes keep exact-schema validation and stay disposable.
 live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
 evidence only; not shipped.
 
-## One main Home (LOO-342, branch evidence 2026-09-30)
+## One main Home (LOO-342, curated 2026-10-04)
 
-Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task
-workers, Flow steps and agent tools use the installed CLI and `~/.lf`; explicit
-`LF_HOME` experiments initialize once and require a fresh directory after schema
-changes. This supersedes the older branch-copy, development-promotion and retained
-development-store contracts below. Published installation and main-store migration
-recovery remain. Current behavior belongs in [CLI docs](../../docs/lf.md#use-one-home)
-and [Homes](../../docs/architecture/homes.md#one-main-home). Approval and branch
-verification do not establish release or installed acceptance.
+Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
+Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
+`LF_HOME` experiment initializes once and needs a fresh directory after schema
+changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
+at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
+reads done (see the 2026-10-04 entry above). Current behavior belongs in
+[CLI docs](../../docs/lf.md#use-one-home) and [Homes](../../docs/architecture/homes.md#one-main-home).
+The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
+configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
-Jack deferred remaining side-store retirement until after release and after their
-processes settle. The 2026-09-30 cleanup receipt records 14 installed stores and
-415 worktree snapshots removed, with these five paths beneath `~/.lf-dev` retained
-because they had live file handles: `installed/local-04115a69e0c34b198bf110976b32f390`,
-`installed/local-0912e9bdc1194a4c9774b060dadd428d`,
-`installed/local-6bd36934695b4eb98083e81e13aad4e7`,
-`installed/local-be852452823d43d7b7fde663651a7590`, and
-`worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
-reinspect live ownership before cleanup. Older running builds can recreate side
-stores until the published cutover. No active database was removed or process killed.
+Still live: four development stores beneath `~/.lf-dev/installed/` (`local-04115a69…`,
+`local-0912e9bd…`, `local-6bd36934…`, `local-be852452…`) had open database handles
+from 15 processes at the last `lsof` read and remain untouched; reinspect live
+ownership before any cleanup. Seven inactive worktree snapshots were moved intact
+to `~/.lf-retired/20261002T191224Z/worktrees/` (`retirement.json` records paths).
+No process was signaled. Do not manually advance a Home or promote a source build
+around an install refusal. Publication is not installation acceptance.
 
-October 2 readback from `lf task status LOO-342 --json` records
-[PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged at
-`6c73356074c47a90491c1ed4de8e063d85eb3a30`; its merge observation was checked at
-18:14 UTC. The Task remains ready with an idle saved `ship` Flow at `pr land -c`.
-This establishes landing, superseding the branch-only delivery evidence above,
-but not installed acceptance or retirement of the retained stores. Resuming that
-completion step was deferred because those obligations remain unproven. Resolve
-their outcome or explicit remaining disposition before treating the Task as done;
-do not recreate a PR merely because the generic action suggests a next PR.
+## Worktree listing and fenced dispatch (LOO-375, branch evidence 2026-10-04)
 
-Configured acceptance attempted October 2 at 19:12 UTC after Jack Heart requested
-the checks and retirement. The machine install receipt selects published v0.12.29
-(`61d21f88564783a5fc8f63e385ec035f096fc069`) and `~/.lf/loopflow.db`.
-`gh release view` confirmed [v0.12.29](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.29)
-was still the latest published release (September 30, 23:45 UTC). Git ancestry
-confirms it excludes the October 1 one-Home merge. Installed `lf home id` returned
-the main Home, but an explicit fresh `LF_HOME` through both the public entry gate
-and selected artifact still returned main's identity and Waves without creating
-the experimental database. The available source CLI was v0.12.27. These are
-pre-cutover observations, not failures of the merged implementation. Installed
-acceptance requires a published release containing #1381; do not repeat the same
-checks against v0.12.29 or treat a source-only proof as installed acceptance.
+Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
+killed. Two separate causes, both measured on this branch; neither is shipped.
 
-Fresh `lsof +D` inspection found live database handles in all four retained
-`installed/local-*` stores above (15 distinct processes in the initial read).
-No process was stopped and those stores remain untouched. Seven inactive
-worktree snapshots, including `loopflow-growth-thoughts-1c80b40d4504`, were checked
-again individually and moved intact to
-`~/.lf-retired/20261002T191224Z/worktrees/`; `retirement.json` there records exact
-source and destination paths. This retires their old routing locations while
-preserving history; it does not reclaim their disk space. The four live stores
-remain pending until their owners settle. After release, repeat default/source,
-nested Flow/agent and disposable-Home acceptance, then recheck live ownership
-before retiring the remaining stores. LOO-342 remains open.
-
-### Release and acceptance recovery (2026-10-02)
-
-Jack Heart authorized publishing the patch, installation, and the remaining
-one-Home acceptance. [PR #1406](https://github.com/loopflowstudio/loopflow/pull/1406)
-repaired the publisher's installed-CLI command mismatch: staging and finalization
-use `lf release publish`. Six publisher tests and hosted checks passed, and
-v0.12.30 publication completed through `lf release run patch`.
-
-Installed upgrade refused v0.12.30. Its Task-checkout guard opened the old shared
-schema before migration; an isolated preflight also proved the published binary
-still embedded the uncut `remove_ask` draft. Main's #1402 removes the unrelated
-Task guard. The v0.12.31 release batch includes `remove_ask` and its candidate tree
-has no SQL drafts. Publication is not installation acceptance; v0.12.29 remained
-selected after both refused install attempts. Do not manually advance the Home
-or promote a source build to work around these failures.
-
-The v0.12.31 queued run
-[37072469684](https://github.com/loopflowstudio/loopflow/actions/runs/37072469684)
-also exposed missing terminal outcome history after capture completion. The
-recorder queued terminal observations with best-effort telemetry and drained for
-only 250 ms. [PR #1409](https://github.com/loopflowstudio/loopflow/pull/1409), now
-merged, persists terminal outcomes synchronously through the existing Session
-owner, preserves the original receipt on retry, and leaves stream telemetry
-asynchronous. Prepared captures without an admitted Session remain valid. The
-regression disables the recorder, completes twice, removes artifacts, then reads
-the outcome from SQLite; 28 Session-record tests, the scorecard regression and
-all-target Clippy passed, with the regression passing again after sync.
-
-The first v0.12.31 candidate built successfully, but artifact download timed out.
-Re-entry selected newer merged fixes under the same version through release
-[PR #1411](https://github.com/loopflowstudio/loopflow/pull/1411). An exact candidate
-ref creation race also recovered through re-entry, without manually deleting a
-ref or generated worktree. [v0.12.31](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.31)
-then published from `a278d6bc1bd4373f78f27027b8ae249100ef14d3` after
-[workflow 37077794913](https://github.com/loopflowstudio/loopflow/actions/runs/37077794913)
-and signed preparation passed. `lf install` successfully migrated the main Home
-from 0.12.29 through 0.12.31; all 33 executable references resolved in preflight.
-The CLI reports 0.12.31 and promotion installed the matching macOS app.
-
-Configured checks passed on the installed release:
-
-- Installed and current validation-only source CLIs return the same main Home
-  identity, including with a stale `LF_BIN` value.
-- A fresh explicit `LF_HOME` remains empty on initial and repeated reads, and
-  the source CLI reads that same experiment without importing main's data.
-- Installed and source CLIs each complete `sync --plan` as a nested Flow
-  operation on both main and experimental Homes. Both experimental child
-  success receipts are in the experimental database.
-- After an intentional schema change confined to the experiment, the valid
-  `lf monitor list --json` command refuses it, explains disposal, and leaves
-  the schema unchanged without a backup or repair. An earlier probe used the
-  retired `exec` command and was superseded by this valid-command check.
-- An agent-issued `lf home id` uses the published executable, succeeds on main,
-  and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
-  issue, checkout, PR ids and saved Flow invocation match the pre-install read.
-
-Final `lsof` inspection still found 15 processes holding the four retained
-development stores. `lf monitor prune --dry-run --json` reported no registered
-orphan providers; its dead receipt cleanup cannot retire these live stores.
-No legacy process was signaled. The seven archived snapshots remain preserved
-at the retirement path above. Installed routing acceptance is now demonstrated;
-retirement of the four live stores remains the reason LOO-342 is open.
+- **Process count, not Git work, was the listing cost.** About 370 Git processes
+  ran mostly one after another at 25–45 ms each to start. Batched ref reads,
+  concurrent `status`, one GitHub call and answers remembered per commit pair in
+  `.git/lf-commit-facts` leave about 66. The remaining floor is one GitHub round
+  trip (about 1 s here), not local work. Numbers and method:
+  [report](../../scripts/benchmarks/wt-list/README.md).
+- **Never hold the Session fence while waiting on the runtime.** A fenced write
+  held the store mutex and SQLite's write lock inside `block_on`; the reader task
+  waited for that mutex on a runtime worker, so nothing drove the socket or the
+  timeout. The write is now timed on its own thread and store work leaves the
+  worker first (`harness/dispatch.rs`). OpenCode's fenced HTTP post still holds
+  the fence up to 10 s on its own client; that is bounded, not a cycle.
+- **Receipts still serialize a command behind SQLite contention.** A 3 s foreign
+  write lock added 3 s to a listing; a permanent one cost two 15 s waits and a
+  warned, unrecorded Exec. Unchanged in this slice.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

@@ -58,13 +58,15 @@ impl CodexConnection {
                 }),
             )
             .await?;
-            history.record(
-                &self.store,
-                &self.session_id,
-                None,
-                Some(&self.thread_id),
-                &json!({"result":result}),
-            )?;
+            super::dispatch::off_reactor(|| {
+                history.record(
+                    &self.store,
+                    &self.session_id,
+                    None,
+                    Some(&self.thread_id),
+                    &json!({"result":result}),
+                )
+            })?;
             let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
             if next.is_null() {
                 break;
@@ -131,8 +133,10 @@ impl CodexConnection {
                         Message::Close(_) => break,
                         Message::Text(text) => {
                             let rpc: Value = serde_json::from_str(&text)?;
-                            history.record(&self.store, &self.session_id,
-                                self.driver.as_ref(), Some(&self.thread_id), &rpc)?;
+                            super::dispatch::off_reactor(|| {
+                                history.record(&self.store, &self.session_id,
+                                    self.driver.as_ref(), Some(&self.thread_id), &rpc)
+                            })?;
                             client.send(Message::Text(text)).await?;
                         }
                         message => client.send(message).await?,
@@ -158,24 +162,12 @@ impl CodexConnection {
         };
         let store = self.store.clone();
         let session = self.session_id.clone();
-        let runtime = tokio::runtime::Handle::current();
         // A second connection can transfer the driver in another process.
         // Keep the SQLite comparison and bounded socket dispatch in one
         // transaction, rather than checking before an asynchronous queue.
         tokio::task::spawn_blocking(move || {
             let outcome = store.with_session_driver(&session, &driver, || {
-                runtime.block_on(async {
-                    tokio::time::timeout(Duration::from_secs(2), upstream.send(message))
-                        .await
-                        .map_err(|_| {
-                            StoreError::InvalidData(
-                                "Native dispatch timed out; outcome is unknown".into(),
-                            )
-                        })?
-                        .map_err(|error| {
-                            StoreError::InvalidData(format!("Native dispatch failed: {error}"))
-                        })
-                })
+                super::dispatch::send_fenced(&mut upstream, message)
             });
             (upstream, outcome)
         })

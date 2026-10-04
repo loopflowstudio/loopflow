@@ -1,6 +1,6 @@
 # Shared provider homes, multiple credentials
 
-Draft plan — 2026-10-02. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Shared homes for Codex and Claude, the switch command, the route model and the docs are built on this branch; what remains is listed under Internal slices and Remaining questions. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
+Draft plan — 2026-10-02; reconciled 2026-10-04 at `9b22bc7f8`. Jack Heart authorized pursuing this design and settled the product decisions quoted below. Mechanisms marked “chosen” are implementation choices made in planning and remain open to his correction. Shared homes for Codex and Claude, the switch command, the route model and the docs are built on this branch; what remains is listed under Internal slices and Remaining work and decisions. Delivery is not yet requested. Placement is unresolved; no Wave supplied.
 
 ## Problem
 
@@ -32,7 +32,7 @@ Then the same with Claude. Manual resume never inherits Loopflow process or Flow
 3. **Shared model for every provider.** “i think Claude kinda forces our hand on this model though”. A switch moves the provider, not one launch.
 4. **Two metaphors.** “i think we should try to do as much as we can through these metaphors. i do imagine needing to like move all my open workers to a new account. I think maybe if isolated, dont move, keep it on and use its own backup plan”. Shared agents move together; isolated agents stay and use their own fallback.
 5. **Isolated is the current model, demoted.** “something like the current model can still work if we ever do really need like persistently on a specific account agents”; “maybe we dont delete, we just demote the capability”; “there is an extra flag … i meant we would add it”; “--isolate?”.
-6. **Isolation is the only pinning mechanism** (“yes”), following “just one API thats like "enterprise mode" basically rather than have a bunch of one-off specifi mechanisms”. Codex external-token auth and Claude's environment token are dropped.
+6. **Isolation is the only pinning mechanism** (“yes”), following “just one API thats like "enterprise mode" basically rather than have a bunch of one-off specifi mechanisms”. Per-launch local pinning through Codex external-token auth or Claude's environment token is dropped. The later orthogonal SSH decision (2026-10-03/04, below) retains lent access tokens for remote launches in either home mode; those are not local account-pinning options.
 7. **Isolation is set both per launch and as a standing default** (“both”), with `--shared` as the per-launch override.
 8. **One command owns the switch.** It changes the account for everything launched afterwards. Jack first asked for a second, stronger form that also moves running agents, then dropped it on 2026-10-04: “dont worry about it. just kill references to it if were not going to build it for now”. An interactive conversation left open moves by closing and reopening it: “close and reopen is ok enoug for now i guess”.
 9. **Launch wrapper.** “some sort of decorator/handler that basically locked the active account and launched [didnt wait] the lf and then return”, “does nothing if the right account is already active”, “or if no account was specified”.
@@ -91,7 +91,7 @@ distinct from Loopflow's refusal to connect some completed Sessions.
 
 The damage is one turn, not the engine: when the in-flight turn survives, the next turn on that thread usually fails instead (8 of 12), and when it fails, the next completes. An idle engine switched and left for two seconds ran two turns cleanly, 12 of 12. So Codex notices the identity change within about a second and drops something network-related that the next request then trips over. A running Codex keeps its login, but a turn in flight across a switch is not safe. Built: a headless run classifies the error as `AgentFailure::AccountSwitched` and the existing transient-retry loop resumes the same conversation two seconds later on a fresh engine, which reads the new login; the shared-home fixture then passed 6 of 6, against 1 of 4 before. Holding the switch until turns end was not built: every agent shares one login file and a Codex turn can run for an hour, so a held switch would block every new turn behind the longest one. An interactive conversation is not covered: its turn fails visibly and the person resends.
 
-**Codex's native store is a file here.** `~/.codex/config.toml` sets no `cli_auth_credentials_store` and `~/.codex/auth.json` exists. Activation writes that file. A native config that selects the keyring is an error state below, not a second writer.
+**Codex activation supports the file store.** A native config that selects the keyring is an error state below, not a second writer.
 
 **Claude re-reads its login.** Claude Code 2.1.288 caches the Keychain read for 30 seconds and at refresh adopts a stored token that differs from its own; no identity check appears there. Read from the binary, not exercised. A running shared Claude agent follows the native login.
 
@@ -120,13 +120,13 @@ The damage is one turn, not the engine: when the in-flight turn survives, the ne
 **After.**
 
 - **Stored profile:** the existing per-account directory. Holds one credential for login, refresh and quota probes. Also the runtime home of an isolated conversation.
-- **Native home:** the provider default, or the caller's explicit `CODEX_HOME` / `CLAUDE_CONFIG_DIR`. Resolved once at admission from the launch's own environment so a nested launch never mistakes an inherited isolated home for the native one.
+- **Native home:** the provider default, or the caller's explicit `CODEX_HOME` / `CLAUDE_CONFIG_DIR`. Selection reads the ambient home; activation resolves the home from the child command's environment at spawn. Both discard inherited paths under this Home's stored-account directory so an isolated parent is not mistaken for the native home.
 - **Active account:** whichever stored account the native credential identifies. Source of truth is the native credential; nothing remembers it separately.
 - **Activation** (`provider_account/activation.rs`): under the provider credential lock, save the native credential back to the stored profile with the same identity; if it matches none, store it as a new profile; install the selected profile's credential by atomic rename (Codex `auth.json`; Claude Keychain item on macOS, `.credentials.json` elsewhere). Already active: no-op.
 - **Launch wrapper** (`ProviderAccountRoute::launch_as`): prepares the account environment and returns any activation lock; each caller spawns and immediately drops the lock. Codex's engine uses `launch_engine_as` so it can accept a lent login over its protocol. The four conversation launch sites use this path; Claude's binary version check needs no account activation. Isolated launches retain home redirection.
 - **Selection:** in shared mode routing returns the active account while it is eligible. When it is strained or unavailable, routing switches to the next eligible account, logged with cause `exhaustion`. In isolated mode selection is unchanged from today.
-- **Switch command** (`lf account <provider> use <account>`, named by Jack Heart 2026-10-03: “it should be lf account codex use jack@loopflow.studio”): the only writer of a shared account change.
-- **Two independent choices per launch** (Jack Heart, 2026-10-03/04: “why do we need so many ways, not just 2?”; “I prefer it as only an environment variable”; remote is “orthogonal to shared vs isoalted. I could want to do remote with either”). `RouteHome` is where the conversation runs: `Shared` or `Isolated`. `AccountLogin` is who holds the login: `Stored` (this Home's profile), `Replayed` (a recorded Run's catalog, read-only, records nothing) or `Lent` (an `lf ssh` origin's access token, environment only, never written on the target). A lent account runs shared in the target's ordinary home or isolated in `accounts/<provider>/forwarded-<account>`.
+- **Switch command** (`lf account <provider> use <account>`, named by Jack Heart 2026-10-03: “it should be lf account codex use jack@loopflow.studio”): the explicit person-driven switch. It and automatic launch routing use the same activation writer.
+- **Two independent choices per launch** (Jack Heart, 2026-10-03/04: “why do we need so many ways, not just 2?”; “I prefer it as only an environment variable”; remote is “orthogonal to shared vs isoalted. I could want to do remote with either”). `RouteHome` is where the conversation runs: `Shared` or `Isolated`. `AccountLogin` is who holds the login: `Stored` (this Home's profile), `Replayed` (a recorded Run's catalog, read-only, records nothing) or `Lent` (an `lf ssh` origin's access token, passed through Claude's environment or Codex's engine protocol, never written on the target). A lent account runs shared in the target's ordinary home or isolated in `accounts/<provider>/forwarded-<account>`.
 - **Modes:** `--isolate` and `--shared` are bare global flags beside `--account` / `--only-account`, mutually exclusive. They travel in `LF_ACCOUNT_ISOLATION` beside `LF_ACCOUNT_SELECTION`, and a Flow invocation captures the mode in an optional `isolate` field beside its captured accounts. Chosen default key: `isolate: true` in `.lf/config.yaml`; config loading already merges `~/.lf/config.yaml` under the repository file, so a Home-level default works too. Resolution: flag, then config, then shared.
 
 **Source of truth and records.** The native credential decides the active account. One draft migration (`shared_provider_homes`) adds: a switch log `provider_account_switches` (provider, account, time, cause: person or exhaustion), and `isolated` on `provider_session_accounts` so resume returns to the home the conversation started in. Rows that predate the change are isolated. Usage attribution reads the switch log and provider-reported identity; a launch's named account is not evidence of what a shared agent later used. Historical usage is never rewritten.
@@ -143,7 +143,7 @@ As built: only `connect` admits; the other subcommands report an unconnected pro
 
 ## Affected surfaces
 
-`lf` global flags and their forwarding over `lf ssh`; `lf account` (new `use`; `route` explains the active account and mode); `lf session connect` / resume, which must return an isolated conversation to its home and a shared one to the native home; quota probes in `subscription.rs`, which keep reading stored profiles; SSH account leases, unchanged in this plan; `docs/` subscription, security and environment pages; Desktop only through existing account status readers. No wire DTO changes are planned; if account status gains a mode or active field, it is required-or-Optional with a fixture.
+`lf` global flags and their forwarding over `lf ssh`; `lf account` (new `use`; `route` explains the active account and mode); `lf session connect` / resume, which must return an isolated conversation to its home and a shared one to the native home; quota probes in `subscription.rs`, which read the native home for the active account and stored profiles otherwise; SSH account leases, now with Codex engine login and broker renewal; `docs/subscriptions.md`, `docs/security.md` and `docs/config.md`; Desktop only through existing account status readers. `lf account route --json` now includes required `isolated` and optional `active_account` fields; `tests/fixtures/dto/auth_routes.json` carries both.
 
 ## Absent and error states
 
@@ -157,7 +157,7 @@ As built: only `connect` admits; the other subcommands report an unconnected pro
 
 ## Exclusions
 
-Migrating old per-account history. Side-by-side accounts in one home. A pinned provider or `lf` executable (what “pinned binary” covers beyond the account's own home is open). opencode account selection; when added it enters through activation. Changing SSH lease forwarding. Wider `lf auth` CLI redesign.
+Migrating old per-account history. Side-by-side accounts in one home. A pinned provider or `lf` executable (what “pinned binary” covers beyond the account's own home is open). opencode account selection; when added it enters through activation. Copying SSH refresh credentials or account homes. Wider `lf auth` CLI redesign.
 
 ## Delete — do not maintain
 
@@ -171,7 +171,7 @@ Must survive: stored profiles and `acquire_managed_login_lock`, identity checks,
 
 ## Forbidden outcomes
 
-Session-store symlinks or a history synchronizer between homes. A second place that changes the shared account. A provider-specific option on the switch command. Credential environment variables on shared launches. A remembered “active account” that can disagree with the native credential. Rewritten historical usage. API billing substituted for subscription auth.
+Session-store symlinks or a history synchronizer between homes. A second place that changes the shared account. A provider-specific option on the switch command. Credential environment variables on local stored-account launches. Lent SSH launches are the explicit exception: Claude receives its access token in the environment; Codex receives it over the engine protocol. A remembered “active account” that can disagree with the native credential. Rewritten historical usage. API billing substituted for subscription auth.
 
 ## Internal slices
 
@@ -187,14 +187,14 @@ One Task, complete end state above. Each slice leaves the tree working.
 3. **A switch under running agents — built for headless runs.** See “Changing the account in `auth.json` breaks one turn of a running Codex” above. Headless agents move without help: a run is one engine, closed on exit, so the next launch reads the new login, and a turn cut off by the switch is resumed on the new account.
 4. **Docs — built.** `docs/subscriptions.md` and `docs/security.md` (where logins live, what a provider child's environment carries, `LF_ACCOUNT_ISOLATION`); `TESTING.md` names the Claude fixture. There is no separate environment page.
 
-Owed from “Done when”: a Loopflow-started Claude conversation found by plain `claude --resume`, and a Claude conversation ID opening through `lf session`. Both are built on the shared path and neither has been exercised.
+## Remaining work and decisions
 
-## Remaining questions
-
+- **Claude acceptance remains owed:** exercise plain `claude --resume` of a Loopflow-started conversation and `lf session connect` with a Claude conversation ID. The existing fixture checks login and home routing, not these acceptance behaviors.
+- **Current-tree gate remains owed:** existing checks below predate the merge at `9b22bc7f8`. The merge changes process launch, Session filtering and migration dependencies; no current-tree gate result is claimed.
 - **Config levels:** repository and Home `config.yaml` both work; whether a Wave-level default is also wanted is open.
 - **“Pinned binary”:** only the account's own home, or more.
 - **Lent Codex logins — built, unexercised end to end.** The Codex harness signs its engine in with `account/login/start` type `chatgptAuthTokens` (`ProviderAccountRoute::engine_login`) and answers `account/chatgptAuthTokens/refresh` through a new broker `Renew` operation; `CODEX_ACCESS_TOKEN` is no longer set. Synthetic probe, Codex 0.160.0: the login is accepted only with the `experimentalApi` capability, is held in memory, writes no `auth.json`, and a fresh process sees no login. OpenAI's schema labels this login “[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE”. Launches that start Codex directly (`lf/commands/util.rs`, `engine/agent.rs`) refuse a lent Codex account. No real token or `lf ssh` session was used; attached terminal clients on such an engine are untested.
-- **Lent conversations and resume:** the origin's session pin carries no shared/isolated mode, so a lent isolated conversation resumed under a shared default looks in the wrong home.
+- **Lent conversations and resume — implementation gap:** the origin's session pin carries no shared/isolated mode, so a lent isolated conversation resumed under a shared default looks in the wrong home. Preserve the mode through the broker and verify reopening after the default changes; the accepted home-mode contract already requires this.
 - **Resume across accounts:** a conversation started under A continuing under B is assumed to work within one workspace; across workspaces or plans is unverified.
 
 ## Done when
@@ -215,6 +215,10 @@ Claude's Keychain path is macOS-only and the fixture uses it there, the file els
 
 ## Evidence
 
+Reconciliation, 2026-10-04: upstream merged at `9b22bc7f8` adds a regression test distinguishing completed turns from completed conversations, consistent with this runtime ownership design. Its Session filter change and explicit working-directory entry for detached launches do not replace account routing or driver shutdown. No Wave is identified; no Wave memory was selected or edited.
+
+Check, realign: `git diff --check` — clean; prose-only reconciliation, existing check evidence retained; current-tree verification belongs to gate.
+
 Check, owner exit: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean; Session event tests 12 passed, Exec ownership 11 passed/2 ignored, lifecycle 18 passed/1 ignored before stopping a Keychain-blocked fixture; the repaired fixture and captured-isolation retry then passed separately. Both native Codex fixtures (`--shared-provider-home`, `--launch --public-connect`) passed with synthetic credentials; rendered Desktop/TUI and Claude resume remain unverified.
 
 Review repair: direct Flow retry now forwards captured isolation. Its fixture simulates an empty Keychain and uses an isolated profile, avoiding a macOS prompt; the first retry exposed the missing propagation.
@@ -229,4 +233,4 @@ Check: Codex credential probe with synthetic credentials in a temporary home (st
 
 Public-connect now uses `--mode batch` and writes long-running command diagnostics to files so an undrained pipe cannot block startup. Its proof has been run. Older Flow fixture modes still pass the rejected `-b`; they remain outside this lifecycle proof. `docs/lf-reference.md` was edited by hand: no command that emits the Clap catalog for `scripts/generate_cli_reference.py` was found.
 
-Observed on Jack's machine, 2026-10-02: Codex access-token lifetime 240 hours (lifetime only); about 3,011 Codex rollouts and 315 Claude transcripts in per-account homes against 3,595 and 58 native. Retained but unused: Codex 0.160.0's schema includes external-token login and refresh; [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server); [Claude environment documentation](https://code.claude.com/docs/en/env-vars).
+The synthetic Codex external-token probe above informed the lent-login implementation; it is not end-to-end SSH proof. Provider references: [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server); [Claude environment documentation](https://code.claude.com/docs/en/env-vars).

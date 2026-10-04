@@ -98,7 +98,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             if let session = crumb.session {
                 if crumb.waveWork != nil || crumb.taskWork != nil { separator }
                 sessionCrumb(session, siblings: crumb.siblings.filter {
-                    model.navigation.showsHeadlessSessions || $0.interactive || $0.id == session.id
+                    $0.state != .closed && (model.navigation.showsHeadlessSessions || $0.interactive)
                 })
             }
         }

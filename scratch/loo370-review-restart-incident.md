@@ -63,3 +63,60 @@ independent reviews. An idle/mechanical old Flow fixture misses this failure.
 
 Keep emergency recovery, source prevention, installed acceptance and merge
 settlement as separate claims. LOO-370's implementation must not be competed with.
+
+## Recovery readback and causal investigation (2026-10-04)
+
+Installed `lf task status LOO-370 --json` now reports running implement in the
+same replacement b2476b7b-a8b2-4b61-9c04-d146871206d3. Exec
+46f29d1b-e217-46e7-9072-e9a94e92915e drives that step; both original review
+Execs record interrupted/130 at 1791125405. The old review records administrative
+completion at 1791125445. Task, PR row and checkout identities are retained.
+Emergency recovery succeeded at admission; no source prevention or shipment is
+established. No emergency mutation was repeated.
+
+Causal chain verified against source at 13cc752f256b610bf35e222e509c8629d709e952:
+
+1. Admission rejects the previous unfinished review after replacement because
+   `ops/task/lifecycle.rs::execution_blockers` checks non-managed Sessions.
+   Replacement makes the previous review non-managed; its live Execs also block.
+2. Completion cannot resolve this because `human_session.rs::owned_target`
+   rejects a FlowReview with no waiting Flow. The two readers disagree about
+   whether this retired Flow still owns actionable review work.
+3. `restart_task_async` calls `stop_task_worker`, then `restart_task_flow` and
+   launches the replacement. Stop checks only the captured Flow claim and
+   `pending_flow_step_exec`; that SQL reads operation/current_capture, not the
+   pending review's separate service/driver. No claim is treated as dead there.
+   The old review service and provider were proven live in this incident.
+4. The replacement transaction marks the Flow replaced and clears the Task's
+   invocation pointer, but does not retire/fence the pending review. A valid
+   compare against the saved Flow does not prove its Session writers exited.
+5. The identity-preservation restart regression supplies no previous Flow.
+   Other stop tests exercise driver/step cases; those cannot establish waiting
+   review replacement. The exact earlier review worker authority error is
+   retained in Exec history; its initiating race remains unproven and is not
+   required to explain the replacement defect.
+
+## Selected prevention and proof
+
+Jack Heart authorized autonomous implementation, verification, publication and
+landing without human review gates. Keep one separate repair Task covering
+restart through waiting review retirement and replacement admission. LOO-373
+owns retained landing/deleted tmux cwd failures; LOO-370 owns Run-name cleanup.
+Neither is a substitute for this outcome.
+
+The repair must use exact saved review/driver/provider ownership, preserve
+history and Task/PR/checkout identity, and distinguish retirement from successful
+review. Stop/fence old writers before replacement becomes runnable. Interruption
+between stop, retirement and replacement must be retryable without fabricating
+success or skipping independent work. Unknown process identity stays unresolved;
+Task membership and causal ancestry alone never grant signaling authority.
+
+Prove the public restart/admission path with an actual waiting review and owned
+live test processes, retained capture/native history, old-writer rejection,
+interruption/retry, and an unrelated independent review that still blocks.
+Use disposable Homes and stub provider side effects, not LOO-370 as a destructive
+fixture. A no-Flow or idle mechanical fixture alone is insufficient. Installed
+acceptance, source proof and verified merge remain separate claims.
+
+Check: `lf task status LOO-370 --json` — replacement implement running; retained
+old review Execs interrupted; no additional data/process mutation.

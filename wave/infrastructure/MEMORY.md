@@ -1,5 +1,12 @@
 # infrastructure wave memory
 
+## Review replacement (2026-10-04)
+
+Jack Heart authorized autonomous LOO-377 prevention and landing. LOO-370 now
+runs its replacement after emergency recovery. Restart must retire the exact
+review driver before replacing its Flow; a missing worker claim does not prove
+review exit. Preserve independent reviews. Source prevention remains unproved.
+
 ## Operator acceptance and account direction (2026-10-04)
 
 Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine
@@ -874,10 +881,7 @@ commands belong in docs/lf.md and TESTING.md.
   [the shipped history](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#shipped).
   Current Task/PR placement and cleanup contracts supersede older worker
   self-prune claims; a landing never authorizes moving an active checkout.
-- **`lf pm` speaks wave/project/task** (PR #852) — `status`, `show --project <slug>`, `task create/update/done/move`, `rename`, `sync --plan`. The Linear `teamId` `String!`-vs-`ID!` bug is fixed: creating and closing tasks from the CLI works. `update` survives as a compat alias; the documented path is `task …`.
-- **Native Linear hierarchy for PM** (jack-heart/infra) — Wave→Linear Initiative, Project→Linear Project, Task→Issue, replacing the wave-project-plus-`project:<slug>`-label model. `GOAL.md` frontmatter now carries `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates legacy labeled issues into native Linear Projects, and rewrites `pm.linear_project`→`pm.linear_initiative`. Project definition/KRs round-trip through Linear Project `content`. The live Waves are migrated; Linear is the planning truth.
-- **Linear OAuth token pre-emption** — Linear PKCE access tokens expire in 24 h. Loopflow now persists the non-secret OAuth client ID beside the token (migration `060_provider_token_oauth_client_id`) and refreshes ~20 min before expiry, both on PM access and in the background `token_refresh` trigger. PKCE refresh needs no client secret. A rotated refresh token is persisted; an omitted one preserves the prior token. Proactive-refresh failure while the access token is still valid falls through to the current token and retries later; an expired legacy row with no OAuth config fails safe with a sanitized one-time reconnect command. Directly serves developer-efficiency's "credential expiries pre-empt" KR.
-- **`lf pm show` renders an aligned table** — one task per physical line under stable headers, columns measured from visible content (shares the `lf wt list` padding primitive), open tasks before done while preserving Linear rank within status, full task IDs kept, `--json` unchanged for machine consumers. Long titles can no longer collide with project/assignee/ID fields.
+- Historical PM command, hierarchy migration, OAuth refresh and table-formatting shipment details remain in [the October 4 snapshot](https://github.com/loopflowstudio/loopflow/blob/13cc752f256b610bf35e222e509c8629d709e952/wave/infrastructure/MEMORY.md#shipped). Current command names and ownership are documented in the CLI and planning references.
 - **Cron continuity follows durable obligations** (LOO-241) — installed fixed-daily jobs persist their activation time across unchanged syncs, and legacy jobs recover it from the earliest matching scheduled receipt. `lf doctor` judges only each job's latest due interval against an exact scheduled receipt; failed targets still prove the scheduler fired, manual receipts do not, and a miss names the cron, Home, interval, and history command. Raw ledger gap days remain visible history without keeping later telemetry red.
 
 ## Gotchas

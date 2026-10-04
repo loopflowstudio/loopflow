@@ -20,10 +20,8 @@
   command would otherwise reach its finish receipt with no wait left.
 - The report command is `lf wt timing`, a sibling of `lf wt list`, rather than
   a flag on the listing or a general `lf perf` surface with one instrument.
-- The Flow's final step lands with `-c`. Completion still needs ordinary-use
-  timing read after an installed release; landing this PR should keep the Task
-  open.
-- `.lf/flows/pursue-auto.yaml` entered this branch through the restart
-  checkpoint and nothing in the repository references it. Left in place: the
-  running Flow was started from it, and removing a Flow definition mid-run is
-  not this Task's call. Whether it should land on main is unresolved.
+- The Flow's captured final step lands with `-c`. Completion still needs
+  ordinary-use timing read after an installed release, so the definition in
+  `.lf/flows/pursue-auto.yaml` now lands without `-c`. Jack Heart asked for the
+  definition to stay available through completion; whether it should remain on
+  main afterwards is unresolved.

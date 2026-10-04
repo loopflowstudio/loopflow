@@ -17,7 +17,7 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 ## Done on this branch
 
 - Listing: ~370 Git processes → ~66; remote enrichment concurrent, one GitHub
-  call, 10 s limit; commit-pair answers remembered in `.git/lf-commit-facts`.
+  call, 10 s limit and no `ls-remote` after a GitHub timeout; commit-pair answers remembered in `.git/lf-commit-facts`.
   Output byte-identical to baseline on the live repository.
 - Deadlock: fenced dispatch timed on its own thread; history recording leaves
   the runtime worker (`harness/dispatch.rs`).
@@ -47,11 +47,11 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
   the only ones are four runs in a disposable Home. This needs a release
   carrying the branch installed on Jack Heart's machine, then enough listings
   to report a p95. Until then the Task is not complete.
-- **The captured Flow ends with `task pr land -c`**, which completes the Task
-  at landing. That contradicts the line above; landing without `-c` (or
-  reopening afterwards) is the outcome Jack Heart's contract describes. The
-  running Flow's definition is captured, so editing
-  `.lf/flows/pursue-auto.yaml` would not change it. Unresolved.
+- **The running Flow's captured last step is `task pr land -c`**, which
+  completes the Task at landing and contradicts the line above. Gate changed
+  `.lf/flows/pursue-auto.yaml` to a bare `task pr land` so the definition matches
+  Jack Heart's contract, but a captured definition does not reread it. If the
+  Task reads done after landing, it needs reopening until the timing is read.
 
 ### By measured cost
 
@@ -81,13 +81,14 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
 ## Checks
 
-- 2026-10-04, after folding `list_worktrees_enriched` into `list_worktrees_timed`
-  and dropping `first_at`/`last_at`: `cargo test -p loopflow --lib -- ops::wt_timing engine::worktrees ops::wt`
-  with `LF_*` Run variables unset — 34 passed. Earlier passes on this branch
-  (journal, dispatch, `--test worktree_tests`, `--bin lf`, fmt, clippy, the
-  held-write-lock listing at 17.4 s with `receipts.unrecorded: 2`) were not
-  rerun; gate owns the affected suites, with inherited `LF_RUN_ID`/`LF_FLOW_STEP`
-  cleared (two `lf::` tests fail only under them).
+- Gate, 2026-10-04, `LF_*` unset: `scripts/test.py --reuse-passing` stopped at
+  its resource preflight (12.1 GiB free, 32 GiB reserve; nothing inactive to
+  reclaim), so the full Rust nextest matrix did not run locally and is deferred
+  to hosted CI. Run directly instead: `cargo fmt --all -- --check` pass;
+  `cargo clippy --all-targets --jobs 4 -- -D warnings` pass;
+  `check_architecture.py` pass; Python 333 passed; website 78 passed, 3 skipped;
+  `cargo test -p loopflow --lib -- engine::worktrees ops::wt harness::dispatch journal:: completed_session_with_exited_provider`
+  56 passed. `--test worktree_tests` and `--bin lf` were not rerun at this tree.
 
 ## Acceptance against the Task brief
 

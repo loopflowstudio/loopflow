@@ -941,7 +941,7 @@ struct RemoteFacts {
 ///
 /// GitHub answers both in one call. Any other remote, or an unavailable
 /// GitHub, is asked for its branches directly. Each call ends within
-/// `REMOTE_LIMIT`.
+/// `REMOTE_LIMIT`, and a GitHub call that reached it is not followed by another.
 fn remote_facts(
     repo: &Path,
     default_branch: &str,
@@ -983,9 +983,13 @@ fn remote_facts(
             }
         }
         // PR state stays unknown whatever the fallback learns about branches.
+        // A GitHub that used the whole limit leaves none for a second call.
         Err(failure) => RemoteFacts {
             pull_requests: None,
-            branches: list_remote_branches(repo).unwrap_or_default(),
+            branches: match failure {
+                RemoteFailure::Unavailable => list_remote_branches(repo).unwrap_or_default(),
+                RemoteFailure::TimedOut => HashSet::new(),
+            },
             outcome: failure.into(),
         },
     }

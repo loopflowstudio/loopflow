@@ -15,4 +15,4 @@
     repeat:
       from: implement
 - pr-publish
-- cmd: task pr land -c
+- cmd: task pr land

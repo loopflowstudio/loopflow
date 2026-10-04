@@ -217,12 +217,17 @@ final class PodiumModel {
             .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
     }
 
-    /// Task membership is independent of provider mode or attention state.
+    /// Visibility never changes Task membership or retained native surfaces.
+    var visibleSessions: [SessionRecord] {
+        (sessions.value ?? []).filter(isSessionVisible)
+    }
+
+    func isSessionVisible(_ session: SessionRecord) -> Bool {
+        session.state != .closed && (navigation.showsHeadlessSessions || session.interactive)
+    }
+
     var visibleWorkspace: WorkspaceProjection {
-        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
-            $0.state != .closed && (!$0.taskIds.isEmpty || $0.workspace?.taskId != nil
-                || $0.primaryScope != nil || navigation.showsHeadlessSessions || $0.interactive)
-        })
+        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: visibleSessions)
     }
 
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
@@ -638,15 +643,17 @@ final class PodiumModel {
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
+        let includingHeadless = navigation.showsHeadlessSessions
         do {
             repeat {
-                let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: repoPath)
+                let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
                 guard sessionsGeneration == generation, self.repoPath == repoPath,
+                      navigation.showsHeadlessSessions == includingHeadless,
                       !Task.isCancelled else { return }
                 records += page.entries
                 let seen = Set(records.map(\.id))
-                // Partial enumeration cannot establish absence. Keep existing panes
-                // until the last page, including records added locally during this read.
+                // Keep prior rows until enumeration finishes, and preserve records
+                // added locally during this read. Native panes have their own lifetime.
                 let retained = (sessions.value ?? []).filter {
                     !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id))
                 }
@@ -654,10 +661,6 @@ final class PodiumModel {
                 if sessions != next { sessions = next }
                 after = page.next
             } while after != nil
-            if let selected = navigation.selectedSessionId,
-               !(sessions.value ?? []).contains(where: { $0.id == selected }) {
-                navigation.selectedSessionId = nil
-            }
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                   !Task.isCancelled else { return }

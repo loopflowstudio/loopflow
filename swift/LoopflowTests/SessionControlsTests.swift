@@ -28,8 +28,10 @@ import Testing
     func visibilityRetainsInventory() async throws {
         let source = try ControlsSource()
         let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         #expect(model.sessions.value?.count == 2)
+        model.navigation.showsHeadlessSessions = false
         #expect(model.visibleWorkspace.orphanSessions(search: "").map(\.id) == ["interactive"])
         model.navigation.showsHeadlessSessions = true
         #expect(Set(model.visibleWorkspace.orphanSessions(search: "").map(\.id)) == ["interactive", "headless"])
@@ -40,14 +42,40 @@ import Testing
         await model.refreshSessions()
         #expect(model.navigation.selectedSessionId == "headless")
         #expect(model.navigation.renaming?.text == "Retained draft")
-        #expect(model.workspace.breadcrumb(selection: nil, sessionId: "headless")?.session?.id == "headless")
+        #expect(model.sessions.value?.map(\.id) == ["interactive"])
         #expect(model.visibleWorkspace.orphanSessions(search: "").map(\.id) == ["interactive"])
+    }
+
+    @Test("Completion fences an older refresh and stays absent on repeated reads")
+    func completionSurvivesRefresh() async throws {
+        let source = try ControlsSource()
+        let query = RegistryQuery { args, _ in try await source.read(args) }
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let store = SessionsStore(repoPath: "/src/loopflow", query: query)
+        store.onResolved = { id in model.sessionResolved(id, repo: "/src/loopflow") }
+        await model.refreshSessions()
+        store.reconcile(model.visibleSessions)
+        model.navigation.selectedSessionId = "interactive"
+        await source.holdList()
+        let poll = Task { await model.refreshSessions() }
+        await source.waitForList()
+        #expect(await store.complete("interactive"))
+        await source.releaseList()
+        await poll.value
+        for _ in 0..<2 {
+            await model.refreshSessions()
+            store.reconcile(model.visibleSessions)
+            #expect(model.visibleSessions.isEmpty)
+            #expect(store.sessions.isEmpty)
+            #expect(model.navigation.selectedSessionId == nil)
+        }
     }
 
     @Test("Preview is inert; confirmation uses exact Task and fences an older poll")
     func bindAfterPreview() async throws {
         let source = try ControlsSource()
         let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         model.navigation.selectedSessionId = "headless"
         model.beginSessionBinding(try #require(model.sessions.value?.first { $0.id == "headless" }))
@@ -75,6 +103,7 @@ import Testing
     func bindRefusalAndRetry() async throws {
         let source = try ControlsSource()
         let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         model.navigation.selectedSessionId = "headless"
         model.beginSessionBinding(try #require(model.sessions.value?.first { $0.id == "headless" }))
@@ -118,13 +147,17 @@ private actor ControlsSource {
 
     func read(_ args: [String]) async throws -> String {
         if args.prefix(2) == ["session", "list"] {
-            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
-            let snapshot = try JSONSerialization.data(withJSONObject: ["entries": rows, "next": NSNull()])
+            let visible = args.contains("all") ? rows : rows.filter { $0["interactive"] as? Bool == true }
+            let snapshot = try JSONSerialization.data(withJSONObject: ["entries": visible, "next": NSNull()])
             if hold {
                 hold = false
                 await withCheckedContinuation { pending = $0; waiter?.resume(); waiter = nil }
             }
             return String(decoding: snapshot, as: UTF8.self)
+        }
+        if args.prefix(2) == ["session", "complete"] {
+            rows.removeAll { $0["id"] as? String == args[2] }
+            return "Completed"
         }
         if args.contains("--dry-run") {
             return #"{"session_id":"headless","task_id":"task-exact","identifier":"INF-123","title":"Completed off-roadmap Task"}"#

@@ -220,8 +220,13 @@ Task destinations open details; selecting a Flow opens its folded template.
 
 ```bash
 lf task status LOO-358 --json
-lf session list --task LOO-358 --history
+lf session list --task LOO-358 --interactive all --history
 ```
+
+`lf session list` defaults to unfinished interactive conversations and current
+Flow reviews. `--needs-me` narrows that selection to immediate attention;
+`--all` changes repository scope, `--interactive all` includes background work,
+and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
 including headless and completed work. Managed marks the Flow advanced by

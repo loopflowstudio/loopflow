@@ -46,6 +46,7 @@ Review: retained exact driver fencing on dispatch, claim, release and exit;
 kept Project association reconciliation on the exact post-write issue; did not
 advance Wave snapshot freshness from an issue-only read.
 
-Checks: deadlock regression and initial affected suite passed (31 tests);
-final `cargo clippy --all-targets -- -D warnings`, fmt and architecture check
-passed; final affected-suite run pending after Project reconciliation review.
+Checks: final affected Rust suite passed (31 tests; one subprocess entry point
+ignored by design); `cargo clippy --all-targets -- -D warnings`, `cargo fmt
+--check`, and `uv run python scripts/check_architecture.py` passed. Sync with
+main was conflict-free; CI owns the full matrix.

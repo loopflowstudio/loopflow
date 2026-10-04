@@ -823,6 +823,102 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn session_exit_closes_engine_unless_ownership_transferred() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        for transfer in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            let session =
+                store.test_session("conversation", &crate::session_record::new_artifact_key());
+            let first = crate::id::ExecId::new();
+            let second = crate::id::ExecId::new();
+            {
+                let conn = store.conn.lock().unwrap();
+                for exec in [&first, &second] {
+                    conn.execute(
+                        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                        [exec.as_str()],
+                    )
+                    .unwrap();
+                }
+                conn.execute(
+                    "UPDATE agent_sessions SET provider='codex' WHERE id=?1",
+                    [&session.id],
+                )
+                .unwrap();
+            }
+            let original = store
+                .claim_session_driver(&session.id, None, &first, true)
+                .unwrap();
+            let mut child = Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let started = crate::journal::process_started_at(child.id())
+                .unwrap()
+                .unwrap();
+            store
+                .record_session_provider_process(&session.id, &original, child.id(), started)
+                .unwrap();
+            // An engine whose socket has gone must still be reaped on exit.
+            store
+                .record_session_connection(
+                    &session.id,
+                    &original,
+                    home.path().join("engine.sock").to_str().unwrap(),
+                    "saved-thread",
+                )
+                .unwrap();
+            let current = if transfer {
+                let replacement = store
+                    .claim_session_driver(&session.id, Some(&original), &second, false)
+                    .unwrap();
+                assert!(matches!(
+                    crate::session_record::finish_session_driver(
+                        &store,
+                        &session.id,
+                        &original,
+                        "completed"
+                    ),
+                    Err(crate::store::StoreError::InvalidAuthority(_))
+                ));
+                assert!(child.try_wait().unwrap().is_none());
+                assert!(store.session_connection(&session.id).unwrap().is_some());
+                replacement
+            } else {
+                original
+            };
+            crate::session_record::finish_session_driver(
+                &store,
+                &session.id,
+                &current,
+                "completed",
+            )
+            .unwrap();
+            assert!(crate::journal::process_started_at(child.id())
+                .unwrap()
+                .is_none());
+            // Shutdown may already have reaped this exact child.
+            let _ = child.wait();
+            assert!(store.session_connection(&session.id).unwrap().is_none());
+            assert_eq!(
+                store.session_thread(&session.id).unwrap().as_deref(),
+                Some("saved-thread")
+            );
+            assert!(store
+                .session_driver(&session.id)
+                .unwrap()
+                .unwrap()
+                .exec_id
+                .is_none());
+        }
+    }
+
+    #[test]
     fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -875,7 +971,7 @@ mod tests {
             }
             let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
             store
-                .finish_session_driver(id, &driver, "interrupted")
+                .finish_session_driver(id, &driver, "interrupted", || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -984,7 +1080,7 @@ mod tests {
             .claim_session_driver(&session.id, Some(&original), &second, true)
             .unwrap();
         assert!(store
-            .finish_session_driver(&session.id, &original, "interrupted")
+            .finish_session_driver(&session.id, &original, "interrupted", || Ok(false))
             .is_err());
         assert!(store
             .session(&session.id)
@@ -994,7 +1090,7 @@ mod tests {
             .is_none());
         assert_eq!(store.session_driver(&session.id).unwrap().unwrap(), resumed);
         store
-            .finish_session_driver(&session.id, &resumed, "completed")
+            .finish_session_driver(&session.id, &resumed, "completed", || Ok(false))
             .unwrap();
         assert!(store
             .session(&session.id)

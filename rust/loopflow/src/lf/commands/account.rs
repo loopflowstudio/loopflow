@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
@@ -68,9 +68,15 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    match cmd {
-        Some(cmd) => rt.block_on(run_async(cmd)),
-        None => rt.block_on(account_status::run(provider, !cached, details, json)),
+    if let Some(misuse) = AccountCommand::misuse(cmd, provider, cached || details || json) {
+        bail!(misuse);
+    }
+    match (cmd, provider) {
+        (Some(AccountCommand::Use { email }), Some(provider)) => {
+            rt.block_on(use_account(provider.as_str(), email))
+        }
+        (Some(cmd), _) => rt.block_on(run_async(cmd)),
+        (None, provider) => rt.block_on(account_status::run(provider, !cached, details, json)),
     }
 }
 
@@ -115,6 +121,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             )
             .await
         }
+        AccountCommand::Use { .. } => unreachable!("run handles use with its provider"),
         AccountCommand::Route {
             cmd,
             repo,
@@ -170,6 +177,36 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// The only command that changes which account a provider's shared home is
+/// signed in as. Running Codex agents keep their login until they restart.
+async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let store = open_account_store().await?;
+    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let native = crate::provider_account::activation::native_home(provider, None);
+    let switched = crate::provider_account::activation::activate(
+        &store,
+        provider,
+        &account.account_id,
+        &native,
+        crate::provider_account::activation::SwitchCause::Person,
+    )
+    .await?;
+    let login = crate::provider_account::account_login(&account);
+    match switched {
+        Some(_) => println!(
+            "{} is now signed in as {login} in {}",
+            provider.display_name(),
+            native.display()
+        ),
+        None => println!(
+            "{} is already signed in as {login}",
+            provider.display_name()
+        ),
+    }
+    Ok(())
 }
 
 async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {

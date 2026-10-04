@@ -120,11 +120,32 @@ machine where it was connected:
 ~/.lf/accounts/codex/<account-id>/
 ```
 
-That home contains the provider CLI's own authentication and session state.
-Loopflow points local provider children at it with `CLAUDE_CONFIG_DIR` or
-`CODEX_HOME`. Shared settings, skills, and plugins may be linked from the
-normal `~/.claude` or `~/.codex` home; credentials and session state remain
-isolated by account.
+That home holds the identity's stored login. By default it is not where
+conversations run: Loopflow signs the provider's ordinary home (`~/.claude`,
+`~/.codex`, or the caller's own `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) in as one
+stored identity at a time, and launches there.
+
+| Launch | Provider home | What Loopflow sets on the provider child |
+|---|---|---|
+| Shared (default) | the provider's ordinary home | no home and no credential variable; inherited ones are removed, except a home the caller chose |
+| `--isolate` | the identity's own home | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
+| Forwarded over `lf ssh` | shared or isolated, as the target launch chooses; an isolated one runs in a home for that identity under the target's `~/.lf/accounts` | the leased access token (Claude: environment; Codex: handed to its engine in memory), and the home when isolated; no login is written to disk |
+
+Switching the shared identity writes one login into the provider's own store:
+Codex's `auth.json`, replaced by atomic rename, or Claude's Keychain item on
+macOS (`Claude Code-credentials`, suffixed for a non-default home) and
+`.credentials.json` elsewhere. The login being replaced is first saved back to
+its identity's stored home, or kept as a new one, so it is never discarded.
+The Keychain write goes through `security` on standard input, not its
+arguments. The provider's ordinary home therefore holds a login Loopflow
+manages; your own `claude` and `codex` run as whichever identity is active.
+
+`LF_ACCOUNT_ISOLATION` (`isolated` or `shared`) carries `--isolate` /
+`--shared` to child `lf` processes. It selects a home and carries no secret.
+
+In an isolated home, shared settings, skills, and plugins may be linked from
+the normal `~/.claude` or `~/.codex` home; credentials and session state
+remain isolated by account.
 
 `~/.lf/loopflow.db` stores non-secret account metadata: verified login,
 routing and credential state, health signals, repository routes,
@@ -146,9 +167,16 @@ process:
    origin broker for that account.
 4. The origin refreshes only the selected credential when necessary and sends
    one access token through an SSH-forwarded, owner-only socket.
-5. The target passes that access token to the selected Claude or Codex child.
+5. The target hands that access token to the selected child without writing
+   it to disk. Claude receives it as `CLAUDE_CODE_OAUTH_TOKEN`. Codex has no
+   variable for a ChatGPT login, so Loopflow signs its Codex engine in over
+   the app-server protocol and the token stays in that process's memory. That
+   sign-in is an experimental Codex interface OpenAI marks as unstable. A
+   launch that starts Codex directly, outside Loopflow's engine, refuses a
+   forwarded identity.
 6. Health results and session pins return to the origin database that owns the
-   identity.
+   identity. Pins retain the shared/isolated home mode so reopening uses the
+   original home even after the target's default changes.
 
 The access token really does enter the target's process boundary. It is not put
 in argv, logs, a remote account home, or a durable Loopflow store, but the

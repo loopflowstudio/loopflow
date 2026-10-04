@@ -20,6 +20,7 @@ mod present;
 mod progress;
 pub mod project;
 mod release;
+mod release_lock;
 mod run;
 mod sync;
 pub mod task;
@@ -48,6 +49,7 @@ pub use cron::{
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_command;
+pub(crate) use flow::execute_flow_command_with_cron;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_sync, finish_submit_after_sync};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};

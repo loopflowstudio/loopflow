@@ -156,9 +156,24 @@ Focused public-command and store tests passed. The local broader gate stopped at
 first Rust run had 2,210 passes and two fixture failures: a stale-decision fixture
 bypassed retirement, and a direct launch-lock fixture tried to claim a review.
 Commit cd3e0a0f3 repairs those setups; the public waiting-review regression passed
-in the first hosted run. Final hosted verification and merge remain pending here.
+in the first hosted run. Final hosted verification and merge passed; see the outcome below.
 
 Publication/auto-merge succeeded, then installed landing reconciliation reported
 `invalid stored landing placement: home`. LOO-373 already owns that defect. It is
 separate from GitHub's merge evidence and does not authorize another emergency
 DB edit or source-binary promotion.
+
+## Verified delivery outcome (2026-10-04)
+
+[PR #1429](https://github.com/loopflowstudio/loopflow/pull/1429) merged at
+2026-10-04T15:50:44Z as c5dc238b0afb53dbe7098f30e2dee8085b53e1e3.
+Both PR-head and merge-queue CI passed. The corrected Rust run recorded 2,212
+passes and 16 skips. The contribution ended successfully after supported
+reconciliation recorded this merge. Repository-wide reconciliation still reports
+`invalid stored landing placement: home`, owned by LOO-373; installed acceptance
+of review-restart prevention is not established. No release or installation was
+requested by this repair. LOO-377's never-started managed code Flow remains idle;
+its steps were not fabricated as successful. Source implementation and delivery
+were performed by the independent Task contribution instead.
+
+Check: GitHub PR readback — MERGED at the exact commit above; hosted CI green.

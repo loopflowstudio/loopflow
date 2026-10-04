@@ -2,10 +2,11 @@
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized autonomous LOO-377 prevention and landing. LOO-370 now
-runs its replacement after emergency recovery. Restart must retire the exact
-review driver before replacing its Flow; a missing worker claim does not prove
-review exit. Preserve independent reviews. Source prevention remains unproved.
+Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
+with hosted CI passing. Restart serializes review launch, fences writers and
+retains exact stop evidence for retry. Independent reviews remain protected.
+LOO-370 resumed after emergency recovery. Installed acceptance remains unproved;
+LOO-373 owns the retained landing-placement reconciliation error.
 
 ## Operator acceptance and account direction (2026-10-04)
 

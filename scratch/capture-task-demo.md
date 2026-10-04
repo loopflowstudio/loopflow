@@ -89,3 +89,67 @@ Its implement Session `session_b4b784b6ae0b4592adaaaad93342caf9` is live and con
 it is implementing the approved picker. The managed Flow remains idle; do not
 resume it concurrently. This direct Flow retains pursue's publication and human
 demo boundary. Managed/direct Flow reconciliation remains unresolved.
+
+## Native picker review preparation — 2026-10-03 UTC
+
+This review follows [the current design](capture-task.md) and
+[the accepted picker reference](session-picker.html). No new feedback or native
+acceptance from Jack Heart has been recorded in this review yet.
+
+The current checkout's `swift build` passed, compiling the picker and launch
+controls. Linking emitted two Ghostty ImGui symbol warnings. Both the installed
+CLI and the app-bundled CLI returned capture-tasks in `lf list --json`, sourced
+from the previously recorded local skill link. This proves configured discovery,
+not shipped builtin packaging or an interactive provider launch. The attempted
+`lf skill show capture-tasks` was rejected by the active human Flow's skill guard;
+`lf list --json` is the successful discovery evidence.
+
+Loopflow Dev was already running from this Task checkout. Its installed executable
+differed from the local build, and the local build predated the latest picker
+source before rebuilding. Restart is pending Jack's confirmation that existing
+terminal drafts are saved; the normal dev launcher stops the running app. No
+restart or Session completion has been performed by this review.
+
+Next: install/open the rebuilt app once drafts are safe, then have Jack inspect
+the compose row, search and keyboard selection, confirm selection alone does not
+launch, and launch capture-tasks from an existing Task while checking both retained
+layouts. Continue a real idea through ownership and useful Task text in the same
+capture conversation. Record actual observations before marking the review ready.
+Native appearance, provider/draft continuity, cross-repository filing and uncertain
+write recovery remain unproven; no design change or approval is inferred.
+
+Check: `swift build` passed with two linker warnings; configured `lf list --json`
+and bundled-CLI discovery passed using the local skill link.
+
+## Synced build reopened — 2026-10-04
+
+Jack Heart requested `lf sync` and reopening the app, authorizing the pending
+restart. Bare `lf sync` was ambiguous; `lf task sync` merged main. Its conflict
+helper could not run within the human review Session's skill guard. The Product
+memory conflict was resolved inline, retaining capture decisions and main's
+Session working-set update; `lf task sync --continue` completed locally. The
+stashed demo notes were restored using the recovery command supplied by lf.
+
+`uv run python scripts/loopflow-dev.py run` rebuilt Swift and the bundled CLI,
+signed the app and reopened Loopflow Dev from this checkout. This supersedes the
+pending-restart status above. No new native feedback or approval is recorded;
+Jack can now review the picker and capture launch in the reopened app.
+
+Check: dev build/sign/open passed; `scripts/test_desktop.sh --filter TaskCaptureTests` passed all six tests; native review and capture-to-owner proof remain open.
+
+## Demo approved — 2026-10-04
+
+After the synced build was reopened, Jack Heart said, “ok, demo approved”.
+This is Jack's approval of the presented demo. No design changes or additional
+implementation requests accompanied it. The accepted contract remains
+[capture-task.md](capture-task.md), with the visual reference in
+[session-picker.html](session-picker.html).
+
+Jack did not report individual scenario results. Approval does not independently
+prove cross-repository filing, uncertain-write recovery, provider/draft continuity,
+release packaging, or sustained-use KRs. The build and six focused passing tests
+are recorded above; those evidence limits remain explicit.
+
+Recommended next action: complete this human review and let the following
+loop-decide interpret the approval and remaining evidence against the authored
+Flow. This review does not choose a navigation edge or establish delivery.

@@ -36,7 +36,7 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow is not evidence of unfinished work:
    stop if the Task's outcome is already satisfied. Ask about consequential scope
-   or authority conflicts; when judgment is unavailable, name the exact decision.
+   or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** Use `lf --task <issue> flow start` to continue, or
    `lf --task <issue> flow start <flow>` for the selected new Flow. Check installed
@@ -44,11 +44,10 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    the same saved Flow; never restart or replace it merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
    merely to reach the person already present. At a review boundary, collect the
-   required feedback and complete that exact review Session only when authorized
-   and its feedback has been saved. Let the authored Flow choose the next edge.
+   required feedback and complete that exact review Session after its feedback
+   has been saved. Let the authored Flow choose the next edge.
    Headless, a required judgment or review is a blocker: report it and exit.
    Report unavailable commands or services without upgrading or changing accounts.
-   Launching a Flow does not grant missing publication or merge authority.
 
 4. **Stay with the Task.** Refresh Task status and Sessions after each action.
    An accepted launch or a healthy worker is progress, not the stopping point.

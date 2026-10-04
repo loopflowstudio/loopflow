@@ -48,7 +48,7 @@ and sources.
 
 Report historical Task transfers and cancellations only when evidenced. If the
 parent supplies a dated repository rotation preview, report this Wave's proposed
-dispositions separately; they are not historical facts or permission to apply.
+dispositions separately; they are not historical facts or applied changes.
 Never implement a second classifier. Keep next-chapter recommendations separate
 from observations, including work lacking evidence of priority.
 

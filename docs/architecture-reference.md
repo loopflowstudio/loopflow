@@ -34,8 +34,8 @@ observations until enumeration succeeds. `lf flow list/show --sessions` discover
 saved FlowSessions through metadata and exact captured graphs. Historical `lf mon show` and `lf replay` remain command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or
-wire reference does not make Run a target owner or authorize breaking external
-consumers without their coordinated migration.
+wire reference does not make Run a target owner. Coordinate migration with
+external consumers before changing those references.
 
 ### Implementation and acceptance evidence
 
@@ -50,7 +50,7 @@ consumers without their coordinated migration.
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Flows and 100,000 Execs: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Exec search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
 | Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. History and usage use the coordinated Session wire types. Configured Desktop continuity remains unproven. |
 | Status-owned Chapters | Focused fixtures cover rotation/default Flows, populated current-state adoption, partial/competing-plan preservation and second-Home convergence. Configured Linear rotation remains unproven. No Chapter table or packet belongs in the model. |
-| Integrated acceptance | Affected checks, configured provider/Desktop, backed-up current-state conversion and final consistency remain required. Branch fixture passes are neither installed acceptance nor permission to promote. |
+| Integrated acceptance | Affected checks, configured provider/Desktop, backed-up current-state conversion and final consistency remain required. Branch fixture passes do not establish installed acceptance or promotion readiness. |
 
 Admission preserves saved executable/Home/database handoff and failed-command
 diagnostics. Exec owns command outcome and error; Session events own provider
@@ -330,7 +330,7 @@ attribution: bind records assignment time; earlier usage retains its owner.
 The history reader owns this single choice. `lf usage --binds` compares it with
 post-hoc attribution from the same history; the
 [evaluation](../performance/bind-attribution.md) holds the reading and recommendation. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
-Authorized Project/Task moves preserve immutable historical attribution while
+Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
 `tasks.started_at` is set once when actual agent work or a mechanical Flow boundary
@@ -459,7 +459,7 @@ kernel locks                 live local exclusion authority
 Released migration files remain immutable. Three direct draft groups establish
 the final Exec, Project-status and Session schema. Current Work, links, accounts,
 routes and resumable conversations survive the cutover. Migration rehearsal uses
-a disposable copy; it never grants permission to mutate the installed Home.
+a disposable copy and leaves the installed Home unchanged.
 
 ### Filesystem state
 
@@ -567,7 +567,7 @@ or disappears. Missing process evidence stays uncertain. Explicit restart retain
 the previous FlowSession as history and captures another. Completion clears the
 managed selection without completing Task Work or choosing a successor.
 
-Independent helpers may carry the same Task and separately authorized Git/PR
+Independent helpers may carry the same Task and independent Git/PR
 operations. Attribution does not acquire its managed Flow claim. Binding to done
 Work assigns a conversation without reopening it. Unresolved reviews remain
 visible when their associated Work is terminal.

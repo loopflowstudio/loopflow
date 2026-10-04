@@ -58,7 +58,7 @@ keeps one command/result line, not an evidence ledger.
    - exact task or durable objective;
    - observable success;
    - plausible near-misses that do not count;
-   - affected boundaries, edge cases, permissions, and exclusions;
+   - affected boundaries, edge cases, and exclusions;
    - the command, observation, or artifact that proves success.
 
    Build a useful atom before choosing its place in a process. Require the
@@ -103,7 +103,7 @@ keeps one command/result line, not an evidence ledger.
    through examples, handoffs, later edits, and mechanical rendering. For Task
    authors, check the description with comments collapsed: the current problem,
    desired outcome, acceptance, and real blockers must still make sense. Dated
-   planning/execution updates belong in authorized comments; raw receipts belong
+   planning/execution updates belong in comments; raw receipts belong
    behind links. Test a later scope change: reconcile the brief instead of stacking
    amendments, preserving the decision history and unresolved contrary evidence.
    Apply this second-revision check to other artifacts too. Try the skill
@@ -150,8 +150,8 @@ Return conversation-only findings here. Do not create a second assessment file.
 ```
 
 Give procedural skills numbered work and a concrete output. Give exploratory
-skills room to follow evidence without turning “explore” into permission to
-change unrelated code. Define behavior when required judgment is unavailable
+skills room to follow evidence while keeping changes scoped to the task.
+Define behavior when required judgment is unavailable
 without assuming a particular launch mode or reviewer protocol.
 
 ## Wave goal contract
@@ -176,7 +176,7 @@ not contain a roadmap disguised as a prompt.
 ## Parallel search
 
 Use parallel approaches only when the task is genuinely uncertain, safely
-divisible, and delegation is already authorized. Start with different
+divisible, and benefits from independent investigation. Start with different
 mechanisms, preserve early independence, keep a registry of evidence and exact
 gaps, block routes whose missing dependency merely restates the original
 problem, and require concrete artifacts or counterexamples. Cross-pollinate

@@ -61,19 +61,19 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      replaces its complete content: `{"metric_targets":[],"flow":"feature","krs":[]}`.
      Supply the intended nonempty `flow` string and all KRs and targets.
    - If no current Project exists, arrange its plan through the accepted
-     repository chapter process or an explicitly authorized Linear change.
+     repository chapter process or a Linear change.
      Future plan authoring needs an available Linear writer; `update-plan`
      cannot write a Planned Project. Report missing access rather than inventing
      a command or starting Tasks without a current plan.
-   - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in authorized comments; keep current blockers and dependencies in the description even when comments are collapsed.
+   - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning
-   - A split does not authorize a chapter rotation. If a repository boundary is
+   - Chapter rotation is a separate operation from splitting a Wave. If a repository boundary is
      also accepted, preview `lf repo new-chapter <name> --dry-run --json` for all
      Waves, including the parent and children. There is no per-Wave or plan-file
      option. Apply with `lf repo new-chapter <name> --json` only after the
-     direction and Task-disposition review gates; retain prior authorization.
+     direction and Task-disposition review gates.
    - Rotation moves started unfinished Tasks within their owning Wave, retaining
      worktrees, PRs and captured execution. Proven untouched backlog is canceled,
      retaining issues and history; terminal Tasks stay historical. Missing

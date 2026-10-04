@@ -5521,6 +5521,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completed_session_with_exited_provider_does_not_block_task_work() {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let exited_pid = child.id();
+        child.wait().unwrap();
+        let live_pid = std::process::id();
+        let live_start = crate::journal::process_started_at(live_pid)
+            .unwrap()
+            .unwrap();
+        for (completed, provider, blocked) in [
+            (false, Some((exited_pid, 1_i64)), true),
+            (true, Some((exited_pid, 1_i64)), false),
+            (true, Some((live_pid, live_start)), true),
+            (true, None, true),
+        ] {
+            let fixture = task_fixture("CLOSED-SESSION").await;
+            let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,
+                    interactive,task_id,completed_at,provider_pid,provider_started_at,wave_id,cwd)
+                 VALUES('old-session','old implement','generated',1,1,0,?1,?2,?3,?4,?5,?6)",
+                rusqlite::params![
+                    fixture.task.id.as_str(),
+                    completed.then_some(2_i64),
+                    provider.map(|value| value.0),
+                    provider.map(|value| value.1),
+                    fixture.task.wave_id.as_str(),
+                    fixture.task.worktree.to_str().unwrap(),
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                 VALUES('old-session','captured',?1,1,'{}')",
+                [crate::session_record::new_artifact_key()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET current_capture=?1 WHERE id='old-session'",
+                [conn.last_insert_rowid()],
+            )
+            .unwrap();
+            fixture
+                .store
+                .sqlite
+                .record_session_event(
+                    "old-session",
+                    "thread",
+                    "turn",
+                    crate::session::SessionEventKind::Started,
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            assert_eq!(
+                crate::ops::task_automation::admission_blocker(
+                    &fixture.store.sqlite,
+                    &fixture.task.id,
+                    false,
+                    None,
+                )
+                .unwrap()
+                .is_some(),
+                blocked,
+            );
+            assert_eq!(
+                !super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                    .unwrap()
+                    .is_empty(),
+                blocked,
+            );
+            // Administrative closure never invents a native completion receipt.
+            assert!(fixture
+                .store
+                .sqlite
+                .session_has_pending_turn("old-session")
+                .unwrap());
+        }
+    }
+
+    #[tokio::test]
     async fn task_work_completion_preserves_independent_flow_and_managed_selection() {
         let fixture = task_fixture("WORK-1").await;
         let managed = claim_stop_fixture(&fixture, 999_999).await;

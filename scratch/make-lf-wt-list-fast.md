@@ -47,3 +47,11 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
   worker-blocking reader restored.
 
 - After main sync: `cargo test -p loopflow --test worktree_tests` — 26 passed.
+
+## Completed Session recovery
+
+Jack Heart authorized fixing the delivery blocker in this PR and repairing the live database. Task admission and completion now allow a closed Session with a confirmed-dead provider even if its native turn has no completion receipt; live, unknown and unfinished Sessions still block. Native history remains untouched by the code fix. Review finding: Session closure alone cannot exempt a live provider, so both gates reuse the existing process-identity evidence.
+
+Live recovery retained the original start and recorded an explicitly administrative interruption (not provider-reported success), with a private backup of the original rows. The code regression does not depend on this repair.
+
+Checks: `cargo test -p loopflow --lib completed_session_with_exited_provider_does_not_block_task_work` passed (four cases); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.

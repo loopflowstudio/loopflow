@@ -1,8 +1,8 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
     current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
-    is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add, worktree_add_inheriting,
-    worktree_remove, WorktreeBranch,
+    is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
+    worktree_add_inheriting, worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;

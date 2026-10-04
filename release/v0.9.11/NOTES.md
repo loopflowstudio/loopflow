@@ -21,7 +21,7 @@ Every path to "inject our context at launch" was blocked at once — argv trunca
 - **A sync emits each step as a `SKILL.md`** into `.claude/skills/` and `.agents/skills/` at repo and global scope. Bodies stay out of context until the step fires; generated skills carry a provenance marker so re-sync prunes safely
 - **The seed is just `"<surface preamble> /step"`** — the only per-run injection. Identical headless and interactive, save the run-mode preamble. Verified to fire under headless `claude -p` and `codex exec`, not only interactively
 - **Harness-aware sigil** — `$step` for Codex (works in both `exec` and the interactive composer), `/step` for Claude
-- **Ambient context moves to disk** — repo conventions, voice, and orientation live in `AGENTS.md` / `CLAUDE.md`, auto-loaded by the vendor. The agent reads `scratch/` and `wave/` on demand; we point, we don't dump
+- **Ambient context moves to disk** — repo conventions, voice, and orientation live in `AGENTS.md`, auto-loaded by the vendor. The agent reads `scratch/` and `wave/` on demand; we point, we don't dump
 - **Directions removed as a first-class concept** — with no assembled prompt, a direction had no delivery vehicle. The `-d/--direction` flag, config field, wave key, loader, and `builtins/directions/` are gone; the perspective text was redistributed into the relevant step bodies. The wave model simplifies from area × direction × flow to **area × flow**
 - **`LOOPFLOW.md` leaves the product** — the operating manual is no longer injected into every session. It now lives in loopflow's own agent doc, loaded only when working on loopflow itself
 

@@ -1,83 +1,180 @@
 ---
-description: Operate the Wave — read, decide, and take the one or two useful moves in a single turn.
+description: Operate one Wave through delivery, coordination, capacity, adaptation and identity; focus on a few useful moves.
 action_style: procedural
 ---
-Operate the Wave in one turn: understand where it stands, choose the one or two
-useful moves, and take them.
+Operate the selected Wave once: read, judge, act, and exit. Aim for one or two
+useful authorized moves; let the evidence determine how much is worthwhile.
+No action is a valid result. No chat or schedule is required.
 
-## Your final message is posted to a channel a person reads — so usually say nothing
+## Scope and evidence
 
-Your visible reply is delivered verbatim to the Wave's chat channel. Treat it
-like a message to a busy person, not a work log. **Most passes should end with no
-message at all.**
+Resolve the exact Wave from the invocation's explicit selection or supplied
+bound Wave context. Do not guess from an arbitrary GOAL file. If selection is
+missing or contradictory, report the missing scope without operating another
+Wave. Read its objective and memory, current Project's plan, Task outcomes and
+unresolved concerns. The Project is part of the Wave, not another operator.
 
-- **Silence is the default.** A routine tick, a re-read that found no change, an
-  attempt that hit the same known blocker — end the turn with an **empty reply**.
-  Do not write "nothing changed," "yielding," "no action needed," or a recap.
-  Empty output is not delivered; that is correct.
-- **Speak only when there is genuine news** the person can act on: work you
-  actually started or finished (with its link), a blocker you are surfacing for
-  the first time (one line, with the exact fix needed), or one sharp question.
-- **Never narrate your machinery.** No "I'm using wave/operate," no phase or
-  skill or flow names, no "X is retired," no play-by-play of launch attempts, no
-  control-plane vocabulary (ancestry, placement, durable Turn Basis, reservation).
-  The person does not care how you work.
-- **State a blocker at most once.** If you already reported it on an earlier
-  pass and nothing changed, stay silent this pass. Do not re-post it every tick.
-- Do your reading and reasoning silently; the channel hears only a deliberate,
-  plain sentence or two, or nothing.
+Start with `lf wave status <exact-wave> --json` and
+`lf roadmap --wave <exact-wave> --json`. Read relevant Task detail with
+`lf task status <issue> --json`. Follow summaries to the source only where a
+claim, conflict or missing fact matters; do not ingest every transcript.
+
+Keep source links/paths, dates and freshness with consequential findings;
+separate observations, hypotheses and proposals. Rereading cached content does
+not refresh it. Failed reads, stale plans, missing outcomes and unknown liveness
+cannot establish an empty backlog, health, approval or permission to close work.
+Continue independent work from available evidence without repairing auth or
+waiting indefinitely.
+
+## Exercise all five functions within the Wave
+
+Use these questions together; investigate the material tension, not five
+mandatory reports or five agents.
+
+| Function | Question and possible response |
+| --- | --- |
+| S1 · Delivery | What useful outcome did a Task deliver? Compare actual results with its intended beneficiary; select an existing next Task when warranted. |
+| S2 · Coordination | Where do Tasks collide or depend on each other? Clarify the concrete interface or ordering without serializing unrelated work. |
+| S3 · Present capacity | Is effort advancing outcomes? Distinguish active work, review waits, repeated failures and unused capacity before reallocating effort. |
+| S4 · Adaptation | What changed in user needs, code or the outside environment? Follow dated evidence that could invalidate the plan; propose a bounded response. |
+| S5 · Identity | Do the objective and boundaries still describe useful work? Let Task evidence challenge the Wave's premise, including tension between current commitments and future needs. |
+
+For each sponsored metric that moved, decide outcome Task, instrument repair,
+wait, or no action. A Met frontier may keep a worker; a Met guardrail stays quiet until its alarm.
+Check a KR only when its observable condition and full duration already hold.
+Silence in chat, a completed agent turn, or a green PR is not outcome evidence.
+
+Follow the relevant signal into its source: PR/path overlap and repeated
+conflicts for coordination; retries, CI waits, resource usage and actual outcomes
+for capacity; dated dependency, advisory or API changes for adaptation; gaps,
+contradictory boundaries and accepted decisions for identity. Distinguish urgent
+response from preparation or a watchlist. Do not invent a worker count, require
+all Waves to move at the same rate, or change policy merely to produce an action.
+
+## Identity travels both ways
+
+A Task finding can challenge Wave purpose; a Wave finding can challenge
+repository direction. Record the sourced finding, challenged premise,
+consequence, proposed change and competing interpretations in the relevant
+Wave memory or existing Task discussion. For cross-Wave concerns, name the
+affected Waves and who needs to decide. Repository synthesis participates in
+identity without owning it alone.
+
+Within accepted direction, reconcile the Wave plan or memory. Changes beyond
+current authority stay proposals for review; never silently rewrite another
+Wave's objective. Return accepted decisions, their source and practical
+consequence to affected Task briefs or authorized discussions, retaining
+disagreement. A draft or failed delivery leaves the handoff pending.
 
 ## The hierarchy is an intent graph, not a control plane
 
-Wave → Project → Task is a graph of intent and purpose: it makes work visible,
-gives intent a shareable shape, and ties code to the work it serves. It is **not
-ownership and not permissions.** It gates nothing. An unhealthy Project or Task
-agent never blocks you — adding a Task is just adding a node to the graph.
+Tasks progress independently of Wave and repository passes. Neither operation
+is an approval prerequisite. Each Task's selected Flow carries its work through
+landing; do not perform that Flow's steps or create another cursor here. Preserve selected Flows, review gates,
+worktrees, placement and execution history.
 
-- **Always launch work.** If work should start, start it. Do not wait for a
-  Project agent, a placement check, or a valid ancestry. If a reader or the Task
-  controller is down, do the computable thing directly.
-- **Step in when a delegated layer fails.** Project agent can't create the Task?
-  Create and run it directly. A Task run crashed mid-work? Inspect it with `lf
-  runs` and finish the work in that Task's worktree (concurrent writers are fine).
-- **Capture stays.** Work is still captured as Task nodes with Project placement;
-  only the requirement that the ancestry be *healthy first* is gone.
+- Start selected authorized work with `lf --task <issue-id> flow start`; use the
+  current Project's Flow unless an explicit choice is warranted. Existing
+  execution is reconciled through Task operations, never a duplicate driver.
+- Inspect `lf task status` and existing logs before recovery. Resolve authorized
+  impediments; discuss missing judgment in the ongoing Wave chat when present.
+  Headless operation stops with the reason when it cannot proceed. Retry failed
+  work with `lf --task <issue> flow start --reason "<what changed>"` only when new
+  evidence warrants it. Unknown liveness is not idle. Authored Task review
+  Sessions retain their own feedback and completion contract.
+- Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
+  when execution is intended and authorized. Give work an observable outcome.
+- Update an authorized plan through `lf update-plan --wave <wave> --plan
+  <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
+  GOAL.md only within accepted direction. Supply the complete content object
+  with `metric_targets`, required nonempty `flow` and `krs`; for example
+  `{"metric_targets":[],"flow":"feature","krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve authored Flow and other plan fields.
+- Use supported Task/Work operations for changes, not raw stores, unclaimed
+  process signals or a competing worker on this Home. A missing Home stays an
+  explicit blocker.
 
-## Read, decide, act
+Distinguish completed effects, proposals, failed writes and unresolved readback;
+reconcile uncertain effects before retry. Keep planning at its existing owners
+without introducing a resident or another execution cursor.
 
-Resolve the exact Wave from the prompt or `wave/<wave>/GOAL.md`. Read GOAL/MEMORY,
-the recent human conversation, the cache-only PM snapshot, and current
-Project/Task state. If a reader fails, work from memory — repairing PM or auth is
-not the objective. Trust worker summaries; do not reread transcripts.
+A chapter boundary previews the whole repository with
+`lf repo new-chapter <name> --dry-run --json`. Apply with
+`lf repo new-chapter <name> --json` only after repository direction and disposition
+review gates are satisfied; existing authorization remains valid. An ordinary
+Wave pass does not authorize rotation. The operation has no per-Wave selector
+or plan input. Started work moves intact, proven untouched backlog is canceled
+with history retained, and predecessors become Completed. Uncertain evidence
+blocks automatic retirement. Retry the same name after interruption.
 
-- Answer a waiting human first, plainly and with the useful thing.
-- Select from filed Tasks and open KRs, or file the Task the moment work should
-  start. Start it with `lf task run <issue-id> --directive "<brief>"`; if the
-  controller is down, create and run the node directly.
-- Supervise with `lf task status/steer/interrupt/wait/resume`. Independent Tasks
-  run in parallel; never a second session for one issue.
-- Keep coordination and small read-only decisions in the Wave.
+Planned and Completed Projects retain future and past plans. Future plan edits
+need an authorized Linear writer; `update-plan` cannot target a Planned successor.
+Judge prior chapters using dated evidence, not current metric readings or
+reconstructed starting membership. Do not introduce competing current Projects.
 
-When reporting more than one Task, read `lf roadmap --wave <exact-wave> --json`
-and `lf status <exact-wave> --json` and render each as
-`[identifier](provider URL) — readable active PR/workspace slug — status/next owner`,
-filling the link from
-`task.identifier`/`reference.issue_url`, the slug from `active_pr.slug` (fall back
-to `reference.workspace.slug`), status from `runtime.status` or the roadmap
-`section`, next owner from `next_move.owner`. Never reconstruct a provider URL,
-branch, or slug from an identifier or title. Omit only a link or slug whose
-snapshot evidence is explicitly absent; keep the Task and its status/next owner.
+## Finish
 
-## Uncertainty selects the flow, it never blocks
+Reply in this conversation with the decisive source, judgment, action/result
+and unresolved decisions or evidence gaps. If no move is useful, say why briefly.
+Persist only changed decisions, durable learning and unresolved concerns at
+their existing owners. External posting requires authorization and confirmed
+delivery; this skill does not automatically send the reply to a channel.
 
-Do not stop to ask permission before launching. If uncertain, launch the work
-with a flow whose lifecycle already contains a human review gate (`task-design` →
-`task-gate`, or a `finally` review) rather than blocking the channel. Confident
-work runs a straight-through ship flow. Your only judgment is *which flow*.
+When reporting more than one Task, use the status/roadmap reads above and render
+operational rows as
+`[identifier · Task title](provider URL) — status; next action/owner`.
 
-Correct `GOAL.md` only when the objective, bounds, or cadence no longer ask the
-honest question; correct Project definitions or KRs through `lf pm project
-update`. Promote a durable operating context into a Wave, never a child Project.
+Use this ID-first form in operational lists. In prose, use
+`[Task title · identifier](provider URL)` on first mention; shorten later
+references when unambiguous.
 
-Keep the turn to the one or two useful moves. The Wave runner advances the flow;
-write no loop bit.
+Fill the link from `task.identifier` and `reference.issue_url`, and the readable
+title from `task.title`. Take status from `runtime.status` or the roadmap
+`section`, and next owner from `next_move.owner`. State the next action only
+when supported by current evidence; leave unknown state unknown. Include an
+active PR/workspace slug only when navigating that workspace is the job. In
+roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+URL, branch, or slug from a title or identifier. If a link is absent, keep the
+readable title and available status without inventing a URL.
+
+## Task briefs
+
+Write a description someone can understand without the planning conversation.
+Open with what the person is trying to do, what gets in their way, and what should
+improve. Use a short title naming that improvement. Preserve useful user language;
+use concrete verbs rather than process phrases such as “establish the bounded
+outcome” or “settle the publication commitment”.
+
+Usually one or two short paragraphs and a few acceptance bullets are enough.
+Use headings only when they help. Describe observable success, including required
+numbers, windows, failure cases, and constraints; brevity must not erase them.
+Technical Tasks can serve maintainers or operators without inventing a customer.
+Mark possible solutions as tentative. Keep architecture, implementation steps,
+and detailed proof in the design, linked and available to the worker.
+
+Keep the description current. Put dated progress, chapter allocation, queue
+changes, launch attempts, and verification updates in Task comments when posting
+is authorized. A comment should say what changed and what it means; link detailed
+receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Draft
+proposed comments without posting.
+Do not use a description update or worker steering as a substitute log channel.
+
+Comments may be collapsed by default. Keep current blockers, actual dependencies,
+accepted scope, and unresolved contrary evidence summarized in the description
+when they affect the work. A queue position is not necessarily a dependency.
+When a comment changes the accepted scope, reconcile the description and retain
+the comment as history. Do not append dated amendments or require readers to
+reconstruct the current brief from the thread. Preserve decisions and evidence
+before removing superseded prose.
+
+For example, describe: “After an interrupted release, maintainers need to see
+whether anything shipped and safely continue unfinished work.” Acceptance can
+require that a retry never publishes twice and that failures remain visible.
+Put “Moved into the September chapter; scheduled after the installation repair”
+in a comment. Include that repair in the description only if it is a real blocker.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
+
+Link related work where you explain its relationship: builds on, supersedes,
+or verified by. Use the link forms above for Tasks and PRs, and preserve cited
+decisions and evidence somewhere that survives shipping.

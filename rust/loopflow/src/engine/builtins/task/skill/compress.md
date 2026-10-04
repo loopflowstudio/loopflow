@@ -1,82 +1,59 @@
 ---
-requires: diff vs main
-produces: simpler code
+requires: branch diff and current design
+produces: simpler code related to the diff
 action_style: procedural
 ---
-Leave the codebase simpler than you found it. Delete what isn't needed. Flatten unnecessary abstractions.
+Simplify anything related to the branch diff. Make the code easier to understand
+and change while preserving required behavior. The output is a diff.
 
-## Goal
+1. Read the full diff and current design, then follow the affected code into
+   its surrounding implementation, callers, tests, configuration, and docs.
+   Scope follows the relationship to the change, not just modified lines.
+   Take every worthwhile simplification you find in that scope; do not stop
+   after one small win or wander into unrelated cleanup.
 
-The best reduction isn't deleting a function—it's reshaping a structure so three special cases become one.
+2. Make the deepest cuts first. Read or update the plan's **Delete — do not
+   maintain** list of concrete files/symbols and their exclusive tests/fixtures.
+   Remove obsolete concepts, authorities, and paths before polishing surviving
+   code. Never repair, refactor, or extend code the plan removes, including its
+   exclusive tests/fixtures. Preserve required behavior, data, and tests on the
+   surviving path; include any minimum consumer cutover or migration in the same
+   cut. Temporary breakage within that cut calls for finishing it, not repairing
+   the predecessor. Keep remaining deletion targets current for the next pass.
+   Additive work needs no invented deletion.
 
-Simplicity compounds. Every line removed is a line that can't break, can't confuse, can't slow down the next change.
+3. Then look at every scale in what remains. Clearer names,
+   simpler control flow, better function boundaries, a more direct algorithm or
+   data structure, less repeated work, and fewer concepts or dependencies all
+   count. So do simpler tests, configuration, and documentation. These are
+   starting points, not an exhaustive checklist.
 
-The bar: could someone reading this code for the first time understand it faster after your changes?
+4. Choose the shape that makes the actual problem simplest. Extract or inline,
+   combine or split, share a real common idea or separate cases that were forced
+   together. Reuse existing capabilities when they fit. Remove unnecessary
+   indirection, state, and speculative flexibility; retain abstractions that
+   help readers. Clarity matters more than brevity or line count.
 
-## Workflow
+5. Sanity-check the reduction: build changed code and run its focused test
+   when behavior changed. Reuse applicable results; no edits means no rerun.
+   Fix actual failures. If a check cannot run headless, use a headless equivalent
+   or leave it to gate/CI; do not stop or block the Flow for it. Human judgment
+   belongs to demo/review. Gate owns affected suites and acceptance checks once.
 
-1. **Reflect on the implementation**
-   What did building this reveal? Ask:
-   - Did the implementation fight the existing structure?
-   - Did we add workarounds that hint at a deeper problem?
-   - Is there a simpler design we only see now that it's built?
+Keep rationale beside the code or in the plan, and one command/result line
+with any deferred owner. No pass ledger. If nothing needs reducing, say so.
+Realign reconciles the plan.
 
-   If yes: this is the reduction opportunity. Don't just clean up around the edges—reshape toward the simpler design you now see.
+## Keep authored context within budget
 
-2. **Review the diff**
-   The diff against main is in your context. Identify what was added, what was
-   changed, and whether the current slice still moves toward the complete
-   reviewed design.
-
-3. **Find reduction opportunities**
-   For each file touched, ask:
-   - What's unused now that this change landed?
-   - What abstraction exists only because the old code needed it?
-   - What duplication did this change create or reveal?
-   - Which old authority, type, writer, or path should now be unreachable?
-   - Did a locally convenient adapter leave two representations of one concept?
-
-4. **Reduce**
-   Apply changes directly. Prefer reshaping over deleting—a better structure beats surgical removal.
-
-5. **Verify**
-   If the reduction changed executable behavior, run the smallest existing
-   behavioral test that covers it. If only structure changed, do not rerun the
-   branch suite; gate owns that proof. If the focused test breaks, the
-   reduction went too far.
-
-## What to reduce
-
-**Reshape data structures.** A different representation can eliminate special cases.
-
-Example: Three optional fields that are mutually exclusive → one enum with three variants.
-
-**Rearrange APIs.** Change the interface so callers don't need conditionals.
-
-Example: `process(item, mode)` where every caller passes the same mode → `process(item)` with mode baked in.
-
-**Delete dead code.** Unused functions, unreachable branches, obsolete options.
-
-Example: A feature flag that's been `true` for six months → delete the flag and the `false` branch.
-
-**Collapse duplication.** Same pattern twice? Inline it or pick one location.
-
-Example: Two functions that differ by one line → one function with a parameter, or inline both if they're only called once.
-
-**Remove backwards-compatibility shims.** Old parameter names, deprecated re-exports, migration code for formats nothing uses anymore.
-
-Example: `def foo(x, old_name=None): x = x or old_name` → just `def foo(x):` if nothing uses `old_name`.
-
-## Scope
-
-**Stay in the diff.** If a file wasn't changed or used by this branch, don't touch it.
-
-**Reshape, don't layer.** Restructuring is good. Adding adapters, wrappers, or compatibility shims is not reducing—it's adding.
-
-**Preserve behavior.** Reduction changes structure, not functionality. If tests break, you changed behavior.
-
-**Be aggressive.** Question whether each abstraction earns its place. Question whether each option is used. Question whether the API surface is minimal. The default is "this can probably go"—make it prove otherwise.
-
-## Output
-
-Simpler code that passes tests. If nothing can be reduced, say so—not every diff has reduction opportunities.
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill compress`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Bring over-budget material under both token and byte limits as part of this step.
+Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
+stacked parent, and keep historical detail in git rather than ambient context.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.

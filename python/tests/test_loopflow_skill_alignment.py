@@ -36,7 +36,7 @@ def test_external_user_and_internal_worker_authority_are_distinct():
         assert "external harness" in text
         assert "Loopflow-launched" in text
         assert "User" in text
-        assert "lf chat" in text
+        assert "Session" in text
 
     install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
     assert install in agent_api
@@ -48,10 +48,9 @@ def test_agent_surfaces_share_the_inspection_commands():
         SKILL.read_text(),
         LOOPFLOW.read_text(),
         (ROOT / "docs/agent-api.md").read_text(),
-        (ROOT / "docs/lf.md").read_text(),
     ]
 
     for text in surfaces:
-        assert "lf ls --json" in text
-        assert "lf status <wave> --json" in text
+        assert "lf wave list --json" in text
+        assert "lf wave status <wave> --json" in text
         assert "lf roadmap --json" in text

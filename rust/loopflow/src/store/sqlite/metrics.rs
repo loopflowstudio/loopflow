@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
-    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
-    ObservationAcceptance,
-};
 #[cfg(test)]
 use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
+use crate::work::wave::metrics::{
+    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
+    ObservationAcceptance,
+};
 
 use super::SqliteStore;
 
@@ -255,10 +255,8 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{
-        MetricContractDefinition, MetricDuration, MetricStage, MetricTarget,
-    };
     use crate::id::WaveId;
+    use crate::work::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::work::wave::Wave;
 
     use super::*;
@@ -267,11 +265,10 @@ mod tests {
         MetricContract::new(MetricContractDefinition {
             identity,
             name: "Task loops earn trust".to_string(),
-            project_id: "project-1".to_string(),
             stage: MetricStage::Installed,
             instrument: "lifecycle-scorecard".to_string(),
             unit: "ratio".to_string(),
-            target: MetricTarget::AtLeast { value: 1.0 },
+
             window: MetricDuration::parse("7d").unwrap(),
             freshness_policy: MetricDuration::parse("6h").unwrap(),
             body: "Count settled Task loops.".to_string(),

@@ -1,0 +1,88 @@
+{
+  "changes": {
+    "issue_identifier": "TEST-1",
+    "task_id": "task-files",
+    "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "files": [
+      {
+        "path": "new.txt",
+        "old_path": "old.txt",
+        "committed": true,
+        "staged": false,
+        "unstaged": false,
+        "untracked": false
+      }
+    ],
+    "scratch": [
+      "scratch/notes.md"
+    ],
+    "scratch_truncated": false,
+    "recovery_directory": "/task/git/loopflow-file-recovery"
+  },
+  "diff": {
+    "issue_identifier": "TEST-1",
+    "task_id": "task-files",
+    "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "new.txt",
+    "patch": "-old\n+draft\n",
+    "binary": false,
+    "truncated": false
+  },
+  "file": {
+    "issue_identifier": "TEST-1",
+    "task_id": "task-files",
+    "path": "scratch/notes.md",
+    "content": "\ufeffnotes\r\n",
+    "state": "text",
+    "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "size_bytes": 10,
+    "recoveries": [
+      {
+        "directory": "/task/git/loopflow-file-recovery/path/save",
+        "changed": true,
+        "message": "Recovered file changed. Inspect before continuing."
+      }
+    ],
+    "read_only_reason": null
+  },
+  "save": {
+    "file": {
+      "issue_identifier": "TEST-1",
+      "task_id": "task-files",
+      "path": "scratch/notes.md",
+      "content": "\ufeffnotes\r\n",
+      "state": "text",
+      "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size_bytes": 10,
+      "recoveries": [
+        {
+          "directory": "/task/git/loopflow-file-recovery/path/save",
+          "changed": true,
+          "message": "Recovered file changed. Inspect before continuing."
+        }
+      ],
+      "read_only_reason": null
+    },
+    "published": true,
+    "message": "Saved. Previous file retained."
+  },
+  "directory": {
+    "path": "",
+    "entries": [
+      {
+        "path": "scratch",
+        "kind": "directory"
+      },
+      {
+        "path": "unchanged.txt",
+        "kind": "file"
+      },
+      {
+        "path": "link",
+        "kind": "symlink"
+      }
+    ],
+    "next_cursor": null
+  }
+}

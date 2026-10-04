@@ -1,161 +1,172 @@
 ---
-requires: the latest chapter report when one exists; Task worktree for tracked application
-produces: .lf/chapters/<chapter-id>/ start record, scoped child proposals, applied accepted plan
+requires: latest chapter review when available; Task worktree for tracked edits
+produces: accepted Project plans, repository rotation result, publication status
 ---
-Open a new chapter: brief the human, accept direction, gather scoped proposals and challenges, then apply only the plan the human finally accepts.
+Open a new chapter from user direction. A chapter is the shared name of every
+Wave's one In Progress Linear Project. Planned Projects hold future plans;
+Completed Projects retain past plans and Tasks. Existing Project identities
+survive. The Wave owns its objective, memory and instruments; Project content
+owns metric targets, KRs and the required `flow:` default. There is no separate
+Chapter record or local planning directory.
 
-A chapter is a dated planning interval. Plans expire at its boundary; shipped
-code, history, and in-flight work do not. The old chapter's report is
-evidence; its priorities carry no authority into this one. Two explicit human
-decisions gate this skill: direction before delegation, and the reconciled
-plan before mutation.
+Started unfinished Tasks move with identity, Started timestamp, worktree, PR
+and captured execution intact. Proven untouched backlog becomes abandoned
+locally and canceled in Linear; its issues and history remain. Terminal Tasks
+stay historical unless current execution evidence conflicts. Unresolved
+dispositions require reconciliation; missing evidence never authorizes retirement.
 
-## Ground in evidence
+## Brief, then accept direction
 
-Read the latest repository chapter report (`.lf/chapters/<id>/review.md`)
-when one exists; if the record is missing or stale, run `review-chapter`
-bound to the same Task first and use its report. Read every
-`wave/<name>/GOAL.md` and `MEMORY.md`, the PM snapshots
-(`lf pm show --wave <name> --json`), and live state
-(`lf ls`, `lf status <wave>`). Build a concise briefing: what held, what is
-unknown, what shipped, which work remains active, and where reality has
-moved. Start with what became better or worse for users, operators,
-maintainers, and agents. Keep the exact KR evidence available underneath;
-do not make the human reconstruct product meaning from the ledger.
-Carry forward the review's proposed next-chapter implications as questions,
-not inherited decisions: likely carry goals, changed assumptions, goals not
-supported by actual priority, and misplaced or unowned work.
+Read the available dated chapter review and Linear Project plans by stable ID,
+including their statuses and content. Run review-chapter when evidence is missing
+or stale. Read the Wave roster, GOAL/MEMORY,
+`lf wave status <wave> --no-sync --json`, and `lf roadmap --json`.
+Name stale or unavailable planning and historical evidence explicitly; today's
+Project content and metric readings cannot establish an earlier boundary.
+Lead with experienced improvements, remaining friction, active work, and gaps.
+Ask what mattered, surprised, or should become possible; reflect the user's
+language and unresolved tensions. Discuss any Wave boundary changes.
 
-The tracked chapter archive and any Wave charter edits belong in a Task
-worktree. If this Run is not in one, complete the human briefing and return
-the accepted direction as a draft; continue the chapter from an existing or
-new Task worktree before dispatching children or changing live planning.
+**Gate 1:** the user explicitly accepts direction before scoped planning contributions.
+In an interactive session, ask in the conversation. Headless work without accepted
+direction explains the missing decision and stops. Silence, elapsed time, or
+provider exit is not acceptance. Existing accepted direction remains valid; do not ask again.
 
-## Gate 1 — accept direction before delegation
+Tracked charter edits belong in a Task worktree. If not in one, return the
+direction draft and continue those edits in a Task worktree. Keep temporary
+proposals and evidence under `scratch/`, recording accepted direction, target
+chapter name, stable Project IDs, exact KR wording, evidence dates and gaps.
+These notes do not own live planning or recovery.
 
-Bring the briefing, then begin with the human's experience rather than a
-portfolio proposal. Ask a small number of open questions at a time and listen
-before synthesizing:
+## Shape one plan per Wave
 
-- How did the last chapter feel? What created momentum, frustration, or
-  surprise?
-- What are they excited to make possible for users now?
-- Which user pain or opportunity matters most, independent of the existing
-  backlog?
-- What feels complete, obsolete, urgent, valuable, or constrained?
+Launch bounded `lf -b --wave <name> wave/start-chapter "<chapter name, accepted
+brief, exact prior ledger>"` contributions. For a proposed uninitialized Wave use an
+unbound contribution with its exact name and boundary. Children propose, return agree or
+challenge, and never mutate live planning. Do not launch Project planning contributions.
 
-These are direction questions, not requests to approve an agent-authored map.
-Reflect the answers back in the human's language, name tensions that remain
-open, and only then propose a provisional Wave map that names who each Wave
-serves and what should improve in their real use of Loopflow. Discuss keep,
-split, merge, retire, and new boundaries until the human explicitly says the
-direction captures their intent. A list of old Projects or Tasks is not a
-substitute for this conversation. No Wave or Project start Run may launch
-before this record exists.
+Keep each complete proposal and exact JSON plan in scratch. Preview the whole
+repository with `lf repo new-chapter <name> --dry-run --json`; there is no
+per-Wave rotation or plan-file argument. A preview classifies current provider
+facts, not unapplied proposal content. Reconcile challenges and show the user
+Wave objectives, proposed KRs and metric targets, retained successor content,
+inherited started Tasks, backlog cancellations, new Tasks and unresolved evidence.
+A failed or missing proposal stays explicit.
 
-On a headless surface, open a durable `lf ask "<exact request>"` session for
-this conversation and block on it. Provider exit, silence, or a ready
-session does not count as acceptance; only the human completing the session
-with an explicit decision does.
+**Gate 2:** obtain explicit acceptance of the complete reconciled plan and its
+Task dispositions before mutation. Existing acceptance remains valid. A material
+change after acceptance returns to this conversation. Fixed carryover rules are
+not negotiable per-Task prompt choices; changed evidence is reconciled by the API.
 
-On acceptance, create `.lf/chapters/<UTC timestamp>-<this Run id prefix>/`
-and write `draft.md`: the UTC start time and next review date for each scope,
-this Run's id, the accepted repository direction and Wave boundaries with their reasons and
-open tensions, source timestamps and explicit evidence gaps, and the frozen
-ledger — every starting Wave, Project stable id, exact definition, exact KR
-claim, and open Task.
+## Apply through one deterministic owner
 
-## Dogfood the chapter process
+Apply accepted Wave charter edits in this Task worktree and connect accepted
+new Waves. Preserve existing Linear Projects. For an authored successor plan,
+create or edit its Planned Project in Linear through an available authorized
+provider interface, retaining its Wave Initiative and repository Team. There is
+no `lf` command to write a future Project plan; report that exact limitation if
+no provider writer is available. Never use `wave update-plan` to write a future
+plan into the predecessor.
 
-When this live chapter exposes a defect in `start-chapter` instructions or
-tooling, preserve the observation separately from the plan. Fix a reversible,
-in-scope process defect in the current Task worktree, run its smallest useful
-validation, and resume from the same gate. Process repair never counts as human
-acceptance and never grants permission to mutate Wave, Project, Task, or Work
-state early. Record larger defects as explicit follow-up work without making
-the chapter wait for unrelated infrastructure.
+Without a prepared successor, rotation creates an empty plan carrying only the
+predecessor's Flow; a Wave with no Projects starts with `feature`. An existing
+Planned successor retains its authored Flow, KRs and targets. Missing default
+Flow or competing current Projects require explicit resolution in Linear.
+Refresh the repository preview after preparation, then apply the accepted name:
 
-## Delegate and reconcile
+```bash
+lf repo new-chapter <name> --dry-run --json
+lf repo new-chapter <name> --json
+```
 
-Launch bounded `wave/start-chapter` Runs sequentially. For an existing Wave,
-use `lf -b --wave <name> wave/start-chapter "<chapter-id> + that Wave's accepted
-brief and exact starting Project/KR ledger>"`. For a proposed new Wave with
-no registered Work, use an unbound `lf -b wave/start-chapter "<proposed Wave
-name, repository, and accepted boundary>"` Run; do not create its Work before
-the final decision. During this orchestration child starts are proposal-only:
-each inspects its real objective, code, PM snapshot, and active work, gathers
-scoped human direction, proposes its Project portfolio, and returns `agree`
-or `challenge` against the parent boundary with reasons and evidence.
+Retain dated command output and exit status as evidence. Retry an interrupted
+rotation with the same name. Fresh Linear statuses and stable Project IDs own
+recovery; command output is not a durable recovery record. Rotation activates
+successors, rechecks Task dispositions, moves started work, cancels untouched
+backlog and completes predecessors. It is not atomic across Waves or Homes;
+partial application can leave both Projects In Progress. Report conflicting
+plans or external reassignments instead of choosing by name recency. Never
+reimplement rotation as individual provider mutations, restart moved Tasks,
+delete predecessor Projects, or count canceled backlog as completed work.
 
-A challenge is first-class output. Capture each child's final proposal,
-included Project proposals, and all Run ids, and write their scoped
-`start.md` files from this Task worktree; children do not write into their
-Wave checkout. Preserve each challenge, reconcile overlaps and gaps, and
-return the complete plan to the human. A failed or unanswered child
-stays explicit and blocks application for its affected scope; it never
-becomes tacit agreement. Record every child Run id, agreement, challenge,
-failure, and unanswered question in `draft.md`.
+To apply an accepted plan after its Project becomes current, use:
 
-## Gate 2 — accept the reconciled plan before mutation
+```bash
+lf wave update-plan --wave <wave> --plan <plan.json>
+```
 
-Only the human's explicit final acceptance crosses the mutation boundary.
-Then apply the accepted plan through the existing owners:
+The file replaces the complete current Project content:
 
-- Wave objective, boundary, or roster edits happen in the current Task
-  worktree and follow the ordinary PR path.
-- Project definitions and KRs use `lf pm project create/update/archive`.
-- Task dispositions use `lf pm task create/update/done/move`.
-- Durable pursuit ends through `lf work abandon` or the scoped lifecycle
-  command, only where retirement was explicitly accepted.
+```json
+{"metric_targets":[],"flow":"feature","krs":[{"text":"Observable proof","holds":false}]}
+```
 
-Every prior Project and open Task receives an explicit carry, rewrite,
-complete, or retire disposition; none inherits priority merely by existing.
-Record each operation's success, failure, and canonical identifier in
-`draft.md`. Partial application leaves the affected live source as the
-authority and reports the mismatch — never rewrite the accepted plan to make
-an operation look successful. Seal the interval by renaming `draft.md` to
-`start.md` only after every accepted operation succeeds. A failed or
-interrupted draft never displaces the last valid chapter. Corrections append
-a dated correction section rather than replacing an observed decision.
+`flow` must be a nonempty string. Each metric target names `metric_id` and a
+`target` such as `{"kind":"at_least","value":0.95}`. Omitted targets stay
+unset; readings remain Wave-owned and rotation copies none of them. Read back
+the resulting Project content and status before claiming the plan applied.
 
-## Publish the chapter boundary
+File accepted fresh Tasks through `lf task create --wave <wave> --title
+<title> --notes <description>`. The Wave resolves the current Project. Rotation
+itself never launches workers. Record failures and unresolved dispositions;
+partial application is pending, never prose success. A successful rotation
+alone does not prove separately accepted plan edits or Task creation succeeded.
 
-The chapter is not durable merely because live planning changed or a local
-`start.md` exists. After application succeeds, create one repository checkpoint
-containing the preceding chapter's `review.md`, every scoped review and start
-report, the accepted `start.md`, and any accepted Wave charter edits. Use `lf
-commit` so the archive has one identifiable Git boundary. Do not include
-scratch presentations or transient planning notes.
+## Publish separately
 
-Obtain explicit human authority before pushing. Then publish the checkpoint
-through the ordinary PR workflow the human selected; default to `lf pr submit`
-when a person should land it. Future chapter reviews open their interval from
-the newest merged `.lf/chapters/<chapter-id>/start.md`, using the record's UTC
-start time rather than commit age. Until that commit merges, report that live PM
-state is ahead of the repository archive and do not claim the new chapter is
-fully published. A later correction appends evidence in a new commit; it never
-rewrites the observed start decision.
+Curate durable lessons into Wave memory and retain useful decisions and evidence
+in existing durable records before scratch cleanup. Linear retains Project
+plans and history; do not create a second local chapter owner. Checkpoint
+coherent repository edits with `lf commit`. Obtain push authority unless already
+given, then use the selected PR workflow; default to `lf pr submit` for a manual
+merge. Until merged, explicitly report that operational application is complete
+but repository publication is pending. Corrections append dated observations;
+never rewrite earlier evidence.
 
-## Preservation
+## Task briefs
 
-Active Task work survives unless the final human decision explicitly moves,
-completes, or retires it. Retiring a plan never deletes product code,
-branches, commits, merged PRs, Run records, or the chapter archive; Git and
-Linear keep the history of removed Wave files and archived planning objects.
+Write a description someone can understand without the planning conversation.
+Open with what the person is trying to do, what gets in their way, and what should
+improve. Use a short title naming that improvement. Preserve useful user language;
+use concrete verbs rather than process phrases such as “establish the bounded
+outcome” or “settle the publication commitment”.
 
-## What to avoid
+Usually one or two short paragraphs and a few acceptance bullets are enough.
+Use headings only when they help. Describe observable success, including required
+numbers, windows, failure cases, and constraints; brevity must not erase them.
+Technical Tasks can serve maintainers or operators without inventing a customer.
+Mark possible solutions as tentative. Keep architecture, implementation steps,
+and detailed proof in the design, linked and available to the worker.
 
-**A backlog audit wearing a chapter's clothes.** Routine reprioritization is
-`wave/operate`'s job. A chapter start re-derives the map from direction, not
-from the open Task list.
+Keep the description current. Put dated progress, chapter allocation, queue
+changes, launch attempts, and verification updates in Task comments when posting
+is authorized. A comment should say what changed and what it means; link detailed
+receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
+dated application evidence in existing records. Proposals draft comments without posting.
+Do not use a description update or worker steering as a substitute log channel.
 
-**Launching early.** A child dispatched before the human accepts direction
-plans against direction no one gave.
+Comments may be collapsed by default. Keep current blockers, actual dependencies,
+accepted scope, and unresolved contrary evidence summarized in the description
+when they affect the work. A queue position is not necessarily a dependency.
+When a comment changes the accepted scope, reconcile the description and retain
+the comment as history. Do not append dated amendments or require readers to
+reconstruct the current brief from the thread. Preserve decisions and evidence
+before removing superseded prose.
 
-**Applying early.** A mutation performed before final acceptance turns a
-child challenge into a rollback problem. Children propose; the root applies
-once, at the end.
+For example, describe: “After an interrupted release, maintainers need to see
+whether anything shipped and safely continue unfinished work.” Acceptance can
+require that a retry never publishes twice and that failures remain visible.
+Put “Moved into the September chapter; scheduled after the installation repair”
+in a comment. Include that repair in the description only if it is a real blocker.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
-**Children as executors.** A Wave start that only transcribes the parent
-brief wastes the session; the brief stays provisional until scoped evidence
-and human direction confirm or challenge it.
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
+
+Apply these rules within the chapter’s existing proposal and acceptance boundaries.
+Preserve the accepted brief when applying it; retain dated application evidence;
+summarize relevant changes in authorized Task comments, never
+prepend or append allocation logs to the description.

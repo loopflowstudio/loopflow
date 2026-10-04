@@ -2,15 +2,16 @@
 
 pub mod config;
 pub mod context;
-pub mod memory;
+pub mod metrics;
+pub mod relocate;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
 use crate::repository::{CanonicalRepo, CanonicalRepoError};
 
-/// A Wave's mutable human address inside one canonical repository.
+/// A Wave's mutable readable address inside one canonical repository.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WaveLocator {
     repo: CanonicalRepo,
@@ -52,37 +53,18 @@ impl WaveLocator {
     }
 }
 
-/// The one-time typed wake derived from a child Wave's durable promotion occurrence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PromotionWake {
-    pub(crate) parent_wave_id: WaveId,
-    pub(crate) parent: String,
-}
-
-impl PromotionWake {
-    pub(crate) fn inbox_id(&self) -> String {
-        format!("promotion:{}", self.parent_wave_id)
-    }
-
-    pub(crate) fn prompt(&self) -> String {
-        format!(
-            "Promotion from parent Wave '{}' is complete. Begin the first child-Wave pass and report what this Wave now owns.",
-            self.parent
-        )
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Wave {
     id: WaveId,
     name: String,
+    /// Derived on read from this Wave and its ancestors; never persisted.
+    #[serde(skip)]
+    slug: String,
     /// Current canonical repository half of the mutable locator.
     repo: String,
     #[serde(with = "time::serde::rfc3339::option")]
     created_at: Option<OffsetDateTime>,
-    /// Parent wave in the chord tree. `None` for a root wave. A chord is simply
-    /// a wave that has children (`children_of(id)` non-empty) — there is no
-    /// `wave_type` discriminator.
+    /// Directory parent; absent for a top-level Wave.
     parent_wave_id: Option<WaveId>,
     /// The first completed promotion occurrence. Ancestry alone leaves this
     /// absent so an older parent link cannot manufacture a new wake.
@@ -98,6 +80,7 @@ impl Wave {
     pub fn new(id: WaveId, name: String, repo: String) -> Self {
         Self {
             id,
+            slug: name.clone(),
             name,
             repo,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -109,7 +92,7 @@ impl Wave {
         }
     }
 
-    /// Establish initial chord ancestry without recording a promotion occurrence.
+    /// Establish an initial directory parent without recording a promotion occurrence.
     /// An existing parent always wins.
     pub fn with_parent(mut self, parent: WaveId) -> Self {
         self.parent_wave_id.get_or_insert(parent);
@@ -130,6 +113,7 @@ impl Wave {
     ) -> Self {
         Self {
             id,
+            slug: name.clone(),
             name,
             repo,
             created_at: Some(created_at),
@@ -141,32 +125,11 @@ impl Wave {
         }
     }
 
-    /// Record the first promotion occurrence and its validated ancestry.
-    pub(crate) fn record_promotion(
-        &mut self,
-        parent: &WaveId,
-        at: OffsetDateTime,
-    ) -> Result<(), String> {
-        if self
-            .parent_wave_id
-            .as_ref()
-            .is_some_and(|current| current != parent)
-        {
-            return Err(format!(
-                "Wave '{}' already belongs to another parent",
-                self.name
-            ));
-        }
-        self.parent_wave_id.get_or_insert_with(|| parent.clone());
-        self.promoted_at.get_or_insert(at);
-        Ok(())
-    }
-
     pub fn id(&self) -> &WaveId {
         &self.id
     }
 
-    /// Parent wave in the chord tree, `None` for a root wave.
+    /// Directory parent, `None` for a root Wave.
     pub fn parent_wave_id(&self) -> Option<&WaveId> {
         self.parent_wave_id.as_ref()
     }
@@ -192,6 +155,15 @@ impl Wave {
         self.retired_at.is_some()
     }
 
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
+    pub(crate) fn with_slug(mut self, slug: String) -> Self {
+        self.slug = slug;
+        self
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -206,17 +178,143 @@ impl Wave {
     }
 }
 
+pub async fn ensure_wave_row(
+    store: &crate::store::Store,
+    main_repo: &std::path::Path,
+    name: &str,
+) -> crate::store::StoreResult<Wave> {
+    use crate::store::StoreError;
+    let locator = WaveLocator::discover(main_repo, name)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    let repo = locator.repo().to_string();
+    let mut parent: Option<WaveId> = None;
+    let mut prefix = String::new();
+    for segment in locator.slug().split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        let address = WaveLocator::new(locator.repo().clone(), &prefix)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let config = config::try_read_wave_config(main_repo, &prefix)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let at_address = store.get_wave_at(&address).await?;
+        let id = config
+            .as_ref()
+            .and_then(|config| config.id.clone())
+            .or_else(|| at_address.as_ref().map(|wave| wave.id().clone()))
+            .unwrap_or_default();
+        if at_address.as_ref().is_some_and(|wave| wave.id() != &id) {
+            return Err(StoreError::InvalidData(format!(
+                "Wave {prefix} is already registered with another id"
+            )));
+        }
+        if let Some(existing) = store.get_wave(&id).await? {
+            if existing.is_retired() || existing.repo() != repo {
+                return Err(StoreError::InvalidData(format!(
+                    "Wave {id} belongs to another repository or is retired"
+                )));
+            }
+            if existing.slug() != prefix {
+                let previous = config::try_read_wave_config(main_repo, existing.slug())
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                if previous.and_then(|config| config.id).as_ref() == Some(&id) {
+                    return Err(StoreError::InvalidData(format!(
+                        "Wave {id} appears at both {} and {prefix}",
+                        existing.slug()
+                    )));
+                }
+            }
+            store
+                .reconcile_wave_directory(&id, segment, parent.as_ref())
+                .await?;
+        } else {
+            let mut wave = Wave::new(id.clone(), segment.to_string(), repo.clone());
+            if let Some(parent) = &parent {
+                wave = wave.with_parent(parent.clone());
+            }
+            store.create_wave(&wave).await?;
+        }
+        if config.as_ref().is_none_or(|config| config.id.is_none()) {
+            config::update_wave_goal_config(main_repo, &prefix, |map| {
+                map.insert(
+                    serde_yaml_ng::Value::String("id".into()),
+                    serde_yaml_ng::Value::String(id.to_string()),
+                );
+                Ok(())
+            })
+            .map_err(StoreError::InvalidData)?;
+        }
+        parent = Some(id);
+    }
+    store.get_wave_at(&locator).await?.ok_or_else(|| {
+        StoreError::InvalidData(format!(
+            "Wave {name} disappeared during directory discovery"
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Wave, WaveLocator};
+    use crate::id::WaveId;
+    use time::OffsetDateTime;
+
+    #[tokio::test]
+    async fn directory_discovery_rejects_duplicate_ids_and_preserves_sibling_names() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            home.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let first = super::ensure_wave_row(&store, repo.path(), "infra/release")
+            .await
+            .unwrap();
+        let other = super::ensure_wave_row(&store, repo.path(), "product/release")
+            .await
+            .unwrap();
+        assert_ne!(first.id(), other.id());
+        assert_eq!(first.name(), other.name());
+        std::fs::copy(
+            repo.path().join("wave/infra/release/GOAL.md"),
+            repo.path().join("wave/product/release/GOAL.md"),
+        )
+        .unwrap();
+        assert!(
+            super::ensure_wave_row(&store, repo.path(), "product/release")
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.get_wave(other.id()).await.unwrap().unwrap().slug(),
+            "product/release"
+        );
+        assert!(store
+            .reconcile_wave_directory(first.parent_wave_id().unwrap(), "infra", Some(first.id()))
+            .await
+            .is_err());
+        assert_eq!(
+            store.get_wave(first.id()).await.unwrap().unwrap().slug(),
+            "infra/release"
+        );
+    }
 
     #[test]
     fn reconstructing_identity_cannot_copy_or_reparent_a_promotion() {
         let parent = WaveId::new();
-        let mut promoted = Wave::new(WaveId::new(), "ship".to_string(), "/repo".to_string());
-        promoted
-            .record_promotion(&parent, OffsetDateTime::now_utc())
-            .expect("record promotion");
+        let promoted = Wave::from_stored_parts(
+            WaveId::new(),
+            "ship".to_string(),
+            "/repo".to_string(),
+            OffsetDateTime::now_utc(),
+            Some(parent.clone()),
+            Some(OffsetDateTime::now_utc()),
+            None,
+            None,
+            None,
+        );
 
         let rebuilt = Wave::new(
             promoted.id().clone(),

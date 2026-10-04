@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
 use crate::work::project::ProjectId;
 use crate::work::task::TaskId;
 
@@ -67,22 +66,6 @@ pub enum ChildDataError {
     InvalidId(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ObservationRecipient {
-    Wave { wave_id: WaveId },
-    Project { project_id: ProjectId },
-}
-
-/// Requested replacement of the agent/provider body acting for a durable
-/// Project or Task.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildBodyHandoffRequest {
-    pub agent: String,
-    pub provider: String,
-    pub reason: String,
-}
-
 /// Typed audit record for a body handoff. Work and Run identity are intentionally
 /// absent: they do not change during this transition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,13 +77,12 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The `lf` binary, store, and home a child Work launch uses, resolved fresh at
+/// The `lf` binary and Home a child Work launch uses, resolved fresh at
 /// the launch boundary from the current Home — never persisted as Work state.
 /// Work no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
-    pub db_path: PathBuf,
     pub lf_home: PathBuf,
 }
 

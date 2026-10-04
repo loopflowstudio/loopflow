@@ -1,6 +1,6 @@
 //! Turn a Linear issue read into durable Task direction.
 //!
-//! A human editing a Linear issue's title or description or adding a comment
+//! Someone editing a Linear issue's title or description or adding a comment
 //! appends an ordered Steer. This module maps one observation onto that input
 //! spine, and [`Store::apply_linear_observation`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
@@ -9,21 +9,171 @@
 
 use time::OffsetDateTime;
 
+use super::{OpsError, OpsResult};
+use crate::pm::linear::LinearClient;
+use crate::store::SharedStore;
+
 use crate::pm::{IssueComment, IssueObservation};
 use crate::store::{Store, StoreResult};
 use crate::work::task::{
     LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
 };
 
-/// A comment carries human direction when it has an author that is not
-/// Loopflow's own Linear user. A null author (an integration/bot actor) or
-/// Loopflow's own writeback never becomes Task direction — this is what keeps
-/// ingestion from feeding itself.
-pub(crate) fn is_human_comment(comment: &IssueComment, viewer_id: &str) -> bool {
-    comment
-        .author_id
+/// Explicit steering is eligible even when published by an integration. Participant-authored
+/// comments include the account used by Loopflow; exclude writebacks by content.
+pub(crate) fn is_human_comment(comment: &IssueComment, _viewer_id: &str) -> bool {
+    is_direction_comment(&comment.body, comment.author_id.as_deref())
+}
+
+/// Explicit steering carries its marker, whichever account published it.
+pub(crate) fn is_steer(body: &str) -> bool {
+    body.contains("<!-- loopflow-steer:")
+}
+
+pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
+    if body.contains("<!-- loopflow-progress:") {
+        return false;
+    }
+    if is_steer(body) {
+        return true;
+    }
+    author.is_some()
+        && !body.contains("<!-- loopflow-")
+        && !body.starts_with("PR: ")
+        && !body.starts_with("Shipped: ")
+        && !body.starts_with("Reteamed by loopflow:")
+        && !body.starts_with("[GitHub PR #")
+}
+
+/// Publish first; local events are a recoverable projection of Linear comments.
+pub(crate) async fn publish_task_steer(
+    store: &SharedStore,
+    task: &Task,
+    text: &str,
+) -> OpsResult<String> {
+    let client = super::pm::issue_client(&task.worktree).await?;
+    let comment_id = publish_direction(&client, task.plan.id.as_str(), text).await?;
+    refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
+        "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
+    )))?;
+    Ok(comment_id)
+}
+
+pub(crate) async fn publish_issue_comment(
+    client: &LinearClient,
+    issue: &str,
+    text: &str,
+    steer: bool,
+) -> OpsResult<String> {
+    if steer {
+        return publish_direction(client, issue, text).await;
+    }
+    if let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) {
+        let run_id = run_id.to_string_lossy();
+        let run_id = crate::session_record::parse_artifact_key(&run_id)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let marker = format!(
+            "<!-- loopflow-progress:{run_id}:{} -->",
+            uuid::Uuid::new_v4()
+        );
+        return publish_comment(client, issue, text, &marker).await;
+    }
+    publish_direction(client, issue, text).await
+}
+
+async fn publish_direction(client: &LinearClient, issue: &str, text: &str) -> OpsResult<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(OpsError::Message("Task direction cannot be empty".into()));
+    }
+    let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
+    let name = crate::engine::config::participant_name()
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let text = match name {
+        Some(name) => format!(
+            "{text}\n\n<!-- loopflow-requester:{} -->",
+            serde_json::to_string(&name)
+                .expect("name is serializable")
+                .replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+        ),
+        None => text.to_string(),
+    };
+    publish_comment(client, issue, &text, &marker).await
+}
+
+pub(crate) async fn publish_comment(
+    client: &LinearClient,
+    issue_id: &str,
+    text: &str,
+    marker: &str,
+) -> OpsResult<String> {
+    // One identity per authored instruction. Equal text can intentionally recur.
+    let body = format!("{text}\n\n{marker}");
+    match client.comment(issue_id, &body).await {
+        Ok(id) => Ok(id),
+        Err(error) => match client.find_comment_with_marker(issue_id, marker).await {
+            Ok(Some(id)) => Ok(id),
+            _ => Err(OpsError::Message(format!(
+                "Linear did not confirm this comment: {error}. Check Linear for {marker} before resubmitting; no local-only comment was accepted."
+            ))),
+        },
+    }
+}
+
+pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let client = super::pm::issue_client(&task.worktree).await?;
+    let observation = client
+        .observe_issue(task.plan.id.as_str())
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    reconcile_linear_observation(store, task, observation, "", OffsetDateTime::now_utc())
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(())
+}
+
+pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
+    match revision {
+        Some(revision) => format!("{id}@{revision}"),
+        None => id.to_string(),
+    }
+}
+
+/// The person a comment speaks for. Explicit steering can be published through
+/// an integration account: its recorded requester wins over the Linear author.
+pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option<String> {
+    let requester = if is_steer(body) {
+        body.split_once("<!-- loopflow-requester:")
+            .and_then(|(_, rest)| rest.split_once(" -->"))
+            .and_then(|(name, _)| serde_json::from_str::<String>(name).ok())
+    } else {
+        author_name.map(str::to_string)
+    };
+    requester
         .as_deref()
-        .is_some_and(|id| id != viewer_id)
+        .and_then(crate::engine::config::normalize_user_name)
+        .or_else(|| author_name.and_then(crate::engine::config::normalize_user_name))
+}
+
+pub(crate) fn render_comment(
+    id: &str,
+    body: &str,
+    author_id: Option<&str>,
+    author_name: Option<&str>,
+) -> String {
+    let attribution = comment_requester(body, author_name)
+        .map(|name| {
+            format!(
+                " by {}",
+                serde_json::to_string(&name).expect("name is serializable")
+            )
+        })
+        .unwrap_or_default();
+    let source = author_id
+        .map(|id| format!(" (provider user {id})"))
+        .unwrap_or_default();
+    format!("Linear comment {id}{attribution}{source}:\n\n{body}")
 }
 
 fn content_steer_text(title: &str, description: &str) -> String {
@@ -31,14 +181,6 @@ fn content_steer_text(title: &str, description: &str) -> String {
         "The linked Linear task was edited; use this current definition.\n\n\
          Title: {title}\n\n{description}"
     )
-}
-
-fn follow_up_text(body: &str) -> String {
-    format!("New Linear comment:\n\n{body}")
-}
-
-pub(crate) fn linear_follow_up_text(body: &str) -> String {
-    follow_up_text(body)
 }
 
 /// Read one Linear observation into durable, exactly-once Task direction.
@@ -82,8 +224,13 @@ pub(crate) fn plan_apply(
         .iter()
         .filter(|comment| is_human_comment(comment, viewer_id))
         .map(|comment| LinearFollowUp {
-            comment_id: comment.id.clone(),
-            text: linear_follow_up_text(&comment.body),
+            comment_id: comment_revision_id(&comment.id, comment.revision.as_deref()),
+            text: render_comment(
+                &comment.id,
+                &comment.body,
+                comment.author_id.as_deref(),
+                comment.author_name.as_deref(),
+            ),
         })
         .collect();
     LinearObservationApply {
@@ -98,17 +245,168 @@ pub(crate) fn plan_apply(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{is_human_comment, plan_apply};
     use crate::planning::{LinearIssueId, TaskPlan};
     use crate::pm::{IssueComment, IssueObservation};
     use crate::work::task::{Task, TaskId, TaskLinearObservation};
 
+    use crate::pm::test_server::{self, json_response};
+    use crate::store::{CredentialType, ProviderToken, SharedStore};
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use std::future::Future;
+
+    pub(crate) async fn with_posted_comment<T>(
+        store: &SharedStore,
+        task: &Task,
+        body: &str,
+        future: impl Future<Output = T>,
+    ) -> T {
+        let (url, _) = test_server::spawn(vec![
+            json_response(StatusCode::OK, json!({"data": {"commentCreate": {"comment": {"id": "comment-1"}}}})),
+            json_response(StatusCode::OK, json!({"data": {"issue": {
+                "updatedAt": "2026-09-23T00:00:00Z", "title": task.plan.title, "description": task.plan.description,
+                "comments": {"nodes": [{"id": "comment-1", "body": body, "updatedAt": "2026-09-23T00:00:00Z", "user": {"id": "user-loopflow"}}], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }}})),
+        ]).await;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "linear".into(),
+                access_token: "fixture-token".into(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: Some("fixture".into()),
+                updated_at: 1,
+                credential_type: CredentialType::OAuth,
+            })
+            .await
+            .unwrap();
+        crate::ops::pm::PM_TEST_CONTEXT
+            .scope(
+                crate::ops::pm::PmTestContext {
+                    path: file.path().to_path_buf(),
+                    store: store.clone(),
+                    graphql_url: url,
+                },
+                future,
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn uncertain_publication_reconciles_the_existing_linear_comment() {
+        let marker = "<!-- loopflow-steer:request-1 -->";
+        let page = |nodes| json!({"data": {"issue": {"comments": {"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}}}}});
+        let (url, _) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({"errors": [{"message": "response interrupted"}]}),
+            ),
+            json_response(
+                StatusCode::OK,
+                page(
+                    json!([{"id": "posted-comment", "body": format!("keep the API\n\n{marker}")}]),
+                ),
+            ),
+        ])
+        .await;
+        let client =
+            crate::pm::linear::LinearClient::with_base_url("fixture-token".into(), None, url);
+        assert_eq!(
+            super::publish_comment(&client, "issue-1", "keep the API", marker)
+                .await
+                .unwrap(),
+            "posted-comment"
+        );
+    }
+
     const VIEWER: &str = "user-loopflow";
+
+    #[test]
+    fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {
+        let obs = observation(
+            "title",
+            "body",
+            vec![
+                comment(
+                    "progress",
+                    "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
+                    Some(VIEWER),
+                ),
+                comment("person", "keep the API", Some(VIEWER)),
+                comment(
+                    "explicit",
+                    "new instruction <!-- loopflow-steer:explicit -->",
+                    None,
+                ),
+            ],
+        );
+        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
+        assert_eq!(
+            apply
+                .follow_ups
+                .iter()
+                .map(|follow| follow.comment_id.as_str())
+                .collect::<Vec<_>>(),
+            ["person", "explicit"]
+        );
+    }
+
+    #[test]
+    fn request_authors_survive_linear_direction_rendering() {
+        let comments = [
+            ("one", Some("Jack")),
+            ("two", Some("Maya")),
+            ("three", None),
+        ]
+        .into_iter()
+        .map(|(id, name)| IssueComment {
+            id: id.into(),
+            created_at: None,
+            revision: None,
+            body: "prototype".into(),
+            author_id: Some(format!("person-{id}")),
+            author_name: name.map(str::to_string),
+        })
+        .collect();
+        let apply = plan_apply(
+            &task(),
+            observation("title", "body", comments),
+            VIEWER,
+            time::OffsetDateTime::now_utc(),
+            None,
+        );
+        assert!(apply.follow_ups[0]
+            .text
+            .contains("by \"Jack\" (provider user person-one)"));
+        assert!(apply.follow_ups[1]
+            .text
+            .contains("by \"Maya\" (provider user person-two)"));
+        assert!(!apply.follow_ups[2].text.contains(" by "));
+        let explicit =
+            "prototype\n<!-- loopflow-requester:\"Jack\" -->\n<!-- loopflow-steer:one -->";
+        let rendered =
+            super::render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
+        assert!(rendered.contains("by \"Jack\""));
+        assert!(!rendered.contains("Account Owner"));
+        let legacy = super::render_comment(
+            "old",
+            "prototype\n<!-- loopflow-steer:old -->",
+            Some("publisher"),
+            Some("Account Owner"),
+        );
+        assert!(legacy.contains("by \"Account Owner\""));
+    }
 
     fn comment(id: &str, body: &str, author: Option<&str>) -> IssueComment {
         IssueComment {
+            author_name: None,
             id: id.to_string(),
+            created_at: None,
+            revision: None,
             body: body.to_string(),
             author_id: author.map(str::to_string),
         }
@@ -143,6 +441,7 @@ mod tests {
             project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -164,9 +463,13 @@ mod tests {
     }
 
     #[test]
-    fn only_non_viewer_authored_comments_are_user_input() {
+    fn own_account_comments_are_direction_but_writebacks_are_not() {
         assert!(is_human_comment(
             &comment("c", "hi", Some("user-human")),
+            VIEWER
+        ));
+        assert!(is_human_comment(
+            &comment("c", "please fix this", Some(VIEWER)),
             VIEWER
         ));
         assert!(!is_human_comment(
@@ -179,7 +482,7 @@ mod tests {
     #[test]
     fn baseline_emits_no_content_steer_and_keeps_user_comments_as_candidates() {
         // No cursor yet: a title change must not become a Steer, but user
-        // comments still ride so the store can baseline them.
+        // comments still ride so the store can deliver them.
         let obs = observation(
             "New title",
             "New body",

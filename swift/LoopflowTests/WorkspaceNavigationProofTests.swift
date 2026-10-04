@@ -1,0 +1,1254 @@
+#if os(macOS)
+import AppKit
+import Foundation
+import SwiftUI
+import Testing
+import ViewInspector
+#if canImport(GhosttyKit)
+import GhosttyKit
+#endif
+@testable import Loopflow
+@testable import LoopflowMac
+
+@Suite("Unified workspace navigation proof", .requiresDisplay)
+@MainActor
+struct WorkspaceNavigationProofTests {
+    @Test("The work list retains its viewport through presentations, refresh and repository return")
+    func navigatorRetainsScroll() async throws {
+        _ = NSApplication.shared
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
+        var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
+        let tasks = try #require(evidence["items"] as? [[String: Any]])
+        let template = try #require(tasks.last)
+        evidence["items"] = try (0..<80).map { index in
+            var task = template
+            var planning = try #require(task["task"] as? [String: Any])
+            planning["id"] = "scroll-task-\(index)"
+            planning["name"] = "Work item \(index)"
+            planning["rank"] = Double(index)
+            planning["completed"] = false
+            task["task"] = planning
+            var runtime = try #require(task["runtime"] as? [String: Any])
+            runtime["work_id"] = "scroll-work-\(index)"
+            runtime["started"] = true
+            task["runtime"] = runtime
+            return task
+        }
+        waves[0]["tasks"] = evidence
+        snapshot["waves"] = waves
+        let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in navigator proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+        let host = NSHostingView(rootView: view.id("/src/loopflow"))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = window.contentLayoutRect
+        defer { window.contentView = nil }
+        try await settle(window)
+        let scroll = try #require(_scrollView(in: host))
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: 1200))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await settle(window)
+        let offset = scroll.contentView.bounds.minY
+        try #require(offset > 1000)
+        model.select(.task(id: "scroll-task-30"))
+        try await settle(window)
+        model.navigation.content = .terminals
+        try await settle(window)
+        #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
+        await model.refresh()
+        try await settle(window)
+        #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
+        model.navigation.content = .overview
+        try await settle(window)
+        #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
+        model.setRepoPath("/src/context")
+        host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)
+            .id("/src/context")
+        try await settle(window)
+        let other = try #require(_scrollView(in: host))
+        #expect(abs(other.contentView.bounds.minY) < 1)
+        model.setRepoPath("/src/loopflow")
+        host.rootView = view.id("/src/loopflow")
+        try await settle(window)
+        let restored = try #require(_scrollView(in: host))
+        #expect(abs(restored.contentView.bounds.minY - offset) < 1)
+    }
+
+    @Test("At density the sidebar lists started Tasks under sans Wave heads and orphans in one bottom section")
+    func sidebarDensityWithOrphans() async throws {
+        _ = NSApplication.shared
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
+        var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let base = try #require((snapshot["waves"] as? [[String: Any]])?.first)
+        let template = try #require(((base["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first {
+            (($0["task"] as? [String: Any])?["id"] as? String) == "issue-review"
+        })
+        // 3 Waves × 50 Tasks, 20 started; a few started Tasks need eyes.
+        let executions = ["work-0-0": "running", "work-0-7": "blocked", "work-1-6": "human", "work-1-13": "idle"]
+        var waves: [[String: Any]] = []
+        for waveIndex in 0..<3 {
+            var wave = base
+            var identity = try #require(base["wave"] as? [String: Any])
+            identity["id"] = "wave-\(waveIndex)"
+            identity["name"] = ["product", "infrastructure", "intelligence"][waveIndex]
+            wave["wave"] = identity
+            wave["unavailable_tasks"] = []
+            wave["tasks"] = ["state": "ok", "truncated": false, "items": try (0..<50).map { index -> [String: Any] in
+                var item = template
+                var task = try #require(item["task"] as? [String: Any])
+                task["id"] = "task-\(waveIndex)-\(index)"
+                task["identifier"] = "T-\(waveIndex)-\(index)"
+                task["name"] = ["Retry and publish the chapter safely", "Understand running work",
+                                "A calmer desktop workspace", "Keep Task observation read-only"][index % 4] + " \(index)"
+                task["rank"] = index
+                item["task"] = task
+                var runtime = try #require(item["runtime"] as? [String: Any])
+                let workId = "work-\(waveIndex)-\(index)"
+                runtime["work_id"] = workId
+                let global = waveIndex * 50 + index
+                runtime["started"] = global < 140 && global.isMultiple(of: 7)
+                item["runtime"] = runtime
+                var flow = try #require(item["flow"] as? [String: Any])
+                var record = try #require(flow["record"] as? [String: Any])
+                record["execution"] = executions[workId] ?? "idle"
+                flow["record"] = record
+                item["flow"] = flow
+                return item
+            }]
+            waves.append(wave)
+        }
+        snapshot["waves"] = waves
+        let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
+            let binding = work as? [String: String]
+            let taskIds = binding?["kind"] == "task" ? binding?["id"].map { [$0] } ?? [] : []
+            return ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
+             "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
+             "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated",
+             "flow_membership": ["kind": "independent"], "task_ids": taskIds, "terminal_ids": [], "open_argv": ["must-not-launch"]]
+        }
+        let attached = [
+            record("release-outcomes", title: "Release outcomes", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
+            record("verification", title: "Verification cases", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
+            record("wren-canon", title: "wren-canon", work: ["kind": "task", "id": "work-1-6"], cwd: "/src/loopflow.observe"),
+        ]
+        let orphans = [
+            record("demo", title: "demo", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
+            record("realign", title: "realign", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
+            record("luna-aria", title: "luna-aria", work: NSNull(), cwd: "/src/loopflow.release-run"),
+            record("loopflow", title: "loopflow", work: NSNull(), cwd: "/src/loopflow.build-size"),
+        ]
+        func encode(_ records: [[String: Any]]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+        }
+        let source = SidebarSessionSource(list: try encode(attached + orphans))
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":\#(await source.list()),"next":null}"#
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(.task(id: "task-0-7"))
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+        let host = NSHostingView(rootView: view.id("/src/loopflow"))
+        let captureDirectory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"].map(URL.init(fileURLWithPath:))
+        func capture(_ window: NSWindow, _ name: String) throws {
+            guard let captureDirectory else { return }
+            _ = try SnapshotService().snapshotWindow(window, to: captureDirectory.appendingPathComponent("\(name).png"))
+        }
+        for size in [CGSize(width: 1440, height: 900), CGSize(width: 1100, height: 800)] {
+            let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = window.contentLayoutRect
+            defer { window.contentView = nil }
+            try await settle(window)
+            let suffix = "\(Int(size.width))x\(Int(size.height))"
+            let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+            let outline = try navigator.inspect()
+            // 20 started Tasks under three sans Wave heads; no lens, no Wave count.
+            #expect(try outline.findAll(ViewType.Button.self) {
+                (try? $0.accessibilityIdentifier().hasPrefix("workspace-task-")) == true
+            }.count == 20)
+            #expect(try outline.findAll(ViewType.Button.self) {
+                (try? $0.accessibilityIdentifier().hasPrefix("workspace-disclose-wave-")) == true
+            }.count == 3)
+            #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
+            // Counts only where Sessions exist.
+            _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-0")
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-7") }
+            // Diagnostic Sessions do not consume main navigation space.
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
+            _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
+            try capture(window, "density-debug-orphans-\(suffix)")
+        }
+        // Zero orphans hides the section.
+        await source.replace(try encode(attached))
+        await model.refreshSessions()
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = window.contentLayoutRect
+        defer { window.contentView = nil }
+        try await settle(window)
+        #expect(model.workspace.unmatchedSessions.isEmpty)
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(WorkspaceNavigator.self).actualView().inspect()
+                .find(viewWithAccessibilityIdentifier: "workspace-orphans-open")
+        }
+        try capture(window, "density-no-orphans-1440x900")
+    }
+
+    private func _scrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        return view.subviews.lazy.compactMap { _scrollView(in: $0) }.first
+    }
+
+    private func settle(_ window: NSWindow) async throws {
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
+#if canImport(GhosttyKit)
+    @Test("Renaming a Session and returning through its ancestors keeps its terminal, draft and companion")
+    func namedSessionDrillDownRetainsTerminal() async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let repo = "/src/loopflow"
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
+        var terminals: [GhosttyMetalView] = []
+        for _ in 0..<3 {
+            workspace.multiplexer.newShell()
+            let pane = workspace.multiplexer.focusedPaneId
+            let terminal = registry.surfaces.view(for: .shell(pane))
+            terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
+            terminal.workingDirectory = NSTemporaryDirectory()
+            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.createSurface(manager: GhosttyManager.shared)
+            terminals.append(terminal)
+        }
+        defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
+        let surfaces = try terminals.map { try #require($0.surface) }
+        let shells = workspace.multiplexer.layout.allPanes.map(\.id)
+        let layout = workspace.multiplexer.layout
+        let task = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let named = try NamedSessionSource(records: JSONSerialization.data(withJSONObject: ["first", "second"].enumerated().map { index, id in
+            let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
+            var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+            value["state"] = "active"
+            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+            value["terminal_ids"] = [shells[index]]
+            value["wave_id"] = "wave-1"
+            value["open_argv"] = ["must-not-launch"]
+            return value
+        }))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let flowData = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_flow.json"))
+        let flows = try #require(JSONSerialization.jsonObject(with: flowData) as? [[String: Any]])
+        let pinned = try #require(flows[1]["record"] as? [String: Any])
+        let invocation = try #require(pinned["invocation_id"] as? String)
+        var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
+            root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
+        var waves = try #require(plan["waves"] as? [[String: Any]])
+        let waveIndex = try #require(waves.firstIndex { wave in
+            let tasks = wave["tasks"] as? [String: Any]
+            return (tasks?["items"] as? [[String: Any]])?.contains { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" } == true
+        })
+        var tasks = try #require(waves[waveIndex]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
+        items[taskIndex]["flow"] = flows[1]
+        tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
+        let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
+        let planning = SidebarSessionSource(list: roadmap)
+        let query = RegistryQuery { args, _ in
+            switch (args.first, args.dropFirst().first) {
+            case ("roadmap", _): return await planning.list()
+            case ("wave", "list"): return "[]"
+            case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case ("session", "list"): return try await named.page(args)
+            case ("session", "rename"): return try await named.rename(args)
+            case ("session", "bind"): return try await named.bind(args, task: task)
+            default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: repo)
+        await model.refresh()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        try await settle(window)
+        let draft = "named-session-draft"
+        draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
+
+        // Two open Sessions: the Task row opens its overview, which names each.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        #expect(model.navigation.content == .details)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(window.firstResponder !== terminals[0])
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-issue").link().labelView().text().string() == "W2-131")
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(window.firstResponder === terminals[0])
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
+            == "Show the all-wave roadmap and launch or attach")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").text().string() == "Independent")
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-second").button().tap()
+        try await settle(window)
+        // The selected second Session arrives on the second page. An
+        // incomplete or failed inventory must not detach either native pane.
+        for failing in [true, false] {
+            await named.pauseSecondPage(failing: failing)
+            let refresh = Task { await model.refreshSessions() }
+            await named.waitForPage()
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            await named.releasePage()
+            await refresh.value
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            if failing {
+                guard case .unavailable(_, let reason) = model.sessions else {
+                    Issue.record("Failed page lost its unavailable state")
+                    return
+                }
+                #expect(reason == "Second page unavailable")
+            }
+        }
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+        try await settle(window)
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
+        try await settle(window)
+        #expect(model.navigation.renaming?.sessionId == "first")
+        model.navigation.renaming?.text = "Launch design"
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
+        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
+        #expect(model.navigation.renaming == nil)
+        #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Launch design")
+        #expect(await named.renames == 1)
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(terminals[0].surface == surfaces[0])
+
+        // Hidden headless Sessions stay selected, with the same native panes.
+        try await named.headlessUnbound("first")
+        await model.refreshSessions()
+        for visible in [true, false, true] {
+            model.navigation.showsHeadlessSessions = visible
+            await model.refreshSessions()
+            try await settle(window)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(terminals[0].surface == surfaces[0])
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-bind").button().tap()
+        model.navigation.binding?.selector = "W2-131"
+        await model.previewSessionBinding()
+        #expect(model.sessions.value?.first { $0.id == "first" }?.work == nil)
+        #expect(model.navigation.binding?.preview?.taskId == task.id)
+        var relocatedPlan = plan
+        var relocatedWaves = waves
+        var relocatedTasks = tasks
+        var relocatedItems = items
+        var reference = try #require(relocatedItems[taskIndex]["reference"] as? [String: Any])
+        var taskWorkspace = try #require(reference["workspace"] as? [String: Any])
+        taskWorkspace["worktree"] = repo + "-other-task-checkout"
+        taskWorkspace["local_exists"] = true
+        reference["workspace"] = taskWorkspace
+        relocatedItems[taskIndex]["reference"] = reference
+        relocatedTasks["items"] = relocatedItems
+        relocatedWaves[waveIndex]["tasks"] = relocatedTasks
+        relocatedPlan["waves"] = relocatedWaves
+        await planning.replace(String(decoding: try JSONSerialization.data(withJSONObject: relocatedPlan), as: UTF8.self))
+        await model.refresh()
+        await model.commitSessionBinding()
+        try await settle(window)
+        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.taskWork == task)
+        #expect(workspace.multiplexer.layout == layout)
+        for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+        #expect(window.firstResponder === terminals[0])
+        await planning.replace(roadmap)
+        await model.refresh()
+        try await settle(window)
+        // The existing final PTY assertions below read the draft typed before binding.
+
+        // Current planning can disappear while the same conversations and
+        // native surfaces remain. The draft typed above must survive this too.
+        let selection = model.selection
+        let focusedPane = workspace.multiplexer.focusedPaneId
+        var missingPlan = plan
+        var missingWaves = waves
+        missingWaves[waveIndex]["tasks"] = ["state": "unavailable", "reason": "planning offline"]
+        missingWaves[waveIndex]["unavailable_tasks"] = []
+        missingPlan["waves"] = missingWaves
+        let unavailable = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        missingPlan["waves"] = []
+        let absent = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        for reading in [unavailable, absent, roadmap] {
+            await planning.replace(reading)
+            await model.refresh()
+            try await settle(window)
+            let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+            #expect(crumb.taskWork == task)
+            #expect(crumb.waveWork == .wave(id: "wave-1"))
+            #expect(crumb.siblings.map(\.id) == ["first", "second"])
+            #expect(model.selection == selection)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.focusedPaneId == focusedPane)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[0])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            if reading != roadmap {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
+                #expect(model.workspace.orphanSessions(search: "").isEmpty)
+            } else {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
+                    == "Show the all-wave roadmap and launch or attach")
+            }
+        }
+
+        func clickTerminal(_ index: Int) throws {
+            let terminal = terminals[index]
+            let point = terminal.convert(NSPoint(x: terminal.bounds.midX, y: terminal.bounds.midY), to: nil)
+            let event = try #require(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+                clickCount: 1, pressure: 1
+            ))
+            terminal.mouseDown(with: event)
+        }
+
+        // Native pointer focus and breadcrumb selection identify the same
+        // conversation. A companion shell does not replace that context.
+        try clickTerminal(1)
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "second")
+        #expect(window.firstResponder === terminals[1])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
+        #expect(model.navigation.renaming?.sessionId == "second")
+        model.navigation.renaming?.text = "Second conversation"
+        await named.rejectNextRename()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
+        // The save starts asynchronously; wait for the refusal itself.
+        for _ in 0..<10 where model.navigation.renaming?.error == nil { try await settle(window) }
+        #expect(model.navigation.renaming?.text == "Second conversation")
+        #expect(model.navigation.renaming?.error == "Rename refused")
+        #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
+        model.cancelSessionRename()
+
+        try clickTerminal(0)
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
+        model.navigation.renaming?.text = "Pinned rename target"
+        await named.holdNextRename()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
+        try await settle(window)
+        #expect(model.navigation.renaming?.submitting == true)
+        try clickTerminal(1)
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "second")
+        try clickTerminal(2)
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "second")
+        #expect(window.firstResponder === terminals[2])
+        await named.releaseRename()
+        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
+        #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
+        #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
+        #expect(model.navigation.selectedSessionId == "second")
+        try clickTerminal(0)
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(workspace.multiplexer.layout == layout)
+
+        // A repeated skill name and a nested occurrence both locate the exact
+        // captured node; navigation preserves the original unfinished draft.
+        // Captured preorder: root decision 5; XOR 6; its patch child 7.
+        for node in [UInt32(5), UInt32(7)] {
+            try await named.membership(.step(flow: "feature", invocationId: invocation,
+                                            step: "recorded skill", node: node,
+                                            iterations: [[2, 0]], occurrence: .earlier), for: "first")
+            await model.refresh()
+            try await settle(window)
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button().tap()
+            try await settle(window)
+            #expect(model.navigation.content == .details)
+            #expect(model.navigation.selectedSessionId == nil)
+            #expect(model.navigation.flowDrafts["issue-review"]?.selectedNode
+                == FlowNodeSelection(invocationId: invocation, node: node))
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "flow-node-detail-\(node)")
+            #expect(window.firstResponder !== terminals[0])
+            #expect(workspace.multiplexer.layout == layout)
+            try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+            try await settle(window)
+            #expect(window.firstResponder === terminals[0])
+            #expect(terminals[0].surface == surfaces[0])
+        }
+
+        // Ancestor return shows the Task; the Session row drills back into the
+        // same terminal rather than opening another client.
+        try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().tap()
+        try await settle(window)
+        #expect(model.navigation.content == .details)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(window.firstResponder !== terminals[0])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+        try await settle(window)
+        #expect(window.firstResponder === terminals[0])
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session-second").button().tap()
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "second")
+        #expect(window.firstResponder === terminals[1])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session-first").button().tap()
+        try await settle(window)
+        #expect(window.firstResponder === terminals[0])
+        #expect(workspace.multiplexer.layout == layout)
+
+        for (index, surface) in surfaces.enumerated() {
+            #expect(terminals[index].surface == surface)
+            let reply = index == 0 ? draft : "companion-\(index)-responds"
+            let input = index == 0 ? "\n" : reply + "\n"
+            input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+            let deadline = ContinuousClock.now + .seconds(3)
+            while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+        }
+        // A historical invocation must not jump into an identically keyed node
+        // of the current Flow. The real chip leaves this Session selected.
+        try await named.membership(.step(flow: "feature", invocationId: "prior-invocation",
+                                        step: "loop-decide", node: 5, iterations: [[1, 1]],
+                                        occurrence: .past), for: "first")
+        await model.refresh()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button().tap()
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(model.navigation.content == .terminals)
+        #expect(terminals[0].surface == surfaces[0])
+    }
+
+    @Test("Session rows restore their shell and companion layout across worktree slots")
+    func sessionRowRestoresWorktree() async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let repo = "/src/loopflow"
+        let paths = [repo, "/src/loopflow.task"]
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let outer = registry.layout(for: fixtureWorkspace(repo))
+        var terminals: [GhosttyMetalView] = []
+        var records: [[String: Any]] = []
+        for (index, path) in paths.enumerated() {
+            let workspace = registry.workspace(for: fixtureWorkspace(path))
+            for _ in 0..<2 {
+                workspace.multiplexer.newShell()
+                let pane = workspace.multiplexer.focusedPaneId
+                let terminal = registry.surfaces.view(for: .shell(pane))
+                terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
+                terminal.workingDirectory = NSTemporaryDirectory()
+                terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+                terminal.createSurface(manager: GhosttyManager.shared)
+                terminals.append(terminal)
+            }
+            let shell = workspace.multiplexer.layout.firstPane.id
+            workspace.multiplexer.setFocusedPane(shell)
+            records.append([
+                "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "kind": "conversation", "work": NSNull(),
+                "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [shell],
+                "open_argv": ["must-not-launch"],
+            ])
+        }
+        defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
+        let surfaces = try terminals.map { try #require($0.surface) }
+        let layouts = paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout }
+        let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            default: throw RegistryQueryError("Local row must focus its existing shell")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: repo)
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        try await settle(window)
+        let draft = "retained-row-draft"
+        draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
+
+        for index in [1, 0] {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
+            try await settle(window)
+            #expect(outer.focusedPath == fixtureWorkspace(paths[index]))
+            #expect(window.firstResponder === terminals[index * 2])
+            #expect(terminals[index * 2].window === window)
+            #expect(terminals[(1 - index) * 2].window == nil)
+            #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
+        }
+
+        let firstSlot = outer.focusedSlotId
+        try view.inspect().find(viewWithAccessibilityLabel: "Split worktrees right").button().tap()
+        outer.select(fixtureWorkspace(paths[1]))
+        try await settle(window)
+        #expect(terminals.allSatisfy { $0.window === window })
+        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
+        try await settle(window)
+        #expect(outer.layout.slots.count == 2)
+        #expect(outer.focusedSlotId == firstSlot)
+        #expect(window.firstResponder === terminals[0])
+        outer.close(firstSlot)
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
+        try await settle(window)
+        #expect(window.firstResponder === terminals[0])
+        #expect(paths.map { registry.workspace(for: fixtureWorkspace($0)).multiplexer.layout } == layouts)
+
+        let store = registry.workspace(for: fixtureWorkspace(repo)).sessionStore(repoPath: repo, query: query)
+        #expect(store.sessions.allSatisfy { $0.state == .live })
+        for (index, surface) in surfaces.enumerated() {
+            #expect(terminals[index].surface == surface)
+            let reply = index == 0 ? draft : "companion-\(index)-responds"
+            let input = index == 0 ? "\n" : reply + "\n"
+            input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+            let deadline = ContinuousClock.now + .seconds(3)
+            while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+        }
+    }
+
+    @Test("Shell-attached Sessions can complete without closing their terminal", .serialized,
+          arguments: [false, true])
+    func shellSessionCompletion(rejected: Bool) async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
+        workspace.multiplexer.newShell()
+        let pane = workspace.multiplexer.focusedPaneId
+        let terminal = registry.surfaces.view(for: .shell(pane))
+        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
+        terminal.workingDirectory = "/tmp"
+        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+        terminal.createSurface(manager: GhosttyManager.shared)
+        defer { registry.surfaces.release(.shell(pane)) }
+        let surface = try #require(terminal.surface)
+        let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
+            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(),
+             "title": id, "detail": "Local PTY", "cwd": "/tmp",
+             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane],
+             "open_argv": ["unused"]] as [String: Any]
+        }), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
+            case "session" where args.dropFirst().first == "complete":
+                if rejected { throw RegistryQueryError("Completion rejected") }
+                return "Session completed"
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in shell completion proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/tmp")
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: view)
+        window.contentView = host
+        host.frame = window.contentLayoutRect
+        defer { window.contentView = nil }
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+        try await settle(window)
+        if rejected {
+            // An ordinary inventory refresh must not erase a rejected action.
+            let store = workspace.sessionStore(repoPath: "/tmp", query: query)
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
+            #expect(store.sessions.first?.state == .live)
+            #expect(store.sessions.first?.resolutionError == "Completion rejected")
+            try await settle(window)
+            #expect(model.sessions.value?.map(\.id) == ["shell-conversation", "second-conversation"])
+            #expect(throws: Never.self) { try view.inspect().find(text: "Completion rejected") }
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+        } else {
+            #expect(model.sessions.value?.map(\.id) == ["second-conversation"])
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+            try await settle(window)
+            #expect(model.sessions.value?.isEmpty == true)
+            // A later conversation in the same retained shell must still be completable.
+            await model.refreshSessions()
+            try await settle(window)
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+        }
+        #expect(terminal.surface == surface)
+        #expect(workspace.multiplexer.layout.pane(for: pane)?.content == .shell)
+        let reply = "shell-after-completion"
+        let input = reply + "\n"
+        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+    }
+
+    @Test("Rejected Flow completion retains its terminal and remains visible after polling")
+    func rejectedFlowCompletionRetainsTerminal() async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
+        workspace.multiplexer.load(sessionId: "review-decision")
+        let terminal = registry.surfaces.view(for: .session("review-decision"))
+        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
+        terminal.workingDirectory = "/tmp"
+        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
+        terminal.createSurface(manager: GhosttyManager.shared)
+        defer { registry.surfaces.release(.session("review-decision")) }
+        let surface = try #require(terminal.surface)
+        let records = """
+        [{"id":"review-decision", "run_id": "review-decision", "interactive": true,"kind":"flow","work":null,"work_path":null,
+          "title":"Review decision","detail":"Human review","cwd":"/tmp",
+          "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],
+          "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
+        """
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
+            case "session": throw RegistryQueryError("Decision rejected")
+            default: throw RegistryQueryError("Unexpected read in decision proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/tmp")
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        try await settle(window)
+        let store = workspace.sessionStore(repoPath: "/tmp", query: query)
+        for _ in 0..<2 {
+            let accepted = await store.complete("review-decision")
+            #expect(!accepted)
+            #expect(store.sessions.first?.state == .live)
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
+            try await settle(window)
+            #expect(store.sessions.first?.state == .live)
+            #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
+            for id in ["session-action-complete"] {
+                #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: id).button().isDisabled())
+            }
+            #expect(model.sessions.value?.map(\.id) == ["review-decision"])
+            #expect(terminal.surface == surface)
+        }
+        let input = "review-still-responds\n"
+        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(surface).components(separatedBy: "review-still-responds").count < 3,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(surface).components(separatedBy: "review-still-responds").count == 3)
+    }
+
+    @Test("A hidden retained terminal relinquishes focus and keeps its unfinished PTY input")
+    func hiddenTerminalPreservesDraft() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        try #require(manager.state == .ready)
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("navigation-draft-proof")
+        let terminal = pool.view(for: identity)
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 500, height: 300),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        let view = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(),
+            argv: ["/bin/cat"],
+            terminal: identity, surfacePool: pool, isFocused: true
+        )
+        terminal.setFrameSize(window.contentLayoutRect.size)
+        terminal.workingDirectory = NSTemporaryDirectory()
+        terminal.command = buildGhosttyShellCommand(argv: view.argv, env: [:])
+        terminal.createSurface(manager: manager)
+        let surface = try #require(terminal.surface)
+        let host = NSHostingView(rootView: view.disabled(false))
+        host.frame = window.contentLayoutRect
+        window.contentView = host
+        defer { pool.release(identity) }
+        host.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        try #require(terminal.surface == surface)
+        #expect(window.makeFirstResponder(terminal))
+        let draft = "retained-draft"
+        draft.withCString { ghostty_surface_text(surface, $0, UInt(draft.utf8.count)) }
+        let search = NSTextField(frame: CGRect(x: 0, y: 0, width: 200, height: 24))
+        host.addSubview(search)
+        #expect(window.makeFirstResponder(search))
+        let editor = try #require(search.currentEditor())
+        window.setContentSize(CGSize(width: 520, height: 300))
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(window.firstResponder === editor)
+        search.removeFromSuperview()
+        pool.focus(identity)
+        #expect(window.firstResponder === terminal)
+        host.rootView = view.disabled(true)
+        window.layoutIfNeeded()
+        let hiddenDeadline = ContinuousClock.now + .seconds(3)
+        while window.firstResponder === terminal, ContinuousClock.now < hiddenDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(window.firstResponder !== terminal)
+        #expect(terminal.surface == surface)
+        host.rootView = view.disabled(false)
+        window.layoutIfNeeded()
+        let focusDeadline = ContinuousClock.now + .seconds(3)
+        while window.firstResponder !== terminal, ContinuousClock.now < focusDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(window.firstResponder === terminal)
+        #expect(pool.view(for: identity) === terminal)
+        "\n".withCString { ghostty_surface_text(surface, $0, 1) }
+        let outputDeadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(surface).components(separatedBy: draft).count < 3, ContinuousClock.now < outputDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(surface).components(separatedBy: draft).count == 3)
+
+        // Task terminals have no selected-pane binding. Manual focus must
+        // survive a resize while the view remains enabled.
+        host.rootView = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"],
+            terminal: identity, surfacePool: pool, isFocused: false
+        ).disabled(false)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(window.makeFirstResponder(terminal))
+        window.setContentSize(CGSize(width: 540, height: 300))
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(window.firstResponder === terminal)
+    }
+
+    @Test("The workspace retains navigation and reconciles completion in its originating repository",
+          .serialized, arguments: [false, true])
+    func workspaceRetainsNativeSplit(switchBeforeCompletion: Bool) async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent(
+            "tests/fixtures/dto/roadmap_snapshot.json"
+        )), at: "/src/loopflow"), as: UTF8.self)
+        let records = """
+        [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,"kind":"conversation",
+          "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
+          "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
+        """
+        let otherRecords = """
+        [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
+          "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
+        """
+        let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
+        defer { completionResponse.finish() }
+        let query = RegistryQuery { args, cwd in
+            switch args.first {
+            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "list":
+                return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
+            case "session" where args == ["session", "complete", "navigation-split"]:
+                for await _ in completionResponses { break }
+                return "Session completed"
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in navigation proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
+        workspace.multiplexer.load(sessionId: "navigation-split")
+        let sessionPane = workspace.multiplexer.focusedPaneId
+        _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
+        workspace.multiplexer.newShell()
+        let shellPane = workspace.multiplexer.focusedPaneId
+        workspace.multiplexer.load(sessionId: "navigation-split")
+        let layout = workspace.multiplexer.layout
+        let identities: [TerminalIdentity] = [.session("navigation-split"), .shell(shellPane)]
+        let terminals = identities.map { workspace.surfaces.view(for: $0) }
+        defer { for identity in identities { workspace.surfaces.release(identity) } }
+        let history = (0..<120).map { "history-\($0)" }.joined(separator: " ")
+        for (index, terminal) in terminals.enumerated() {
+            terminal.setFrameSize(CGSize(width: 400, height: 300))
+            terminal.workingDirectory = NSTemporaryDirectory()
+            // Emit history from the child, without PTY input echo interleaving
+            // with cat's output. Both children then retain ordinary input.
+            let argv = index == 0 ? ["/bin/cat"] : [
+                "/bin/sh", "-c", "printf '\\033]2;Retained companion\\007'; printf '%s\\n' \(history); exec /bin/cat",
+            ]
+            terminal.command = buildGhosttyShellCommand(argv: argv, env: [:])
+            terminal.createSurface(manager: GhosttyManager.shared)
+        }
+        let sessionSurface = try #require(terminals[0].surface)
+        let shellSurface = try #require(terminals[1].surface)
+        model.select(.task(id: "issue-review"))
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+        let host = NSHostingView(rootView: view.id("/src/loopflow"))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = window.contentLayoutRect
+        defer { window.contentView = nil }
+        try await settle(window)
+        try #require(terminals.allSatisfy { $0.window === window })
+        let historyDeadline = ContinuousClock.now + .seconds(3)
+        while !_terminalText(shellSurface).contains("history-119"),
+              ContinuousClock.now < historyDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(_terminalText(shellSurface).contains("history-119"))
+        #expect(throws: Never.self) { try view.inspect().find(text: "Retained companion") }
+        let scroll = "scroll_to_top"
+        #expect(scroll.withCString { ghostty_surface_binding_action(shellSurface, $0, UInt(scroll.utf8.count)) })
+        let scrollDeadline = ContinuousClock.now + .seconds(3)
+        while !_terminalText(shellSurface, viewport: true).contains("history-0"),
+              ContinuousClock.now < scrollDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let historyTop = Array(_terminalText(shellSurface, viewport: true).components(separatedBy: "\n").prefix(5))
+        try #require(historyTop.contains { $0.contains("history-0") })
+        let draft = "split-draft"
+        draft.withCString { ghostty_surface_text(sessionSurface, $0, UInt(draft.utf8.count)) }
+
+        for presentation in WorkspacePresentation.allCases {
+            model.navigation.presentation = presentation
+            model.navigation.content = presentation == .full ? .details : .terminals
+            try await settle(window)
+            if model.navigation.content == .details {
+                #expect(!model.navigation.showsActivity)
+                #expect(throws: (any Error).self) {
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                }
+                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try await settle(window)
+                #expect(throws: Never.self) {
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                }
+                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try await settle(window)
+                #expect(!model.navigation.showsActivity)
+            }
+            if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
+                let path = URL(fileURLWithPath: directory)
+                    .appendingPathComponent("\(presentation.rawValue)-\(switchBeforeCompletion).png")
+                _ = try SnapshotService().snapshotWindow(window, to: path)
+            }
+            #expect(terminals[0].surface == sessionSurface)
+            #expect(terminals[1].surface == shellSurface)
+            #expect(Array(_terminalText(shellSurface, viewport: true).components(separatedBy: "\n").prefix(5)) == historyTop)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(workspace.multiplexer.focusedPaneId == sessionPane)
+            if model.navigation.content != .terminals {
+                #expect(!terminals.contains { window.firstResponder === $0 })
+            }
+        }
+        if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
+            model.navigation.presentation = .compact
+            model.select(.wave(id: "wave-1"))
+            try await settle(window)
+            _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory)
+                .appendingPathComponent("wave-\(switchBeforeCompletion).png"))
+            model.select(.task(id: "issue-review"))
+            model.navigation.content = .terminals
+            try await settle(window)
+        }
+        model.setRepoPath("/src/context")
+        host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)
+            .id("/src/context")
+        try await settle(window)
+        model.setRepoPath("/src/loopflow")
+        host.rootView = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+            .id("/src/loopflow")
+        try await settle(window)
+        #expect(terminals.allSatisfy { $0.window === window })
+        #expect(terminals[0].surface == sessionSurface)
+        #expect(terminals[1].surface == shellSurface)
+        #expect(Array(_terminalText(shellSurface, viewport: true).components(separatedBy: "\n").prefix(5)) == historyTop)
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(workspace.multiplexer.focusedPaneId == sessionPane)
+        #expect(window.firstResponder === terminals[0])
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(throws: Never.self) { try view.inspect().find(text: "Retained companion") }
+        "\n".withCString { ghostty_surface_text(sessionSurface, $0, 1) }
+        let companion = "companion-alive"
+        let companionInput = companion + "\n"
+        companionInput.withCString {
+            ghostty_surface_text(shellSurface, $0, UInt(companionInput.utf8.count))
+        }
+        let deadline = ContinuousClock.now + .seconds(3)
+        // Require both PTY input echo and cat's reply from each retained child.
+        while (_terminalText(sessionSurface).components(separatedBy: draft).count < 3
+               || _terminalText(shellSurface).components(separatedBy: companion).count < 3),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(sessionSurface).components(separatedBy: draft).count == 3)
+        #expect(_terminalText(shellSurface).components(separatedBy: companion).count == 3)
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+        try await settle(window)
+        #expect(terminals[0].surface == sessionSurface)
+        let otherWorkspace = registry.workspace(for: fixtureWorkspace("/src/context"))
+        if switchBeforeCompletion {
+            model.setRepoPath("/src/context")
+            await model.refreshSessions()
+            model.select(.wave(id: "wave-2"))
+            otherWorkspace.multiplexer.load(sessionId: "context-session")
+            host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)
+                .id("/src/context")
+            try await settle(window)
+            #expect(terminals.allSatisfy { $0.window == nil })
+        }
+        let otherLayout = otherWorkspace.multiplexer.layout
+        let otherFocus = otherWorkspace.multiplexer.focusedPaneId
+        completionResponse.yield(())
+        completionResponse.finish()
+        let completionDeadline = ContinuousClock.now + .seconds(3)
+        while terminals[0].surface != nil, ContinuousClock.now < completionDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await settle(window)
+        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
+        #expect(terminals[0].surface == nil)
+        #expect(terminals[1].surface == shellSurface)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
+        #expect(workspace.multiplexer.focusedPaneId == shellPane)
+        // Completing a Session is not an undoable Close view operation.
+        workspace.multiplexer.undoClose()
+        try await settle(window)
+        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
+        #expect(workspace.multiplexer.focusedPaneId == shellPane)
+        if switchBeforeCompletion {
+            #expect(model.repoPath == "/src/context")
+            #expect(model.selection == .wave(id: "wave-2"))
+            #expect(model.sessions.value?.map(\.id) == ["context-session"])
+            #expect(otherWorkspace.multiplexer.layout == otherLayout)
+            #expect(otherWorkspace.multiplexer.focusedPaneId == otherFocus)
+            model.setRepoPath("/src/loopflow")
+            host.rootView = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+                .id("/src/loopflow")
+            try await settle(window)
+        }
+        #expect(model.sessions.value?.isEmpty == true)
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.task(id: "issue-review")?.task.task.completed == false)
+        model.select(.task(id: "issue-review"))
+        try await settle(window)
+        #expect(model.workspace.subject(for: "human") == nil)
+        model.navigation.content = .terminals
+        try await settle(window)
+        #expect(window.firstResponder === terminals[1])
+        try #require(terminals[1].surface == shellSurface)
+        let afterCompletion = "companion-after-completion"
+        let input = afterCompletion + "\n"
+        input.withCString { ghostty_surface_text(shellSurface, $0, UInt(input.utf8.count)) }
+        let replyDeadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(shellSurface).components(separatedBy: afterCompletion).count < 3,
+              ContinuousClock.now < replyDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(shellSurface).components(separatedBy: afterCompletion).count == 3)
+    }
+
+    private func _terminalText(_ surface: ghostty_surface_t, viewport: Bool = false) -> String {
+        var text = ghostty_text_s()
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: viewport ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+            bottom_right: ghostty_point_s(tag: viewport ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+            rectangle: false
+        )
+        guard ghostty_surface_read_text(surface, selection, &text) else { return "" }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let bytes = text.text else { return "" }
+        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+    }
+#endif
+
+}
+
+/// A replaceable Session list for the sidebar density proof.
+private actor SidebarSessionSource {
+    private var records: String
+    init(list: String) { records = list }
+    func replace(_ list: String) { records = list }
+    func list() -> String { records }
+}
+
+/// The shared Session authority for the named drill-down proof.
+private actor NamedSessionSource {
+    private var records: [[String: Any]]
+    private(set) var renames = 0
+    private var rejectRename = false
+    private var holdRename = false
+    private var paged = false
+    private var failPage = false
+    private var pendingPage: CheckedContinuation<Void, Never>?
+    private var pageWaiter: CheckedContinuation<Void, Never>?
+
+    func pauseSecondPage(failing: Bool) { paged = true; failPage = failing }
+    func waitForPage() async {
+        if pendingPage != nil { return }
+        await withCheckedContinuation { pageWaiter = $0 }
+    }
+    func releasePage() { pendingPage?.resume(); pendingPage = nil }
+    func page(_ args: [String]) async throws -> String {
+        if paged && !args.contains("--after") {
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[0]], "next": "first"]), as: UTF8.self)
+        }
+        if paged {
+            await withCheckedContinuation { pendingPage = $0; pageWaiter?.resume(); pageWaiter = nil }
+            paged = false
+            if failPage { throw RegistryQueryError("Second page unavailable") }
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[1]], "next": NSNull()]), as: UTF8.self)
+        }
+        return #"{"entries":\#(try list()),"next":null}"#
+    }
+
+    private var pendingRename: CheckedContinuation<Void, Never>?
+
+    func rejectNextRename() { rejectRename = true }
+    func holdNextRename() { holdRename = true }
+    func releaseRename() {
+        holdRename = false
+        pendingRename?.resume()
+        pendingRename = nil
+    }
+
+    init(records: Data) throws {
+        self.records = try JSONSerialization.jsonObject(with: records) as? [[String: Any]] ?? []
+    }
+
+    func list() throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+    }
+
+    func headlessUnbound(_ id: String) throws {
+        let index = try #require(records.firstIndex { $0["id"] as? String == id })
+        records[index]["interactive"] = false
+        records[index]["work"] = NSNull()
+        records[index]["task_ids"] = []
+        records[index]["wave_id"] = NSNull()
+    }
+
+    func bind(_ args: [String], task: WorkReference) throws -> String {
+        if args.contains("--dry-run") {
+            return String(decoding: try JSONSerialization.data(withJSONObject: [
+                "session_id": "first", "task_id": task.id, "identifier": "W2-131", "title": "Retained Task",
+            ]), as: UTF8.self)
+        }
+        #expect(args == ["session", "bind", "--json", "--task", task.id, "--", "first"])
+        let index = try #require(records.firstIndex { $0["id"] as? String == "first" })
+        records[index]["work"] = ["kind": "task", "id": task.id]
+        records[index]["task_ids"] = [task.id]
+        records[index]["wave_id"] = "wave-1"
+        return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
+    }
+
+    func membership(_ value: SessionFlowMembership, for id: String) throws {
+        let index = try #require(records.firstIndex { $0["id"] as? String == id })
+        records[index]["flow_membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+    }
+
+    func rename(_ args: [String]) async throws -> String {
+        renames += 1
+        let id = args[4], name = args[5]
+        if rejectRename {
+            rejectRename = false
+            throw RegistryQueryError("Rename refused")
+        }
+        if holdRename { await withCheckedContinuation { pendingRename = $0 } }
+        guard let index = records.firstIndex(where: { $0["id"] as? String == id }) else {
+            throw RegistryQueryError("Session \(id) was not found")
+        }
+        records[index]["title"] = name
+        records[index]["title_source"] = "human"
+        return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
+    }
+}
+#endif

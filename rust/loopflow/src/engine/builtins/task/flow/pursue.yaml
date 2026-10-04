@@ -1,0 +1,20 @@
+- step:
+    id: implement
+    name: implement
+- compress
+- flow: refresh
+- step:
+    id: decide
+    name: loop-decide
+    repeat:
+      from: implement
+- pr-publish
+- step:
+    id: review_delivery
+    name: demo
+    human: true
+- step:
+    id: decide_delivery
+    name: loop-decide
+    repeat:
+      from: implement

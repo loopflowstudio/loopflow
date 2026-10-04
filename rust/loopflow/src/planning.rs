@@ -48,15 +48,8 @@ pub struct ProjectPlan {
     /// Definition and proof-shaped KRs from the latest PM snapshot.
     pub prompt_context: String,
     pub pm_snapshot_synced_at: i64,
-}
-
-impl ProjectPlan {
-    pub(crate) fn has_same_content(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.slug == other.slug
-            && self.name == other.name
-            && self.prompt_context == other.prompt_context
-    }
+    pub flow: String,
+    pub status: crate::pm::ProjectStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

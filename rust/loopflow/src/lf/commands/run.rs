@@ -1,12 +1,15 @@
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
+    check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, SkillSyncOptions,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
     StreamFormat, Surface,
 };
-use crate::lf::commands::util::{find_repo_root, launch_session_with_env};
+use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
+use crate::session_record::{
+    AgentExecRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
+};
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -23,11 +26,143 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    if let Some(flow) = saved_flow(cli)? {
+        return run_flow_skill(flow, skill, cli);
+    }
+    if let Some(binding) = implicit_binding(cli)? {
+        let mut bound = cli.exec_options();
+        bound.wave = Some(binding.wave_name.clone());
+        if bound.model.is_none() {
+            bound.model = binding.agent.clone();
+        }
+        return exec_bound(skill, message, &bound, &binding).map(|_| ());
+    }
     let mut built = build_prompt(skill, message, cli)?;
-    built.subject = cli.work_subject_selector();
+    built.subjects = cli.work_subject_selector().into_iter().collect();
+    // `--wave` resolved its Wave once for this process.
+    built.work = cli.wave.as_ref().and_then(|_| {
+        let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
+        Some(crate::session::SessionWork {
+            task_id: None,
+            wave_id: Some(crate::id::WaveId::parse(&id).ok()?),
+            source: crate::session::WorkSource::Declared,
+        })
+    });
 
     print_context_header(&built, cli);
-    launch_prompt(&built, cli)
+    exec_prompt(&built, cli).map(|_| ())
+}
+
+/// Read a Flow command's captured definition; ordinary skill commands have none.
+pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
+    let Some(value) = &cli.flow_step else {
+        return Ok(None);
+    };
+    let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let flow = store
+        .flow(&token.invocation)?
+        .ok_or_else(|| anyhow!("Flow disappeared"))?;
+    anyhow::ensure!(
+        flow.version == token.version && !flow.finished && !flow.is_human(),
+        "Flow boundary changed before skill execution"
+    );
+    Ok(Some(flow))
+}
+
+fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &Cli) -> Result<()> {
+    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<crate::durable::TaskWorkerClaim>(&value))
+        .transpose()?;
+    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
+    anyhow::ensure!(
+        flow.claim == claim,
+        "Flow claim changed before skill execution"
+    );
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let binding = implicit_binding(cli)?;
+    let task = binding.as_ref().and_then(|binding| match &binding.work {
+        crate::durable::WorkRef::Task(id) => Some(id.clone()),
+        _ => None,
+    });
+    anyhow::ensure!(
+        task == flow.task_id,
+        "Flow Task and current checkout disagree; restore the Flow checkout before resuming"
+    );
+    let flow = store.reserve_attempt(flow.id(), flow.version, claim.as_ref(), Some(&exec))?;
+    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
+        .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
+    anyhow::ensure!(
+        name == Some(skill.skill.name.as_str()),
+        "command does not name the selected Flow skill"
+    );
+    let mut launch = cli.exec_options();
+    launch.mode = Some(crate::lf::LaunchMode::Batch);
+    launch.task = task.as_ref().map(ToString::to_string);
+    launch.wave = flow
+        .wave_id
+        .as_ref()
+        .map(|id| {
+            store
+                .get_wave(id)?
+                .map(|wave| wave.slug().to_owned())
+                .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
+        })
+        .transpose()?;
+    launch.bound_cwd = Some(flow.cwd.clone());
+    launch.model = launch.model.or_else(|| flow.model.clone());
+    let _token = super::flow::EnvVarGuard::set(
+        crate::ops::flow_run::FLOW_STEP_ENV,
+        &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
+    );
+    let mut message = flow.message.clone().unwrap_or_default();
+    if let Some(repeat) = &skill.repeat {
+        let edge = skill.id.as_deref().expect("repeat occurrence has an id");
+        let traversals = flow
+            .cursor
+            .leaf()
+            .progress
+            .repeats
+            .get(edge)
+            .copied()
+            .unwrap_or(0);
+        message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
+    }
+    if let Some(direction) = &flow.cursor.leaf().progress.direction {
+        message.push_str(&format!(
+            "\n\nPrevious step feedback or iteration direction:\n{direction}"
+        ));
+    }
+    if let Some(output) = flow
+        .current_step()
+        .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
+    {
+        message.push_str(&output);
+    }
+    let mut built = build_prompt_at(
+        Some(&skill.skill.name),
+        Some(&message),
+        &launch,
+        flow.cwd.clone(),
+        false,
+        None,
+        Some(skill.skill.clone()),
+    )?;
+    built.subjects = launch.work_subject_selector().into_iter().collect();
+    built.work = binding
+        .as_ref()
+        .map(|binding| crate::session::SessionWork {
+            task_id: task,
+            wave_id: Some(binding.wave_id.clone()),
+            source: binding.source,
+        })
+        .or_else(|| flow.declared_work().filter(|work| work.task_id.is_none()));
+    built.claim = claim;
+    print_context_header(&built, &launch);
+    exec_prompt(&built, &launch).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -37,31 +172,89 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
-    let message = match message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-            message,
-        ),
-        None => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-        ),
+    exec_bound(skill, message, cli, binding).map(|_| ())
+}
+
+/// Run a channel request through the ordinary attributed launch and settlement path.
+pub(crate) fn answer_bound(
+    message: &str,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<Option<String>> {
+    exec_bound(None, Some(message), cli, binding).map(|answer| answer.map(|answer| answer.text))
+}
+
+fn exec_bound(
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<Option<FinalAnswer>> {
+    let mut launch = cli.exec_options();
+    let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
+        launch.task = Some(id.to_string());
+        launch.model = binding.agent.clone().or(launch.model);
+        message.unwrap_or_default().to_owned()
+    } else {
+        bound_message(binding, message)
     };
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
+    let cli = &launch;
+    let resolved_skill = skill
+        .map(crate::ops::human_session::active_flow_skill)
+        .transpose()?
+        .flatten();
+    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd, resolved_skill)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
         binding.wave_id.to_string(),
     );
-    built.subject = Some(format!("{}:{}", binding.work.kind(), binding.work.id()));
+    built.subjects = binding.subjects.clone();
+    built.work = Some(crate::session::SessionWork {
+        task_id: match &binding.work {
+            crate::durable::WorkRef::Task(id) => Some(id.clone()),
+            crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
+        },
+        wave_id: Some(binding.wave_id.clone()),
+        source: binding.source,
+    });
 
     print_context_header(&built, cli);
-    launch_prompt(&built, cli)
+    exec_prompt(&built, cli)
+}
+
+/// An `lf` launch inside a registered Task's checkout binds to that Task unless
+/// the caller selected Work explicitly. Otherwise checkout ownership wins over
+/// an ancestor's explicit declaration. An unavailable registry leaves context
+/// unresolved; it never reconstructs Task identity from process ancestry.
+pub fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+    if cli.work_subject_selector().is_some() {
+        return Ok(None);
+    }
+    let repo = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await else {
+            return Ok(None);
+        };
+        crate::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)
+            .await
+            .map_err(anyhow::Error::from)
+    })
+}
+
+pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
+    let mut context = format!(
+        "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
+        binding.work.kind(),
+        binding.work.id(),
+        binding.context,
+    );
+    if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
+        context.push_str("\n\n");
+        context.push_str(message);
+    }
+    context
 }
 
 struct PromptBuild {
@@ -77,117 +270,21 @@ struct PromptBuild {
     model: Option<String>,
     skill_name: Option<String>,
     log_name: String,
-    subject: Option<String>,
-}
-
-/// A skill turn ready for a runner-owned provider surface.
-#[derive(Debug)]
-pub(crate) struct PreparedHarnessTurn {
-    pub config: AgentConfig,
-    pub input: String,
-    pub context: crate::trace::PreparedTurnContext,
-    pub harness: String,
-    pub model: Option<String>,
-}
-
-pub(crate) fn prepare_harness_turn(
-    skill: &str,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    prepare_runner_turn(skill, message, &cli)
-}
-
-pub(crate) fn prepare_harness_turn_at(
-    skill: &str,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-    repo_root: &Path,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), true, None)
-}
-
-pub(crate) fn prepare_wave_harness_turn(
-    skill: &str,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-    origin_repo: &std::path::Path,
-    resident_repo: &std::path::Path,
-    surface_override: Option<Surface>,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    let mut prepared = prepare_runner_turn_at(
-        skill,
-        message,
-        &cli,
-        origin_repo.to_path_buf(),
-        true,
-        surface_override,
-    )?;
-    prepared.config.cwd = Some(resident_repo.to_path_buf());
-    Ok(prepared)
-}
-
-fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
-    let repo_root = find_repo_root()?;
-    prepare_runner_turn_at(skill, message, cli, repo_root, true, None)
-}
-
-fn prepare_runner_turn_at(
-    skill: &str,
-    message: &str,
-    cli: &Cli,
-    repo_root: PathBuf,
-    use_native_skill_launch: bool,
-    surface_override: Option<Surface>,
-) -> Result<PreparedHarnessTurn> {
-    let mut built = build_prompt_at(
-        Some(skill),
-        Some(message),
-        cli,
-        repo_root,
-        use_native_skill_launch,
-        Some((
-            crate::trace::ContextAssetKind::Goal,
-            crate::trace::ContextScope::Step,
-        )),
-        surface_override,
-    )?;
-    let input = std::mem::take(&mut built.agent_config.task_prompt);
-    Ok(PreparedHarnessTurn {
-        config: built.agent_config,
-        input,
-        context: built.context,
-        harness: built.harness,
-        model: built.model,
-    })
+    subjects: Vec<String>,
+    work: Option<crate::session::SessionWork>,
+    claim: Option<crate::durable::TaskWorkerClaim>,
 }
 
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::working_directory()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, true, None, None)
+    let saved = skill
+        .map(crate::ops::human_session::active_flow_skill)
+        .transpose()?
+        .flatten();
+    let native = saved.is_none();
+    build_prompt_at(skill, message, cli, repo_root, native, None, saved)
 }
 
 fn build_bound_prompt_at(
@@ -195,6 +292,7 @@ fn build_bound_prompt_at(
     message: &str,
     cli: &Cli,
     repo_root: &Path,
+    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     // A Work-bound launch carries context that cannot be reconstructed by a
     // vendor skill sigil: the selected Work seed and the Task worktree's exact
@@ -209,8 +307,40 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        None,
+        resolved_skill,
     )
+}
+
+// Keep the existing unattended Task confinement while applying it equally to
+// direct skills and Flows. The broader checkout-only versus unattended-only
+// policy remains Jack's choice; neither is selected by this intersection.
+fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
+    task_checkout && !interactive
+}
+
+fn prepare_task_input(
+    cli: &Cli,
+) -> Result<Option<(crate::store::SharedStore, crate::ops::task_input::TaskSeed)>> {
+    let Some(id) = &cli.task else { return Ok(None) };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let store = std::sync::Arc::new(
+            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
+        );
+        let task = store
+            .get_task_by_issue(id)
+            .await?
+            .ok_or_else(|| anyhow!("Task {id} is missing"))?;
+        let wave = store
+            .get_wave(&task.wave_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
+        if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
+            tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
+        }
+        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
+        Ok(Some((store, seed)))
+    })
 }
 
 fn build_prompt_at(
@@ -218,12 +348,29 @@ fn build_prompt_at(
     message: Option<&str>,
     cli: &Cli,
     repo_root: PathBuf,
-    use_native_skill_launch: bool,
+    use_native_skill_exec: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    surface_override: Option<Surface>,
+    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
+    let is_interactive = is_interactive_run(cli, skill, message);
+    let task_input = prepare_task_input(cli)?;
+    let task_checkout = match &task_input {
+        Some((_, seed)) => {
+            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
+        }
+        None => false,
+    };
+    let confine = confine_checkout_agent(task_checkout, is_interactive);
+    let task_message = task_input
+        .as_ref()
+        .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
+    let message = task_message.as_deref().or(message);
+    let steers = task_input
+        .as_ref()
+        .map(|(_, seed)| seed.steers.clone())
+        .unwrap_or_default();
     let config_start = Instant::now();
-    let config = load_config_or_default(Some(&repo_root));
+    let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -235,63 +382,51 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = if let Some(skill_name) = skill {
-        Some(crate::lf::discovery::discover_skill(
+    let discovered_skill = match (resolved_skill, skill) {
+        (Some(skill), _) => Some(skill),
+        (None, Some(skill_name)) => Some(crate::lf::discovery::discover_skill(
             &repo_root, skill_name,
-        )?)
-    } else {
-        None
+        )?),
+        (None, None) => None,
     };
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
     );
 
-    let is_interactive = is_interactive_run(cli, skill, message);
-
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let launch_target = if cli.ide {
-        LaunchTarget::Ide
-    } else if cli.tui || skill == Some("loopflow") {
-        LaunchTarget::Tui
+    let exec_target = forced_launch_target(cli, skill).unwrap_or(config.session.launch);
+    let surface = if is_interactive && exec_target == ExecTarget::Ide {
+        Surface::Ide
+    } else if is_interactive {
+        Surface::Cli
     } else {
-        config.session.launch
+        Surface::Headless
     };
-    let surface =
-        surface_override.unwrap_or(if is_interactive && launch_target == LaunchTarget::Ide {
-            Surface::Ide
-        } else if is_interactive {
-            Surface::Cli
-        } else {
-            Surface::Headless
-        });
 
     let wave = cli
         .wave
         .clone()
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| crate::work::wave::context::gather_wave_memory(&repo_root, wave));
-    let prepared = prepare_launch_prompt(
+    let prepared = prepare_exec_prompt(
         &config,
-        LaunchPromptInput {
+        ExecPromptInput {
             repo_root: repo_root.clone(),
             skill: skill.map(|value| value.to_string()),
             resolved_skill: discovered_skill.clone(),
             surface,
-            directions: cli.direction.clone(),
             docs: cli.docs.clone(),
             wave,
-            wave_memory,
             message: message.map(|value| value.to_string()),
             no_loopflow: cli.no_loopflow,
-            agent: cli.model.clone(),
+            agent: task_input
+                .as_ref()
+                .and_then(|(_, seed)| seed.task.agent.clone())
+                .or_else(|| cli.model.clone()),
             cwd: Some(repo_root.clone()),
             max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
-            include_config_directions: !cli.no_direction,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
@@ -310,7 +445,7 @@ fn build_prompt_at(
         .config
         .agent
         .clone()
-        .expect("prepare_launch_prompt always sets agent");
+        .expect("prepare_exec_prompt always sets agent");
     let (harness, model) = parse_agent(&agent);
 
     let skill_name = discovered_skill
@@ -322,6 +457,8 @@ fn build_prompt_at(
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
     let process = ProcessConfig {
+        task_input: task_input
+            .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
         ..Default::default()
@@ -330,16 +467,32 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
+    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
+    if confine {
+        agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+        agent_config.execution_boundary = Some(crate::engine::agent::checkout_execution_boundary(
+            &repo_root,
+            agent_config.agent(),
+        )?);
+        agent_config.skip_permissions = true;
+    }
     let mut prompt = prepared.prompt;
     // IDE deep links use the vendor skill sigil to stay below their URL cap.
     // Terminal sessions receive the fully assembled prompt from `lf <skill>`;
     // a positional `/skill` is not a reliable vendor invocation boundary.
     if let Some(skill_name) = skill_name.as_deref() {
         if is_interactive
-            && launch_target == LaunchTarget::Ide
-            && use_native_skill_launch
-            && should_launch_via_skill(skill_name)
+            && exec_target == ExecTarget::Ide
+            && use_native_skill_exec
+            && should_exec_via_skill(skill_name)
+            // Wave seeds refer to assembled documents, including GOAL.md.
+            // The short vendor seed carries no document section.
+            && !prepared
+                .components
+                .docs
+                .iter()
+                .any(|doc| doc.source == crate::engine::DocumentSource::Wave)
         {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
@@ -347,36 +500,48 @@ fn build_prompt_at(
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
-            let wave_memory =
-                crate::engine::prompt::format_wave_memory_section(&prepared.components);
-            prompt = skill_launch_seed(
+            let wave_context =
+                crate::engine::prompt::format_wave_sections(&prepared.components).join("\n\n");
+            prompt = skill_exec_seed(
                 &harness,
                 surface,
                 skill_name,
-                message,
+                prepared.components.message.as_deref(),
                 prepared.components.operate,
-                wave_memory.as_deref(),
+                Some(&wave_context),
+                prepared.components.user_name.as_deref(),
             );
+            if let Some(notice) = &prepared.components.budget_notice {
+                prompt.push_str(&format!(
+                    "\n\n<lf:context-budget>\n{notice}\n</lf:context-budget>"
+                ));
+            }
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
-        } else if is_interactive && launch_target == LaunchTarget::Ide && use_native_skill_launch {
+        } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
             warn!(
                 skill = skill_name,
-                "external skill uses assembled prompt fallback"
+                "skill launch requires assembled prompt context"
             );
         }
     }
 
     let mut components = prepared.components;
     components.message_context = message_context;
-    let deduplicated_docs = prepared.deduplicated_docs;
+    components.steers = steers;
+    let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
+    crate::engine::context_budget::check_input(
+        &effective_system,
+        &agent_config.task_prompt,
+        &budgets,
+    )?;
     let context = attributed_context(
         &components,
         &effective_system,
         &agent_config.task_prompt,
-        &deduplicated_docs,
+        &deduplication_decisions,
     );
     Ok(PromptBuild {
         repo_root,
@@ -391,7 +556,9 @@ fn build_prompt_at(
         model,
         skill_name,
         log_name,
-        subject: None,
+        subjects: Vec::new(),
+        work: None,
+        claim: None,
     })
 }
 
@@ -410,13 +577,14 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    cli.tui
-        || cli.ide
-        || cli.interactive
-        || (!cli.batch && (attached_tty || (skill.is_none() && message.is_none())))
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Batch) => false,
+        Some(_) => true,
+        None => attached_tty || (skill.is_none() && message.is_none()),
+    }
 }
 
-fn should_launch_via_skill(skill_name: &str) -> bool {
+fn should_exec_via_skill(skill_name: &str) -> bool {
     !skill_name.starts_with("npx/") && !skill_name.starts_with("rams/")
 }
 
@@ -430,13 +598,14 @@ fn should_launch_via_skill(skill_name: &str) -> bool {
 /// The invocation sigil is harness-specific: Codex's interactive composer
 /// reserves `/` for built-in commands, so skills fire with `$name` there (and
 /// `$` works in `codex exec` too). Claude uses `/name` everywhere.
-fn skill_launch_seed(
+fn skill_exec_seed(
     harness: &str,
     surface: Surface,
     skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    wave_memory: Option<&str>,
+    wave_context: Option<&str>,
+    user_name: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
@@ -446,13 +615,18 @@ fn skill_launch_seed(
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
     let mut seed = format!("{sigil}{skill_name}\n\n{}", system_sections.join("\n\n"));
-    if let Some(memory) = wave_memory {
+    let user_context = crate::engine::prompt::render_user_context(user_name);
+    if !user_context.is_empty() {
         seed.push_str("\n\n");
-        seed.push_str(memory);
+        seed.push_str(&user_context);
+    }
+    if let Some(context) = wave_context.filter(|context| !context.is_empty()) {
+        seed.push_str("\n\n");
+        seed.push_str(&crate::engine::prompt::render_reference(context));
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
-        seed.push_str(message);
+        seed.push_str(&crate::engine::prompt::render_message(message));
         seed.push_str("\n</lf:message>");
     }
     seed
@@ -461,12 +635,6 @@ fn skill_launch_seed(
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
-    let direction_names: Vec<String> = built
-        .components
-        .directions
-        .iter()
-        .map(|d| d.name.clone())
-        .collect();
     let cli_model = if cli.model.is_some() {
         built.agent_config.agent.as_deref()
     } else {
@@ -474,7 +642,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     };
     let command = format_reproducible_command(
         built.skill_name.as_deref(),
-        &direction_names,
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
@@ -490,34 +657,33 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
-    // Bare terminal control always stays in the TUI. Other human-present skills
-    // use explicit flags first, then the configured launch target.
-    let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
-        Some(LaunchTarget::Tui)
-    } else if cli.ide {
-        Some(LaunchTarget::Ide)
-    } else if cli.tui {
-        Some(LaunchTarget::Tui)
-    } else {
-        None
-    };
+fn forced_launch_target(cli: &Cli, skill: Option<&str>) -> Option<ExecTarget> {
+    // The default conversation stays in the terminal that opened it.
+    if skill == Some("default") {
+        return Some(ExecTarget::Tui);
+    }
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Ide) => Some(ExecTarget::Ide),
+        Some(crate::lf::LaunchMode::Tui) => Some(ExecTarget::Tui),
+        _ => None,
+    }
+}
+
+fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
+    let forced_target = forced_launch_target(cli, built.skill_name.as_deref());
 
     if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
         let target = forced_target.unwrap_or(built.config.session.launch);
-        let surface = if target == LaunchTarget::Ide {
+        let surface = if target == ExecTarget::Ide {
             "ide"
         } else {
             "tui"
         };
         let capture = begin_run_capture(built, surface, &built.agent_config)?;
-        let provider_session_id = if target == LaunchTarget::Tui && built.harness == "claude" {
-            let run_id = capture.run_id();
-            let raw_id = run_id
-                .as_str()
-                .strip_prefix("run_")
-                .expect("Run IDs always carry the run_ prefix");
+        let provider_session_id = if target == ExecTarget::Tui && built.harness == "claude" {
+            let run_id = capture.artifact_key();
+            let raw_id = run_id.as_str().strip_prefix("run_").unwrap_or(&run_id);
             Some(
                 uuid::Uuid::parse_str(raw_id)
                     .expect("Run IDs always carry a UUID")
@@ -526,22 +692,27 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         } else {
             None
         };
-        let result = launch_session_with_env(
+        let mut environment = built.agent_config.env.clone();
+        environment.extend(capture.environment());
+        let result = exec_session_with_env(
             target,
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
             &built.prompt,
-            &capture.environment(),
+            &environment,
             provider_session_id.as_deref(),
         );
         if let Some(provider_session) =
-            crate::run_record::read_provider_session(&capture.artifact_dir())
+            crate::session_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            capture.set_provider_session_id(Some(provider_session.provider_session_id));
+            capture.observe_provider(
+                Some(provider_session.provider_session_id),
+                provider_session.account_id,
+            );
         }
-        if target == LaunchTarget::Ide && result.is_ok() {
+        if target == ExecTarget::Ide && result.is_ok() {
             capture.mark_handoff(surface);
         } else {
             capture.finish(if result.is_ok() {
@@ -550,15 +721,12 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
                 "failed"
             })?;
         }
-        return result;
+        return result.map(|_| None);
     }
 
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            built.harness
-        ));
+        return Err(anyhow!(missing_agent_message(&built.harness)));
     }
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
@@ -572,7 +740,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_run_capture(built, "headless", &agent_config)?;
 
-    let result = launch_headless_prompt(built, &capture, &effective_system, &agent_config);
+    let result = exec_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
         "completed"
     } else {
@@ -585,13 +753,13 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         }
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Ok(())) => Ok(capture.final_answer()?),
     }
 }
 
-fn launch_headless_prompt(
+fn exec_headless_prompt(
     built: &PromptBuild,
-    capture: &crate::run_record::CaptureHandle,
+    capture: &CaptureHandle,
     effective_system: &str,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
@@ -621,7 +789,7 @@ fn launch_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf pr land` rotates worktrees).
+    // (e.g. `cd` after `lf task wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
@@ -636,8 +804,8 @@ fn launch_headless_prompt(
     debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
 
     info!(harness = built.harness, "launching agent");
-    let launch_start = Instant::now();
-    let result = launch_agent(&agent_config, &process, &built.capabilities);
+    let exec_start = Instant::now();
+    let result = exec_agent(&agent_config, &process, &built.capabilities);
 
     // Relay safe directives from the agent back to the invoking shell.
     if let (Some(relay), Some(ref target)) = (relay_path, directive_file) {
@@ -646,7 +814,7 @@ fn launch_headless_prompt(
 
     let result = result?;
     debug!(
-        elapsed_ms = launch_start.elapsed().as_millis(),
+        elapsed_ms = exec_start.elapsed().as_millis(),
         "agent finished"
     );
     debug!(exit_code = result.exit_code, "agent completed");
@@ -670,19 +838,20 @@ fn begin_run_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
-) -> Result<crate::run_record::CaptureHandle> {
+) -> Result<CaptureHandle> {
     let cwd = built
         .agent_config
         .cwd
         .clone()
         .unwrap_or_else(|| built.repo_root.clone());
     let subjects = built
-        .subject
-        .clone()
-        .map(crate::run_record::SubjectAttribution::declared)
-        .into_iter()
+        .subjects
+        .iter()
+        .cloned()
+        .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
-    let spec = crate::run_record::RunSpec {
+    let step = crate::ops::flow_run::capture_membership()?;
+    let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
         surface: surface.to_string(),
@@ -691,23 +860,54 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
+        flow: step.membership,
+        work: built.work.clone(),
     };
-    let capture = if surface == "headless" {
-        let launch = crate::run_record::RunLaunchRequest::from_prepared(
-            prepared_config,
-            &built.capabilities,
-        );
-        crate::run_record::CaptureHandle::begin_with_launch_and_context(
+    let capture = if let Some((token, captured, run_id)) = step.reserved {
+        // The step command reserved this capture; publication retains its claim.
+        let (provider, model) = (spec.harness.clone(), spec.model.clone());
+        CaptureHandle::begin_reserved_with_context(
             spec,
-            launch,
+            run_id,
+            (surface == "headless")
+                .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
             &built.context,
+            |_artifact| {
+                let path = crate::store::database_path_from_env()
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+                crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
+                    &token.invocation,
+                    token.version,
+                    captured,
+                    built.claim.as_ref(),
+                    &provider,
+                    model.as_deref(),
+                )
+            },
         )
+    } else if let Some((run_id, membership)) = crate::ops::human_session::reserved_capture()? {
+        let spec = SessionCaptureSpec {
+            flow: membership,
+            ..spec
+        };
+        let (provider, model) = (spec.harness.clone(), spec.model.clone());
+        CaptureHandle::begin_reserved_with_context(spec, run_id, None, &built.context, |run_id| {
+            crate::ops::human_session::publish_capture_binding(run_id, &provider, model.as_deref())
+                .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
+        })
+    } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
+        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
-        crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
+        let interactive = surface != "headless";
+        let launch = (!interactive)
+            .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities));
+        CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
-    .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
+    .map_err(|error| {
+        anyhow!("failed to publish Session capture manifest before agent launch: {error}")
+    })?;
+    capture.claim_conversation_driver()?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     Ok(capture)
 }
 
@@ -715,7 +915,7 @@ pub(crate) fn attributed_context(
     components: &PromptComponents,
     system_prompt: &str,
     task_prompt: &str,
-    deduplicated_docs: &[crate::engine::Document],
+    deduplication_decisions: &[crate::trace::ContextDecision],
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -733,11 +933,21 @@ pub(crate) fn attributed_context(
         if content.is_empty() {
             return;
         }
+        // Attribute the submitted reference bytes, while components retain the
+        // authored source. Otherwise escaped references become anonymous assembly.
+        let content = match included_by {
+            "wave" | "docs" | "diff_files" | "diff" | "summary" | "clipboard" => {
+                crate::engine::prompt::escape_reference(content)
+            }
+            "message" => crate::engine::prompt::render_message(content),
+            "steers" => crate::engine::prompt::render_reference(content),
+            _ => content.to_string(),
+        };
         for channel in [ContextChannel::System, ContextChannel::Task]
             .into_iter()
             .filter(|channel| match channel {
-                ContextChannel::System => system_prompt.contains(content),
-                ContextChannel::Task => task_prompt.contains(content),
+                ContextChannel::System => system_prompt.contains(&content),
+                ContextChannel::Task => task_prompt.contains(&content),
             })
         {
             specs.push(ContextAssetSpec {
@@ -748,7 +958,10 @@ pub(crate) fn attributed_context(
                 source_path: source_path.clone(),
                 included_by: included_by.to_string(),
                 content: content.to_string(),
-                match_all_occurrences: !matches!(included_by, "message" | "vendor_skill"),
+                match_all_occurrences: !matches!(
+                    included_by,
+                    "message" | "steers" | "vendor_skill"
+                ),
             });
         }
     };
@@ -789,44 +1002,18 @@ pub(crate) fn attributed_context(
         None,
         "surface",
     );
-    for direction in &components.directions {
-        push(
-            &direction.content,
-            Kind::Direction,
-            Scope::Task,
-            direction.name.clone(),
-            direction
-                .source
-                .is_file()
-                .then(|| direction.source.to_string_lossy().to_string()),
-            "direction",
-        );
-    }
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
-        push(
-            goal,
-            Kind::Goal,
-            Scope::Wave,
-            wave.clone(),
-            Some(format!("wave/{wave}/GOAL.md")),
-            "wave",
-        );
-    }
-    if let Some(memory) = &components.wave_memory {
-        push(
-            &memory.content,
-            Kind::Memory,
-            Scope::Wave,
-            "wave memory".to_string(),
-            Some(memory.path.clone()),
-            "wave",
-        );
+        push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
             Kind::Scratch
+        } else if document.source == DocumentSource::RepoMemory
+            || (document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md"))
+        {
+            Kind::Memory
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
         } else {
@@ -835,10 +1022,18 @@ pub(crate) fn attributed_context(
         push(
             &document.content,
             kind,
-            Scope::Repo,
+            if document.source == DocumentSource::Wave {
+                Scope::Wave
+            } else {
+                Scope::Repo
+            },
             document.path.clone(),
             Some(document.path.clone()),
-            "docs",
+            if document.source == DocumentSource::Wave {
+                "wave"
+            } else {
+                "docs"
+            },
         );
     }
     for document in &components.diff_files {
@@ -907,6 +1102,17 @@ pub(crate) fn attributed_context(
         }
     }
     if let Some(message) = &components.message {
+        // Steers ride inside the launch message; claim them before it does.
+        if let Some(steers) = tagged_block(message, "<lf:steers>", "</lf:steers>") {
+            push(
+                steers,
+                Kind::Steer,
+                Scope::Task,
+                "steers".to_string(),
+                None,
+                "steers",
+            );
+        }
         let (kind, scope) = components
             .message_context
             .unwrap_or((Kind::UserMessage, Scope::User));
@@ -924,19 +1130,18 @@ pub(crate) fn attributed_context(
         );
     }
 
-    let mut decisions = Vec::new();
-    for (position, document) in deduplicated_docs.iter().enumerate() {
+    let mut decisions = deduplication_decisions.to_vec();
+    for steer in &components.steers {
         decisions.push(ContextDecision {
-            position: position as u32,
-            kind: Kind::RepoInstructions,
-            scope: Scope::Repo,
-            label: document.path.clone(),
-            source_path: Some(document.path.clone()),
-            decision: ContextDecisionKind::Deduplicated,
-            reason: "provider-native instruction discovery owns this file or its symlink target"
-                .to_string(),
-            original_bytes: Some(document.content.len() as u64),
-            original_tokens: Some(crate::engine::prompt::count_tokens(&document.content) as u64),
+            position: decisions.len() as u32,
+            kind: Kind::Steer,
+            scope: Scope::Task,
+            label: steer.author.to_string(),
+            source_path: Some(format!("steer:{}", steer.id)),
+            decision: ContextDecisionKind::Included,
+            reason: "rendered in the launch goal".to_string(),
+            original_bytes: Some(steer.text.len() as u64),
+            original_tokens: Some(crate::engine::prompt::count_tokens(&steer.text) as u64),
             asset_position: None,
         });
     }
@@ -955,6 +1160,16 @@ pub(crate) fn attributed_context(
         });
     }
 
+    for mut decision in components.budget_decisions.clone() {
+        decision.position = decisions.len() as u32;
+        if decision.kind == Kind::UserMessage {
+            if let Some((kind, scope)) = components.message_context {
+                decision.kind = kind;
+                decision.scope = scope;
+            }
+        }
+        decisions.push(decision);
+    }
     crate::trace::PreparedTurnContext::from_attributed_prompts(
         system_prompt,
         task_prompt,
@@ -1021,14 +1236,14 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
-        is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
-        prepare_wave_harness_turn, should_launch_via_skill, skill_launch_seed, split_skill_args,
+        exec_headless_prompt, exec_prompt, forced_launch_target, is_interactive_run,
+        is_interactive_run_with_tty, should_exec_via_skill, skill_exec_seed, split_skill_args,
         PromptBuild,
     };
-    use crate::durable::RunId;
-    use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+
+    use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, Surface};
+    use crate::engine::{Config, ExecTarget, Skill, Surface};
     use crate::lf::Cli;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
@@ -1058,20 +1273,223 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
+        for mode in [
+            None,
+            Some(crate::lf::LaunchMode::Ide),
+            Some(crate::lf::LaunchMode::Tui),
+        ] {
+            let cli = Cli {
+                mode,
+                ..Default::default()
+            };
+            assert_eq!(
+                forced_launch_target(&cli, Some("default")),
+                Some(ExecTarget::Tui)
+            );
+        }
+        let cli = Cli {
+            mode: Some(crate::lf::LaunchMode::Ide),
+            ..Default::default()
+        };
+        assert_eq!(
+            forced_launch_target(&cli, Some("repo/operate")),
+            Some(ExecTarget::Ide)
+        );
+        assert_eq!(
+            forced_launch_target(&Cli::default(), Some("repo/operate")),
+            None
+        );
+    }
+
+    #[test]
+    fn context_choices_override_config_and_omission_inherits() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("context-choice");
+        repo.create_file("changed.txt", "changed file body\n");
+        repo.stage_all();
+        repo.commit("Add changed content");
+        for configured in [false, true] {
+            repo.create_file(
+                ".lf/config.yaml",
+                &format!(
+                "diff: {configured}\ndiff_files: {configured}\nchrome: {configured}\npaste: false\n"
+            ),
+            );
+            for (choice, files, patch) in [
+                (None, configured, configured),
+                (Some("files"), true, false),
+                (Some("patch"), false, true),
+                (Some("both"), true, true),
+                (Some("none"), false, false),
+            ] {
+                let mut args = vec!["lf", "--mode", "batch"];
+                if let Some(choice) = choice {
+                    args.extend(["--diff", choice]);
+                }
+                for browser in [None, Some("on"), Some("off")] {
+                    let mut args = args.clone();
+                    if let Some(browser) = browser {
+                        args.extend(["--chrome", browser]);
+                    }
+                    let cli = Cli::parse_from(args);
+                    let built =
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
+                            .unwrap();
+                    assert_eq!(
+                        built
+                            .components
+                            .diff_files
+                            .iter()
+                            .any(|file| file.content.contains("changed file body")),
+                        files
+                    );
+                    assert_eq!(
+                        built
+                            .components
+                            .diff
+                            .as_ref()
+                            .is_some_and(|diff| diff.contains("+changed file body")),
+                        patch
+                    );
+                    assert_eq!(
+                        built.capabilities.chrome,
+                        browser.map_or(configured, |value| value == "on")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preferred_name_survives_fresh_launches_and_corrections() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&[
+            "LF_HOME",
+            "LF_USER_NAME",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        ]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::remove_var("LF_USER_NAME");
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "Git User");
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
+        );
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+
+        for name in ["Jack", "Jacqueline", "  "] {
+            std::fs::write(
+                home.path().join("config.yaml"),
+                format!("user:\n  name: '{name}'\n"),
+            )
+            .unwrap();
+            // Each assembly reloads personal config, including the correction.
+            for _ in 0..2 {
+                let built = build_bound_prompt_at(
+                    None,
+                    "choose the prototype path",
+                    &cli,
+                    repo.path(),
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    built.components.user_name.as_deref(),
+                    if name.trim().is_empty() {
+                        Some("Git User")
+                    } else {
+                        Some(name)
+                    }
+                );
+                let context = crate::engine::prompt::render_user_context(
+                    built.components.user_name.as_deref(),
+                );
+                assert_eq!(
+                    built.prompt.matches("<lf:user>").count(),
+                    usize::from(!context.is_empty())
+                );
+                assert!(built.agent_config.task_prompt.contains(&context));
+                assert!(!built
+                    .prompt
+                    .contains("display name is \"Repository Owner\""));
+            }
+        }
+        std::fs::remove_file(home.path().join("config.yaml")).unwrap();
+        let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+        assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
+    }
+
+    #[test]
+    fn preferred_name_uses_remote_caller_and_leaves_background_work_unattributed() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "user:\n  name: Host Owner\n",
+        )
+        .unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+        for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
+            std::env::set_var("LF_USER_NAME", caller);
+            let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+            assert_eq!(built.components.user_name.as_deref(), Some(expected));
+            assert!(built.agent_config.task_prompt.contains(expected));
+            assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
+        }
+        std::env::set_var("LF_USER_NAME", "Jack");
+    }
+
+    #[test]
+    fn preferred_name_reaches_native_skill_handoffs() {
+        for harness in ["codex", "claude", "opencode"] {
+            let seed = skill_exec_seed(
+                harness,
+                Surface::Ide,
+                "design",
+                Some("prototype"),
+                true,
+                None,
+                Some("Jack"),
+            );
+            assert!(seed.contains("display name is \"Jack\""));
+            assert!(seed.contains("Address them as \"you\""));
+            assert_eq!(seed.matches("<lf:user>").count(), 1);
+        }
+    }
+
     #[cfg(unix)]
     #[test]
-    fn ad_hoc_batch_launch_uses_generic_run_record_without_planning_registry() {
+    fn ad_hoc_batch_launch_captures_session_without_planning_registry() {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("provider-run");
         let implicit_evidence = home.path().join("implicit-provider-run");
-        let provider = bin.join("opencode");
+        let provider = bin.join("claude");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
-printf '%s\n' "$LF_RUN_ID|$LF_RUN_DIR|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}|${LF_PARENT_RUN_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
+printf '%s\n' "$LF_RUN_ID|$LF_RUN_DIR|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
 if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
   touch "$LF_TEST_ATTEMPT_FILE"
   printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
@@ -1087,14 +1505,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "PATH",
             "LF_BIN",
             "LF_HOME",
-            "LF_DB_PATH",
             crate::journal::LF_TRACE_ID_ENV,
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
-            crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
-            crate::store::CONTROL_HOME_ENV,
-            crate::store::CONTROL_DB_PATH_ENV,
+            crate::session_record::RUN_DIR_ENV,
         ];
         let _environment = EnvironmentRestore::capture(&keys);
         let path = format!(
@@ -1105,19 +1519,17 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
-        let registry_blocker = home.path().join("unreadable-registry");
-        std::fs::create_dir(&registry_blocker).unwrap();
-        std::env::set_var("LF_DB_PATH", &registry_blocker);
+        let registry = home.path().join("loopflow.db");
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
-        std::env::set_var(crate::durable::RUN_ID_ENV, RunId::new().as_str());
         std::env::set_var(
-            crate::run_record::RUN_DIR_ENV,
+            crate::durable::RUN_ID_ENV,
+            crate::session_record::new_artifact_key().as_str(),
+        );
+        std::env::set_var(
+            crate::session_record::RUN_DIR_ENV,
             home.path().join("stale-run"),
         );
-        std::env::set_var(crate::run_record::PARENT_RUN_ID_ENV, RunId::new().as_str());
-        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
 
         let task = "prove the generic Run launch";
         let context = crate::trace::PreparedTurnContext::from_prompts("", task);
@@ -1131,7 +1543,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             config: Config::default(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: Some("opencode".to_string()),
+                agent: Some("claude".to_string()),
                 cwd: Some(home.path().to_path_buf()),
                 skip_permissions: true,
                 env,
@@ -1145,14 +1557,16 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             components: PromptComponents::default(),
             context,
             prompt: task.to_string(),
-            harness: "opencode".to_string(),
+            harness: "claude".to_string(),
             model: None,
             skill_name: Some("implement".to_string()),
             log_name: "generic-run-proof".to_string(),
-            subject: Some("task:LOO-265".to_string()),
+            subjects: vec!["task:LOO-265".to_string()],
+            work: None,
+            claim: None,
         };
         let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
-        let run_id = capture.run_id();
+        let run_id = capture.artifact_key();
         let run_dir = capture.artifact_dir();
 
         assert!(run_dir.join("manifest.json").is_file());
@@ -1161,8 +1575,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(!run_dir.join("terminal.json").exists());
         let effective_system =
             crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-        let result =
-            launch_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
+        let result = exec_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
         capture
             .finish(if result.is_ok() {
                 "completed"
@@ -1175,12 +1588,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let provider_identity = std::fs::read_to_string(evidence).unwrap();
         assert_eq!(
             provider_identity.trim(),
-            format!("{}|{}|unset|unset|unset", run_id, run_dir.display())
+            format!("{}|{}|unset|unset", run_id, run_dir.display())
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
-        let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
 
         let mut implicit_launch = built.agent_config.clone();
         implicit_launch.env.insert(
@@ -1191,15 +1602,15 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "LF_TEST_ATTEMPT_FILE".to_string(),
             home.path().join("implicit-attempt").display().to_string(),
         );
-        let result = launch_agent(&implicit_launch, &built.process, &built.capabilities).unwrap();
+        let result = exec_agent(&implicit_launch, &built.process, &built.capabilities).unwrap();
         assert_eq!(result.exit_code, 0);
         let implicit_identities = std::fs::read_to_string(implicit_evidence).unwrap();
         let identities = implicit_identities.lines().collect::<Vec<_>>();
         assert_eq!(identities.len(), 2, "transient failure should retry once");
         assert_eq!(identities[0], identities[1], "retry must stay in one Run");
         let fields = identities[0].split('|').collect::<Vec<_>>();
-        assert_eq!(&fields[2..], ["unset", "unset", "unset"]);
-        let implicit_run_id = RunId::parse(fields[0]).unwrap();
+        assert_eq!(&fields[2..], ["unset", "unset"]);
+        let implicit_run_id = crate::session_record::parse_artifact_key(fields[0]).unwrap();
         let implicit_run_dir = std::path::Path::new(fields[1]);
         assert_eq!(
             implicit_run_dir.file_name().and_then(|name| name.to_str()),
@@ -1208,13 +1619,17 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(implicit_run_dir.join("manifest.json").is_file());
         assert!(implicit_run_dir.join("terminal.json").is_file());
         assert!(!implicit_run_dir.join("owner.json").exists());
-        let implicit_events =
-            std::fs::read_to_string(implicit_run_dir.join("events.jsonl")).unwrap();
+        // Completion does not wait for all telemetry. The provider evidence above
+        // proves retry identity; session_record tests own usage and account events.
+        assert!(registry.is_file());
+        let db = rusqlite::Connection::open(&registry).unwrap();
+        let tasks: i64 = db
+            .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(
-            implicit_events.matches("provider_attempt_started").count(),
-            2
+            tasks, 0,
+            "agent work needs storage, not registered planning Work"
         );
-        assert!(registry_blocker.is_dir());
     }
 
     #[cfg(unix)]
@@ -1240,7 +1655,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 config: Config::default(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: Some("opencode".to_string()),
+                    agent: Some("claude".to_string()),
                     cwd: Some(repo.to_path_buf()),
                     skip_permissions: true,
                     env,
@@ -1254,11 +1669,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 components: PromptComponents::default(),
                 context: crate::trace::PreparedTurnContext::from_prompts("", task),
                 prompt: task.to_string(),
-                harness: "opencode".to_string(),
+                harness: "claude".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
                 log_name: log_name.to_string(),
-                subject: Some("task:LOO-267".to_string()),
+                subjects: vec!["task:LOO-267".to_string()],
+                work: None,
+                claim: None,
             }
         }
 
@@ -1266,12 +1683,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
-        let provider = bin.join("opencode");
+        let provider = bin.join("claude");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
 if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'opencode test'
+  printf '%s\n' 'claude test'
   exit 0
 fi
 sleep "$LF_TEST_RESEARCH_DELAY"
@@ -1289,8 +1706,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         // session's execution identity.
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
-            crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
+            crate::session_record::RUN_DIR_ENV,
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];
@@ -1337,8 +1753,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let cli = Cli::default();
 
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| launch_prompt(&first, &cli));
-            let second = scope.spawn(|| launch_prompt(&second, &cli));
+            let first = scope.spawn(|| exec_prompt(&first, &cli));
+            let second = scope.spawn(|| exec_prompt(&second, &cli));
             first.join().unwrap().unwrap();
             second.join().unwrap().unwrap();
         });
@@ -1361,14 +1777,9 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .status()
             .unwrap()
             .success());
-        assert_eq!(
-            crate::run_record::observed_run_ids(&["task:LOO-267".to_string()])
-                .unwrap()
-                .len(),
-            2
-        );
 
-        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path(), None).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1377,33 +1788,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .agent_config
             .task_prompt
             .contains("handoff evidence bytes"));
-    }
-
-    #[test]
-    fn wave_harness_loads_canonical_skill_and_executes_in_resident_worktree() {
-        let origin = loopflow_test_support::TestRepo::new();
-        origin.create_file(".lf/skills/proof.md", "canonical skill instructions");
-        origin.stage_all();
-        origin.commit("canonical skill");
-        let resident = loopflow_test_support::TestRepo::new();
-        resident.create_file(".lf/skills/proof.md", "stale resident skill instructions");
-        resident.stage_all();
-        resident.commit("stale resident skill");
-
-        let prepared = prepare_wave_harness_turn(
-            "proof",
-            "continue",
-            "ship",
-            Some(4),
-            origin.path(),
-            resident.path(),
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(prepared.config.cwd.as_deref(), Some(resident.path()));
-        assert!(prepared.input.contains("canonical skill instructions"));
-        assert!(!prepared.input.contains("stale resident skill instructions"));
     }
 
     #[test]
@@ -1416,11 +1800,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
 
         let cli = Cli {
-            batch: true,
+            mode: Some(crate::lf::LaunchMode::Batch),
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path(), None).unwrap();
 
         let committed = built
             .agent_config
@@ -1451,7 +1836,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.stage_all();
         repo.commit("bound basis");
         let cli = Cli {
-            interactive: true,
+            mode: Some(crate::lf::LaunchMode::Interactive),
             ..Cli::default()
         };
 
@@ -1460,6 +1845,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             &cli,
             repo.path(),
+            None,
         )
         .unwrap();
         repo.create_file(
@@ -1488,14 +1874,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "gate"]);
 
         assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
     fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--batch", "design"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch", "design"]);
         assert!(!is_interactive_run(&cli, Some("design"), None));
     }
 
@@ -1523,7 +1909,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "--mode", "tui", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1545,13 +1931,89 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_launch_seed_starts_with_slash_skill_and_message() {
-        let seed = skill_launch_seed(
+    fn ide_wave_skill_launch_delivers_the_authored_goal() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        // A regression into native skill sync must never write personal skills.
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("LF_HOME", home.path().join(".lf"));
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let goal =
+            "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
+        repo.create_file("wave/release/GOAL.md", goal);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
+        let built = build_prompt_at(
+            Some("design"),
+            Some("plan the release"),
+            &cli,
+            repo.path().to_path_buf(),
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.prompt.matches(goal).count(), 1);
+        assert!(built
+            .context
+            .task
+            .assets
+            .iter()
+            .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
+    }
+
+    #[test]
+    fn persisted_skill_spec_is_the_prompt_authority() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/skills/proof.md",
+            "# Mutated\n\nThis source was edited after the Flow started.",
+        );
+        let skill = Skill {
+            name: "proof".to_string(),
+            agent: None,
+            default_agent: None,
+            action_style: None,
+            content: Some(
+                "# Persisted\n\nThese are the instructions captured at Flow start.".to_string(),
+            ),
+        };
+
+        let built = build_prompt_at(
+            Some("proof"),
+            Some("prove it"),
+            &Cli::default(),
+            repo.path().to_path_buf(),
+            false,
+            None,
+            Some(skill),
+        )
+        .unwrap();
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("captured at Flow start"));
+        assert!(!built
+            .agent_config
+            .task_prompt
+            .contains("edited after the Flow started"));
+    }
+
+    #[test]
+    fn skill_exec_seed_starts_with_slash_skill_and_message() {
+        let seed = skill_exec_seed(
             "claude",
             Surface::Cli,
             "implement",
             Some("build auth"),
             false,
+            None,
             None,
         );
         assert!(seed.starts_with("/implement\n\n"));
@@ -1561,90 +2023,250 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_launch_seed_uses_dollar_sigil_for_codex() {
+    fn skill_exec_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
+        let seed = skill_exec_seed("codex", Surface::Cli, "gate", None, false, None, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
-    fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
+    fn skill_exec_seed_interactive_surfaces_have_no_preamble() {
         for surface in [Surface::Cli, Surface::Ide, Surface::Mac] {
-            let seed = skill_launch_seed("claude", surface, "gate", None, false, None);
+            let seed = skill_exec_seed("claude", surface, "gate", None, false, None, None);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");
         }
     }
 
     #[test]
-    fn skill_launch_seed_omits_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None);
+    fn skill_exec_seed_omits_message_when_absent() {
+        let seed = skill_exec_seed("claude", Surface::Cli, "gate", None, false, None, None);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
-    fn skill_launch_seed_headless_includes_preamble() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+    fn skill_exec_seed_headless_includes_preamble() {
+        let seed = skill_exec_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            false,
+            None,
+            None,
+        );
         assert!(seed.contains("Run mode is headless"));
     }
 
     #[test]
-    fn skill_launch_seed_omits_loopflow_when_disabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
+    fn skill_exec_seed_omits_loopflow_when_disabled() {
+        let seed = skill_exec_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            false,
+            None,
+            None,
+        );
         assert!(!seed.contains("<lf:loopflow>"));
-        assert!(!seed.contains("lf commit"));
+        assert!(!seed.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]
-    fn skill_launch_seed_includes_loopflow_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
+    fn skill_exec_seed_includes_loopflow_when_enabled() {
+        let seed = skill_exec_seed(
+            "claude",
+            Surface::Headless,
+            "implement",
+            None,
+            true,
+            None,
+            None,
+        );
         assert!(seed.contains("<lf:loopflow>"));
-        assert!(seed.contains("lf commit"));
+        assert!(seed.contains(crate::engine::builtins::LOOPFLOW_DOC));
         assert!(seed.contains("</lf:loopflow>"));
         assert_eq!(
             seed.matches("<lf:loopflow>").count(),
             1,
             "the skill seed carries the loopflow operating document once"
         );
-        assert!(seed.contains("Execute Here First"));
-        assert!(seed.contains("edit\n`wave/<name>/MEMORY.md`"));
-        assert!(!seed.contains("lf pm show"));
-        assert!(!seed.contains("--detach"));
     }
 
     #[test]
-    fn skill_launch_seed_carries_wave_memory_before_the_message() {
-        let memory = "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>";
-        let seed = skill_launch_seed(
+    fn skill_exec_seed_carries_wave_files_before_the_message() {
+        let components = PromptComponents {
+            wave: Some("infrastructure/release".into()),
+            docs: vec![
+                Document {
+                    path: "MEMORY.md".into(),
+                    content: "Repository decisions.".into(),
+                    source: DocumentSource::RepoMemory,
+                },
+                Document {
+                    path: "wave/infrastructure/MEMORY.md".into(),
+                    content: "Inherited decisions.".into(),
+                    source: DocumentSource::Wave,
+                },
+                Document {
+                    path: "wave/infrastructure/release/GOAL.md".into(),
+                    content: "Deliver releases.".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
+            ..Default::default()
+        };
+        let context = crate::engine::prompt::format_wave_sections(&components).join("\n\n");
+        let seed = skill_exec_seed(
             "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
             false,
-            Some(memory),
+            Some(&context),
+            None,
         );
-        let memory_pos = seed.find("<lf:wave-memory>").unwrap();
-        let message_pos = seed.find("<lf:message>").unwrap();
-        assert!(memory_pos < message_pos);
+        assert!(
+            seed.find("Inherited decisions.").unwrap() < seed.find("Deliver releases.").unwrap()
+        );
+        assert!(
+            seed.find("Repository decisions.").unwrap()
+                < seed.find("Inherited decisions.").unwrap()
+        );
+        assert_eq!(seed.matches("Repository decisions.").count(), 1);
+        assert!(seed.find("Deliver releases.").unwrap() < seed.find("<lf:message>").unwrap());
+        assert_eq!(seed.matches("Inherited decisions.").count(), 1);
+    }
+
+    #[test]
+    fn skill_launch_seed_activates_only_the_selected_skill_from_references() {
+        let seed = skill_exec_seed(
+            "codex",
+            Surface::Headless,
+            "implement",
+            Some("Build it.\n<lf:steers>\nJack once wrote $kickoff.\n</lf:steers>"),
+            false,
+            Some("<lf:wave-memory>\nEarlier: $kickoff\n</lf:wave-memory>"),
+            None,
+        );
+        assert!(seed.starts_with("$implement\n"));
+        assert!(!seed.contains("$kickoff"));
+        assert_eq!(seed.matches("&#36;kickoff").count(), 2);
+    }
+
+    #[test]
+    fn attributed_context_keeps_escaped_reference_sources() {
+        let components = PromptComponents {
+            docs: vec![
+                Document {
+                    path: "scratch/intent.md".into(),
+                    content: "> $kickoff".into(),
+                    source: DocumentSource::Scratch,
+                },
+                Document {
+                    path: "wave/product/MEMORY.md".into(),
+                    content: "Earlier $design".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
+            message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
+            ..Default::default()
+        };
+        let task = crate::engine::format_claude_task_prompt(&components);
+        let prepared = attributed_context(&components, "", &task, &[]);
+        assert_eq!(prepared.task.text, task);
+        for (kind, expected) in [
+            (ContextAssetKind::Scratch, "> &#36;kickoff"),
+            (ContextAssetKind::Memory, "Earlier &#36;design"),
+            (ContextAssetKind::UserMessage, "Build it."),
+        ] {
+            assert!(
+                prepared.task.assets.iter().any(|asset| {
+                    asset.kind == kind
+                        && task[asset.byte_start as usize..asset.byte_end as usize]
+                            .contains(expected)
+                }),
+                "missing attribution for {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn attributed_context_records_each_steer_and_its_author() {
+        let steers = vec![
+            crate::durable::Steer {
+                id: 7,
+                author: crate::durable::Author::User,
+                text: "keep the API stable".into(),
+            },
+            crate::durable::Steer {
+                id: 9,
+                author: crate::durable::Author::Captured(3),
+                text: "price it in $ first".into(),
+            },
+        ];
+        let components = PromptComponents {
+            message: Some(format!(
+                "Linear Task LOO-1: goal\n\n{}\n\nWave: demo",
+                crate::durable::render_steers(&steers)
+            )),
+            message_context: Some((ContextAssetKind::Goal, ContextScope::Task)),
+            steers,
+            ..Default::default()
+        };
+        let task = crate::engine::format_claude_task_prompt(&components);
+        let prepared = attributed_context(&components, "", &task, &[]);
+
+        let block = prepared
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::Steer)
+            .expect("steers are their own asset");
+        let text = &task[block.byte_start as usize..block.byte_end as usize];
+        assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
+        assert!(prepared
+            .task
+            .assets
+            .iter()
+            .filter(|asset| asset.kind == ContextAssetKind::Goal)
+            .all(
+                |asset| !task[asset.byte_start as usize..asset.byte_end as usize]
+                    .contains("keep the API stable")
+            ));
+        let recorded = prepared
+            .decisions
+            .iter()
+            .filter(|decision| decision.asset_position.is_none())
+            .map(|decision| (decision.source_path.as_deref(), decision.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            recorded,
+            [
+                (Some("steer:7"), "user"),
+                (Some("steer:9"), "session input 3")
+            ]
+        );
     }
 
     #[test]
     fn external_skill_skills_keep_assembled_prompt_fallback() {
-        assert!(!should_launch_via_skill("npx/vercel-labs/deep-research"));
-        assert!(!should_launch_via_skill("rams/rams"));
-        assert!(should_launch_via_skill("implement"));
+        assert!(!should_exec_via_skill("npx/vercel-labs/deep-research"));
+        assert!(!should_exec_via_skill("rams/rams"));
+        assert!(should_exec_via_skill("implement"));
     }
 
     #[test]
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
-            wave_memory: Some(Document {
+            docs: vec![Document {
                 path: "wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
+                source: DocumentSource::Wave,
+            }],
             message: Some("outer MEMORY remainder".to_string()),
             message_context: Some((ContextAssetKind::Goal, ContextScope::Step)),
             ..PromptComponents::default()

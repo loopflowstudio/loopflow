@@ -4,7 +4,7 @@ produces: connected Loopflow path and an evidence-backed next command
 Connect this repository to Loopflow's distributed control system.
 
 Loopflow is not primarily a prompt launcher. It is the shared control surface
-for durable Waves, Linear-backed Projects and Tasks, GitHub delivery, stable
+for durable Waves, chapter plans and Linear-backed Tasks, GitHub delivery, stable
 execution Homes, and the agents that do the work. Establish that system first.
 Skills, flows, models, and launch preferences are secondary configuration.
 
@@ -12,16 +12,16 @@ Skills, flows, models, and launch preferences are secondary configuration.
 
 The launch prompt identifies the reviewer.
 
-- **Human reviewer:** ask one consequential question at a time. You may guide
+- **Interactive reviewer:** ask one consequential question at a time. You may guide
   interactive account connections and edit personal config only after the
-  human explicitly chooses them.
+  user explicitly chooses them.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
   reversible changes through the review protocol with the Task. Never guess a
-  human preference. OAuth, personal config, placement, and external object
+  user preference. OAuth, personal config, placement, and external object
   creation require the present User. When absent, report the exact blocker and
-  next commands; do not manufacture a human session.
+  next commands; do not manufacture a session.
 
-Never expose credential values. Use Loopflow's auth commands; do not read
+Never expose credential values. Use Loopflow's account commands; do not read
 tokens from dotfiles or environment variables.
 
 ## 1. Discover the existing system
@@ -33,10 +33,11 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf auth status
-lf route show
-lf home id --json
-lf ls --json
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
+lf id --json
+lf wave list --json
 command -v claude
 command -v codex
 command -v opencode
@@ -46,8 +47,8 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 ```
 
 Do not reconstruct distributed state from processes, worktrees, or provider
-web pages. `lf ls`, `lf status`, and `lf roadmap` are the shared read surfaces.
-If `lf home id` says the local store is not initialized, record that plainly
+web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
+If `lf id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
 Present one compact topology:
@@ -68,6 +69,18 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
+Read `lf user --json`: a personal Loopflow `user.name` override wins,
+otherwise Git's configured `user.name` supplies the baseline. An available name
+needs no additional setup. Agents may also use a name already known in the session.
+In an interactive session, if neither source supplies a name, ask what name to
+use in saved artifacts. Record an explicit choice or correction as `user.name`
+in personal configuration (`$LF_HOME/config.yaml`, or `~/.lf/config.yaml` when
+unset), preserving other settings. Blank or absent preferences fall through to
+Git. Never infer a name from an account, directory, or commit author, and never
+put a personal name in repo Loopflow configuration.
+On SSH, preserve the destination owner's preference; the caller's preference
+belongs on the originating Home. In unattended work, leave an absent name unknown.
+
 At least one supported agent must be available: Claude Code, Codex, or
 OpenCode. If none is installed, stop with install commands and end with
 `lf init` as the retry. Do not run a package manager.
@@ -79,16 +92,17 @@ team-wide repo configuration merely to mirror `command -v` on this machine.
 Resolve repo agent configuration conservatively:
 
 - Preserve a valid existing `agent` override.
-- Codex is the implicit default. An absent `agent` is valid even when this Home
-  lacks Codex; report the local mismatch instead of changing repo policy.
-- Change `agent` or `supported_harnesses` only when the human explicitly wants
+- An absent `agent` is valid: Loopflow then uses the first of Codex, Claude,
+  and OpenCode installed on this Home. Do not write `agent` to work around a
+  missing harness.
+- Change `agent` or `supported_harnesses` only when the user explicitly wants
   a team-wide policy. Ask whether the choice is repo-wide or Home-local before
   writing it.
 - A local harness mismatch affects where work can run. It does not invalidate
   the repository.
 
 Create `.lf/config.yaml` only when a real repo-scoped policy is missing and the
-human chooses one. Preserve every existing field. For example:
+user chooses one. Preserve every existing field. For example:
 
 ```yaml
 supported_harnesses:
@@ -106,7 +120,7 @@ works; never modify them for a parent reviewer.
 
 ## 3. Connect shared truth for the intended path
 
-Ask the human what they want to make operational now:
+Ask the user what they want to make operational now:
 
 1. an existing Wave,
 2. a new durable Wave,
@@ -116,19 +130,27 @@ Ask the human what they want to make operational now:
 This answer determines the minimum accounts and files. Do not turn init into a
 questionnaire.
 
-For durable planning and delivery, inspect `lf auth status` and offer only the
+For durable planning and delivery, inspect `lf account` and offer only the
 missing connections:
 
 ```bash
-lf auth github
-lf auth linear
-lf auth claude
-lf auth status
+lf account connect github
+lf account connect linear
+lf account connect claude
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
 ```
 
-Account connection is an external side effect. A human must choose it and
-complete the provider flow. Never claim a provider is connected until
-`lf auth status` proves it. Direct skills can proceed with a local agent even
+OAuth client credentials resolve from environment first, with a Doppler fallback
+when configured. If this repository uses Doppler and credentials are missing,
+use `doppler run -- lf account connect linear`. Otherwise follow the customer's secret
+manager and the exact missing variable names. Never print credential values.
+
+Account connection is an external side effect. The user must choose it and
+complete the provider flow. Claim a new connection only after connect completes;
+cached status is retained evidence, not a fresh authorization check. Managed
+verification requires an accepted managed row from `auth status --json`.
+Direct skills can proceed with a local agent even
 when Linear is absent; do not block that path on PM setup.
 
 ## 4. Make one durable path real
@@ -138,20 +160,20 @@ when Linear is absent; do not block that path on PM setup.
 Read its `wave/<name>/GOAL.md`, then verify its shared state:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf roadmap --wave <wave> --json
-lf pm show --wave <wave> --no-sync
+lf wave status <wave>
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf pm init --wave <wave>
+lf repo connect <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the
 repository name; `--team-key <KEY>` is an explicit override. Later Waves must
-reuse that binding. Choosing the initial repository Team requires the human's
+reuse that binding. Choosing the initial repository Team requires the user's
 choice. Do not invent another Team, Initiative, Project, or KR; an existing
 repository binding changes only through the repository-wide migration.
 
@@ -164,13 +186,33 @@ wave/<name>/GOAL.md
 ```
 
 Write the goal as a durable operating contract: objective, observable success,
-project-selection judgment, boundaries, and when to stop or escalate. Do not
-create or edit `MEMORY.md`; the Wave runtime owns compiled memory. Runtime
-learnings arrive through `lf memory add` and `lf memory update`. Do not create
-Projects or Tasks in the goal body.
+boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
+in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
+the repository workflow; do not invent runtime memory commands or duplicate the
+plan in the goal body.
 
-Then offer Linear binding as above. Every Project belongs to exactly one Wave;
-Projects carry definitions and KRs, while Tasks carry concrete work.
+Then offer Linear binding as above. Connection creates or links the Initiative
+and preserves existing Projects; it does not provision an initial Project.
+Inspect available Linear status/content: one In Progress Project is the current
+plan, Planned Projects hold future plans, and Completed Projects retain history.
+Tasks use the current Project and its required `flow:` default.
+
+If no current Project exists, report that planning gap. Establishing a chapter
+requires accepted repository-wide direction and plan dispositions: preview with
+`lf repo new-chapter <name> --dry-run --json`, then apply with
+`lf repo new-chapter <name> --json` only under that authorization. Every Wave
+participates; do not rotate the repository merely to initialize one Wave. A Wave
+with no Projects receives an empty plan with `flow: feature`, unless an authored
+Planned successor supplies its content. Existing successors and predecessors
+retain identity; rotation completes predecessors rather than deleting them.
+
+Author future content in the Planned Linear Project through an available
+authorized provider interface. For an existing current Project,
+`lf wave update-plan --wave <wave> --plan <plan.json>` replaces its complete
+content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
+There is no future-plan writer or historical chapter selector in these commands.
+Missing access or competing current Projects stays an explicit next action;
+never invent a local chapter store or guess a plan from the newest name.
 
 ### Existing Linear Task
 
@@ -178,7 +220,7 @@ Require its exact issue identifier. If Linear is connected and the Task belongs
 to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
-lf task run <ISSUE-ID>
+lf --task <ISSUE-ID> flow start
 lf task status <ISSUE-ID> --json
 ```
 
@@ -203,18 +245,18 @@ author reusable behavior.
 The current Home is the default execution authority. Do not place or start a
 Wave merely to prove setup.
 
-If the human wants remote execution, explain the durable sequence and use the
+If the user wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
 lf ssh <host> home id --json
-lf home observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> auth status
-lf ssh <home-id> route show
-lf ls --json
-lf work place wave <wave-id> <home-id>
-lf home probe <wave> --json
-lf ssh <home-id> start <wave>
+lf observe <home-id> ssh://<user>@<host>
+lf ssh <home-id> account --cached
+lf ssh <home-id> account route
+lf wave list --json
+lf wave place <wave-id> <home-id>
+lf wave status <wave> --json
+lf ssh <home-id> --wave <wave> wave/operate
 ```
 
 `lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
@@ -223,25 +265,26 @@ for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf home observe` records the
-mutable SSH route for the stable HomeId. Placement is allowed only while no Run
-is live. `lf start <wave>` starts on the current machine; use `lf ssh <home-id>
-start <wave>` to start on the remote Home. Ask before observing a route,
+mutable SSH route for the stable HomeId. Placement is allowed only while no execution
+is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
+`lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
 changing placement, or starting a Wave; each changes durable execution state.
 
 ## 6. Prove the result
 
-Run the smallest read-only checks that prove the selected path:
+Run the smallest checks that prove the selected path:
 
 ```bash
-lf auth status
-lf route show
-lf home id --json
-lf ls --json
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
+lf id --json
+lf wave list --json
 ```
 
-For a selected Wave, also run `lf status <wave> --json` and
+For a selected Wave, also run `lf wave status <wave> --json` and
 `lf roadmap --wave <wave> --json`. After placement, use
-`lf home probe <wave> --json`. For a selected Task, run
+`lf wave status <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated
 historical problems. Do not start work as a setup test.
@@ -255,18 +298,18 @@ Home         home_... (local)
 Home agents  Codex + Claude installed
 Repo policy  inherited defaults
 Accounts     GitHub + Linear connected
-Wave         designer stopped on home_...
-Planning     Linear bound; 2 open Projects / 7 open Tasks
+Wave         designer placed on home_...
+Planning     Linear bound; 1 current chapter / 7 open Tasks
 
-Next         lf start designer
-Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
+Next         lf --wave designer wave/operate
+Also         lf roadmap --wave designer | lf --task DES-123 flow start | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and
 the command that would establish it. Never hide a missing account, Home,
 Wave/PM binding, or agent behind "setup complete."
 
-On macOS, offer `lf desktop` as an optional human control surface after the
+On macOS, offer `lf desktop` as an optional interactive control surface after the
 selected path is proved. Do not launch it automatically.
 
 ## Conversation style
@@ -274,5 +317,5 @@ selected path is proved. Do not launch it automatically.
 - Lead with the observed topology, not configuration trivia.
 - Ask one consequential question at a time.
 - Prefer a working durable path over exhaustive optional setup.
-- Keep Wave, Project, Task, Home, account, and skill distinct.
+- Expose Wave and Task; keep the chapter Project internal. Keep Home, account, and skill distinct.
 - Stop when the chosen path is proved and the next command is obvious.

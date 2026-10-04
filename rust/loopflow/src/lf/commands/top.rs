@@ -18,7 +18,7 @@ use crate::journal::{
     read_exec_process_receipts_at, remove_exec_process_receipt_at, ExecProcessReceipt,
 };
 use crate::lf::output::truncate;
-use crate::store::{sqlite::SqliteStore, RunEventRow};
+use crate::store::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -59,6 +59,7 @@ pub struct ActivityNode {
     pub kind: ActivityNodeKind,
     pub label: String,
     pub repo: Option<String>,
+    pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
     pub started_at: i64,
@@ -107,11 +108,11 @@ pub struct ProcessPruneReport {
 
 #[derive(Debug, Clone)]
 struct ActivityData {
-    events: Vec<RunEventRow>,
+    execs: Vec<ExecRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OsProcess {
+pub(crate) struct OsProcess {
     pid: u32,
     ppid: u32,
     process_group: u32,
@@ -122,16 +123,161 @@ struct OsProcess {
 }
 
 #[derive(Debug, Clone)]
-struct ProcessSnapshot {
-    processes: Vec<OsProcess>,
-    receipts: Vec<ExecProcessReceipt>,
-    opencode_servers: Vec<OpenCodeServerEntry>,
+pub(crate) struct ProcessSnapshot {
+    pub(crate) processes: Vec<OsProcess>,
+    pub(crate) receipts: Vec<ExecProcessReceipt>,
+    pub(crate) opencode_servers: Vec<OpenCodeServerEntry>,
 }
 
 #[derive(Debug, Clone)]
 struct OwnedProviderProcess {
     exec_id: String,
     process: OsProcess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveProviderProcess {
+    pub pid: u32,
+    pub provider: String,
+    pub state: ActivityState,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveExecProviders {
+    pub receipt: ExecProcessReceipt,
+    pub providers: Vec<LiveProviderProcess>,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveSessionProcesses {
+    pub execs: Vec<LiveExecProviders>,
+    pub clients: Vec<(String, LiveProviderProcess)>,
+    pub gaps: Vec<String>,
+}
+
+/// Session observations use the same process and ownership evidence as `ps`,
+/// without loading the Exec event ledger or provider output.
+pub(crate) fn live_exec_providers(
+    snapshot: &ProcessSnapshot,
+    clients: &[(String, crate::session_record::ProviderClientRef)],
+) -> LiveSessionProcesses {
+    let mut native = Vec::new();
+    let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();
+    for (input, client) in clients {
+        if let Some(process) = by_pid.get(&client.pid) {
+            if process.matches_start(client.pid, client.started_at.unix_timestamp(), 5) {
+                native.push((input.clone(), observed_process(process)));
+            }
+        }
+    }
+    let native_pids = native
+        .iter()
+        .map(|(_, process)| process.pid)
+        .collect::<HashSet<_>>();
+    let receipts = snapshot
+        .receipts
+        .iter()
+        .filter(|receipt| receipt_matches_live_process(receipt, &by_pid))
+        .collect::<Vec<_>>();
+    let owners = receipts
+        .iter()
+        .map(|receipt| (receipt.pid, receipt.exec_id.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut gaps = Vec::new();
+    let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
+    let unclaimed = unclaimed
+        .iter()
+        .filter(|process| {
+            process.claim == ProviderClaim::Orphaned && !native_pids.contains(&process.pid)
+        })
+        .count()
+        + snapshot
+            .processes
+            .iter()
+            .filter(|process| {
+                process.kind.is_none()
+                    && !native_pids.contains(&process.pid)
+                    && nearest_exec_owner(process.ppid, &by_pid, &owners).is_some()
+                    && process
+                        .command
+                        .split_whitespace()
+                        .next()
+                        .and_then(|word| Path::new(word).file_name())
+                        .is_some_and(|name| name == "opencode")
+            })
+            .count();
+    let execs = receipts
+        .into_iter()
+        .map(|receipt| LiveExecProviders {
+            receipt: receipt.clone(),
+            providers: providers
+                .iter()
+                .filter(|provider| {
+                    provider.exec_id == receipt.exec_id
+                        && !native_pids.contains(&provider.process.pid)
+                        && !provider.process.kernel_state.starts_with('Z')
+                })
+                .map(|provider| LiveProviderProcess {
+                    pid: provider.process.pid,
+                    provider: provider
+                        .process
+                        .kind
+                        .expect("owned process is a provider")
+                        .label()
+                        .to_owned(),
+                    state: os_activity_state(&provider.process),
+                })
+                .collect(),
+        })
+        .collect();
+    if unclaimed > 0 {
+        gaps.push(format!(
+            "{unclaimed} Home-owned provider processes have no verified Session attribution"
+        ));
+    }
+    gaps.sort();
+    gaps.dedup();
+    LiveSessionProcesses {
+        execs,
+        clients: native,
+        gaps,
+    }
+}
+
+/// Exact recorded provider identity may survive its launching Exec.
+/// A caller still needs a verified current driver or native client to display it.
+pub(crate) fn exact_provider_process(
+    snapshot: &ProcessSnapshot,
+    pid: u32,
+    started_at: i64,
+) -> Option<LiveProviderProcess> {
+    snapshot
+        .processes
+        .iter()
+        .find(|process| {
+            process.matches_start(pid, started_at, PROCESS_START_TOLERANCE_SECONDS)
+                && process.kind.is_some_and(ProcessKind::is_provider)
+        })
+        .map(observed_process)
+}
+
+fn observed_process(process: &OsProcess) -> LiveProviderProcess {
+    LiveProviderProcess {
+        pid: process.pid,
+        provider: process
+            .kind
+            .map(|kind| kind.label().to_owned())
+            .unwrap_or_else(|| {
+                process
+                    .command
+                    .split_whitespace()
+                    .next()
+                    .and_then(|word| Path::new(word).file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "unknown".into())
+            }),
+        state: os_activity_state(process),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +310,7 @@ struct ExecRecord {
     parent_id: Option<String>,
     label: String,
     repo: Option<String>,
+    worktree: Option<String>,
     wave: Option<String>,
     started_at: i64,
 }
@@ -198,7 +345,7 @@ pub fn run_top(json: bool) -> Result<()> {
 
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = crate::store::observability_home_dir();
+    let lf_home = crate::store::lf_home_dir();
     let processes = observe_processes(now, &lf_home)?;
     let (stale_exec_receipt_pids, orphaned_opencode_process_groups) =
         resolve_prune_targets(&processes);
@@ -257,7 +404,7 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
     let mut stale_exec_receipt_pids = processes
         .receipts
         .iter()
-        .filter(|receipt| !receipt_matches_live_lf(receipt, &process_by_pid))
+        .filter(|receipt| !receipt_matches_live_process(receipt, &process_by_pid))
         .map(|receipt| receipt.pid)
         .collect::<Vec<_>>();
     stale_exec_receipt_pids.sort_unstable();
@@ -304,8 +451,8 @@ pub fn running_workspace_paths() -> HashSet<PathBuf> {
 
 fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = crate::store::observability_home_dir();
-    let path = crate::store::observability_database_path()?;
+    let lf_home = crate::store::lf_home_dir();
+    let path = crate::store::database_path_from_env()?;
     let processes = observe_processes(now, &lf_home)?;
     let process_by_pid = processes
         .processes
@@ -315,7 +462,7 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
     let live_execs = processes
         .receipts
         .iter()
-        .filter(|receipt| receipt_matches_live_lf(receipt, &process_by_pid))
+        .filter(|receipt| receipt_matches_live_process(receipt, &process_by_pid))
         .cloned()
         .collect::<Vec<_>>();
     let data = read_activity_data(&path, &live_execs)?;
@@ -324,21 +471,43 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
 
 fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<ActivityData> {
     if !path.exists() {
-        return Ok(ActivityData { events: Vec::new() });
+        return Ok(ActivityData { execs: Vec::new() });
     }
-    let store = SqliteStore::open_run_ledger_read_only(path)
-        .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
-    Ok(store.read_run_ledger_snapshot(|store| {
-        let mut events = Vec::new();
+    let store = SqliteStore::open_execs_read_only(path)
+        .map_err(|error| anyhow!("failed to read Exec history {}: {error}", path.display()))?;
+    Ok(store.read_exec_snapshot(|store| {
+        let mut execs = Vec::new();
         for receipt in live_execs {
-            let exec_events = store.run_events_matching_exec(&receipt.exec_id)?;
-            events.extend(exec_events);
+            let id = crate::id::ExecId::parse(&receipt.exec_id)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            if let Some(exec) = store.exec(&id)? {
+                execs.push(ExecRecord {
+                    trace_id: exec.trace_id.to_string(),
+                    id: exec.id.to_string(),
+                    parent_id: exec.parent_exec_id.map(|id| id.to_string()),
+                    label: command_label(exec.command.as_deref()),
+                    repo: exec.repo,
+                    worktree: exec.cwd,
+                    wave: None,
+                    started_at: exec.started_at,
+                });
+            }
         }
-        Ok(ActivityData { events })
+        Ok(ActivityData { execs })
     })?)
 }
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
+    Ok(ProcessSnapshot {
+        processes: sample_processes(now)?,
+        receipts: read_exec_process_receipts_at(lf_home)
+            .context("failed to read live Exec receipts")?,
+        opencode_servers: registered_opencode_servers_at(lf_home)
+            .context("OpenCode ownership registry unavailable")?,
+    })
+}
+
+pub(crate) fn sample_processes(now: i64) -> Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,state=,etime=,command="])
         .output()
@@ -346,20 +515,22 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     if !output.status.success() {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
-    let processes = parse_processes(&String::from_utf8_lossy(&output.stdout), now);
-    let opencode_servers = match registered_opencode_servers_at(lf_home) {
-        Ok(servers) => servers,
-        Err(error) => {
-            tracing::warn!(error = %error, "OpenCode ownership registry unavailable");
-            Vec::new()
-        }
-    };
-    Ok(ProcessSnapshot {
-        processes,
-        receipts: read_exec_process_receipts_at(lf_home)
-            .context("failed to read live Exec receipts")?,
-        opencode_servers,
-    })
+    Ok(parse_processes(
+        &String::from_utf8_lossy(&output.stdout),
+        now,
+    ))
+}
+
+impl OsProcess {
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub(crate) fn matches_start(&self, pid: u32, started_at: i64, tolerance: i64) -> bool {
+        self.pid == pid
+            && !self.kernel_state.starts_with('Z')
+            && (self.started_at - started_at).abs() <= tolerance
+    }
 }
 
 fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {
@@ -432,8 +603,7 @@ fn collect_activity(
     processes: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
-    let ActivityData { events } = data;
-    let execs = collect_execs(&events).into_values().collect::<Vec<_>>();
+    let ActivityData { execs } = data;
 
     let process_by_pid = processes
         .processes
@@ -492,6 +662,7 @@ fn collect_activity(
             kind: ActivityNodeKind::Exec,
             label: exec.label,
             repo: exec.repo,
+            worktree: exec.worktree,
             wave: exec.wave,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
@@ -508,14 +679,19 @@ fn collect_activity(
     }
     let exec_context = nodes
         .iter()
-        .map(|node| (node.id.clone(), (node.repo.clone(), node.wave.clone())))
+        .map(|node| {
+            (
+                node.id.clone(),
+                (node.repo.clone(), node.worktree.clone(), node.wave.clone()),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for owned in owned_providers {
         let parent_id = exec_node_id(&owned.exec_id);
-        let (repo, wave) = exec_context
+        let (repo, worktree, wave) = exec_context
             .get(&parent_id)
             .cloned()
-            .unwrap_or((None, None));
+            .unwrap_or((None, None, None));
         let process = owned.process;
         let provider = process
             .kind
@@ -527,6 +703,7 @@ fn collect_activity(
             kind: ActivityNodeKind::ProviderProcess,
             label: format!("{provider} {}", process.pid),
             repo,
+            worktree,
             wave,
             pid: Some(process.pid),
             started_at: process.started_at,
@@ -544,34 +721,6 @@ fn collect_activity(
     })
 }
 
-fn collect_execs(events: &[RunEventRow]) -> HashMap<String, ExecRecord> {
-    let mut execs = HashMap::new();
-    for event in events.iter().filter(|event| event.node == "run") {
-        let entry = execs
-            .entry(event.process_id.clone())
-            .or_insert_with(|| ExecRecord {
-                trace_id: event.run_id.clone(),
-                id: event.process_id.clone(),
-                parent_id: event.parent_process_id.clone(),
-                label: command_label(event.command.as_deref()),
-                repo: event.repo.clone(),
-                wave: event.wave.clone(),
-                started_at: event.ts,
-            });
-        entry.started_at = entry.started_at.min(event.ts);
-        if entry.repo.is_none() {
-            entry.repo.clone_from(&event.repo);
-        }
-        if entry.wave.is_none() {
-            entry.wave.clone_from(&event.wave);
-        }
-        if entry.label == "lf" && event.command.is_some() {
-            entry.label = command_label(event.command.as_deref());
-        }
-    }
-    execs
-}
-
 fn command_label(command: Option<&str>) -> String {
     let Some(command) = command else {
         return "lf".to_string();
@@ -583,7 +732,7 @@ fn command_label(command: Option<&str>) -> String {
         return "lf".to_string();
     };
     let grouped = [
-        "__work", "home", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "home", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
     ];
     let operation = grouped
         .contains(&command.as_str())
@@ -615,20 +764,20 @@ fn receipt_evidence(
     else {
         return ReceiptEvidence::Missing;
     };
-    if receipt_matches_live_lf(receipt, process_by_pid) {
+    if receipt_matches_live_process(receipt, process_by_pid) {
         ReceiptEvidence::Present(receipt.pid)
     } else {
         ReceiptEvidence::Absent
     }
 }
 
-fn receipt_matches_live_lf(
+fn receipt_matches_live_process(
     receipt: &ExecProcessReceipt,
     process_by_pid: &HashMap<u32, &OsProcess>,
 ) -> bool {
     process_by_pid.get(&receipt.pid).is_some_and(|process| {
-        process.kind == Some(ProcessKind::Lf)
-            && (process.started_at - receipt.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+        // The receipt establishes ownership; pinned binaries need not be named `lf`.
+        (process.started_at - receipt.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
     })
 }
 
@@ -995,33 +1144,38 @@ fn kernel_state_label(state: &str) -> &'static str {
 }
 
 #[cfg(test)]
+pub(crate) fn test_process(pid: u32, ppid: u32, started_at: i64, command: &str) -> OsProcess {
+    OsProcess {
+        pid,
+        ppid,
+        process_group: pid,
+        started_at,
+        kernel_state: "S".into(),
+        command: command.into(),
+        kind: process_kind(command),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn run_event(
+    fn exec_record(
         trace: &str,
         exec: &str,
         parent: Option<&str>,
         at: i64,
-        event: &str,
         command: &str,
-    ) -> RunEventRow {
-        RunEventRow {
-            run_id: trace.to_string(),
-            process_id: exec.to_string(),
-            parent_process_id: parent.map(str::to_string),
-            seq: 0,
-            ts: at,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: Some("/src/loopflow".to_string()),
-            wave: Some("product".to_string()),
-            node: "run".to_string(),
-            event: event.to_string(),
-            command: Some(serde_json::to_string(&["lf", command]).unwrap()),
-            flow: None,
-            skill: None,
-            step_index: None,
-            error: None,
+    ) -> ExecRecord {
+        ExecRecord {
+            trace_id: trace.into(),
+            id: exec.into(),
+            parent_id: parent.map(str::to_owned),
+            label: format!("lf {command}"),
+            repo: Some("/src/loopflow".into()),
+            worktree: Some("/src/loopflow".into()),
+            wave: Some("product".into()),
+            started_at: at,
         }
     }
 
@@ -1048,17 +1202,108 @@ mod tests {
     }
 
     #[test]
+    fn activity_reads_exact_exec_rows_without_replaying_command_events() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let exec = crate::id::ExecId::new();
+        let missing = crate::id::ExecId::new();
+        let trace = crate::id::TraceId::new();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
+            rusqlite::params![exec, trace, r#"["lf","implement"]"#],
+        ).unwrap();
+        let recorded = store.exec(&exec).unwrap().unwrap();
+        assert_eq!(recorded.via_agent, None);
+        assert_eq!(recorded.completed_at, None);
+        assert_eq!(recorded.exit_code, None);
+        assert!(store.exec(&missing).unwrap().is_none());
+        conn.execute(
+            "UPDATE execs SET completed_at=9000,outcome='failed',exit_code=42 WHERE id=?1",
+            [&exec],
+        )
+        .unwrap();
+        let recorded = store.exec(&exec).unwrap().unwrap();
+        assert_eq!(recorded.completed_at, Some(9000));
+        assert_eq!(recorded.outcome.as_deref(), Some("failed"));
+        assert_eq!(recorded.exit_code, Some(42));
+        assert_eq!(recorded.signal, None);
+        // An observed command outcome cannot override an exact OS-live receipt.
+        let mut owned = receipt(exec.as_str(), 10, 1000);
+        owned.trace_id = trace.to_string();
+        let mut unowned = receipt(missing.as_str(), 20, 1000);
+        unowned.trace_id = trace.to_string();
+        let receipts = vec![owned, unowned];
+        let data = read_activity_data(&path, &receipts).unwrap();
+        let snapshot = collect_activity(
+            data,
+            ProcessSnapshot {
+                processes: vec![
+                    process(10, 1, 1000, "lf implement"),
+                    process(20, 1, 1000, "lf unowned"),
+                ],
+                receipts,
+                opencode_servers: Vec::new(),
+            },
+            10_000,
+        )
+        .unwrap();
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].label, "lf implement");
+        assert_eq!(snapshot.nodes[0].started_at, 1000);
+        assert_eq!(snapshot.nodes[0].worktree.as_deref(), Some("/checkout"));
+        assert_eq!(snapshot.nodes[0].wave, None);
+    }
+
+    #[test]
+    fn activity_fixture_preserves_provider_worktrees() {
+        let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/activity_snapshot.json"
+        ))
+        .unwrap();
+        let paths: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.kind == ActivityNodeKind::ProviderProcess)
+            .map(|node| node.worktree.as_deref())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![Some("/src/loopflow.task"), Some("/src/loopflow.task")]
+        );
+    }
+
+    #[test]
+    fn live_receipts_survive_versioned_binaries_and_app_paths() {
+        for command in [
+            "/Users/jack/.lf/bin/lf-4bacf9e4ad62b05f6b1f3a7fae56111401c387f336ef8048000a01aab1a0446c implement",
+            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf implement",
+        ] {
+            let snapshot = collect_activity(
+                ActivityData { execs: vec![exec_record("trace", "worker", None, 1_000, "implement")] },
+                ProcessSnapshot {
+                    processes: vec![process(10, 1, 1_000, command), process(11, 10, 1_001, "codex app-server")],
+                    receipts: vec![receipt("worker", 10, 1_000)],
+                    opencode_servers: Vec::new(),
+                }, 2_000,
+            ).unwrap();
+            assert_eq!(snapshot.nodes.iter().filter(|node| node.kind == ActivityNodeKind::ProviderProcess).count(), 1);
+            assert!(snapshot.provider_processes.is_empty());
+        }
+    }
+
+    #[test]
     fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
         let data = ActivityData {
-            events: vec![
-                run_event("trace", "exec-5whys", None, 1_000, "started", "5whys"),
-                run_event(
+            execs: vec![
+                exec_record("trace", "exec-5whys", None, 1_000, "5whys"),
+                exec_record(
                     "trace",
                     "exec-implement",
                     Some("exec-5whys"),
                     2_000,
-                    "started",
                     "implement",
                 ),
             ],
@@ -1069,7 +1314,7 @@ mod tests {
             processes: vec![
                 process(10, 1, 1_000, "lf 5whys"),
                 process(11, 10, 1_001, "codex app-server"),
-                process(20, 10, 2_000, "lf implement"),
+                process(20, 10, 2_000, "/home/.lf/bin/lf-deadbeef implement"),
                 working_provider,
                 process(40, 1, 9_000, "codex app-server"),
             ],
@@ -1096,6 +1341,7 @@ mod tests {
             .unwrap();
         assert_eq!(provider.parent_id.as_deref(), Some("exec:exec-implement"));
         assert_eq!(provider.kind, ActivityNodeKind::ProviderProcess);
+        assert_eq!(provider.worktree.as_deref(), Some("/src/loopflow"));
         assert_eq!(provider.state, ActivityState::Working);
         assert_eq!(snapshot.provider_processes.len(), 1);
         assert_eq!(snapshot.provider_processes[0].pid, 40);
@@ -1122,9 +1368,9 @@ mod tests {
     fn dead_and_unknown_calls_are_absent_while_registered_orphans_remain_visible() {
         let now = 10_000;
         let data = ActivityData {
-            events: vec![
-                run_event("trace", "dead", None, 1_000, "started", "old"),
-                run_event("trace", "unknown", None, 2_000, "started", "legacy"),
+            execs: vec![
+                exec_record("trace", "dead", None, 1_000, "old"),
+                exec_record("trace", "unknown", None, 2_000, "legacy"),
             ],
         };
         let processes = ProcessSnapshot {
@@ -1164,14 +1410,15 @@ mod tests {
     fn prune_targets_only_dead_receipts_and_registered_orphan_groups() {
         let snapshot = ProcessSnapshot {
             processes: vec![
-                process(10, 1, 1_000, "lf wave core"),
+                process(10, 1, 1_000, "/home/.lf/bin/lf-deadbeef wave core"),
+                process(88, 1, 9_000, "/home/.lf/bin/lf-deadbeef task run"),
                 process(99, 1, 2_000, "opencode serve --port 1234"),
                 process(100, 1, 2_000, "codex app-server"),
             ],
             receipts: vec![receipt("live", 10, 1_000), receipt("dead", 88, 1_000)],
             opencode_servers: vec![OpenCodeServerEntry {
                 opencode_pid: 99,
-                owner_loopflow_pid: 88,
+                owner_loopflow_pid: 77,
             }],
         };
 

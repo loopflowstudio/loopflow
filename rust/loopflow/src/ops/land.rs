@@ -30,12 +30,11 @@ pub struct LandOptions {
     pub agent: Option<String>,
 }
 
-/// How a prepared PR is handed off once it is rebased, scratch-cleared, and
+/// How a prepared PR is handed off once it is synced, scratch-cleared, and
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
-    /// Arm GitHub auto-merge so the PR merges itself once checks pass. `arm`
-    /// returns here; `land` continues into the watched lifecycle.
+    /// Request auto-merge and retain delivery for later finite checks.
     AutoMerge,
     /// Assign the PR to the current user and leave it for a required, manual
     /// merge click. Used by `submit` — nothing merges without that one click.
@@ -48,9 +47,9 @@ enum Integration {
     Completed,
 }
 
-/// Prepare one PR: commit, rebase onto main, clear scratch, mark it ready, and
+/// Prepare one PR: commit, sync onto main, clear scratch, mark it ready, and
 /// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
-/// for a human to merge. Neither rotates the worktree. Returns the resulting PR,
+/// for the reviewer to merge. Neither rotates the worktree. Returns the resulting PR,
 /// or `None` for a local merge or direct Task completion over an already-merged
 /// PR.
 fn prepare_pr(
@@ -80,6 +79,7 @@ fn prepare_pr(
             // settles the Task without manufacturing an empty GitHub PR.
             clear_scratch(&repo_root, progress)?;
             crate::ops::task::task_complete(
+                &repo_root,
                 &issue,
                 "Completed over its merged pull request".to_string(),
             )?;
@@ -130,6 +130,26 @@ fn prepare_pr(
                         return Ok(Some(pr));
                     }
                 }
+            } else if task_context.is_none()
+                && !options.local
+                && !options.complete
+                && options.next_slug.is_none()
+                && is_clean(&repo_root)?
+            {
+                let head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+                if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                    if pr.head_sha.as_deref() == Some(head.as_str())
+                        && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
+                    {
+                        update_pr_message(
+                            &repo_root,
+                            options.pr_title.as_deref(),
+                            options.pr_body.as_deref(),
+                        )?;
+                        progress.status("Pull request is already armed for this exact head");
+                        return Ok(Some(pr));
+                    }
+                }
             }
         }
         let cleared_task_request =
@@ -137,7 +157,7 @@ fn prepare_pr(
         if !options.local && !cleared_task_request {
             // Wave and other non-Task PRs have no durable Task request to
             // revoke, but GitHub may still have this branch in its merge queue.
-            // Dequeue it before rebase/push; otherwise GitHub rejects the head
+            // Dequeue it before sync/push; otherwise GitHub rejects the head
             // update and the repair cannot publish.
             if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
                 let number = u32::try_from(pr.number).map_err(|_| {
@@ -170,37 +190,16 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
         )));
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
-    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
-    let (pr_title, pr_body) = match (pr_title, pr_body) {
-        (Some(title), body) => {
-            let copy = normalize_task_pr_copy(
-                PrCopy {
-                    title,
-                    body: body.unwrap_or_default(),
-                },
-                task_context.as_ref(),
-                &copy_lifecycle,
-            )?;
-            (Some(copy.title), Some(copy.body))
-        }
-        (None, body) if task_context.is_none() => (None, body),
-        (None, body) => {
-            let copy = normalize_task_pr_copy(
-                PrCopy {
-                    title: String::new(),
-                    body: body.unwrap_or_default(),
-                },
-                task_context.as_ref(),
-                &copy_lifecycle,
-            )?;
-            (Some(copy.title), Some(copy.body))
-        }
-    };
+    let copy = normalize_task_pr_copy(
+        resolve_pr_copy(&repo_root, &copy_head, options, progress)?,
+        task_context.as_ref(),
+        &copy_lifecycle,
+    )?;
     let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
         return Err(OpsError::Message(
@@ -213,10 +212,10 @@ fn prepare_pr(
     }
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let main_branch = match integration {
-        Integration::Required => rebase_land(&repo_root, &main_repo, progress)?,
+        Integration::Required => sync_land(&repo_root, &main_repo, progress)?,
         Integration::Completed => accept_completed_integration(&repo_root, &main_repo)?,
     };
-    // Rebase may advance the fork point. Re-run the authoritative proof to heal
+    // Sync may advance the fork point. Re-run the authoritative proof to heal
     // the recorded base and refuse an empty range before any `gh pr` side effect.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     if pr_exists {
@@ -231,19 +230,14 @@ fn prepare_pr(
     // any failure rollback atomic with respect to other Loopflow PR commands
     // and pushes in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
-    crate::ops::task::request_task_pr_publication(
-        &repo_root,
-        pr_title.as_deref().unwrap_or_default(),
-        pr_body.as_deref().unwrap_or_default(),
-    )?;
+    crate::ops::task::request_task_pr_publication(&repo_root, &copy.title, &copy.body)?;
     let created_pr = ensure_pr(
         &repo_root,
         pr_exists,
         &feature_branch,
         options.create_pr,
         &main_branch,
-        pr_title.as_deref(),
-        pr_body.as_deref(),
+        &copy,
     )?;
     let pr = match created_pr {
         Some(pr) => Some(pr),
@@ -266,8 +260,7 @@ fn prepare_pr(
     )?;
     if let Err(finalize_error) = finalize_remote(
         &repo_root,
-        pr_title.as_deref(),
-        pr_body.as_deref(),
+        &copy,
         finalize,
         pr.as_ref().map(|pr| pr.number),
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
@@ -296,31 +289,39 @@ pub fn arm(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Required,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
-pub(crate) fn finish_arm_after_rebase(
+pub(crate) fn finish_arm_after_sync(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
-/// Prepare a PR to land without arming auto-merge: commit, rebase onto main,
+/// Prepare a PR to land without arming auto-merge: commit, sync onto main,
 /// clear scratch, mark the PR ready, and assign it to the current user. Nothing
 /// merges until that user clicks merge on GitHub — that one click is the
 /// required gate. Like `arm`, this never rotates the worktree.
@@ -338,7 +339,7 @@ pub fn submit(
     )
 }
 
-pub(crate) fn finish_submit_after_rebase(
+pub(crate) fn finish_submit_after_sync(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
@@ -354,35 +355,34 @@ pub(crate) fn finish_submit_after_rebase(
 
 fn resolve_pr_copy(
     repo_root: &Path,
+    head: &str,
     options: &LandOptions,
     progress: &impl Progress,
-) -> OpsResult<(Option<String>, Option<String>)> {
-    if options.local {
-        return Ok((options.pr_title.clone(), options.pr_body.clone()));
+) -> OpsResult<PrCopy> {
+    if options.local || options.pr_title.is_some() {
+        return Ok(PrCopy {
+            title: options.pr_title.clone().unwrap_or_default(),
+            body: options.pr_body.clone().unwrap_or_default(),
+        });
     }
 
-    let mut pr_title = options.pr_title.clone();
-    let mut pr_body = options.pr_body.clone();
-
-    if pr_title.is_some() {
-        return Ok((pr_title, pr_body));
-    }
-
-    if let Some(copy) = read_cached_pr_copy(repo_root, progress)? {
-        progress.status("Using cached PR copy from scratch/");
-        pr_title = Some(copy.title);
-        if pr_body.is_none() {
-            pr_body = Some(copy.body);
+    let mut copy = match read_cached_pr_copy(repo_root, progress)? {
+        Some(copy) => {
+            progress.status("Using cached PR copy from scratch/");
+            copy
         }
-        return Ok((pr_title, pr_body));
+        None => match crate::ops::pr::published_pr_copy(repo_root, head)? {
+            Some(copy) => {
+                progress.status("Keeping published PR copy for this head");
+                copy
+            }
+            None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
+        },
+    };
+    if let Some(body) = &options.pr_body {
+        copy.body = body.clone();
     }
-
-    let generated = generate_pr_copy(repo_root, progress, options.agent.as_deref())?;
-    pr_title = Some(generated.title);
-    if pr_body.is_none() {
-        pr_body = Some(generated.body);
-    }
-    Ok((pr_title, pr_body))
+    Ok(copy)
 }
 
 fn prepare_land(
@@ -415,15 +415,14 @@ fn prepare_land(
     Ok(())
 }
 
-fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
+fn sync_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
     let onto = format!("origin/{main_branch}");
-    // A stacked child collapses onto trunk deterministically: replay only
-    // `base..HEAD`, dropping the (squash-)merged parent commits.
-    let stacked = crate::ops::task::stacked_collapse(repo_root)?;
-    let verification = crate::ops::rebase::rebase_final_with_recovery(
+    // Use the recorded parent base when integrating a squash-landed stack.
+    let stacked = crate::ops::task::stack_for_landing(repo_root)?;
+    let verification = crate::ops::sync::sync_for_delivery(
         repo_root,
-        &crate::ops::rebase::RebaseOptions {
+        &crate::ops::sync::SyncOptions {
             onto: onto.clone(),
             push: true,
             fork_base: stacked.as_ref().map(|stacked| stacked.fork_base.clone()),
@@ -433,19 +432,17 @@ fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> 
     if let Some(stacked) = stacked {
         // Record the immutable target proven by the integration owner. Another
         // worktree may fetch and move origin/main after our pinned fetch.
-        crate::ops::task::record_stack_rebase(&stacked, &verification.target_sha, true)?;
+        crate::ops::task::record_stack_sync(&stacked, &verification.target_sha, true)?;
     }
     Ok(main_branch)
 }
 
 fn accept_completed_integration(repo_root: &Path, main_repo: &Path) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
-    if let Some(stacked) = crate::ops::task::stacked_collapse(repo_root)? {
-        // Final integration is exactly one collapsed authored commit. Its
-        // parent is the immutable target the owner already verified; reading a
-        // moving origin/main here could record a newer, unreachable base.
-        let new_base = crate::engine::git::rev_parse(repo_root, "HEAD^")?;
-        crate::ops::task::record_stack_rebase(&stacked, &new_base, true)?;
+    if let Some(stacked) = crate::ops::task::stack_for_landing(repo_root)? {
+        // The merge's second parent is the immutable integration target.
+        let new_base = crate::engine::git::rev_parse(repo_root, "HEAD^2")?;
+        crate::ops::task::record_stack_sync(&stacked, &new_base, true)?;
     }
     Ok(main_branch)
 }
@@ -462,15 +459,13 @@ fn finalize_local(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn ensure_pr(
     repo_root: &Path,
     pr_exists: bool,
     feature_branch: &str,
     create_pr: bool,
     base_branch: &str,
-    pr_title: Option<&str>,
-    pr_body: Option<&str>,
+    copy: &PrCopy,
 ) -> OpsResult<Option<PrInfo>> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
@@ -478,22 +473,16 @@ fn ensure_pr(
 
     if !pr_exists {
         if create_pr {
-            let title = pr_title.ok_or_else(|| {
-                OpsError::Message(
-                    "no PR title provided; run `lf gate` or pass --title/--body".to_string(),
-                )
-            })?;
-            let body = pr_body.unwrap_or("");
             return crate::ops::pr::create_pr_from_pushed_branch(
                 repo_root,
-                title,
-                body,
+                &copy.title,
+                &copy.body,
                 base_branch,
             )
             .map(Some);
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
             )));
         }
     }
@@ -503,18 +492,14 @@ fn ensure_pr(
 
 fn finalize_remote(
     repo_root: &Path,
-    pr_title: Option<&str>,
-    pr_body: Option<&str>,
+    copy: &PrCopy,
     finalize: Finalize,
     number: Option<u64>,
     head_sha: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if let Some(title) = pr_title {
-        let body = pr_body.unwrap_or("");
-        progress.status("Updating PR...");
-        update_pr_message(repo_root, title, body)?;
-    }
+    progress.status("Updating PR...");
+    update_pr_message(repo_root, Some(&copy.title), Some(&copy.body))?;
     mark_ready(repo_root)?;
 
     match finalize {
@@ -532,7 +517,7 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            crate::ops::pr::enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo_root, number, Some(copy), head_sha)?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");
@@ -663,15 +648,18 @@ fn read_worktree_state(repo: &Path) -> OpsResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
+fn update_pr_message(repo: &Path, title: Option<&str>, body: Option<&str>) -> OpsResult<()> {
+    if title.is_none() && body.is_none() {
+        return Ok(());
+    }
     let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("edit")
-        .arg("--title")
-        .arg(title)
-        .arg("--body")
-        .arg(body)
-        .current_dir(repo);
+    cmd.args(["pr", "edit"]).current_dir(repo);
+    if let Some(title) = title {
+        cmd.args(["--title", title]);
+    }
+    if let Some(body) = body {
+        cmd.args(["--body", body]);
+    }
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

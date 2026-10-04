@@ -4,7 +4,7 @@ Design research for the Loopflow app—a visual interface for conducting AI codi
 
 ## What to Build
 
-A design system and UX philosophy for Loopflow that embodies "musically inspired UX for conducting agents"—keeping humans in flow while orchestrating AI.
+A design system and UX philosophy for Loopflow that embodies "musically inspired UX for conducting agents"—keeping people in flow while orchestrating AI.
 
 ---
 
@@ -12,7 +12,7 @@ A design system and UX philosophy for Loopflow that embodies "musically inspired
 
 From loopflowstudio: The "Loopflow" is an engineer who seeks balance between **craft and throughput**. They reject the false dichotomy between speed and quality. The conductor metaphor implies:
 
-- **Human in the loop, not out of it** — watch, interrupt, resume
+- **Stay involved** — watch, interrupt, resume
 - **Arranging harmony** — multiple agents working together toward a unified outcome
 - **Intentionality** — the loopflow shapes the music; agents play the notes
 - **Flow state** — the tool disappears; the work remains

@@ -7,7 +7,7 @@ Run release as a one-shot operation that owns the full lifecycle.
 
 ## Input
 
-`lf release-run <version>` passes `<version>` as message text. Interpret the
+`lf skill release-run <version>` passes `<version>` as message text. Interpret the
 first token as:
 
 - `patch` / `minor` / `major` (bump from latest tag)
@@ -15,12 +15,17 @@ first token as:
 
 If no input is provided, default to `patch`.
 
+`minor` completes a closing patch when unreleased changes exist, or reuses the
+latest completed patch when it already contains the release snapshot. The minor
+publishes that same product state with new version metadata and cycle notes
+against the preceding `.0` tag. Patch notes retain their incremental baseline.
+
 ## Workflow
 
 Run exactly one command:
 
 ```bash
-lf release run <version>
+lf repo run <version>
 ```
 
 That command is responsible for:
@@ -42,8 +47,12 @@ publication, deployment, and secret handling in the publisher.
 
 ## Re-entry
 
-`lf release run` resumes an existing release PR or incomplete latest tag after
+`lf repo run` resumes an existing release PR or incomplete latest tag after
 interruptions.
+
+A minor run records its selected patch, minor version, and source snapshot in
+`.lf/releases/minor-<target>.json`. Retry `lf repo run minor` to complete that
+pair; a published patch is reused even when no unreleased commits remain.
 
 Process death does not make generated release state temporary. Re-entry owns:
 
@@ -67,7 +76,7 @@ durable intermediate implements this restart rule.
 
 ## Guardrails
 
-- The version comes from the human or wave config. Don't decide it.
+- The version comes from the user or wave config. Don't decide it.
 - Be concrete in release notes: include real shipped changes, not vague summaries.
 - If required data is missing (tags/gh auth/workflows), state exactly what command failed and what to run.
 

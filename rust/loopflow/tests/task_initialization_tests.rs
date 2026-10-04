@@ -1,13 +1,225 @@
 mod support;
 
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
-use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
-use loopflow::work::task::TaskEventKind;
+use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use support::{register_unrun_task, EnvGuard};
+
+fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(cli);
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            command.env_remove(name);
+        }
+    }
+    command.current_dir(repo).args(args);
+    command
+}
+
+#[test]
+fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    repo.create_branch("parent");
+    repo.create_file("scratch/design.md", "parent design");
+    repo.create_file("scratch/review/notes.md", "parent review");
+    repo.stage_all();
+    repo.commit("Parent notes");
+    let parent_head = repo.head_sha();
+    let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
+    let child =
+        support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
+
+    let checkout = || {
+        loopflow::ops::task::task_checkout(
+            repo.path(),
+            "INF-124",
+            loopflow::ops::task::TaskCheckoutOptions::default(),
+        )
+        .unwrap()
+    };
+    checkout();
+    assert!(!child.worktree.join("scratch").exists());
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD^").unwrap(),
+        parent_head
+    );
+    let subject = Command::new("git")
+        .current_dir(&child.worktree)
+        .args(["log", "-1", "--format=%s"])
+        .output()
+        .unwrap();
+    assert!(subject.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&subject.stdout).trim(),
+        "Clear inherited scratch"
+    );
+    let child_head = loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap();
+    fs::create_dir(child.worktree.join("scratch")).unwrap();
+    fs::write(child.worktree.join("scratch/design.md"), "child design").unwrap();
+    checkout();
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap(),
+        child_head
+    );
+    assert_eq!(
+        fs::read_to_string(child.worktree.join("scratch/design.md")).unwrap(),
+        "child design"
+    );
+    assert_eq!(repo.head_sha(), parent_head);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
+        "parent design"
+    );
+    assert!(repo.path().join("scratch/review/notes.md").exists());
+}
+
+#[test]
+fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let mut fixture = register_unrun_task(
+        home.path(),
+        repo.path(),
+        "test/checkout-recovery",
+        &repo.head_sha(),
+    );
+    fixture.task.worktree = target.path().join("checkout");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime
+        .block_on(fixture.store.update_task(&fixture.task))
+        .unwrap();
+    fixture.pr = runtime
+        .block_on(fixture.store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    let invoking = repo.create_named_worktree("dirty-invoker");
+    fs::write(repo.path().join("main-notes"), "keep main edits").unwrap();
+    fs::write(invoking.join("caller-notes"), "keep caller edits").unwrap();
+    let checkout = || {
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &invoking,
+            &["task", "checkout", "INF-123", "--json"],
+        )
+        .env("LF_HOME", home.path())
+        .output()
+        .unwrap()
+    };
+    let first = checkout();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap(),
+        fixture.pr.base_commit
+    );
+    fs::write(
+        fixture.task.worktree.join("work.txt"),
+        "committed Task work",
+    )
+    .unwrap();
+    for args in [
+        vec!["add", "work.txt"],
+        vec!["commit", "-m", "Preserve Task work"],
+    ] {
+        assert!(Command::new("git")
+            .current_dir(&fixture.task.worktree)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    let head = loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap();
+    fs::remove_dir_all(&fixture.task.worktree).unwrap();
+    let restored = checkout();
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&fixture.task.worktree, "HEAD").unwrap(),
+        head
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.task.worktree.join("work.txt")).unwrap(),
+        "committed Task work"
+    );
+    let persisted = runtime
+        .block_on(fixture.store.get_task(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.worktree, fixture.task.worktree);
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.active_task_pr(&fixture.task.id))
+            .unwrap()
+            .unwrap(),
+        fixture.pr
+    );
+    let events = runtime
+        .block_on(fixture.store.task_events_after(&fixture.task.id, 0))
+        .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, TaskEventKind::PrStarted { .. }))
+            .count(),
+        1
+    );
+    fs::remove_dir_all(&fixture.task.worktree).unwrap();
+    fs::create_dir(&fixture.task.worktree).unwrap();
+    fs::write(fixture.task.worktree.join("notes"), "unregistered work").unwrap();
+    let occupied = checkout();
+    assert!(!occupied.status.success());
+    assert!(String::from_utf8_lossy(&occupied.stderr).contains("occupied"));
+    assert_eq!(
+        fs::read_to_string(fixture.task.worktree.join("notes")).unwrap(),
+        "unregistered work"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("main-notes")).unwrap(),
+        "keep main edits"
+    );
+    assert_eq!(
+        fs::read_to_string(invoking.join("caller-notes")).unwrap(),
+        "keep caller edits"
+    );
+}
 
 #[test]
 fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
@@ -38,49 +250,9 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .expect("publish initialization marker");
     std::fs::create_dir_all(&missing_worktree)
         .expect("simulate a partially created worktree directory");
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .expect("read owning Project")
-        .expect("owning Project exists");
-    let payload = serde_json::json!({
-        "projects": [{
-            "id": project.plan.id.as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
-            "summary": project.plan.prompt_context,
-            "definition": project.plan.prompt_context,
-            "flows": {"first": null, "loop": null, "finally": null},
-            "krs": [],
-            "initiative_ids": ["initialization-initiative"],
-            "team_ids": ["initialization-team"]
-        }],
-        "items": [{
-            "id": task.task.plan.id.as_str(),
-            "identifier": task.task.plan.identifier,
-            "url": null,
-            "name": task.task.plan.title,
-            "description": task.task.plan.description,
-            "rank": 1,
-            "completed": false,
-            "project_id": project.plan.id.as_str(),
-            "project": project.plan.slug,
-            "team_id": "initialization-team",
-            "assignee": null
-        }]
-    });
-    runtime
-        .block_on(task.store.put_pm_snapshot(PmSnapshotRow {
-            wave_id: task.task.wave_id.clone(),
-            provider: "linear".to_string(),
-            initiative: "initialization-initiative".to_string(),
-            synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
-        }))
-        .expect("seed roadmap planning");
     let run_lf = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
             .env_remove("LF_WAVE_ID")
             .current_dir(repo.path())
             .output()
@@ -93,6 +265,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
+    let status = &status["execution"];
+    assert_eq!(status["execution"]["state"], "idle");
+    assert_eq!(status["work"]["sessions"], serde_json::json!([]));
+    assert_eq!(status["work"]["flows"], serde_json::json!([]));
     assert_eq!(status["actions"]["recommended"], "no_action");
     assert!(status["actions"]["reason"]
         .as_str()
@@ -116,16 +292,18 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let roadmap: serde_json::Value = serde_json::from_slice(&roadmap.stdout).expect("roadmap JSON");
     let wave = &roadmap["waves"][0];
-    assert_eq!(wave["projects"]["state"], "ok", "roadmap wave: {wave:#}");
-    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(wave["tasks"]["state"], "ok", "roadmap wave: {wave:#}");
+    let roadmap_task = &wave["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "INF-123");
     assert_eq!(roadmap_task["actions"]["recommended"], "no_action");
     assert!(roadmap_task["condition"]["reason"]
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected =
-        task_snapshot(&task_status("INF-123").expect("read Task")).expect("project Task status");
+    let projected = task_status(repo.path(), Some("INF-123"))
+        .expect("read Task")
+        .execution
+        .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -145,6 +323,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale: serde_json::Value =
         serde_json::from_slice(&stale.stdout).expect("stale status JSON");
+    let stale = &stale["execution"];
     assert_eq!(stale["actions"]["recommended"], "no_action");
     assert!(stale["actions"]["reason"]
         .as_str()
@@ -157,8 +336,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale_roadmap: serde_json::Value =
         serde_json::from_slice(&stale_roadmap.stdout).expect("stale roadmap JSON");
-    let stale_condition =
-        &stale_roadmap["waves"][0]["projects"]["items"][0]["tasks"][0]["condition"];
+    let stale_condition = &stale_roadmap["waves"][0]["tasks"]["items"][0]["condition"];
     assert_eq!(stale_condition["state"], "blocked");
     assert!(stale_condition["reason"]
         .as_str()
@@ -188,8 +366,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status("INF-123").expect("status survives the absent worktree");
-    let snapshot = task_snapshot(&status).expect("project missing-worktree status");
+    let snapshot = task_status(&missing_path, Some("INF-123"))
+        .expect("status survives the absent worktree")
+        .execution
+        .expect("execution");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot
@@ -197,7 +377,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .reason
         .contains(&missing_path.display().to_string()));
     assert!(snapshot.actions.reason.contains(&branch));
-    assert!(snapshot.actions.reason.contains("lf task resume INF-123"));
+    assert!(snapshot
+        .actions
+        .reason
+        .contains("lf --task INF-123 flow start"));
     assert!(snapshot
         .actions
         .reason

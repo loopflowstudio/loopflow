@@ -4,6 +4,8 @@
 mkdir -p release/unreleased
 $EDITOR release/unreleased/DECISIONS.md
 lf release run patch
+lf release notes 0.13.0 --preview  # inspect the cycle since v0.12.0
+lf release run minor             # close the patch cycle, then publish its minor
 find release -maxdepth 2 -type f | sort
 ```
 
@@ -13,30 +15,29 @@ lf cron history --wave infrastructure --days 35
 ```
 
 ```bash
-uv run python scripts/install.py local --use  # pin a local build against a disposable Home
-uv run python scripts/install.py refresh      # return to the latest published release
+lf install                                   # install the latest published release
 uv run python scripts/install.py local        # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`install.py` is the local entry point. `local` builds this worktree's `lf`,
-`lfd`, and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
-migration authority. `local --use` retains the complete published fallback,
-clones the reliable Home into a disposable installed-development Home, and
-promotes the local artifact set through the same lock and drain boundary as a
-release. A compatible later local build reuses that clone; pass `--fresh` to
-fork reliable data again. `refresh` resolves one published tag, verifies its
-installer from `SHA256SUMS`, then returns every installed surface to the
-reliable published Home. Dev data is never imported into it.
+`scripts/install.py local` builds this worktree's `lf`
+and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
+migration authority. Local builds never change the installed CLI or main Home.
+Use an explicit disposable `LF_HOME` for experiments.
+
+Older installed CLIs still call `scripts/install.py refresh` after updating
+main. That upgrade entry point delegates to `release/install.sh`, which verifies
+the published artifacts and promotes them through the same transaction.
 
 Published promotion stops before compilation while draft migrations remain.
-Local promotion applies their exact embedded graph only to the disposable Home.
+Explicit experiments initialize the embedded schema in a fresh directory.
 Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
 On an active Home, promotion fences the old runtime generation, checkpoints and
 drains exact Wave/Project/Task containment, advances the store, restarts the
-same keeper, then reconciles every enabled open Work onto a new Run. `refresh`
+same keeper, then reconciles every enabled open Work onto a new Run. `lf install`
 prints the terminal upgrade result directly; no manual zero-Run window is
 required.
 
@@ -48,6 +49,12 @@ intent, an isolated release PR, the tag, and observed completion. This
 repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
+
+Failed release-PR checks enter the same watched CI repair as `lf pr land`.
+Release preparation still rebuilds version metadata when main advances.
+Blocked repairs retain their checkout so `lf release run` can resume the work.
+The scheduled `release-run` Flow executes the release operation directly;
+its failed result cannot be hidden by a successful agent report.
 
 The repository names the logical `loopflow-release-publisher` command. The
 maintained Home supplies that executable on PATH and keeps its credential
@@ -84,9 +91,8 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local` | Build validation-only `lf`, `lfd`, and `Loopflow.app` into `local-bin/` | No |
-| Local | `scripts/install.py local --use` | Promote the local artifact set against a disposable Home | Yes, disposable Home |
-| Local | `scripts/install.py refresh` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
+| Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
+| Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
@@ -102,11 +108,46 @@ An ambiguous Fly command result is accepted only when `/healthz` and the root
 page prove the exact tag; rollback starts only after that production proof
 fails.
 
-The daily run is idempotent. No merged changes is success. If a tag's hosted
+The daily run is idempotent. No merged changes is success. If a valid tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
-artifacts and resumes the same tag instead of cutting another patch.
+artifacts and resumes the same tag. Cached receipts never bypass installer
+preflight: preparation reuse and publication validate the packaged CLI in a fresh
+disposable Home.
+
+After integration, the publisher inspects the exact merged source before the
+controller builds or tags it. A migration arriving after preparation causes a
+new patch cut; canonical batches already on main stay immutable. For an invalid
+tagged candidate, replacement first requires confirmed absence of a GitHub
+Release (including drafts), crates.io version, and versioned R2 download.
+Provider errors leave publication state unresolved. Partial publication needs
+reconciliation; the controller never rewrites the old tag.
+
+The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
+with `preparation_required` (a list of reasons) and `publications` (null when
+unchecked). `--check-publication` queries external publication when source needs
+preparation; only a successfully queried empty list permits replacement.
+Progress goes to stderr. The publisher owns repository-specific source and
+publication facts; the release controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
+
+Minor releases summarize a completed patch cycle. When changes remain,
+`lf release run minor` publishes the next patch first. When the latest completed
+patch already contains everything, it reuses that patch. The minor uses the
+same product snapshot; version metadata and release notes change. Patch notes
+compare against the preceding release, while minor notes compare against the
+preceding `.0` tag. A missing cycle baseline is reported explicitly.
+An explicit minor version such as `lf release run 0.13.0` follows the same policy.
+
+The selected pair and snapshot survive interruption in
+`.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing
+an unprepared candidate advances the closing patch within the same cycle. A
+completed successor is recovered even if publication finished before the pair
+was saved. A minor candidate whose merged tree differs from its
+prepared snapshot is stopped before tagging. Notes previews print Markdown to
+stdout and progress to stderr, without changing manifests or release archives.
+For an existing version, previews end at its tag and read historical release
+context. Unreleased versions end at HEAD.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

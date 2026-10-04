@@ -3,8 +3,8 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_interrupt, task_status, task_steer};
+use loopflow::durable::{WorkRef, WorkStatus};
+use loopflow::ops::task::{task_interrupt, task_status};
 use loopflow::work::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard, RegisteredTask};
@@ -57,14 +57,14 @@ if [ "$1 $2" = "pr list" ]; then
   echo "GraphQL: API rate limit already exceeded" >&2
   exit 1
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  echo "GraphQL: API rate limit already exceeded" >&2
+  exit 1
+fi
 if [ "$1" = "api" ]; then
   cat <<'JSON'
 {{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":928,"html_url":"https://github.com/loopflowstudio/loopflow/pull/928","head":{{"sha":"head-928"}}}}
 JSON
-  exit 0
-fi
-if [ "$1 $2" = "pr checks" ]; then
-  echo '[]'
   exit 0
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -94,11 +94,11 @@ exit 1
     )
 }
 
-fn github_reads(log: &str) -> Vec<String> {
+fn github_rest_reads(log: &str) -> Vec<String> {
     fs::read_to_string(log)
         .expect("read gh log")
         .lines()
-        .filter(|line| line.starts_with("api "))
+        .filter(|line| line.starts_with("api ") && !line.starts_with("api graphql"))
         .map(str::to_string)
         .collect()
 }
@@ -119,22 +119,39 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST status succeeds despite GraphQL exhaustion");
+    let first = task_status(repo.path(), Some("INF-123"))
+        .expect("REST status succeeds despite GraphQL exhaustion")
+        .execution
+        .expect("execution");
     assert!(matches!(&first.observation, Observation::Fresh { .. }));
-    let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
+    assert_eq!(first.status, WorkStatus::Ready, "{first:?}");
 
-    let steer =
-        task_steer("INF-123", "keep going".to_string()).expect("Steer remains local and durable");
-    assert!(matches!(steer.observation, Observation::Cached { .. }));
-    task_steer("INF-123", "prioritize the cache proof".to_string())
-        .expect("steer remains local and durable");
-    let cached = task_status("INF-123").expect("cached status succeeds");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let work = WorkRef::Task(task.task.id.clone());
+    let previous_interrupt = runtime
+        .block_on(task.store.latest_interrupt_id(&work))
+        .unwrap();
+    let interrupt = task_interrupt("INF-123").expect("interrupt remains local and durable");
+    assert!(matches!(interrupt.observation, Observation::NotRequired));
+    assert!(
+        runtime
+            .block_on(task.store.latest_interrupt_id(&work))
+            .unwrap()
+            > previous_interrupt
+    );
+    assert!(runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .is_none());
+    let cached = task_status(repo.path(), Some("INF-123"))
+        .expect("cached status succeeds")
+        .execution
+        .expect("execution");
     assert!(matches!(cached.observation, Observation::Cached { .. }));
 
     let log_text = fs::read_to_string(&log).expect("read gh log");
     assert!(!log_text.lines().any(|line| line.starts_with("pr list")));
-    let reads = github_reads(log.to_string_lossy().as_ref());
+    let reads = github_rest_reads(log.to_string_lossy().as_ref());
     assert_eq!(reads.len(), 1, "rapid controls share one bounded REST read");
     assert!(reads[0].contains("repos/loopflowstudio/loopflow/pulls/928"));
 }
@@ -156,9 +173,11 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST failure degrades instead of failing");
-    let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
+    let first = task_status(repo.path(), Some("INF-123"))
+        .expect("REST failure degrades instead of failing")
+        .execution
+        .expect("execution");
+    assert_eq!(first.status, WorkStatus::Ready, "{first:?}");
     let (reason, first_retry_at) = match first.observation {
         Observation::Degraded {
             reason,
@@ -175,10 +194,24 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
     };
     assert!(reason.contains("Internal Server Error"));
 
-    let steer =
-        task_steer("INF-123", "work locally".to_string()).expect("Steer survives REST failure");
-    task_interrupt("INF-123").expect("interrupt remains local and durable");
-    match &steer.observation {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let work = WorkRef::Task(task.task.id.clone());
+    let previous_interrupt = runtime
+        .block_on(task.store.latest_interrupt_id(&work))
+        .unwrap();
+    let interrupt = task_interrupt("INF-123").expect("interrupt survives REST failure");
+    assert!(matches!(interrupt.observation, Observation::NotRequired));
+    assert!(
+        runtime
+            .block_on(task.store.latest_interrupt_id(&work))
+            .unwrap()
+            > previous_interrupt
+    );
+    let cached = task_status(repo.path(), Some("INF-123"))
+        .expect("cached degraded status succeeds")
+        .execution
+        .expect("execution");
+    match &cached.observation {
         Observation::Degraded {
             reason, retry_at, ..
         } => {
@@ -187,9 +220,9 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         }
         other => panic!("expected cached degradation, got {other:?}"),
     }
-    assert_eq!(status.status, WorkStatus::Ready);
+    assert_eq!(cached.status, WorkStatus::Ready);
     assert_eq!(
-        github_reads(log.to_string_lossy().as_ref()).len(),
+        github_rest_reads(log.to_string_lossy().as_ref()).len(),
         1,
         "the degraded circuit suppresses repeat REST reads"
     );

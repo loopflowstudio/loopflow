@@ -26,7 +26,7 @@ final class PortfolioRepoState {
     let repo: PortfolioRepo
 
     private let repoPath: String
-    /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` means this
+    /// Local discovery via `lf wave list` (see `RegistryQuery`). `nil` means this
     /// platform cannot read the registry yet; there is no HTTP fallback.
     private let registryQuery: RegistryQuery?
 
@@ -44,7 +44,7 @@ final class PortfolioRepoState {
         self.registryQuery = registryQuery
     }
 
-    /// Author a Wave before it is served. `lf start` later registers the
+    /// Author a Wave before its first Run. Planning sync registers the
     /// coordination row; GOAL.md and MEMORY.md remain the authored objective
     /// and durable learning.
     ///
@@ -77,7 +77,7 @@ final class PortfolioRepoState {
         await refresh()
     }
 
-    /// Re-read this repo's waves. Discovery is a query, not a stream: `lf ls`
+    /// Re-read this repo's waves. Discovery is a query, not a stream: `lf wave list`
     /// via `RegistryQuery`. The dashboard re-runs this on a cadence; a wave's
     /// live motion rides its own per-wave SSE in the detail pane.
     func refresh() async {

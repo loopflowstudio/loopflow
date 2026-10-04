@@ -12,7 +12,7 @@
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
 //! store rather than the environment. The remote `resolve_pm_token` reads
-//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
+//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf repo refresh` works.
 //!
 //! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
@@ -22,12 +22,12 @@
 //! Agent forwarding (`ssh -A`) is off by default — git pushes ride the
 //! forwarded `GH_TOKEN` over HTTPS, so the caller's SSH identity stays home.
 
+use clap::Parser;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
-use clap::Parser;
 
 use crate::durable::HomeId;
 use crate::pm::PmProviderKind;
@@ -138,11 +138,10 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let target = resolve_target(target)?;
-    let lf_args = bind_home_start_wave_ids(&target, lf_args)?;
     let cmd = std::iter::once("lf".to_string())
-        .chain(lf_args)
+        .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    let mut extra_env = vec![(crate::engine::process::SSH_TARGET_ENV, target.dest.as_str())];
+    let mut extra_env = Vec::new();
     if let Some(home_id) = target.home_id.as_ref().map(HomeId::as_str) {
         extra_env.push((EXPECTED_HOME_ID_ENV, home_id));
     }
@@ -158,66 +157,6 @@ pub fn run(
     )
 }
 
-fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::Result<Vec<String>> {
-    if target.home_id.is_none() {
-        return Ok(lf_args.to_vec());
-    }
-    let parsed = crate::lf::Cli::try_parse_from(
-        std::iter::once("lf".to_string()).chain(lf_args.iter().cloned()),
-    );
-    let Ok(crate::lf::Cli {
-        command: Some(crate::lf::Commands::Start {
-            waves, wave_ids, ..
-        }),
-        ..
-    }) = parsed
-    else {
-        return Ok(lf_args.to_vec());
-    };
-    if waves.is_empty() {
-        return Ok(lf_args.to_vec());
-    }
-    let existing = wave_ids
-        .iter()
-        .filter_map(|binding| binding.split_once('=').map(|(name, _)| name.to_string()))
-        .collect::<std::collections::HashSet<_>>();
-    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let repo = crate::repo::find_repo_root().ok();
-    let bindings = runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
-            return Ok::<_, anyhow::Error>(Vec::new());
-        };
-        let mut bindings = Vec::new();
-        for raw_name in waves {
-            let Some(name) = crate::ops::util::normalize_wave_name(&raw_name) else {
-                continue;
-            };
-            if existing.contains(&name) {
-                continue;
-            }
-            match crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                repo.as_deref(),
-                Some(&name),
-                None,
-            )
-            .await
-            {
-                Ok(wave) => bindings.push(format!("{}={}", wave.name(), wave.id())),
-                Err(crate::work::wave::context::WaveResolveError::UnknownExplicit(_)) => {}
-                Err(error) => return Err(anyhow!(error)),
-            }
-        }
-        Ok(bindings)
-    })?;
-    let mut bound = lf_args.to_vec();
-    for binding in bindings {
-        bound.push("--wave-id".to_string());
-        bound.push(binding);
-    }
-    Ok(bound)
-}
-
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
@@ -228,9 +167,11 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
     if matches!(
-        crate::lf::Cli::try_parse_from(args),
+        crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?),
         Ok(crate::lf::Cli {
-            command: Some(crate::lf::Commands::Ssh { .. }),
+            command: Some(crate::lf::Commands::Home {
+                cmd: crate::lf::HomeCommand::Ssh { .. }
+            }),
             ..
         })
     ) {
@@ -352,21 +293,30 @@ fn run_with_env(
     reject_detached_account_forwarding(account_lease.is_some(), cmd)?;
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
+    let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
+    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
+    let mut extra_env = extra_env.to_vec();
+    if let Some(value) = declaration.as_deref() {
+        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
+    }
+    extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
     let preamble = build_preamble(
         &credentials,
         remote_handle.as_ref(),
         dest,
         repo,
         cmd,
-        extra_env,
+        &extra_env,
     );
     let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
-    // `process::exit` skips destructors. Close the broker and remove its local
-    // socket before preserving a nonzero remote command's exact exit code.
+    // Release the broker before reporting the remote command's result.
     drop(broker);
     match outcome {
         SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
         SshOutcome::ConnectionFailure => {
             unreachable!("run_ssh returns transport failures as errors")
         }
@@ -491,7 +441,18 @@ fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
 /// PM/Linear access token from the local store credential store. Absent when no
 /// store exists or no Linear credential is stored.
 async fn resolve_pm_token() -> Option<String> {
-    _resolve_stored_provider_token(PmProviderKind::Linear.as_str()).await
+    match crate::ops::pm::resolve_local_pm_token(PmProviderKind::Linear).await {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::warn!(%error, "local Linear credential unavailable; forwarding no PM token");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn resolve_pm_token_for_test() -> Option<String> {
+    resolve_pm_token().await
 }
 
 async fn _resolve_opencode_token(home: &std::path::Path) -> Option<String> {
@@ -928,7 +889,7 @@ mod tests {
 
     #[test]
     fn preamble_exports_every_credential_and_execs_command() {
-        let cmd = vec!["lf".to_string(), "op".to_string(), "pr".to_string()];
+        let cmd = vec!["lf".to_string(), "task".to_string(), "pr".to_string()];
         let handle = lease_handle();
         let preamble = build_preamble(
             &full_credentials(),
@@ -936,11 +897,10 @@ mod tests {
             "mini-heart",
             "src/loopflow",
             &cmd,
-            &[(crate::engine::process::SSH_TARGET_ENV, "mini-heart")],
+            &[],
         );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
-        assert!(preamble.contains("export LF_SSH_TARGET="));
         assert!(preamble.contains("export OPENCODE_API_KEY='opencode-secret'"));
         assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
         assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));
@@ -965,7 +925,7 @@ mod tests {
         assert!(preamble.contains("password=$GH_TOKEN"));
         // cd into the repo and run under the cleanup trap.
         assert!(preamble.contains("cd \"$HOME\"/'src/loopflow'"));
-        assert!(preamble.trim_end().ends_with("'lf' 'op' 'pr'"));
+        assert!(preamble.trim_end().ends_with("'lf' 'task' 'pr'"));
     }
 
     #[test]
@@ -1034,6 +994,36 @@ mod tests {
         assert!(preamble.contains(r#"export GH_TOKEN='a'\''b; rm -rf ~ #'"#));
         // The dangerous substring never appears unquoted at a statement start.
         assert!(!preamble.contains("\nrm -rf"));
+    }
+
+    #[test]
+    fn preferred_name_crosses_the_remote_shell_without_host_fallback() {
+        for name in ["Jack", "", "D'Angelo $(printf wrong)"] {
+            let cmd = vec![
+                "sh".into(),
+                "-c".into(),
+                "printf '%s' \"$LF_USER_NAME\"".into(),
+            ];
+            let preamble = build_preamble(
+                &Credentials::default(),
+                None,
+                "host",
+                ".",
+                &cmd,
+                &[(crate::engine::config::USER_NAME_ENV, name)],
+            );
+            let output = std::process::Command::new("bash")
+                .args(["-c", &preamble])
+                .env(crate::engine::config::USER_NAME_ENV, "Host Owner")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(String::from_utf8(output.stdout).unwrap(), name);
+        }
     }
 
     #[test]

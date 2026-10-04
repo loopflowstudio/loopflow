@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
+use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::work::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,17 +35,10 @@ pub struct TaskActionModel {
     pub reason: String,
 }
 
-impl TaskActionModel {
-    pub fn no_task() -> Self {
-        Self {
-            recommended: None,
-            reason: "Task is ready to start".into(),
-        }
-    }
-}
-
+#[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
+    pub execution: Option<&'a TaskExecutionSnapshot>,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
@@ -61,6 +55,12 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
         && !evidence.abandon_intent
     {
+        if let Some(execution) = evidence
+            .execution
+            .filter(|execution| execution.state != TaskExecutionState::Idle)
+        {
+            return action(TaskAction::NoAction, &execution.reason);
+        }
         if let Some(refusal) = evidence.launch_refusal {
             return action(TaskAction::NoAction, refusal);
         }
@@ -80,7 +80,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) if evidence.latest_pr_presentation_current == Some(false) => action(
             TaskAction::Resume,
-            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf pr land -c`",
+            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf task pr land -c`",
         ),
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
@@ -88,7 +88,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
                 TaskAction::Resume,
-                "PR is published but settlement is not armed; run `lf pr land -c`",
+                "PR is published but settlement is not armed; run `lf task pr land -c`",
             ),
             Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
                 let request = evidence
@@ -145,7 +145,7 @@ fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
     } else {
-        action(TaskAction::Resume, "resume the parked Task")
+        action(TaskAction::Resume, "continue the saved Task Flow with `lf flow start`; inspect independent Sessions before starting additional work")
     }
 }
 
@@ -153,7 +153,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
     match predecessor {
         Some(PrPhase::Abandoned) => action(
             TaskAction::Resume,
-            "parent PR was abandoned; rebase or abandon this stack",
+            "parent PR was abandoned; sync or abandon this stack",
         ),
         Some(PrPhase::Merged) | None => model,
         Some(_)
@@ -204,6 +204,7 @@ mod tests {
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
     use crate::durable::WorkStatus;
+    use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{
         AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase,
     };
@@ -215,6 +216,7 @@ mod tests {
     ) -> TaskActionEvidence<'a> {
         TaskActionEvidence {
             status: WorkStatus::Ready,
+            execution: None,
             latest_pr_phase: Some(phase),
             latest_pr_after_merge: after_merge,
             latest_pr_merge_request: None,
@@ -225,6 +227,32 @@ mod tests {
             predecessor_phase: None,
             abandon_intent: false,
             launch_refusal: None,
+        }
+    }
+
+    #[test]
+    fn active_or_uncertain_execution_never_recommends_another_implementation() {
+        for state in [
+            TaskExecutionState::Starting,
+            TaskExecutionState::Running,
+            TaskExecutionState::Unknown,
+            TaskExecutionState::Human,
+            TaskExecutionState::Blocked,
+        ] {
+            let execution = TaskExecutionSnapshot {
+                state,
+                reason: "Inspect the existing worker".into(),
+                step: None,
+                captured: None,
+            };
+            let mut evidence = evidence(PrPhase::Open, None, None);
+            evidence.execution = Some(&execution);
+            evidence.launch_refusal = Some("next launch configuration is invalid");
+            evidence.latest_pr_presentation_current = Some(false);
+            evidence.predecessor_phase = Some(PrPhase::Abandoned);
+            let model = derive_task_actions(&evidence);
+            assert_eq!(model.recommended, Some(TaskAction::NoAction));
+            assert_eq!(model.reason, execution.reason);
         }
     }
 
@@ -289,7 +317,7 @@ mod tests {
         assert_eq!(model.recommended, Some(TaskAction::Resume));
         assert_eq!(
             model.reason,
-            "PR is published but settlement is not armed; run `lf pr land -c`"
+            "PR is published but settlement is not armed; run `lf task pr land -c`"
         );
     }
 

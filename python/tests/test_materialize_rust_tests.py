@@ -11,8 +11,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/materialize_rust_tests.py"
 AMBIENT_WORK_AUTHORITY = (
-    "LF_DB_PATH",
-    "LF_RUN_CONTEXT",
     "LF_RUN_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
@@ -83,7 +81,6 @@ def test_materialized_command_sees_exact_tree_and_always_cleans_up(
         "assert Path('materialized.txt').read_text() == 'ready'; "
         f"assert all(name not in os.environ for name in {AMBIENT_WORK_AUTHORITY!r}); "
         "assert Path(os.environ['LF_HOME']).name == '.lf-test-home'; "
-        "assert os.environ['LF_CONTROL_HOME'] == os.environ['LF_HOME']; "
         "Path('command-ran.txt').write_text('yes'); "
         f"sys.exit({exit_code})"
     )

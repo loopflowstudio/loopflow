@@ -3,44 +3,30 @@ import AppKit
 import Loopflow
 
 private func enrichProcessPathForGUILaunch() {
-    let existing = ProcessInfo.processInfo.environment["PATH"]
-    let enriched = GUIProcessEnvironment.enrichedPath(from: existing)
-    guard enriched != existing else { return }
-    setenv("PATH", enriched, 1)
-}
-
-@MainActor
-private enum TaskTerminalCleanup {
-    private static var observer: NSObjectProtocol?
-
-    static func install() {
-        guard observer == nil else { return }
-        observer = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: nil
-        ) { _ in
-            TmuxSessionRegistry.shared.killAllSynchronously()
-        }
-    }
+    let existing = ProcessInfo.processInfo.environment
+    let enriched = GUIProcessEnvironment.enriched(existing)
+    for key in existing.keys where enriched[key] == nil { unsetenv(key) }
+    if let path = enriched["PATH"] { setenv("PATH", path, 1) }
 }
 
 @main
 struct LoopflowApp: App {
+    @State private var taskLinks = WorkspaceLinkRouter()
     @State private var portfolioService = PortfolioService()
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @State private var didOpenCaptureView = false
+    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        TaskTerminalCleanup.install()
+        Perf.begin(Perf.coldStart, "launch", id: "launch",
+                   detail: "pre_main_ms=\(Int(Perf.millisecondsSinceProcessStart() ?? -1))")
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
-        // by Wave launchers can find tmux, git, and agent CLIs that live in
+        // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
     }
@@ -49,22 +35,18 @@ struct LoopflowApp: App {
         let resolvedAppearance = AppTestMode.forcesLightAppearance
             ? AppearanceMode.light.rawValue
             : appearanceMode
-        let theme = AppearanceMode.resolvedTheme(
-            rawValue: resolvedAppearance,
-            systemScheme: systemScheme
-        )
         let launchRepoURL = LaunchArguments.repoURL()
         let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
-        WindowGroup {
+        WindowGroup(id: "workspace") {
             PodiumView(
                 portfolioService: portfolioService,
                 initialRepoPath: launchRepoURL?.path,
-                query: registryQuery
+                query: registryQuery,
+                taskLinks: taskLinks
             )
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.palette, theme.palette)
+            .modifier(AppAppearance(mode: resolvedAppearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -76,6 +58,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appSettings) {
+                Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
                 Picker("Appearance", selection: Binding(
                     get: { appearanceMode },
                     set: { appearanceMode = $0 }
@@ -129,8 +112,7 @@ struct LoopflowApp: App {
                 initialRepoPath: repoURL?.path
             )
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.palette, theme.palette)
+            .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -138,16 +120,14 @@ struct LoopflowApp: App {
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
+                .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .defaultSize(width: 1080, height: 760)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
+                .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .defaultSize(width: 1180, height: 860)
 
@@ -183,6 +163,8 @@ struct LoopflowApp: App {
     private func handleDeepLink(_ url: URL) {
         guard url.scheme == "loopflow" else { return }
         switch url.host {
+        case "task":
+            if !taskLinks.deliver(url) { openWindow(id: "workspace") }
         case "open":
             guard let repoPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "repo" })?.value
@@ -208,10 +190,30 @@ struct LoopflowApp: App {
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let mainRepo = portfolioService.addRepo(url) else {
-            NSSound.beep()
+            let alert = NSAlert()
+            alert.messageText = "“\(url.lastPathComponent)” isn’t a Git repository"
+            alert.informativeText =
+                "Loopflow works inside a project that uses Git. "
+                + "Choose a folder that already does, or run “git init” in this one first."
+            alert.runModal()
             return
         }
         openWindow(id: "repo", value: mainRepo)
+    }
+}
+
+/// Resolve system appearance inside the window, where SwiftUI supplies its
+/// effective color scheme. An App-level environment read cannot supply it.
+struct AppAppearance: ViewModifier {
+    let mode: String
+    @Environment(\.colorScheme) private var systemScheme
+
+    func body(content: Content) -> some View {
+        let theme = AppearanceMode.resolvedTheme(rawValue: mode, systemScheme: systemScheme)
+        content
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.colorScheme, theme.preferredScheme ?? systemScheme)
+            .environment(\.palette, theme.palette)
     }
 }
 

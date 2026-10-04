@@ -20,7 +20,6 @@ const RECEIPT_STALE_AFTER: i64 = 6 * 60 * 60;
 pub struct CronHost {
     pub home_id: HomeId,
     pub lf_home: PathBuf,
-    pub db_path: PathBuf,
     pub path_env: String,
 }
 
@@ -50,9 +49,14 @@ pub struct CronSchedule {
     expression: String,
     hour: u32,
     minute: u32,
+    every_minute: bool,
 }
 
 impl CronSchedule {
+    pub(crate) fn every_minute(&self) -> bool {
+        self.every_minute
+    }
+
     pub fn expression(&self) -> &str {
         &self.expression
     }
@@ -72,6 +76,7 @@ impl CronSchedule {
 pub enum CronTargetKind {
     Flow,
     Skill,
+    Repository,
 }
 
 impl CronTargetKind {
@@ -79,6 +84,7 @@ impl CronTargetKind {
         match self {
             Self::Flow => "flow",
             Self::Skill => "skill",
+            Self::Repository => "repository",
         }
     }
 }
@@ -90,6 +96,7 @@ impl FromStr for CronTargetKind {
         match value {
             "flow" => Ok(Self::Flow),
             "skill" => Ok(Self::Skill),
+            "repository" => Ok(Self::Repository),
             _ => Err(OpsError::Parse(format!(
                 "unknown cron target kind {value:?}"
             ))),
@@ -144,6 +151,9 @@ pub(crate) struct CronObligation {
     pub(crate) home_id: HomeId,
     pub(crate) activated_at: i64,
     pub(crate) receipts: Vec<CronReceipt>,
+    pub(crate) repo: PathBuf,
+    pub(crate) lf_path: PathBuf,
+    pub(crate) log_path: PathBuf,
 }
 
 /// Reconcile summary from [`sync_crons`].
@@ -219,7 +229,9 @@ pub fn add_cron(
     launchctl: &dyn Launchctl,
 ) -> OpsResult<InstalledCron> {
     fs::create_dir_all(launch_agents_dir)?;
-    fs::create_dir_all(spec.working_directory.join(".lf/logs"))?;
+    if let Some(parent) = spec.log_path().parent() {
+        fs::create_dir_all(parent)?;
+    }
     let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
@@ -304,6 +316,7 @@ pub(crate) fn list_cron_obligations(launch_agents_dir: &Path) -> OpsResult<Vec<C
 
 pub fn parse_schedule(value: &str) -> OpsResult<CronSchedule> {
     match value {
+        "every-minute" => schedule_from_cron("0 * * * * *"),
         "daily" => schedule_from_cron("0 0 3 * * *"),
         _ => schedule_from_cron(value),
     }
@@ -312,11 +325,20 @@ pub fn parse_schedule(value: &str) -> OpsResult<CronSchedule> {
 /// The launchd [`CronSchedule`] for a declared cron expression, or an error
 /// describing why launchd can't run it.
 pub fn schedule_from_cron(expr: &str) -> OpsResult<CronSchedule> {
+    if matches!(expr.trim(), "0 * * * * *" | "0 * * * * * *") {
+        return Ok(CronSchedule {
+            expression: expr.to_string(),
+            hour: 0,
+            minute: 0,
+            every_minute: true,
+        });
+    }
     let (hour, minute) = daily_time_of(expr)?;
     Ok(CronSchedule {
         expression: expr.to_string(),
         hour,
         minute,
+        every_minute: false,
     })
 }
 
@@ -452,6 +474,12 @@ pub fn run_cron(
 
     let result = spawn_cron_target(&spec);
     receipt.finished_at = Some(Utc::now().timestamp());
+    let result = result.inspect(|_| {
+        if spec.schedule.every_minute {
+            // Coverage needs the latest outcomes, not one file per minute forever.
+            let _ = prune_minute_receipts(&root, &spec, &receipt.id);
+        }
+    });
     match result {
         Ok(status) if status.success() => {
             receipt.outcome = CronOutcome::Succeeded;
@@ -632,6 +660,20 @@ pub fn default_launch_agents_dir() -> OpsResult<PathBuf> {
 }
 
 pub fn resolve_lf_path() -> OpsResult<PathBuf> {
+    // Scheduled work follows future promotions; Sessions pin their own runtime.
+    if !crate::store::custom_home_selected() {
+        let gate = crate::machine_install::root()
+            .and_then(|root| {
+                crate::machine_install::entry_gate_path(
+                    &root,
+                    &crate::machine_install::ArtifactRole::Cli,
+                )
+            })
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        if gate.is_file() {
+            return Ok(gate);
+        }
+    }
     std::env::current_exe().map_err(Into::into)
 }
 
@@ -685,7 +727,6 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
             home_id: HomeId::parse(&required("LoopflowHomeId")?)
                 .map_err(|error| OpsError::Parse(error.to_string()))?,
             lf_home: PathBuf::from(required("LoopflowLfHome")?),
-            db_path: PathBuf::from(required("LoopflowDbPath")?),
             path_env: required("LoopflowPath")?,
         },
     })
@@ -728,7 +769,11 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
                 ))
             })?,
     };
+    let log_path = spec.log_path();
     Ok(CronObligation {
+        repo: spec.working_directory,
+        lf_path: spec.lf_path,
+        log_path,
         wave: spec.wave,
         flow: spec.flow,
         target_kind: spec.target_kind,
@@ -767,21 +812,29 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
         .create(true)
         .append(true)
         .open(spec.log_path())?;
+    if spec.schedule.every_minute && stdout.metadata()?.len() > MINUTE_LOG_LIMIT {
+        stdout.set_len(0)?;
+    }
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
-    command
-        .args([
+    if spec.target_kind == CronTargetKind::Repository {
+        command.args(["task", "reconcile", "--json"]);
+    } else {
+        command.args([
             "--wave",
             &spec.wave,
-            "--batch",
+            "--mode",
+            "batch",
             spec.target_kind.as_str(),
+            "--",
             &spec.flow,
-        ])
+        ]);
+    }
+    command
         .current_dir(&spec.working_directory)
         .env_clear()
         .env("PATH", &spec.host.path_env)
         .env("LF_HOME", &spec.host.lf_home)
-        .env("LF_DB_PATH", &spec.host.db_path)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
     if let Some(home) = dirs::home_dir() {
@@ -871,6 +924,36 @@ fn read_receipts(root: &Path, wave: &str, flow: Option<&str>) -> OpsResult<Vec<C
     Ok(receipts)
 }
 
+const MINUTE_RECEIPTS_KEPT: usize = 10;
+const MINUTE_LOG_LIMIT: u64 = 1024 * 1024;
+
+/// Keep recent receipts plus the latest success and failure.
+fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) -> OpsResult<()> {
+    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.flow))?;
+    receipts.sort_by_key(|receipt| std::cmp::Reverse(receipt.started_at));
+    let latest = |outcome| {
+        receipts
+            .iter()
+            .find(|receipt| receipt.outcome == outcome)
+            .map(|receipt| receipt.id.clone())
+    };
+    let kept = [latest(CronOutcome::Succeeded), latest(CronOutcome::Failed)];
+    let dir = root
+        .join(safe_component(&spec.wave))
+        .join(safe_component(&spec.flow));
+    for receipt in receipts.iter().skip(MINUTE_RECEIPTS_KEPT) {
+        if &receipt.id == current || kept.contains(&Some(receipt.id.clone())) {
+            continue;
+        }
+        fs::remove_file(dir.join(format!(
+            "{}-{}.json",
+            receipt.started_at,
+            receipt.id.as_str()
+        )))?;
+    }
+    Ok(())
+}
+
 fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     let dir = root
         .join(safe_component(&receipt.wave))
@@ -892,7 +975,7 @@ fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     Ok(())
 }
 
-fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -917,6 +1000,15 @@ fn plist_path(dir: &Path, wave: &str, flow: &str) -> PathBuf {
     dir.join(format!("{}.plist", label(wave, flow).replace('/', ".")))
 }
 
+pub fn repository_cron_key(repo: &Path, home: &HomeId) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(repo.as_os_str().as_encoded_bytes());
+    hash.update([0]);
+    hash.update(home.as_str());
+    format!("repository-{}", &hex::encode(hash.finalize())[..24])
+}
+
 fn label(wave: &str, flow: &str) -> String {
     format!("loopflow.cron.{wave}.{flow}").replace('/', ".")
 }
@@ -928,10 +1020,19 @@ fn is_cron_plist(name: &str) -> bool {
 }
 
 fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
-    let interval = format!(
+    let interval = if spec.schedule.every_minute {
+        format!(
+            "    <key>StartCalendarInterval</key>\n    <array>{}</array>",
+            (0..60)
+                .map(|minute| format!("<dict><key>Minute</key><integer>{minute}</integer></dict>"))
+                .collect::<String>()
+        )
+    } else {
+        format!(
         "    <key>StartCalendarInterval</key>\n    <dict>\n        <key>Hour</key>\n        <integer>{}</integer>\n        <key>Minute</key>\n        <integer>{}</integer>\n    </dict>",
         spec.schedule.hour, spec.schedule.minute
-    );
+    )
+    };
     let args = [
         spec.lf_path.to_string_lossy().to_string(),
         "cron".to_string(),
@@ -962,10 +1063,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         (
             "LoopflowLfHome",
             spec.host.lf_home.to_string_lossy().to_string(),
-        ),
-        (
-            "LoopflowDbPath",
-            spec.host.db_path.to_string_lossy().to_string(),
         ),
         ("LoopflowPath", spec.host.path_env.clone()),
         (
@@ -1001,8 +1098,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         <string>{path_env}</string>
         <key>LF_HOME</key>
         <string>{lf_home}</string>
-        <key>LF_DB_PATH</key>
-        <string>{db_path}</string>
     </dict>
 {interval}
     <key>WorkingDirectory</key>
@@ -1017,7 +1112,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         label = xml_escape(&label(&spec.wave, &spec.flow)),
         path_env = xml_escape(&spec.host.path_env),
         lf_home = xml_escape(&spec.host.lf_home.to_string_lossy()),
-        db_path = xml_escape(&spec.host.db_path.to_string_lossy()),
         working_directory = xml_escape(&spec.working_directory.to_string_lossy()),
         log_path = xml_escape(&spec.log_path().to_string_lossy()),
     )
@@ -1031,7 +1125,7 @@ fn plist_string(content: &str, key: &str) -> Option<String> {
     Some(xml_unescape(value))
 }
 
-fn xml_escape(value: &str) -> String {
+pub(crate) fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1085,7 +1179,7 @@ fn run_launchctl_path(action: &str, path: &Path) -> OpsResult<()> {
     })
 }
 
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };
@@ -1106,6 +1200,10 @@ fn status_label(status: &std::process::ExitStatus) -> String {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    use clap::Parser;
+
+    use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
 
     #[derive(Debug, Default)]
     struct FakeLaunchctl {
@@ -1152,7 +1250,6 @@ mod tests {
         CronHost {
             home_id: HomeId::new(),
             lf_home: root.join("home"),
-            db_path: root.join("home/loopflow.db"),
             path_env: "/usr/bin:/bin".to_string(),
         }
     }
@@ -1220,7 +1317,6 @@ mod tests {
         assert!(content.contains("<key>EnvironmentVariables</key>"));
         assert!(content.contains("<key>PATH</key>"));
         assert!(content.contains("<key>LF_HOME</key>"));
-        assert!(content.contains("<key>LF_DB_PATH</key>"));
         assert!(content.contains("<key>LoopflowActivatedAt</key>"));
         assert!(!content.contains("DOPPLER_TOKEN"));
         assert!(!content.contains("LF_RUN_ID"));
@@ -1281,6 +1377,76 @@ mod tests {
     }
 
     #[test]
+    fn repository_tick_runs_each_minute_with_no_agent_or_wave() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let executable = temp.path().join("fake-lf");
+        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut cron = spec(temp.path(), &executable);
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        let plist = super::render_plist(&cron, 0);
+        assert_eq!(plist.matches("<key>Minute</key>").count(), 60);
+        assert!(!plist.contains("<key>Hour</key>"));
+        assert!(!plist.contains("KeepAlive"));
+        assert!(super::spawn_cron_target(&cron).unwrap().success());
+        assert_eq!(
+            fs::read_to_string(cron.log_path()).unwrap(),
+            "task\nreconcile\n--json\n"
+        );
+        assert_ne!(
+            cron.flow,
+            super::repository_cron_key(&cron.working_directory, &HomeId::new())
+        );
+    }
+
+    #[test]
+    fn minute_checks_keep_bounded_receipts_and_the_latest_success() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        add_cron(&agents, &cron, &launchctl).unwrap();
+        let run = || {
+            run_cron(
+                &agents,
+                "",
+                &cron.flow,
+                &cron.host.home_id,
+                &cron.host.home_id,
+                CronSource::Scheduled,
+            )
+        };
+        for _ in 0..14 {
+            run().unwrap();
+        }
+        let root = receipt_root(&cron.host.lf_home);
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 1);
+        assert_eq!(receipts[0].outcome, CronOutcome::Succeeded);
+
+        let mut failing = cron.clone();
+        failing.lf_path = PathBuf::from("/usr/bin/false");
+        add_cron(&agents, &failing, &launchctl).unwrap();
+        for _ in 0..14 {
+            assert!(run().is_err());
+        }
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 2);
+        assert!(receipts
+            .iter()
+            .any(|receipt| receipt.outcome == CronOutcome::Succeeded));
+    }
+
+    #[test]
     fn parse_schedule_accepts_alias_and_cron_expression() {
         assert_eq!(
             parse_schedule("daily").unwrap(),
@@ -1288,6 +1454,7 @@ mod tests {
                 expression: "0 0 3 * * *".to_string(),
                 hour: 3,
                 minute: 0,
+                every_minute: false,
             }
         );
         assert_eq!(
@@ -1296,6 +1463,7 @@ mod tests {
                 expression: "0 30 17 * * *".to_string(),
                 hour: 17,
                 minute: 30,
+                every_minute: false,
             }
         );
     }
@@ -1373,6 +1541,37 @@ mod tests {
         let second = sync_crons(&agents, "infra", &[release], &launchctl).unwrap();
         assert_eq!(second.installed[0].flow, "release-run");
         assert_eq!(second.removed[0].flow, "telemetry-daily");
+    }
+
+    #[test]
+    fn scheduled_work_follows_the_entry_gate_without_reinstalling_the_job() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let agents = temp.path().join("agents");
+        let root = crate::machine_install::root_for_home(temp.path());
+        let role = crate::machine_install::ArtifactRole::Cli;
+        let gate =
+            crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/false"))
+                .unwrap();
+        let spec = spec(temp.path(), &gate);
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        let installed = add_cron(&agents, &spec, &FakeLaunchctl::default()).unwrap();
+        let declaration = fs::read(&installed.path).unwrap();
+
+        crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/true"))
+            .unwrap();
+        let receipt = run_cron(
+            &agents,
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Scheduled,
+        )
+        .unwrap();
+
+        assert_eq!(receipt.outcome, CronOutcome::Succeeded);
+        assert_eq!(receipt.lf_path, gate);
+        assert_eq!(fs::read(&installed.path).unwrap(), declaration);
     }
 
     #[test]
@@ -1457,23 +1656,55 @@ mod tests {
 
         let agents = temp.path().join("agents");
         let launchctl = FakeLaunchctl::default();
-        let cron = spec(temp.path(), &executable);
-        fs::create_dir_all(&cron.working_directory).unwrap();
-        add_cron(&agents, &cron, &launchctl).unwrap();
-        run_cron(
-            &agents,
-            &cron.wave,
-            &cron.flow,
-            &cron.host.home_id,
-            &cron.host.home_id,
-            CronSource::Scheduled,
-        )
-        .unwrap();
+        for (kind, name) in [
+            (CronTargetKind::Flow, "show"),
+            (CronTargetKind::Skill, "list"),
+        ] {
+            let cron = named_spec(
+                temp.path(),
+                &executable,
+                "infrastructure/release",
+                name,
+                "0 0 3 * * *",
+                kind,
+            );
+            fs::create_dir_all(&cron.working_directory).unwrap();
+            add_cron(&agents, &cron, &launchctl).unwrap();
+            assert!(cron.log_path().parent().unwrap().is_dir());
+            run_cron(
+                &agents,
+                &cron.wave,
+                &cron.flow,
+                &cron.host.home_id,
+                &cron.host.home_id,
+                CronSource::Scheduled,
+            )
+            .unwrap();
 
-        assert_eq!(
-            fs::read_to_string(cron.log_path()).unwrap(),
-            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_ID=unset\n"
-        );
+            let output = fs::read_to_string(cron.log_path()).unwrap();
+            let lines: Vec<_> = output.lines().collect();
+            let (authority, args) = lines.split_last().unwrap();
+            assert_eq!(*authority, "LF_RUN_ID=unset");
+            let cli =
+                Cli::try_parse_from(std::iter::once("lf").chain(args.iter().copied())).unwrap();
+            match (kind, cli.command) {
+                (
+                    CronTargetKind::Flow,
+                    Some(Commands::Flow {
+                        cmd: FlowCommand::External(args),
+                    }),
+                )
+                | (
+                    CronTargetKind::Skill,
+                    Some(Commands::Skill {
+                        cmd: SkillCommand::External(args),
+                    }),
+                ) => {
+                    assert_eq!(args, [name]);
+                }
+                (_, command) => panic!("scheduled definition became a command: {command:?}"),
+            }
+        }
     }
 
     #[test]

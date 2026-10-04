@@ -1,36 +1,35 @@
+import Foundation
+
 /// A durable control plane for one repository. Projects and Tasks carry the
 /// shipping state; a Wave itself has no worktree, branch, diff, or PR.
 ///
-/// Beyond identity and lifecycle status, the row carries the few shared facts
-/// the Mac surface spends space on: whether a body is `live`, how much work is
-/// active, and the `parentWaveId` that future ancestry will indent under. All
-/// come straight from `WaveSnapshot` (`lf ls --json`); this is an app model, not
-/// a wire DTO, so the defaults keep non-registry call sites terse.
+/// The app reads identity, placement and active Task counts from `WaveSnapshot`
+/// (`lf wave list --json`). This is an app model, so defaults serve local call sites.
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public let name: String
     public let repo: String
     public let status: WorkStatus
-    public let live: Bool
-    public let paused: Bool
-    public let enabled: Bool
     public let activeTasks: Int
-    public let activeProjects: Int
     public let parentWaveId: String?
     public let retiredAt: String?
     public let supersededByWaveId: String?
     public let retirementReason: String?
+
+    public var displayName: String {
+        guard !name.contains(where: \.isUppercase) else { return name }
+        return name.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
+    }
+
 
     public init(
         id: String,
         name: String,
         repo: String,
         status: WorkStatus,
-        live: Bool = false,
-        paused: Bool = false,
-        enabled: Bool = true,
         activeTasks: Int = 0,
-        activeProjects: Int = 0,
         parentWaveId: String? = nil,
         retiredAt: String? = nil,
         supersededByWaveId: String? = nil,
@@ -40,11 +39,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.name = name
         self.repo = repo
         self.status = status
-        self.live = live
-        self.paused = paused
-        self.enabled = enabled
         self.activeTasks = activeTasks
-        self.activeProjects = activeProjects
         self.parentWaveId = parentWaveId
         self.retiredAt = retiredAt
         self.supersededByWaveId = supersededByWaveId

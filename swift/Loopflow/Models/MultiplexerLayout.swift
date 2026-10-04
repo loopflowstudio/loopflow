@@ -14,6 +14,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
     case empty
     case session(id: String)
     case shell
+    case monitor(taskId: String)
 }
 
 public struct PaneState: Codable, Sendable, Identifiable, Equatable {
@@ -35,6 +36,21 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
 
     public static func defaultLayout() -> LayoutNode {
         .leaf(PaneState(content: .empty))
+    }
+
+    public func visible(excluding collapsed: Set<String>) -> LayoutNode? {
+        switch self {
+        case .leaf(let pane): return collapsed.contains(pane.id) ? nil : self
+        case .split(let axis, let first, let second, let ratio):
+            let left = first.visible(excluding: collapsed)
+            let right = second.visible(excluding: collapsed)
+            switch (left, right) {
+            case let (left?, right?): return .split(axis, first: left, second: right, ratio: ratio)
+            case let (left?, nil): return left
+            case let (nil, right?): return right
+            case (nil, nil): return nil
+            }
+        }
     }
 
     public func pane(for paneId: String) -> PaneState? {

@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
   change; it tells you which parts were one idea and which merely shared a
   branch.
 - Run `git diff main --stat` to see the change's real footprint.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 ## When this skill applies
 
@@ -61,7 +61,7 @@ as one PR; one large honest PR beats an artificially staged series.
 1. Order the slices foundation-first and name each one—the branch name
    becomes the PR title prefix.
 2. Build each slice as its own branch: independent slices branch from main;
-   dependent slices stack on the previous slice's branch and rebase forward
+   dependent slices stack on the previous slice's branch and sync forward
    as predecessors land.
 3. Move work with git—`git cherry-pick` for clean commits,
    `git checkout -p <big-branch> -- <paths>` to carve hunks out of mixed
@@ -71,6 +71,7 @@ as one PR; one large honest PR beats an artificially staged series.
 5. Verify each slice standalone—build and affected tests on that branch, not
    on the union.
 6. Land the series with the PR lifecycle: `lf pr publish` for headless
-   creation, `lf pr land` to watch through merge, next slice rebases and repeats.
+   creation, then `lf land` to request auto-merge. Confirm GitHub reports merged
+   before the next slice syncs and repeats.
    Once the series is fully landed, retire the original big branch
    (`lf pr abandon` if it had a PR, otherwise delete it).

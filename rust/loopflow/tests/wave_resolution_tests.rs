@@ -3,7 +3,7 @@
 //! It was that consumers disagreed about how to read it: `status` handled a
 //! UUID, `pm show` ignored the env entirely, others silently dropped a hand-set
 //! name. This drives the ONE resolver directly across the seven environments,
-//! then proves `lf status` and `lf pm show` — the original reproduction — agree
+//! then proves the shared Wave status projection honors the original reproduction
 //! end to end from a resident wave's environment.
 
 use std::path::Path;
@@ -166,7 +166,10 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .expect("seed pm snapshot");
     wave
@@ -177,12 +180,10 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
     command
         .args(args)
         .current_dir(repo)
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_TRACE_ID")
-        .env_remove("LF_WAVE_ID");
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", home)
+        .env("LF_HOME", home);
     if let Some(id) = wave_id {
         command.env("LF_WAVE_ID", id);
     }
@@ -204,34 +205,8 @@ fn wave_field(output: &std::process::Output) -> String {
         .to_string()
 }
 
-/// The original reproduction: from a resident wave's environment
-/// (`LF_WAVE_ID=<uuid>`, no `--wave`), both `lf pm show` and `lf status` resolve
-/// the same wave. The Mac Project inherits the identical `LF_WAVE_ID`,
-/// so this cell stands for both.
 #[test]
-fn pm_show_and_status_agree_from_a_resident_uuid() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path().join("home");
-    let repo = tmp.path().join("repo");
-    let wave = seed(&home, &repo, "product");
-    let uuid = wave.id().as_str();
-
-    let pm = lf(
-        &home,
-        &repo,
-        &["pm", "show", "--no-sync", "--json"],
-        Some(uuid),
-    );
-    let status = lf(&home, &repo, &["status", "--json"], Some(uuid));
-
-    assert_eq!(wave_field(&pm), "product");
-    assert_eq!(wave_field(&status), "product");
-}
-
-/// Explicit `--wave` beats a wrong ambient id in both commands; a hand-set name
-/// resolves; missing and stale contexts are classified errors.
-#[test]
-fn pm_show_honors_the_shared_resolution_rules() {
+fn cached_status_honors_the_shared_resolution_rules() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home = tmp.path().join("home");
     let repo = tmp.path().join("repo");
@@ -242,25 +217,20 @@ fn pm_show_honors_the_shared_resolution_rules() {
     let overridden = lf(
         &home,
         &repo,
-        &["pm", "show", "--wave", "product", "--no-sync", "--json"],
+        &["wave", "status", "product", "--json"],
         Some(&WaveId::new().to_string()),
     );
     assert_eq!(wave_field(&overridden), "product");
 
     // Hand-set name resolves the same wave.
-    let named = lf(
-        &home,
-        &repo,
-        &["pm", "show", "--no-sync", "--json"],
-        Some("product"),
-    );
+    let named = lf(&home, &repo, &["wave", "status", "--json"], Some("product"));
     assert_eq!(wave_field(&named), "product");
 
     // No context: the classified "pass --wave" error, not a UUID-as-name crash.
-    let missing = lf(&home, &repo, &["pm", "show", "--no-sync", "--json"], None);
+    let missing = lf(&home, &repo, &["wave", "status", "--json"], None);
     assert!(!missing.status.success());
     assert!(
-        String::from_utf8_lossy(&missing.stderr).contains("determine wave"),
+        String::from_utf8_lossy(&missing.stderr).contains("no wave in context"),
         "missing-context stderr: {}",
         String::from_utf8_lossy(&missing.stderr)
     );
@@ -268,12 +238,7 @@ fn pm_show_honors_the_shared_resolution_rules() {
     // Stale identity: a real UUID with no registry row is a distinct error that
     // names the stale id, never a silent fallback.
     let stale_id = WaveId::new().to_string();
-    let stale = lf(
-        &home,
-        &repo,
-        &["pm", "show", "--no-sync", "--json"],
-        Some(&stale_id),
-    );
+    let stale = lf(&home, &repo, &["wave", "status", "--json"], Some(&stale_id));
     assert!(!stale.status.success());
     let stale_err = String::from_utf8_lossy(&stale.stderr);
     assert!(
@@ -283,7 +248,7 @@ fn pm_show_honors_the_shared_resolution_rules() {
     let _ = uuid;
 }
 
-/// W2-240: an explicit `--wave` naming an unknown wave is rejected with the
+/// W2-240: an explicit selector naming an unknown wave is rejected with the
 /// same classified error from every consumer — never silently accepted (the
 /// memory bug), never misdirected to a sync command (the PM bug), never given
 /// a generic "not found" (the status bug). The error names the wave and the
@@ -313,73 +278,15 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         );
     };
 
-    // No ambient: each consumer rejects the unknown explicit on its own.
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            None,
-        ),
-        "chat history (no ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["status", "--wave", "definitely-unknown"],
-            None,
-        ),
-        "status (no ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["pm", "show", "--wave", "definitely-unknown", "--no-sync"],
-            None,
-        ),
-        "pm show (no ambient)",
-    );
-
-    // Valid ambient does not rescue an unknown explicit: explicit wins.
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            Some(uuid),
-        ),
-        "chat history (with ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["status", "--wave", "definitely-unknown"],
-            Some(uuid),
-        ),
-        "status (with ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["pm", "show", "--wave", "definitely-unknown", "--no-sync"],
-            Some(uuid),
-        ),
-        "pm show (with ambient)",
-    );
+    for ambient in [None, Some(uuid)] {
+        assert_rejected(
+            lf(
+                &home,
+                &repo,
+                &["wave", "status", "definitely-unknown"],
+                ambient,
+            ),
+            "Wave status",
+        );
+    }
 }

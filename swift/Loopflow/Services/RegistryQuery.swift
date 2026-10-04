@@ -1,13 +1,10 @@
-// RegistryQuery — discovery and history as `lf` queries over the machine
-// registry store, not a streaming center.
+// RegistryQuery — typed `lf` reads over the machine registry.
 //
-// The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped) and their work
-// — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. The Podium re-queries the bounded process snapshot for live output;
-// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
+// Planning and history are one-shot queries. Active Sessions use one foreground
+// observation per window so native receipt discovery survives between samples.
 //
-// This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
+// This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
+// readers with `--json` as subprocesses and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
@@ -22,28 +19,40 @@ public struct RegistryQueryError: LocalizedError, Sendable {
     public var errorDescription: String? { message }
 }
 
-/// Runs an `lf` argv (already including the subcommand, e.g. `["ls","--json"]`)
+/// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
-/// `cwd` seeds ambient resolution for verbs that want it (`lf status` with no
-/// wave); the machine-wide reads (`lf ls`, `lf runs`) ignore it.
+/// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
+/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
+    private let runWithInput: @Sendable ([String], String?, String) async throws -> String
+    private let observe: @Sendable () async throws -> ActiveSessionsObservation
 
-    public init(run: @escaping RegistryRunner) {
+    public init(
+        runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
+            throw RegistryQueryError("Draft comparison is unavailable on this transport")
+        },
+        watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
+            throw RegistryQueryError("Active Session observation is unavailable on this transport")
+        },
+        run: @escaping RegistryRunner
+    ) {
+        self.runWithInput = runWithInput
         self.run = run
+        self.observe = watchActiveSessions
     }
 
-    /// Every wave the registry knows across the machine. Callers that need
-    /// several repo slices should call this once and filter locally.
+    /// Current Waves across the machine. The shared
+    /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--all", "--json"], nil)
+        let stdout = try await run(["wave", "list", "--all", "--current", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
 
-    /// Every wave the registry knows (running and stopped alike), scoped to one
+    /// Every current Wave the registry knows, scoped to one
     /// repo. This replaces the old `/ws` connected snapshot — a point-in-time
     /// read the caller re-queries on a cadence, not a stream.
     public func waves(repoPath: String) async throws -> [Wave] {
@@ -52,53 +61,14 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's Project/Task work, plus the live loop state when its resident
-    /// is answering.
+    /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
-        let stdout = try await run(["status", wave, "--json"], cwd)
+        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
-    /// Probe one Wave's Home for liveness and the single contextual action.
-    /// The app never does SSH — `lf home probe` classifies the Home (local reads
-    /// are instant; remote routes run one `lf status` on the target Home)
-    /// and returns the shared `HomeRuntimeDto`. Probe on demand per
-    /// focused Wave, never once per row.
-    public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {
-        let stdout = try await run(["home", "probe", wave, "--json"], cwd)
-        return try Self.decode(HomeRuntime.self, from: stdout)
-    }
 
-    /// Idempotently start a Wave on its placed Home and return its status row.
-    public func start(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
-        let stdout = try await run(["start", wave, "--json"], cwd)
-        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
-        guard snapshots.count == 1,
-              let snapshot = snapshots.first,
-              snapshot.name == wave,
-              snapshot.live,
-              snapshot.endpoint != nil
-        else {
-            throw RegistryQueryError("lf start \(wave) returned no live Wave receipt")
-        }
-        return snapshots
-    }
-
-    /// Pause or resume new Wave turns without changing listener residency.
-    public func setWavePaused(
-        wave: String,
-        paused: Bool,
-        cwd: String?
-    ) async throws -> WaveIntentReceipt {
-        let verb = paused ? "pause" : "resume"
-        let stdout = try await run([verb, wave, "--json"], cwd)
-        return try Self.decode(WaveIntentReceipt.self, from: stdout)
-    }
-
-    /// Every durable plan row across the machine, joined to the same Task
-    /// references and live evidence as `lf status`. One subprocess reads every
-    /// Wave; an optional scope filters that shared snapshot at the source.
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
         if let wave {
@@ -111,13 +81,33 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
+        var args = ["roadmap", "--task", issue, "--json"]
+        if repo == nil { args.append("--all") }
+        return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
+    }
+
     /// Exact OS-live Loopflow process trees and unattributed provider processes.
     public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)
         return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
-    /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
+    public func localHomeId() async throws -> String {
+        struct HomeIdentity: Decodable { let id: String }
+        return try Self.decode(HomeIdentity.self, from: await run(["home", "id", "--json"], nil)).id
+    }
+
+    public func userName() async throws -> String? {
+        let stdout = try await run(["home", "user", "--json"], nil)
+        return try Self.decode(String?.self, from: stdout)
+    }
+
+    public func watchActiveSessions() async throws -> ActiveSessionsObservation {
+        try await observe()
+    }
+
+    /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(
         since: String = "7d",
@@ -135,43 +125,113 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
-    /// Bounded history for one conversation epoch. `lf` uses the live backing
-    /// when a listener exists and otherwise folds readable local epochs from
-    /// the journal; this query never starts a Wave listener.
-    public func chatHistory(
-        wave: String,
-        limit: Int = 12,
-        epoch: String? = nil,
-        cwd: String?
-    ) async throws -> ChatHistorySnapshot {
-        var args = [
-            "chat", "--history", "--json", "--limit", String(limit), "--wave", wave,
-        ]
-        if let epoch {
-            args.append(contentsOf: ["--epoch", epoch])
-        }
-        let stdout = try await run(args, cwd)
-        return try Self.decode(ChatHistorySnapshot.self, from: stdout)
+    public func automationStatus(cwd: String) async throws -> AutomationStatus {
+        try Self.decode(AutomationStatus.self, from: await run(["task", "automation", "--json"], cwd))
+    }
+
+    public func setAutomation(enabled: Bool, cwd: String) async throws {
+        var args = ["cron", "sync", "--repo"]
+        if !enabled { args.append("--disable") }
+        _ = try await run(args, cwd)
+    }
+
+    public func automateTask(issue: String, enabled: Bool, cwd: String) async throws {
+        _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
+    }
+
+    public func taskStatus(issue: String, cwd: String?) async throws -> TaskStatus {
+        let stdout = try await run(["task", "status", issue, "--json"], cwd)
+        return try Self.decode(TaskStatus.self, from: stdout)
     }
 
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
-    public func taskChanges(issue: String, cwd: String?) async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "changes", issue, "--json"], cwd)
+    public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    /// Every selectable Flow with the topology it would pin, via the shared loader.
+    public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
+        let stdout = try await run(["flow", "list", "--json"], cwd)
+        return try Self.decode([FlowCatalogEntry].self, from: stdout)
+    }
+
+    /// Start (preparing when needed) the Task's managed Flow.
+    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
+        var args = ["--task", issue, "flow", "start"]
+        if let flow { args.append(flow) }
+        _ = try await run(args, cwd)
+    }
+
+    /// Checkpoint, stop, and replace the pinned Flow. Rust validates `flow`
+    /// before any side effect.
+    public func restartTaskFlow(issue: String, flow: String, cwd: String?) async throws {
+        _ = try await run(["task", "restart", issue, "--flow", flow], cwd)
+    }
+
+    /// One planning Task's complete comment thread. Read-only; works before
+    /// the Task is prepared or started.
+    public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
+        let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
+        return try Self.decode(TaskComments.self, from: stdout)
+    }
+
+    /// All associated Sessions, Flows and Execs, including closed history.
+    public func taskWork(task: String, cwd: String?) async throws -> TaskWork {
+        struct Snapshot: Decodable { let work: TaskWork }
+        let stdout = try await run(["task", "status", task, "--json"], cwd)
+        return try Self.decode(Snapshot.self, from: stdout).work
+    }
+
+    /// Complete Task-attributed Session input/provider history. Read-only; querying
+    /// an unstarted Task neither prepares nor starts it.
+    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
+        let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
+        return try Self.decode([SessionHistory].self, from: stdout)
+    }
+
+    /// What each recorded step's submitted input was made of, oldest first,
+    /// with Task totals. Read-only, from retained local captures.
+    public func taskContext(task: String, cwd: String?) async throws -> ContextReport {
+        let stdout = try await run(["usage", "--days", "0", "--task", task, "--context", "--json"], cwd)
+        return try Self.decode(ContextReport.self, from: stdout)
+    }
+
+    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+        _ = try await run([
+            "task", "edit", id, "--wave", wave, "--notes=\(text)",
+        ], cwd)
     }
 
     /// One Task's complete patch, or the patch for a selected changed file.
     public func taskDiff(
         issue: String,
         path: String?,
+        base: String = "parent",
+        draft: String? = nil,
         cwd: String?
     ) async throws -> TaskDiffSnapshot {
         var args = ["task", "diff", issue]
         if let path { args.append(path) }
-        args.append("--json")
-        let stdout = try await run(args, cwd)
+        args.append(contentsOf: ["--base", base, "--json"])
+        let stdout: String
+        if let draft {
+            args.append("--draft")
+            stdout = try await runWithInput(args, cwd, draft)
+        } else {
+            stdout = try await run(args, cwd)
+        }
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+    }
+
+    /// One page of immediate directory entries in the Task checkout.
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil,
+                          showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
+        var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
+        if let cursor { args += ["--cursor", cursor] }
+        if showIgnored { args.append("--show-ignored") }
+        return try Self.decode(TaskDirectory.self, from: try await run(args, cwd))
     }
 
     /// Current contents of one file, constrained to the Task worktree.
@@ -184,10 +244,21 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// Sessions in this repository.
-    public func sessions(cwd: String? = nil) async throws -> [SessionRecord] {
-        let stdout = try await run(["session", "list", "--json"], cwd)
-        return try Self.decode([SessionRecord].self, from: stdout)
+    public func saveTaskFile(issue: String, path: String, revision: String, content: String,
+                             cwd: String?) async throws -> TaskFileSave {
+        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], cwd, content)
+        return try Self.decode(TaskFileSave.self, from: stdout)
+    }
+
+    /// One bounded page, ordered by stable Session identity.
+    public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
+                            cwd: String? = nil) async throws -> SessionPage {
+        var args = ["session", "list", "--json", "--page"]
+        if includingHeadless { args += ["--interactive", "all"] }
+        args += ["--limit", "100"]
+        if let after { args += ["--after", after] }
+        let stdout = try await run(args, cwd)
+        return try Self.decode(SessionPage.self, from: stdout)
     }
 
     /// Open one Session and return its terminal command.
@@ -196,24 +267,34 @@ public struct RegistryQuery: Sendable {
         replacing: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "open", id, "--json"]
+        var args = ["session", "connect", id, "--json"]
         if replacing { args.append("--replace") }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Decide one Task FlowStep and release its controller.
-    public func resolveFlowSession(
+    /// Give one Session a human-assigned name and return the authoritative
+    /// record. A Run ID reaches the conversation or Flow boundary that owns it.
+    public func renameSession(
         id: String,
-        approving: Bool,
-        text: String,
+        name: String,
         cwd: String? = nil
-    ) async throws {
-        let verb = approving ? "approve" : "iterate"
-        _ = try await run(["session", verb, id, text], cwd)
+    ) async throws -> SessionRecord {
+        let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete one interactive or ad-hoc Ask session.
+    public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {
+        let stdout = try await run(["session", "bind", "--dry-run", "--json", "--task", task, "--", id], cwd)
+        return try Self.decode(SessionBindingPreview.self, from: stdout)
+    }
+
+    public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "bind", "--json", "--task", taskId, "--", id], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Complete an interactive conversation or Flow review.
     public func completeSession(
         id: String,
         cwd: String? = nil
@@ -229,45 +310,33 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        let freshness = sync ? "--sync" : "--no-sync"
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json", freshness], cwd)
-        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
-        return WavePlan(
-            objective: objective,
-            projects: snapshot.projects.map { project in
-                WaveProject(
-                    id: project.slug,
-                    title: project.name,
-                    definition: project.definition.isEmpty ? nil : project.definition,
-                    krs: project.krs.map {
-                        WaveKeyResult(text: $0.text, proof: $0.holds ? .holds : .open)
-                    }
-                )
-            }
-        )
+        if sync { _ = try await run(["repo", "refresh", wave], cwd) }
+        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
+        let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
+        return WavePlan(objective: objective, projects: snapshot.projects)
     }
 
-    /// Direct provider-authored usage for recent Home-local Runs, optionally
+    /// Direct provider-authored usage from retained Session history, optionally
     /// drilled through the shared Wave → Project → Task attribution.
     public func usage(
         days: Int = 30,
         wave: String? = nil,
         project: String? = nil,
         task: String? = nil
-    ) async throws -> [RunSnapshot] {
+    ) async throws -> [SessionHistory] {
         var arguments = ["usage", "--days", String(days), "--json"]
         if let wave { arguments += ["--wave", wave] }
         if let project { arguments += ["--project", project] }
         if let task { arguments += ["--task", task] }
         let stdout = try await run(arguments, nil)
-        return try Self.decode([RunSnapshot].self, from: stdout)
+        return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
-    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf repo tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["tokens", "--json"], repoPath)
+        let stdout = try await run(["repo", "tokens", "--json"], repoPath)
         return try Self.decode(CodeNode.self, from: stdout)
     }
 
@@ -275,7 +344,7 @@ public struct RegistryQuery: Sendable {
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["tokens", "--json", "--days", String(days)], repoPath)
+        let stdout = try await run(["repo", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 
@@ -299,64 +368,6 @@ public struct RegistryQuery: Sendable {
     }
 }
 
-private struct PmShowSnapshot: Decodable {
-    let wave: String
-    let provider: String
-    let initiative: String
-    let project: String?
-    let syncedAt: Int64
-    let projects: [PmProjectSnapshot]
-    let items: [PmItemSnapshot]
-
-    enum CodingKeys: String, CodingKey {
-        case wave, provider, initiative, project, projects, items
-        case syncedAt = "synced_at"
-    }
-}
-
-private struct PmProjectSnapshot: Decodable {
-    let id: String
-    let slug: String
-    let name: String
-    let summary: String
-    let definition: String
-    let flows: ProjectFlowPlanSnapshot
-    let krs: [PmKrSnapshot]
-    let initiativeIds: [String]
-    let teamIds: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case id, slug, name, summary, definition, flows, krs
-        case initiativeIds = "initiative_ids"
-        case teamIds = "team_ids"
-    }
-}
-
-private struct PmItemSnapshot: Decodable {
-    let id: String
-    let identifier: String
-    let url: String?
-    let name: String
-    let description: String
-    let rank: Int
-    let completed: Bool
-    let projectId: String
-    let project: String
-    let teamId: String
-    let assignee: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, identifier, url, name, description, rank, completed, project, assignee
-        case projectId = "project_id"
-        case teamId = "team_id"
-    }
-}
-
-private struct PmKrSnapshot: Decodable {
-    let text: String
-    let holds: Bool
-}
-
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
 /// Durable execution authority and its mutable observed route.
@@ -373,68 +384,15 @@ public struct Home: Decodable, Sendable, Hashable {
     }
 }
 
-/// `HomeState` (`engine/wave_home.rs`) — a Home's observed liveness.
-public enum HomeState: String, Decodable, Sendable, Equatable {
-    case unreachable, stopped, running, unknown
-}
-
-/// `HomeActionDto` — the single contextual action a surface should offer, so the
-/// UI never branches on `HomeState` itself: Attach when running, Start when
-/// reachable-but-stopped, or the actionable reason otherwise.
-public enum HomeAction: Decodable, Sendable, Equatable {
-    case attach(endpoint: String)
-    case start(homeId: String)
-    case reason(message: String)
-
-    enum CodingKeys: String, CodingKey {
-        case kind, endpoint, homeId = "home_id", message
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .kind) {
-        case "attach":
-            self = .attach(endpoint: try container.decode(String.self, forKey: .endpoint))
-        case "start":
-            self = .start(homeId: try container.decode(String.self, forKey: .homeId))
-        case "reason":
-            self = .reason(message: try container.decode(String.self, forKey: .message))
-        case let other:
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind,
-                in: container,
-                debugDescription: "unknown home action kind \(other)"
-            )
-        }
-    }
-}
-
-/// `HomeRuntimeDto` — a Wave's Home probed for liveness: authority and route, the state
-/// with its evidence, the attach endpoint when running, and the one action.
-/// This is the shared contract the conductor renders; the app never probes SSH
-/// itself — it calls `lf home probe --json` and `lf start --json`.
-public struct HomeRuntime: Decodable, Sendable, Equatable {
-    public let home: Home
-    public let state: HomeState
-    public let reason: String
-    public let endpoint: String?
-    public let action: HomeAction
-}
-
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
-public struct WaveSnapshot: Decodable, Sendable, Hashable {
+public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
     public let status: WorkStatus
     public let goal: String
     public let repo: String
     public let activeTasks: Int
-    public let activeProjects: Int
-    public let live: Bool
-    public let paused: Bool
-    public let enabled: Bool
-    public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
     public let retiredAt: String?
@@ -442,10 +400,11 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let retirementReason: String?
     public let home: Home
 
+    public var displayName: String { toWave().displayName }
+
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
+        case id, name, status, goal, repo, home
         case activeTasks = "active_tasks"
-        case activeProjects = "active_projects"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
         case retiredAt = "retired_at"
@@ -461,23 +420,13 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
             name: name,
             repo: repo,
             status: status,
-            live: live,
-            paused: paused,
-            enabled: enabled,
             activeTasks: activeTasks,
-            activeProjects: activeProjects,
             parentWaveId: parentWaveId,
             retiredAt: retiredAt,
             supersededByWaveId: supersededByWaveId,
             retirementReason: retirementReason
         )
     }
-}
-
-/// Receipt returned by `lf pause|resume <wave> --json`.
-public struct WaveIntentReceipt: Decodable, Sendable, Equatable {
-    public let wave: String
-    public let paused: Bool
 }
 
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
@@ -493,36 +442,20 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
-    public let projects: WorkEvidence<RoadmapProject>
-    public let unavailableProjects: [UnavailableProjectEvidence]
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    public let tasks: WorkEvidence<RoadmapTask>
+    public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects
+        case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
-        case unavailableProjects = "unavailable_projects"
+        case unavailableTasks = "unavailable_tasks"
     }
 }
 
 /// Durable Project Work that cannot join the current PM plan, including
 /// non-terminal Tasks stranded under a terminal historical Project.
-public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let projectId: String
-    public let projectSlug: String
-    public let status: WorkStatus
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let recovery: String
-    public let tasks: [UnavailableTaskEvidence]
-
-    enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery, tasks
-        case workId = "work_id"
-        case projectId = "project_id"
-        case projectSlug = "project_slug"
-    }
-}
-
 /// Non-terminal durable Task Work whose historical Project is absent from the
 /// current PM plan.
 public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
@@ -542,62 +475,134 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     }
 }
 
-/// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
+/// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
-    public let loopState: String?
-    public let projects: [WaveProjectWork]
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
-    public let unavailableProjects: [UnavailableProjectEvidence]
-    public let runs: WorkEvidence<RunSnapshot>
-    /// The focused Wave's Home probed for liveness and its one contextual action.
-    public let homeRuntime: HomeRuntime
+    public let unavailableTasks: [UnavailableTaskEvidence]
+    public let runs: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects)
+        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, runs
+        case wave, projects, tasks, runs
         case metricPortfolio = "metric_portfolio"
-        case homeRuntime = "home_runtime"
-        case loopState = "loop_state"
-        case unavailableProjects = "unavailable_projects"
+        case unavailableTasks = "unavailable_tasks"
     }
 }
 
-/// One Home-local harness bundle from `lf runs --json`.
-public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let parentRunId: String?
+/// Read-only history beneath a conversation's captured input; not a resumable Run.
+public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String {
+        if let captured { return "\(sessionId):\(captured)" }
+        if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
+            return "\(sessionId):\(thread):\(turn)"
+        }
+        return sessionId
+    }
+    public let sessionId: String
+    public let captured: Int?
+    public let artifactKey: String?
+    public let callerArtifactKey: String?
+    public let taskPrId: String?
     public let repo: String?
     public let worktree: String?
-    public let subjects: [RunSubjectAttribution]
+    public let taskId: String?
+    public let waveId: String?
+    public let taskIdentifier: String?
+    public let workSource: String?
+    public let waveName: String?
     public let skill: String?
-    public let outcome: String?
-    public let started: Int
-    public let ended: Int?
-    public let usage: RunUsageSnapshot
+    public let observedAt: Int
+    public let firstProviderAttemptAt: Int?
+    public let recordedOutcome: String?
+    public let recordedAt: Int?
+    public let providers: [ProviderHistory]
+    public let usage: SessionUsage
     public let evidenceGaps: Int
     public let harness: String
     public let model: String?
     public let surface: String
 
+    public var status: String {
+        if !providers.isEmpty {
+            return providers.map { record in
+                switch record.reference {
+                case .nativeTurn: return record.outcome ?? "Unknown"
+                case .recordedAttempt: return "Recorded \(record.outcome ?? "unknown")"
+                }
+            }.joined(separator: " → ")
+        }
+        return recordedOutcome.map { "Recorded \($0)" } ?? "Unknown"
+    }
+
+    public var workLabel: String {
+        if providers.contains(where: { $0.taskId != taskId || $0.waveId != waveId }) {
+            return "Mixed/unknown · see provider history"
+        }
+        if let taskId { return "task/\(taskIdentifier ?? taskId)" }
+        if let waveId { return "wave/\(waveName ?? waveId)" }
+        return "—"
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, repo, worktree, subjects, skill, outcome, started, ended, usage, harness, model,
-            surface
-        case parentRunId = "parent_run_id"
-        case evidenceGaps = "evidence_gaps"
+        case repo, worktree, skill, providers, usage, harness, model, surface
+        case captured
+        case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
+        case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"
+        case taskIdentifier = "task_identifier", waveName = "wave_name", workSource = "work_source"
+        case observedAt = "observed_at", firstProviderAttemptAt = "first_provider_attempt_at"
+        case recordedOutcome = "recorded_outcome", recordedAt = "recorded_at", evidenceGaps = "evidence_gaps"
     }
 }
 
-public struct RunSubjectAttribution: Decodable, Sendable, Hashable {
-    public let selector: String
-    public let source: String
+public struct ProviderHistory: Decodable, Sendable, Hashable {
+    public let reference: ProviderHistoryReference
+    public let execId: String?
+    public let taskId: String?
+    public let waveId: String?
+    public let startedAt: Int?
+    public let completedAt: Int?
+    public let outcome: String?
+    public let usage: SessionUsage
+    enum CodingKeys: String, CodingKey {
+        case reference, outcome, usage
+        case execId = "exec_id", taskId = "task_id", waveId = "wave_id"
+        case startedAt = "started_at", completedAt = "completed_at"
+    }
 }
 
-public struct RunUsageSnapshot: Decodable, Sendable, Hashable {
+public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
+    case nativeTurn(thread: String, turn: String, startSeq: Int?, completionSeq: Int?)
+    case recordedAttempt(captured: Int, attemptKey: String)
+    private enum Keys: String, CodingKey {
+        case kind, thread, turn
+        case startSeq = "start_seq", completionSeq = "completion_seq"
+        case captured, attemptKey = "attempt_key"
+    }
+    private enum Kind: String, Decodable { case nativeTurn = "native_turn", recordedAttempt = "recorded_attempt" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .nativeTurn:
+            self = .nativeTurn(thread: try c.decode(String.self, forKey: .thread),
+                turn: try c.decode(String.self, forKey: .turn),
+                startSeq: try c.decodeIfPresent(Int.self, forKey: .startSeq),
+                completionSeq: try c.decodeIfPresent(Int.self, forKey: .completionSeq))
+        case .recordedAttempt:
+            self = .recordedAttempt(captured: try c.decode(Int.self, forKey: .captured),
+                attemptKey: try c.decode(String.self, forKey: .attemptKey))
+        }
+    }
+}
+
+public struct SessionUsage: Decodable, Sendable, Hashable {
     public let streams: Int
     public let finalStreams: Int
     public let gaps: Int
@@ -624,6 +629,54 @@ public struct RunUsageSnapshot: Decodable, Sendable, Hashable {
         case cacheWriteTokens = "cache_write_tokens"
         case costUsd = "cost_usd"
     }
+}
+
+/// One source of a step's submitted input. `tokens` is nil when the record
+/// cannot measure it; that is never zero.
+public struct ContextSourceUsage: Decodable, Sendable, Hashable {
+    public let source: String
+    public let tokens: Int?
+    public let count: Int?
+    public let authors: [String]
+    public let budgetTokens: Int?
+    public let overBudget: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case source, tokens, count, authors
+        case budgetTokens = "budget_tokens"
+        case overBudget = "over_budget"
+    }
+}
+
+public struct StepContext: Decodable, Sendable, Hashable {
+    public let input: String
+    public let sessionId: String
+    public let skill: String?
+    public let harness: String
+    public let observedAt: Int
+    public let sources: [ContextSourceUsage]
+    public let assembledTokens: Int?
+    public let assembledBudgetTokens: Int?
+    public let overAssembledBudget: Bool
+    public let firstRequestTokens: Int?
+    public let peakRequestTokens: Int?
+    public let gaps: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case input, skill, harness, sources, gaps
+        case sessionId = "session_id"
+        case observedAt = "observed_at"
+        case assembledTokens = "assembled_tokens"
+        case assembledBudgetTokens = "assembled_budget_tokens"
+        case overAssembledBudget = "over_assembled_budget"
+        case firstRequestTokens = "first_request_tokens"
+        case peakRequestTokens = "peak_request_tokens"
+    }
+}
+
+public struct ContextReport: Decodable, Sendable, Hashable {
+    public let steps: [StepContext]
+    public let totals: [ContextSourceUsage]
 }
 
 public struct DoctorReport: Decodable, Sendable {

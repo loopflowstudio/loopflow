@@ -1,223 +1,176 @@
 # Execution
 
-Execution turns one Skill into one provider result and one Home-local Run
-record. It has no durable planning prerequisite.
-
 ```bash
-lf implement
+lf -b implement
+lf session list --interactive false --json
+lf session connect SESSION
 ```
 
-That ordinary path needs no Wave, Project, Task, daemon, or planning database.
+These commands use the current parser. This guide specifies the accepted
+lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
+which owners and proofs remain unfinished.
+
+The command has an Exec. The agent has an AgentSession. A captured Flow has a
+FlowSession. Their completion and authority are different facts.
 
 ## Request flow
 
 ```text
-argv
-  |
-  v
-CLI dispatch
-  |
-  v
-Skill discovery --> context sources --> assembled prompt
-                                         |
-                                         v
-provider route --> credential lease --> harness subprocess
-                                         |
-                      +------------------+------------------+
-                      v                  v                  v
-                 conversation        usage events       raw output
-                      +------------------+------------------+
-                                         |
-                                         v
-                                   Run record writer
+argv -> Exec admission -> Skill discovery -> prompt -> provider route
+                                                        |
+                                                        v
+                                     AgentSession reservation + input capture
+                                                        |
+                                                        v
+                                        native engine and conversation
+                                                        |
+                                     provider outcomes / retries / usage
+                                                        |
+                                                        v
+                                           AgentSession history
 ```
 
-| Stage | Input | Output | Source owner |
-| --- | --- | --- | --- |
-| Dispatch | argv, environment, cwd | selected command and launch flags | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) |
-| Discover | Skill or Flow name | one concrete source | [`lf/discovery.rs`](../../rust/loopflow/src/lf/discovery.rs) |
-| Prepare | agent docs, Skill, directions, preassembled context, explicit docs/diff/message | system and task prompts | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) |
-| Route | profile, account health, model request | harness, account, model, credential | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) and [`provider_account/lease.rs`](../../rust/loopflow/src/provider_account/lease.rs) |
-| Spawn | prompt, route, environment | provider process and normalized stream | [`harness/`](../../rust/loopflow/src/harness/) |
-| Record | launch facts and normalized events | immutable record plus disposable read model | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) |
+The same admission applies to headless and interactive skills, inline prompts,
+helpers and reviews. It needs no planning parents, but requires its Home's
+writable conversation store before provider launch. Optional Work enrichment does
+not confer a Flow claim. A failed admission cannot become an invisible file-only
+conversation. Large captured payloads remain outside SQLite behind indexed references.
 
-## Add optional Work attribution
+## Capture intent once
 
-```bash
-LF_DB_PATH=/unreadable lf --task LOO-265 implement
-```
+Discovery selects one repository override, builtin or installed Skill. Prompt
+assembly captures the selected instructions, exact provider strings, attribution,
+explicit documents and launch options. Definitions are not reconstructed from
+current files when continuing historical work.
 
-The Task selector can enrich the prompt when planning storage is available. It
-is still recorded as attribution when the store cannot be read, and the
-provider still launches. Attribution describes the launch; it does not reserve
-Work or authorize a mutation.
+A Flow captures its compiled graph, all routing alternatives and every Skill
+before execution. A direct conversation captures its selected Skill or inline
+prompt. Reconnect retains that conversation; a new Flow invocation captures new
+source. Current credentials and checkout contents remain live inputs to execution,
+not evidence that old captured intent changed.
 
-## Find and assemble the Skill
+## Record actual processes
 
-Skill discovery searches repository overrides, builtins, and installed Skill
-directories. A Flow node resolves through the same mechanism. One source wins;
-there is no runtime merge between two implementations of the same Skill.
+Exec admission records one actual lf process and immutable causal ancestry.
+Nested wrappers reuse the process identity and cannot finish the outer command
+early. Direct child commands name their invoking Exec. Agent-issued commands
+record the incoming agent bit plus stable Session/provider-generation provenance,
+then resolve the current matching driver once at admission.
 
-The prompt engine assembles only declared or explicit context:
+The provider and shell do not become fake Execs. After driver handoff, new
+commands from the continuing provider name the new driver; delayed commands from
+a replaced provider retain their historical origin. A parent exiting never
+rewrites existing descendants. These causal links grant neither signaling nor
+Flow-settlement authority.
 
-- system and surface instructions;
-- `AGENTS.md` or `CLAUDE.md` and the Loopflow operating contract;
-- the Skill and requested directions;
-- Wave goal, memory, and selected Work context when available;
-- explicit documents, changed-file bodies, diff, clipboard, and user message.
-
-Execution does not resolve planning state. The CLI or controller resolves
-Wave/Work context first—through [`work/`](../../rust/loopflow/src/work/) when
-applicable—and passes plain prompt inputs to the engine. A direct Skill run
-therefore remains valid when planning storage is absent or unreadable.
-
-Prompt attribution can report where tokens came from. It is observation, not a
-lease over the repository or planning state.
-
-## Select a provider route
-
-The current Home's access profile supplies an ordered set of provider accounts.
-Routing selects one harness, account, model, and credential before manifest
-publication. The stable non-secret account ID is recorded with the launch
-request; credential bytes and leases are not. A credential retry may move to
-another account while staying inside the same Run.
-
-Credentials remain in provider-native homes, encrypted storage, Doppler, or an
-explicit foreground SSH lease. A detached process uses credentials installed
-on its own Home. The Run record can name the account but never contains its
-credential.
+Exec completion records the observed command result, end time and known exit
+code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
+commands must reach their exact-store authority checks before any logging-induced
+store open; unavailable-store coverage is reported explicitly. An inspection
+Exec does not reserve agent work or mark a Task Started.
 
 ## Publish before spawn
 
-`CaptureHandle` mints a `RunId` and publishes the manifest immediately before
-the provider subprocess starts:
+1. Resolve one Home for the store and payload root; validate typed ancestry.
+2. Reserve the conversation, history/capture reference and exact driver together.
+3. Publish immutable launch input and record publication before spawning.
+4. Start or connect the native provider and retain exact engine/thread/client
+   evidence, distinct from the conversation driver.
+5. Append correlated provider outcomes and usage; settle selected Flow work under
+   its separate claim, and command completion under its Exec lifetime.
 
-```text
-$LF_HOME/runs/<first-two-uuid-chars>/<run-id>/
-  manifest.json       required; immutable
-  context.json        optional; immutable exact provider strings and attributed assets
-  events.jsonl        optional; append-only lifecycle, conversation, provider, and usage evidence
-  terminal.json       optional; immutable terminal proof
-```
+Prepared rows without publication are recoverable preparation failures. A missing
+spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
+Recovery preserves recorded inputs and exact native evidence. File publication
+and SQLite settlement have an explicit recoverable boundary; neither alone is a
+claim of successful execution.
 
-Manifest creation is the only required new persistence step:
+## Connect and transfer the driver
 
-1. Build `RunSpec` from facts available at launch.
-2. When prepared context is available, write `context.json` with the exact
-   system/task strings, ordered attribution, hashes, byte ranges, token counts,
-   and inclusion decisions.
-3. Write `manifest.json` with the context path, hash, and byte count inside the
-   same private staging directory.
-4. Sync the files, rename the directory atomically, then sync its parent.
-5. Export `LF_RUN_ID` and `LF_RUN_DIR` to the child.
-6. Export `LF_PARENT_RUN_ID` only for a verified local parent.
-7. Spawn the provider.
+Codex's private Unix WebSocket supports multiple clients on one active native
+thread. Attachment alone does not revoke the old client's writes. Loopflow's
+conversation-scoped relay therefore checks the Session driver at actual socket
+dispatch, including queued requests and approval replies. A bounded native send
+and driver transfer serialize through the same SQLite transaction. A send timeout
+has an unknown outcome and is not retried automatically.
 
-The manifest records launch identity and attribution: Run and optional parent,
-time, harness/model/surface, cwd/repository/worktree, Skill, subjects, optional
-context reference, runtime artifact, host, and boot identity when available. It records no liveness,
-credential, mutable Work state, or signal target.
+A passive viewer subscribes without claiming the Session. A former driver can
+keep receiving events after transfer but cannot start or steer a turn or mutate
+Session state. The continuing engine retains its provider generation while the
+new driver receives a new driver generation. Engine ownership and driver ownership
+must not be collapsed into one counter.
 
-Core types:
+`session connect --replace` stops the exact owned clients and reconnects to the
+live engine, preserving the active turn and sibling conversations. Flow retry
+can resume the recorded native conversation after confirmed engine exit;
+the replacement provider generation excludes late writes from the old provider.
+There is no separate Session engine-restart operation. Mere process silence,
+tmux visibility, causal ancestry or a stored active label grants no termination
+authority, and recovery never authorizes killing a shared engine for one thread.
 
-| Type | Contract |
-| --- | --- |
-| `RunId` | Opaque launch-evidence identity |
-| `RunSpec` | Launch facts available before publication |
-| `RunManifest` | Immutable, serialized launch record |
-| `CaptureHandle` | Bounded best-effort event writer plus synchronous settlement |
-| `TerminalReceipt` | First terminal outcome; exclusive-create wins |
-| `RunSnapshot` | Disposable projection rebuilt by scanning records |
-| `RunUsage` | Provider-authored usage reduced by stream |
+## Outcomes, retries and usage
 
-## Observe without gating
+AgentSession history owns provider outcomes. Exec owns command completion. A
+provider can succeed before the command fails later, and a parked Flow can outlive
+a successful command. Failed or interrupted conversation work remains history;
+continuation appends a new result to the same conversation.
 
-Harness adapters normalize provider output into conversation, tool lifecycle,
-session, retry, and usage events. The recorder uses a bounded in-process queue.
-A full queue, broken file, or malformed optional event warns once and lets the
-provider continue. JSONL does not sync per event.
+A Flow step consumes one exact successful AgentSession completion under its
+boundary/version/claim fence. Later conversation continuation does not rewrite
+that consumed result. A mechanical step records its own start/result in Flow
+history under its own child `lf` Exec, without inventing an AgentSession. The
+driver retains navigation authority and consumes the saved result. Recovery
+waits for a surviving step before replacing the driver claim; a missing result
+after process death still requires inspection before retry. Cursor movement
+cannot prove exactly-once external effects.
 
-Usage remains provider evidence:
+Blocked records the reason and stops at the current Flow position. Existing logs
+and outcomes provide the evidence. The Wave operator resolves authorized
+impediments or discusses missing judgment in its ongoing chat. Explicit retry
+retains the position and pass; unchanged failures do not automatically retry.
 
-- counters stay cumulative when the provider reports cumulative counters;
-- each provider Turn has a distinct `usage_stream_id`;
-- each retry has a distinct `attempt_key`;
-- omissions and counter resets remain visible;
-- `final_receipt` is provider-authored;
-- Run settlement never invents provider finality.
+Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
+once; never add checkpoints as independent consumption. Retries retain separate
+outcomes and measurements. Missing counters and unknown finality stay missing.
+The shared typed history reader selects captured events and unlinked native turns
+before decoding payloads. Native receipts without a start stay discoverable with
+unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
+separate from provider completion and Exec exit.
+Binding affects later work and preserves earlier usage ownership. The history
+reader owns this single attribution choice. Active-turn allocation uses recorded
+start/assignment evidence; uncertainty never becomes an invented token split.
 
-A reader reduces each cumulative stream once. It never sums every checkpoint
-as independent consumption.
+## Read indexed history
 
-## Settle once
+Conversation, Flow and command summaries filter and page in SQL before opening
+payloads. Exact detail can load the selected captured input, transcript or final
+answer. A provider-neutral exact final-answer receipt and recovered streamed
+prose remain distinguishable; incomplete extraction is labeled.
 
-When the harness returns, settlement creates `terminal.json` with `completed`,
-`failed`, or `interrupted`. Creation is exclusive and synced. A second writer
-with a conflicting outcome loses without changing the first receipt.
+Session inventory reads the selected rows, Work labels and indexed Flow metadata;
+it does not decode captures or Session history. Readiness text remains the exact
+recorded Session field. Local active-client receipts may establish Active; without
+that observation, explicit readiness or closure, the displayed state is Unknown.
+It does not mean failed or unavailable for connection. Connect and completion
+validate the exact capture and native history before acting. A recorded Flow with
+no selected occurrence keeps its membership with an unknown position; missing
+historical membership never becomes Independent. Unknown or corrupt detail remains
+available for exact inspection instead of preventing unrelated rows from listing.
 
-The event writer gets a bounded final drain. Telemetry loss cannot hold
-settlement open or turn a successful provider result into failure.
+Session lists support contains-search and title/ID ordering; stable ID pages serve
+Desktop's complete-inventory reconciliation. Names, readiness text and iteration
+tuples vary in size, and listing checks exact client receipts. The query therefore
+has no constant-byte or constant-time guarantee. Measurement status belongs in
+the [cutover status](../architecture-reference.md#cutover-status).
 
-If the launcher disappears before settlement, the record remains
-unterminated. That means only “no terminal proof was recorded.” It is not proof
-that a process is still alive.
+Typed Task/Wave links survive landing and provider/driver replacement. Readers
+never use live PR eligibility, path names or mutable manifests to recover identity.
+Default interactive visibility does not hide headless history from explicit queries
+or make it impossible to resume. Desktop and CLI consume the same fields.
 
-## Read the evidence
+Current-state conversion and its preservation boundary belong in
+[Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
+owners, with no legacy import or file fallback.
 
-```bash
-lf runs --task LOO-265 --json
-lf runs --parent run_ab12 --json
-lf runs run_ab12 --final
-lf runs run_ab12 --events
-lf replay run_ab12
-lf usage --task LOO-265 --days 30 --json
-```
-
-`--final` prefers the exact provider-neutral final-answer receipt. Runs
-without that receipt are labeled and return normalized streamed prose from
-their last completed provider turn, including commentary, so callers can
-recover evidence without a false claim of exact extraction.
-
-`scan_runs_since` reduces record files into `RunSnapshot`. `lf runs` and `lf
-usage` apply the same Wave/Project/Task attribution drill over that projection;
-Work activity, status views, and the Mac app consume it too. There is no
-authoritative Run index to repair.
-
-Direct-child reads resolve the parent manifest first and scan the Home-local
-records without the recent-history cap. Final-answer reads project normalized
-`ConversationEvent::ItemCompleted` messages, preferring the explicit
-`final_answer` phase and retaining untagged conclusions for older harnesses.
-
-Replay resolves one full Run ID or unambiguous prefix, verifies that its
-manifest contains a headless launch request and that the named provider account
-is available on this Home, then creates a normal child Run through the same
-harness. Current prompt files and planning Work state do not reconstruct the
-request; current credentials and repository contents remain live launch inputs.
-The source record remains immutable.
-
-Reads are local to the current Home:
-
-```bash
-lf runs                         # this Home
-lf ssh build-home runs          # build-home
-lf ssh build-home usage --json  # usage recorded there
-```
-
-## Boundary contracts
-
-- One mediated harness launch publishes one manifest before spawn.
-- One launch creates at most one terminal receipt.
-- Append-only telemetry is useful evidence and a nonfatal side channel.
-- One retry is another attempt inside the same Run.
-- Run parentage and subject attribution describe causality, not authority.
-- No `owner.json` means no durable cross-process signal authority.
-- The direct spawner may cancel the child handle it owns; another process may
-  not infer that capability from PID, Work, tmux, or Run-record evidence.
-- Planning enrichment can add context. It cannot reserve Work or become a
-  launch gate.
-
-## Next
-
-[Planning →](planning.md) composes runs and preserves purpose across them.
-[Data and persistence →](data.md) explains how Run-record evidence relates to the
-other stores.
+[Planning](planning.md) owns captured Flow progression and planning ancestry.
+[Data and persistence](data.md) distinguishes record ownership from payload storage.

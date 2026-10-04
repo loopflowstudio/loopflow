@@ -1,9 +1,161 @@
 # intelligence wave memory
 
 Renamed from `memory` in July 2026. The accepted September chapter combines
-Trace & Context in one measured bet: human-selected work is explainable from
+Trace & Context in one measured bet: explicitly selected work is explainable from
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
+
+## Check ownership (2026-09-30)
+
+Jack Heart requested fewer checks and no Flow blocks on display access or a
+person's judgment (LOO-357). Implement/compress build and run focused sanity
+tests; gate owns affected suites and acceptance once. Unavailable checks go to
+capable gate/CI, judgment to demo/review. Scratch keeps one command/result line.
+Historical measurements below describe their original scope; they do not impose
+new verification obligations on each pass. Desktop's default Swift checks build
+the app and inspect production views without launching windows; native window
+and terminal diagnostics are opt-in. The September 30 baseline and repeatable
+collector live in `performance/check-cost.md`.
+
+## Launch context ablation (2026-10-01)
+
+Jack Heart requested a study of which launch sources change outcomes (LOO-349).
+Findings, method and limits live in `performance/context-ablation.md`; the
+collector is `scripts/context_ablation.py`.
+
+- Verdicts from a 31-replay pilot: keep Wave memory at 16,000 tokens, keep the
+  Task's own scratch notes, trim older scratch (scratch budget now 12,000),
+  old steers and agent comments are already gone from launches. Resumed
+  history is unmeasured: every replayable launch is a fresh turn.
+- A launch is about 12k tokens since budgets and under a tenth of a turn's
+  peak input. Further launch trimming buys little; in-turn reads and resumed
+  history are the unmeasured cost.
+- Two identical replays share 40% of changed files and one in five loop-decide
+  pairs disagrees. No ablation result means anything without a repeat baseline.
+  The pilot compared size, verdict, checks and time, never correctness.
+- Agents fetch what the prompt omits: without inline memory or scratch they
+  read the files from disk. Removing a source moves its tokens into the turn.
+- Replay isolation needs an lf that keeps its store in `LF_HOME` (#1386).
+  Under lf 0.12.28, nested `lf` calls in a "disposable" Home read the real
+  store and Linear. Scrub ambient `LF_*`, put that lf first on `PATH`, and
+  clone without a remote.
+- Manifests do not record HEAD at launch. The worktree reflog recovers it only
+  while the worktree exists; a PR-head approximation made one record block in
+  every arm. Recording the launch commit is the cheapest capture repair.
+
+## Context cost instrument (2026-10-01)
+
+Jack Heart requested weekly context cost and turn latency (LOO-348). `lf usage
+--weekly` reads Session history from the store in seven-day weeks from
+2026-09-30 and publishes the latest complete week to the four
+`metrics/context-*.md` contracts; `telemetry-daily` runs it. Baselines and the
+KR/target plan live in `performance/context-cost.md`. The branch could not read
+Jack's Home: installed 0.12.28 predates `session_events`, so the first real
+reading and the chapter targets wait on a release carrying it. The hand
+baseline's silent hours cover 1,349 records, not one week; compare the report's
+own baseline row before treating 215 h as a weekly target.
+
+## Bind attribution comparison (2026-10-01)
+
+Jack Heart requested re-evaluating prospective usage attribution (LOO-336).
+`lf usage --binds` reads Session history and shows each bound Session's usage
+before, during and after its bind, with Task and Wave totals under both rules.
+The 2026-10-01 reading is empty: installed 0.12.28 has neither `lf session bind`
+nor Session tables, so no bind exists to measure. Prospective stays; the
+recommendation and the reports post-hoc would move are in
+`performance/bind-attribution.md`. The choice is Jack's once real binds appear.
+
+## Attribution and feedback evidence (curated 2026-09-25)
+
+- A first-page GraphQL query captured author names while pagination fetched
+  only IDs. Static fixtures containing names hid the loss. The repaired
+  `observe_issue_reads_every_comment_page_in_revision_order` models field
+  selection and observes both authors. Extend continuation queries and verify
+  their actual selected data when adding provider-record fields.
+- Native resume bypasses fresh prompt assembly. Tests of launch prompts or
+  resume subprocess arguments cannot establish that the resumed model received
+  and obeyed participant corrections. Keep that live proof separate.
+- Human feedback lives in self-contained topic-named scratch notes. Ready
+  summaries name paths and takeaways; deciding agents reconcile those notes
+  and the current design. A path alone does not deliver context. Inspect actual
+  prepared decision and implementation prompts, including nested/untracked
+  Markdown, and reread files changed after the launch-time snapshot. No filename
+  confers navigation authority.
+- One fallible production chat delivery path replaced an anonymous test shortcut
+  and unchecked writer. Preserve destination ownership and journal append before
+  projection/broadcast; failed writes remain retryable. Provider ingestion owns
+  its separate IDs and deduplication. Producer-generated SSE frames exposed a
+  Swift/Rust shape mismatch that an old-shaped green decoder fixture concealed.
+- The earlier live continuation demo used manual binding/Home corrections and
+  predates the outer demo-feedback loop. Later local Complete/recovery and
+  prepared-prompt proofs use simulated providers. Neither establishes installed
+  Task parity or live acceptance of the revised loop. Measure production deletion
+  separately from moved types, tests, historical readers and scratch cleanup.
+
+The retired [attribution record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/name-attribution.md)
+and [continuation record](https://github.com/loopflowstudio/loopflow/blob/1a691ac6a222b95c46859c9c06d162d6442950a4/.lf/directions/task-continuation.md)
+retain exact historical proof counts, commit-addressed artifacts and unresolved
+acceptance. This curation does not rerun those checks or verify remote links.
+
+## Instruction ownership and design delivery (2026-09-25)
+
+- Customer operating guidance carries universal execution rules. Detailed Task,
+  placement and recovery procedures belong in the skills exercising them.
+  Generic model/API reduction advice now lives in builtin compress; maintainer
+  migration/updater constraints remain in repo guidance. Repo `.lf/skills` replace
+  local execution skills but are not exported to customers by skill sync.
+- `.lf/` document gathering is excluded, but branch diffs can include its changes.
+  The tracked chapter archive is historical evidence, not ambient prompt input.
+  Keep repeatable instructions in skills, conventions in the agent guide,
+  durable judgment in Wave memory and temporary designs in scratch. Do not
+  recreate retired root `.lf/` handoff notes or prompt directions.
+- Existing-design handoff prepares the Task, copies actual artifacts with their
+  relative references and draft status, then launches the selected Flow. Task
+  creation stdin is the problem brief. Worker startup alone cannot establish
+  delivery of context. Preserve newer destination edits and existing code ownership.
+  The [preserved handoff design](https://github.com/loopflowstudio/loopflow/blob/033e0758504390e5db9d254fed4964b0dd6da4bc/scratch/prs-and-tasks-handoff.md)
+  proposes scratch import; no automatic `--scratch` transfer or checkout adoption
+  was established by the authorship branch. Those remain separate design questions.
+- The former skill-sync probe expected retired repo-local exports and could
+  mutate personal skills before failing. Removed it; isolated-home Rust tests
+  prove current delivery. Prompt boundary tests must inspect the assembled
+  customer examples, not rely solely on a few forbidden vocabulary assertions.
+
+### Reconciliation and reusable skills (branch evidence, 2026-09-28)
+
+Jack requested useful standalone skills before composing process, and editing
+stale artifacts instead of accumulating review reports. The `realign` branch
+replaces review-slice with reconciliation of intent, evidence, plan, code, and
+identified Wave memory. Clear corrections can change both plan and code;
+missing behavior cannot justify weakening acceptance. Unbound work creates no
+Wave, and unavailable memory remains an explicit gap.
+
+The useful handoff is a short current account of progress, proof, lessons, and
+unresolved choices. It supplies evidence for loop-decide without selecting its
+verdict. Mandatory replacement counts and pass ledgers confused that purpose
+with ceremony; designs can still require architecture-specific replacement
+proof. Independent audits and chapter histories retain their distinct readers.
+Authoring rules live in [PROMPTS.md](../../PROMPTS.md) and builtin prompt;
+reconciliation instructions live in builtin realign.
+
+Jack Heart requested retiring `update-wave` and `record-learnings`; the
+September 28 `retire-update-wave` branch removes both. `realign` now owns
+memory curation alongside plan and code reconciliation. Keep that procedure
+in the skill, with compact ownership guidance in assembled prompts and docs.
+Existing invocations and installed exports may still carry the retired wording;
+their presence is not evidence that the source catalog still offers those skills.
+
+Commit `1a1baa883` records passing prompt goldens, formatting, and all-target
+Clippy after the guidance reduction. Those checks establish rendered guidance
+and static validity, not installed skill refresh or successful live curation.
+Current Flow composition is documented in [CLI docs](../../docs/lf.md).
+
+The [preserved design and proof limits](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
+record passing assembled-prompt, export, catalog, and Flow checks. These prove
+instruction delivery. The stale-plan, code-defect, aligned-repeat, and missing-
+intent scenarios were walkthroughs, not independent-agent trials. QA adaptation
+was deferred; no follow-up Task was filed. This curation does not establish
+branch placement, live acceptance, or a prompting-outcome KR.
 
 ## Current evidence boundary (2026-09-23)
 
@@ -54,6 +206,30 @@ research were not all accepted commitments. Current Task directives govern scope
   budget/duration obligations. These are dated baseline observations, not current
   health claims. LOO-288/289/290 own capture, population, and usable reconstruction;
   retain observations while the serial implementation slot advances.
+
+## Prompt assembly reduction (branch evidence, 2026-09-24)
+
+- **Prompt directions are removed after an explicit request.** The `task-viewer`
+  branch removes CLI switches, config/Skill/Flow fields, directory and fallback
+  loaders, discovery/build generation, injection, and current authoring guidance.
+  Do not restore an implicit skill fallback or compatibility selector. Ordinary
+  Work Steer and Session Iterate advice retain their separate semantics;
+  `DirectionSnapshot` projects Steer, not the removed prompt feature.
+- **Historical trace categories remain readable.** Keep persisted
+  `ContextAssetKind::Direction` for old records; current assembly emits none.
+  Historical release notes and chapter evidence are not active feature paths.
+- **Gather and render the actual values.** The path is now
+  `GatherContextOpts -> PromptComponents -> String`. `GatheredContext` and
+  `RenderedPrompt` had public tuple constructors and unchecked mutable access,
+  so their names supplied no validation or phase guarantee. `PreparedLaunchPrompt`
+  still carries separately consumed agent configuration, deduplication evidence,
+  components, and rendered channels. Preserve those facts for capture work.
+- **Separate removal proof from representation proof.** Direction removal
+  deliberately changes prompt fixtures; the later wrapper reduction preserves
+  those fixtures byte-for-byte. Recorded context/golden/launch tests (34) and
+  Clippy pass for the reduction. These establish source behavior, not installed
+  promotion or the Trace & Context population/reconstruction KRs. LOO-288/289/290
+  remain open; this reduction introduces no migration or new evidence store.
 
 ## Lessons from the retired SQLite ledger
 

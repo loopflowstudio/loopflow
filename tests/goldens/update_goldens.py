@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -30,8 +31,6 @@ def main() -> None:
             cmd.extend(["--surface", case["surface"]])
         if case.get("no_loopflow"):
             cmd.append("--no-loopflow")
-        for direction in case.get("directions", []):
-            cmd.extend(["--direction", direction])
         for docs_target in case.get("docs", []):
             cmd.extend(["--docs", docs_target])
         cmd.extend(["--diff-files", "true" if case["diff_files"] or case["diff"] else "false"])
@@ -40,7 +39,14 @@ def main() -> None:
         if case.get("wave"):
             cmd.extend(["--wave", case["wave"]])
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=ROOT)
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            env=dict(os.environ, LF_USER_NAME="Fixture Participant"),
+        )
         case_path.with_suffix(".md").write_text(result.stdout)
 
 

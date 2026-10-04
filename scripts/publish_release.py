@@ -14,10 +14,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import boto3
+from botocore.exceptions import ClientError
 
 CONTROL_ROOT = Path(__file__).resolve().parent.parent
 ROOT = Path(os.environ.get("LF_RELEASE_SOURCE_REPO", CONTROL_ROOT))
@@ -80,7 +83,7 @@ def _run(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    print(f"$ {shlex.join(cmd)}", flush=True)
+    print(f"$ {shlex.join(cmd)}", file=sys.stderr, flush=True)
     return subprocess.run(
         cmd,
         cwd=cwd,
@@ -137,16 +140,16 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple[Path, Path]:
+def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if sorted(member.name for member in members) != ["lf", "lfd"] or not all(
+        if sorted(member.name for member in members) != ["lf"] or not all(
             member.isfile() for member in members
         ):
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
         binaries = []
-        for name in ("lf", "lfd"):
+        for name in ("lf",):
             member = next(member for member in members if member.name == name)
             source = package.extractfile(member)
             if source is None:
@@ -156,22 +159,29 @@ def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple
                 shutil.copyfileobj(source, destination)
             binary.chmod(0o755)
             binaries.append(binary)
-    return binaries[0], binaries[1]
+    return binaries[0]
 
 
 def _validate_release_candidate(binary: Path, scratch: Path) -> None:
+    home = scratch / "preflight-home"
+    home.mkdir()
     result = _run(
         [str(binary), "install", "preflight", "--json"],
         capture=True,
-        env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
         check=False,
+        env={**os.environ, "LF_HOME": str(home)},
     )
     try:
-        candidate = json.loads(result.stdout)["candidate"]
+        preview = json.loads(result.stdout)
+        candidate = preview["candidate"]
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("release candidate did not emit a promotion identity") from exc
     if candidate.get("authority") != "published":
         raise RuntimeError("release candidate has validation-only migration authority")
+    verdict = preview.get("verdict", {})
+    if result.returncode != 0 or verdict.get("kind") not in {"promote", "promote_and_migrate"}:
+        reasons = "; ".join(verdict.get("reasons", [])) or result.stderr.strip()
+        raise RuntimeError(f"release candidate cannot install into a fresh Home: {reasons}")
 
 
 def _sha256(path: Path) -> str:
@@ -250,6 +260,62 @@ def _candidate_receipt_path(artifact_dir: Path) -> Path:
     return artifact_dir / "candidate.json"
 
 
+def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[str, object]:
+    """Inspect immutable source; external uncertainty never means unpublished."""
+    files = _run(
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            commit,
+            "--",
+            "rust/loopflow/src/store/migrations/drafts",
+        ],
+        capture=True,
+    ).stdout.splitlines()
+    drafts = [name for name in files if name.endswith(".sql")]
+    publications: list[str] | None = None
+    if drafts and check_publication:
+        publications = []
+        release = _run(
+            ["gh", "release", "view", tag, "--json", "isDraft"],
+            capture=True,
+            check=False,
+        )
+        if release.returncode == 0:
+            publications.append("GitHub Release (draft or published)")
+        elif release.stderr.strip() != "release not found":
+            raise RuntimeError(
+                f"cannot establish GitHub publication state: {release.stderr.strip()}"
+            )
+        version = tag.removeprefix("v")
+        request = urllib.request.Request(
+            f"https://crates.io/api/v1/crates/loopflow/{version}",
+            headers={"User-Agent": "loopflow-release"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30):
+                publications.append("crates.io")
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+        try:
+            _r2_client().head_object(Bucket="downloads", Key=f"Loopflow-{version}.dmg")
+            publications.append("versioned DMG")
+        except ClientError as error:
+            if error.response["Error"]["Code"] not in {"404", "NoSuchKey", "NotFound"}:
+                raise
+    return {"preparation_required": drafts, "publications": publications}
+
+
+def _validate_archives(artifact_dir: Path) -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        scratch = Path(temp)
+        binary = _extract_arm_binary(_find_native_archives(artifact_dir), scratch)
+        _validate_release_candidate(binary, scratch)
+
+
 def _read_candidate_receipt(artifact_dir: Path) -> CandidateReceipt:
     try:
         value = json.loads(_candidate_receipt_path(artifact_dir).read_text())
@@ -272,8 +338,7 @@ def _verify_candidate_receipt(
 ) -> None:
     if receipt.tag != tag or receipt.source_commit != source_commit:
         raise RuntimeError(
-            "prepared release candidate identity does not match "
-            f"{tag} at {source_commit}"
+            f"prepared release candidate identity does not match {tag} at {source_commit}"
         )
     workflow_run_id = os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID")
     if workflow_run_id and receipt.workflow_run_id != workflow_run_id:
@@ -302,9 +367,11 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> Candidate
         try:
             receipt = _read_candidate_receipt(output_dir)
             _verify_candidate_receipt(receipt, output_dir, tag, source_commit)
-            return receipt
         except RuntimeError as error:
             print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
+        else:
+            _validate_archives(output_dir)
+            return receipt
 
     archives = _find_native_archives(artifact_dir)
     installer = ROOT / "release" / "install.sh"
@@ -314,7 +381,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> Candidate
     stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
+        arm_binary = _extract_arm_binary(archives, scratch)
         _validate_release_candidate(arm_binary, scratch)
         _run(["sh", "-n", str(installer)])
         stages.append(CANDIDATE_STAGES[1])
@@ -375,6 +442,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
     candidate = _read_candidate_receipt(artifact_dir)
     _verify_candidate_receipt(candidate, artifact_dir, tag, source_commit)
+    _validate_archives(artifact_dir)
     archives = _find_native_archives(artifact_dir)
     dmg = artifact_dir / "Loopflow.dmg"
     installer = artifact_dir / "install.sh"
@@ -425,6 +493,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Publish a Loopflow release from the cron host")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check")
+    inspect = subparsers.add_parser("inspect")
+    inspect.add_argument("--commit", required=True)
+    inspect.add_argument("--tag", required=True)
+    inspect.add_argument("--check-publication", action="store_true")
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--tag", required=True)
     prepare.add_argument("--artifacts", type=Path, required=True)
@@ -436,6 +508,17 @@ def main() -> None:
 
     if args.command == "check":
         check_release_host()
+        return
+    if args.command == "inspect":
+        print(
+            json.dumps(
+                inspect_source(
+                    args.commit,
+                    args.tag,
+                    check_publication=args.check_publication,
+                )
+            )
+        )
         return
 
     main_repo = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT))

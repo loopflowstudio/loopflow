@@ -100,59 +100,60 @@ def main() -> int:
     binary = _lf_binary()
     with tempfile.TemporaryDirectory(prefix="lf-account-demo-") as directory:
         demo_home = Path(directory)
-        env = os.environ.copy()
+        env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
         env["LF_HOME"] = str(demo_home)
 
         print("Isolated account-routing demo — fake metadata, no credentials")
-        _run(binary, env, "auth", "accounts")
+        _run(binary, env, "account", "set", "linear", "--clear-chrome-profiles")
         database = demo_home / "loopflow.db"
         _seed_topology(database, demo_home)
 
         access = (
-            ("claude", "primary-claude", ("personal",)),
-            ("claude", "personal-claude", ("engineering", "loopflow")),
-            ("codex", "primary-codex", ("personal",)),
-            ("codex", "engineering-codex", ("engineering",)),
-            ("codex", "personal-codex", ("loopflow",)),
+            ("claude", "primary@example.com", ("personal",)),
+            ("claude", "personal@example.com", ("engineering", "loopflow")),
+            ("codex", "primary@example.com", ("personal",)),
+            ("codex", "engineering@example.com", ("engineering",)),
+            ("codex", "personal@example.com", ("loopflow",)),
         )
         for provider, account, profiles in access:
             _run(
                 binary,
                 env,
-                "auth",
-                "access",
+                "account",
                 "set",
                 provider,
                 account,
-                *[item for profile in profiles for item in ("--profile", profile)],
+                *[item for profile in profiles for item in ("--chrome-profile", profile)],
             )
 
         _run(
             binary,
             env,
+            "account",
             "route",
             "set",
             "claude",
-            "primary-claude",
-            "personal-claude",
+            "primary@example.com",
+            "personal@example.com",
         )
         _run(
             binary,
             env,
+            "account",
             "route",
             "set",
             "codex",
-            "primary-codex",
-            "engineering-codex",
-            "personal-codex",
+            "primary@example.com",
+            "engineering@example.com",
+            "personal@example.com",
         )
 
-        _print_step("Access profiles", _run(binary, env, "profile", "list"))
+        _print_step("Access profiles", _run(binary, env, "account", "--cached", "--details"))
         _print_step(
             "Provider routes",
-            _run(binary, env, "route", "show"),
+            _run(binary, env, "account", "route"),
         )
-        _print_step("Account lifecycle", _run(binary, env, "auth", "accounts"))
+        _print_step("Account lifecycle", _run(binary, env, "account", "--cached"))
 
         print("\nLook for:")
         print("  1. Claude and Codex have independent account orders.")

@@ -2,26 +2,42 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let projects: [WaveProjectWork]
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    public let tasks: WorkEvidence<WaveTaskWork>
 
-    public init(objective: String, projects: [WaveProjectWork]) {
+    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<WaveTaskWork>) {
         self.objective = objective
         self.projects = projects
+        self.tasks = tasks
     }
 }
 
-public struct WaveProjectWork: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { project.id }
+public enum ProjectStatus: String, Decodable, Sendable, Hashable {
+    case backlog, planned, started, paused, completed, canceled
+}
 
-    public let project: ProjectPlanningSnapshot
-    public let runtime: ProjectRuntimeSnapshot?
-    public let directive: WorkDirectiveSnapshot?
-    public let nextMove: WorkNextMove
-    public let tasks: [WaveTaskWork]
+public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let workId: String?
+    public let slug: String
+    public let name: String
+    public let flow: String
+    public let status: ProjectStatus
+    public let metricTargets: [ChapterMetricTarget]
+    public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case project, runtime, directive, tasks
-        case nextMove = "next_move"
+        case id, slug, name, flow, status, krs
+        case workId = "work_id"
+        case metricTargets = "metric_targets"
+    }
+}
+
+extension WorkEvidence where Item == ProjectPlanningSnapshot {
+    public var currentProject: ProjectPlanningSnapshot? {
+        let current = items.filter { $0.status == .started }
+        return current.count == 1 ? current[0] : nil
     }
 }
 
@@ -31,6 +47,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
+    public let flow: TaskFlowSnapshot
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -39,31 +56,9 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs
+        case task, reference, runtime, directive, condition, actions, prs, flow
         case nextMove = "next_move"
         case activePr = "active_pr"
-    }
-}
-
-public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let slug: String
-    public let name: String
-    public let summary: String
-    public let definition: String
-    public let flows: ProjectFlowPlanSnapshot
-    public let krs: [PlanningKeyResult]
-}
-
-public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
-    public let first: String?
-    public let loopFlow: String?
-    public let finallyFlow: String?
-
-    enum CodingKeys: String, CodingKey {
-        case first
-        case loopFlow = "loop"
-        case finallyFlow = "finally"
     }
 }
 
@@ -80,58 +75,49 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let name: String
     public let description: String
     public let rank: UInt32
+    public let state: String?
+    public let completedAt: String?
     public let completed: Bool
     public let assignee: String?
-}
-
-public struct HistoricalFailure: Codable, Sendable, Hashable {
-    public let message: String
-    public let occurredAt: String
 
     enum CodingKeys: String, CodingKey {
-        case message
-        case occurredAt = "occurred_at"
+        case id, identifier, name, description, rank, completed, state, assignee
+        case completedAt = "completed_at"
     }
-}
 
-public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let status: WorkStatus
-    public let reason: String
-    public let updatedAt: String
-    public let iteration: UInt32
-    public let pendingObservations: UInt32
-    public let provider: String
-    public let lastFailure: HistoricalFailure?
-
-    enum CodingKeys: String, CodingKey {
-        case status, reason, iteration, provider
-        case workId = "work_id"
-        case updatedAt = "updated_at"
-        case pendingObservations = "pending_observations"
-        case lastFailure = "last_failure"
+    public var terminalLabel: String? {
+        switch state {
+        case "canceled": "Canceled"
+        case "duplicate": "Duplicate"
+        default: isSuccessful ? "Completed" : nil
+        }
     }
+
+    public var historyLabel: String? {
+        isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
+    }
+
+    public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
+    public var isSuccessful: Bool { state == "completed" || (state == nil && completed) }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
-    public let projectId: String
-    public let routingProjectId: String?
     public let status: WorkStatus
     public let reason: String
     public let updatedAt: String
     public let provider: String
+    /// Durable evidence that work began; `false` means none is recorded.
+    public let started: Bool
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider
+        case status, reason, provider, started
         case workId = "work_id"
-        case projectId = "project_id"
-        case routingProjectId = "routing_project_id"
         case updatedAt = "updated_at"
     }
 }
 
-/// Stable Task references shared by `lf status` and `lf roadmap`. The issue URL
+/// Stable Task references shared by `lf wave status` and `lf roadmap`. The issue URL
 /// comes from the cached PM snapshot; workspace evidence comes from durable
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
@@ -145,9 +131,18 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+    public let homeId: String?
+    public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
     public let worktree: String
+    public let localExists: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case slug, branch, worktree
+        case homeId = "home_id"
+        case localExists = "local_exists"
+    }
 }
 
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
@@ -155,21 +150,6 @@ public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case waiting
     case available
     case later
-}
-
-public struct RoadmapProject: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { project.id }
-
-    public let project: ProjectPlanningSnapshot
-    public let runtime: ProjectRuntimeSnapshot?
-    public let nextMove: WorkNextMove
-    public let section: RoadmapSection
-    public let tasks: [RoadmapTask]
-
-    enum CodingKeys: String, CodingKey {
-        case project, runtime, section, tasks
-        case nextMove = "next_move"
-    }
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -181,11 +161,12 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
+    public let flow: TaskFlowSnapshot
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, section
+        case task, reference, runtime, condition, actions, flow, section
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -216,7 +197,6 @@ public enum WorkDirectiveKind: String, Decodable, Sendable, Hashable {
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
     case user
     case wave
-    case project
     case task
     case ci
     case external
@@ -361,7 +341,7 @@ public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
     public let url: URL
 }
 
-/// A reading from `lf status`, or the reason there is none. Mirrors Rust
+/// A reading from `lf wave status`, or the reason there is none. Mirrors Rust
 /// `Evidence<T>` (`lf/commands/waves.rs`): "we looked and found nothing" and "we
 /// could not look" are different facts, and a surface that renders them the same
 /// is lying. `truncated` says a cap hid older items.

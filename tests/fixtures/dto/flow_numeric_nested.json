@@ -1,0 +1,276 @@
+{
+  "recommended": "nested",
+  "record": {
+    "kind": "pinned",
+    "invocation_id": "numeric-nested-capture",
+    "graph": {
+      "name": "nested",
+      "steps": [
+        {
+          "key": 0,
+          "id": "begin",
+          "label": "patch",
+          "kind": "skill",
+          "human": false,
+          "returns_to": null,
+          "sources": [],
+          "paths": []
+        },
+        {
+          "key": 1,
+          "id": null,
+          "label": "route",
+          "kind": "xor",
+          "human": false,
+          "returns_to": null,
+          "sources": [],
+          "paths": [
+            {
+              "name": "alpha",
+              "description": "alpha",
+              "steps": [
+                {
+                  "key": 2,
+                  "id": "begin",
+                  "label": "patch",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "sources": [],
+                  "paths": []
+                },
+                {
+                  "key": 3,
+                  "id": null,
+                  "label": "route",
+                  "kind": "xor",
+                  "human": false,
+                  "returns_to": null,
+                  "sources": [],
+                  "paths": [
+                    {
+                      "name": "fix",
+                      "description": "fix",
+                      "steps": [
+                        {
+                          "key": 4,
+                          "id": "begin",
+                          "label": "patch",
+                          "kind": "skill",
+                          "human": false,
+                          "returns_to": null,
+                          "sources": [],
+                          "paths": []
+                        },
+                        {
+                          "key": 5,
+                          "id": "check",
+                          "label": "check",
+                          "kind": "skill",
+                          "human": false,
+                          "returns_to": 4,
+                          "sources": [],
+                          "paths": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": 6,
+                  "id": "check",
+                  "label": "check",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": 2,
+                  "sources": [],
+                  "paths": []
+                }
+              ]
+            },
+            {
+              "name": "zeta",
+              "description": "zeta",
+              "steps": [
+                {
+                  "key": 7,
+                  "id": "begin",
+                  "label": "patch",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": null,
+                  "sources": [],
+                  "paths": []
+                },
+                {
+                  "key": 8,
+                  "id": "check",
+                  "label": "check",
+                  "kind": "skill",
+                  "human": false,
+                  "returns_to": 7,
+                  "sources": [],
+                  "paths": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": 9,
+          "id": "check",
+          "label": "check",
+          "kind": "skill",
+          "human": false,
+          "returns_to": 0,
+          "sources": [],
+          "paths": []
+        }
+      ],
+      "interactions": {
+        "stages": [],
+        "transitions": [
+          {
+            "from": "@start",
+            "to": "@end",
+            "nodes": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9"
+            ],
+            "routes": [
+              {
+                "from": "@start",
+                "to": "0",
+                "condition": null
+              },
+              {
+                "from": "0",
+                "to": "1",
+                "condition": null
+              },
+              {
+                "from": "1",
+                "to": "2",
+                "condition": "alpha"
+              },
+              {
+                "from": "1",
+                "to": "7",
+                "condition": "zeta"
+              },
+              {
+                "from": "7",
+                "to": "8",
+                "condition": null
+              },
+              {
+                "from": "8",
+                "to": "9",
+                "condition": "advance"
+              },
+              {
+                "from": "8",
+                "to": "7",
+                "condition": "repeat"
+              },
+              {
+                "from": "9",
+                "to": "@end",
+                "condition": "advance"
+              },
+              {
+                "from": "9",
+                "to": "0",
+                "condition": "repeat"
+              },
+              {
+                "from": "2",
+                "to": "3",
+                "condition": null
+              },
+              {
+                "from": "3",
+                "to": "4",
+                "condition": "fix"
+              },
+              {
+                "from": "4",
+                "to": "5",
+                "condition": null
+              },
+              {
+                "from": "5",
+                "to": "6",
+                "condition": "advance"
+              },
+              {
+                "from": "5",
+                "to": "4",
+                "condition": "repeat"
+              },
+              {
+                "from": "6",
+                "to": "9",
+                "condition": "advance"
+              },
+              {
+                "from": "6",
+                "to": "2",
+                "condition": "repeat"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "current": 5,
+    "completed": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "returns": [
+      {
+        "decider": 5,
+        "traversals": 2
+      },
+      {
+        "decider": 6,
+        "traversals": 0
+      },
+      {
+        "decider": 8,
+        "traversals": 0
+      },
+      {
+        "decider": 9,
+        "traversals": 3
+      }
+    ],
+    "iterations": [
+      [
+        3
+      ],
+      [
+        0
+      ],
+      [
+        2
+      ]
+    ],
+    "execution": "running",
+    "reason": "Selected nested check",
+    "restart_required": false
+  },
+  "controls": []
+}

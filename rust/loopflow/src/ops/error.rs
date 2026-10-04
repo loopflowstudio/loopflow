@@ -20,16 +20,18 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
-    #[error("rebase onto {onto} failed ({detail})")]
-    RebaseConflict {
+    #[error("Task {issue} is {state} and cannot be completed")]
+    TaskCompletionConflict { issue: String, state: String },
+    #[error("sync onto {onto} failed ({detail})")]
+    SyncConflict {
         onto: String,
         detail: String,
-        recovery: Option<Box<crate::ops::rebase::RebaseRecovery>>,
+        recovery: Option<Box<crate::ops::sync::SyncRecovery>>,
     },
     #[error(
-        "refusing to rebase: recorded base {base} is not an ancestor of HEAD, so \
+        "refusing to sync: recorded base {base} is not an ancestor of HEAD, so \
          its history diverged. Reconcile by hand; the commits since the common \
          ancestor are:\n{commits}"
     )]
-    UnsafeRebaseBase { base: String, commits: String },
+    UnsafeSyncBase { base: String, commits: String },
 }

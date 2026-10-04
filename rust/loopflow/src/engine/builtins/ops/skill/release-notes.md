@@ -17,7 +17,9 @@ Write release notes that fuse release intent with shipped behavior.
    JSON is the complete notes input.
 4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
 5. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
-6. Write `RELEASE_NOTES.md`.
+6. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
+   A preview supplies a temporary output path; do not edit the repository's
+   release files or publish anything.
 
 ## Output
 
@@ -49,6 +51,10 @@ Structure:
   do not dump the omission ledger into the notes.
 - If there are no decisions, build the narrative from commits, merged PRs, and
   diffs.
+- Minor notes summarize the whole cycle since the preceding `.0` tag. Features
+  in that range may already have shipped in patches; describe progress across
+  the cycle without claiming every feature first appears in this release.
+  Reconcile later changes with earlier ones and describe the final behavior.
 - If there are decisions but no matching shipped behavior, keep the note cautious: describe the policy/intent change, not an implementation that is absent.
 
 ## Style

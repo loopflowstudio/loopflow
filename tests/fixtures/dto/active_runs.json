@@ -1,0 +1,29 @@
+{
+  "discovery": "ready",
+  "home": "/fixture/home",
+  "observed_at": 1790270400,
+  "task": {
+    "kind": "task",
+    "id": "task_00000000000000000000000000000001"
+  },
+  "gaps": [
+    "Another Exec has live providers without an unambiguous current Session"
+  ],
+  "sessions": [
+    {
+      "id": "conversation-parser",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "processes": [
+        {
+          "pid": 345,
+          "provider": "claude",
+          "state": "waiting"
+        }
+      ],
+      "title": "implement"
+    }
+  ]
+}

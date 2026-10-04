@@ -1,16 +1,173 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 #if canImport(GhosttyKit)
+    @Test("An off-window representable cannot steal a displayed terminal")
+    @MainActor
+    func offWindowTerminalMount() async throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.shell("off-window-proof")
+        let terminal = pool.view(for: identity)
+        let content = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
+            terminal: identity, surfacePool: pool, isFocused: true
+        )
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let live = NSHostingView(rootView: content)
+        window.contentView = live
+        defer { window.contentView = nil; pool.release(identity) }
+        live.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let surface = try #require(terminal.surface)
+        try #require(terminal.window === window)
+        #expect(window.makeFirstResponder(terminal))
+        // SwiftUI may prepare a replacement subtree without ever displaying it.
+        autoreleasepool {
+            let speculative = NSHostingView(rootView: content)
+            speculative.frame = live.frame
+            speculative.layoutSubtreeIfNeeded()
+            _ = speculative.fittingSize
+            speculative.layoutSubtreeIfNeeded()
+            #expect(terminal.window === window)
+            #expect(terminal.isDescendant(of: live))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.window === window)
+        #expect(terminal.isDescendant(of: live))
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+    }
+
+    @Test("Dismantling an old mount keeps the retained terminal in its new mount")
+    @MainActor
+    func retainedTerminalRemount() async throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.shell("remount-proof")
+        let terminal = pool.view(for: identity)
+        let content = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
+            terminal: identity, surfacePool: pool
+        )
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+        defer {
+            window.contentView = nil
+            pool.release(identity)
+        }
+        let oldMount = NSHostingView(rootView: AnyView(content.disabled(false)))
+        oldMount.frame = root.bounds
+        root.addSubview(oldMount)
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let surface = try #require(terminal.surface)
+        #expect(terminal.window === window)
+
+        // A split mounts its new subtree before SwiftUI retires the old subtree.
+        let newMount = NSHostingView(rootView: AnyView(content))
+        newMount.frame = root.bounds
+        root.addSubview(newMount)
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        try #require(terminal.isDescendant(of: newMount))
+        #expect(window.makeFirstResponder(terminal))
+        // The departing representable can still receive environment updates.
+        // It no longer owns the terminal's focus or size after transfer.
+        oldMount.rootView = AnyView(content.disabled(true))
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.isDescendant(of: newMount))
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+
+        oldMount.rootView = AnyView(EmptyView())
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.window === window)
+        #expect(terminal.isDescendant(of: newMount))
+        #expect(terminal.surface == surface)
+    }
+
 import GhosttyKit
 #endif
 @testable import LoopflowMac
+@testable import Loopflow
 
-@Suite("Embedded terminal input")
+@Suite("Embedded terminal input", .requiresDisplay)
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)
+    @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
+    @MainActor
+    func shellSessionAttachment() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
+        let store = SessionsStore(repoPath: NSTemporaryDirectory(), surfaces: registry.surfaces)
+        var views: [GhosttyMetalView] = []
+        defer { for view in views { view.handleSurfaceClose() } }
+        var records: [SessionRecord] = []
+        for id in ["one", "two"] {
+            workspace.multiplexer.newShell()
+            let pane = workspace.multiplexer.focusedPaneId
+            let view = registry.surfaces.view(for: .shell(pane))
+            view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)
+            view.workingDirectory = NSTemporaryDirectory()
+            view.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/sh", "-c", "printf 'attachment-ready\\n'; exec /bin/cat"], env: [:])
+            view.createSurface(manager: manager)
+            views.append(view)
+            _ = try #require(view.surface)
+            let data = try JSONSerialization.data(withJSONObject: [
+                "id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(), "title": id,
+                "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
+            ])
+            records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
+        }
+        store.reconcile(records)
+        for record in records {
+            #expect(store.sessions.first { $0.id == record.id }?.state == .live)
+            await store.select(record.id)
+            #expect(store.sessions.first { $0.id == record.id }?.surface == record)
+            #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0]))
+        }
+        let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
+        otherWindow.reconcile(records)
+        #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
+        await otherWindow.select("one")
+        #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
+        #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0])))
+    }
+
+    @Test("Exiting the initial conversation leaves a usable companion shell")
+    @MainActor
+    func conversationReturnsToShell() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let view = GhosttyMetalView(terminal: .shell("return-proof"), frame: CGRect(x: 0, y: 0, width: 800, height: 500))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = buildWorkspaceShellCommand(id: "return-proof", argv: ["/bin/true"], env: [:])
+        view.createSurface(manager: manager)
+        defer { view.handleSurfaceClose() }
+        let surface = try #require(view.surface)
+        let command = "printf '%s:%s\\n' companion \"$LF_TERMINAL_ID\"\r"
+        command.withCString { ghostty_surface_text(surface, $0, UInt(command.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !terminalText(view).contains("companion:return-proof"), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(terminalText(view).contains("companion:return-proof"))
+    }
+
     @Test("block clicks copy command and output, then the live prompt clears selection")
     @MainActor
     func commandBlockClickAndCopy() async throws {
@@ -32,13 +189,14 @@ struct GhosttyTerminalInputTests {
         var blocks = Array(repeating: ghostty_command_block_s(), count: 10)
         var count = 0
         let deadline = ContinuousClock.now + .seconds(3)
-        repeat {
+        while true {
             count = blocks.withUnsafeMutableBufferPointer {
                 ghostty_surface_command_blocks(surface, $0.baseAddress, $0.count)
             }
-            if count == 2 { break }
+            // Read once more after a delayed wake-up before declaring timeout.
+            if count == 2 || ContinuousClock.now >= deadline { break }
             try await Task.sleep(for: .milliseconds(20))
-        } while ContinuousClock.now < deadline
+        }
         try #require(count == 2)
         view.setFrameSize(view.frame.size)
         let size = ghostty_surface_size(surface)
@@ -245,7 +403,7 @@ struct GhosttyTerminalInputTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
-            "-i",
+            "--mode", "interactive",
             "-c",
             """
             _ghostty_deferred_init

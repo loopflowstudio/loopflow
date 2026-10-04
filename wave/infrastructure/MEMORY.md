@@ -1,54 +1,867 @@
 # infrastructure wave memory
 
+## Operator acceptance and account direction (2026-10-04)
+
+Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine
+usage rather than another staged acceptance exercise. Both now read `done`
+through `lf task status`. LOO-367's retained feature invocation completed design
+review, traversed four loop returns and reached demo; LOO-285 independently
+reached demo after four returns. Together with LOO-295's reconciled merged
+PR #1283, this closes its remaining continuation proof. Its unrelated viewer and
+earlier assessment survive at `~/.lf-retired/20261004-loo295/scratch`.
+
+LOO-342's installed routing checks and ongoing main-Home usage establish its
+outcome. Jack explicitly declined more work on retired Ask tooling. Four old
+stores still had legacy process handles; they remain untouched, not retired.
+Their cleanup no longer blocks this Task's completion.
+
+LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
+cross-binary history means discovering native Session records across folders,
+not duplicating transcripts or reconstructing new conversations from replayed
+context. Reuse native history and retain Loopflow Session identity. A usage
+threshold such as 90% redirects future launches only; actual exhaustion triggers
+automatic shared failover. Isolated agents retain their own account/fallback.
+The updated Linear brief owns the current scope; stop-bundling's branch evidence
+does not yet establish shipment.
+
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
-## Chapter boundaries and preservation (2026-09-23)
+Release-specific findings live in [release memory](release/MEMORY.md).
 
-The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
-keeps Infrastructure responsible for execution mechanics, auth, placement,
-recovery, releases, and repository-wide simplification. Product judges external
-usefulness; Intelligence owns the non-authoritative evidence. A green scheduling
-receipt does not prove publication, and a passing architecture inventory proves
-only its declared coverage. Earlier release cadence and backlog notes below do
-not override the accepted chapter or current Linear directives.
+The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
+supersede older Run-owner, historical-import, pinned-development-Home and
+demo-before-landing directions for this cutover. Earlier incident observations
+remain evidence of their own versions, not instructions to restore those owners.
 
-- **Separate authority from observation.** The summer moved from a remote
-  daemon API to complete `lf` execution on each owning Home. Stable Work,
-  provider-native continuity, direct child control, and current OS liveness have
-  different owners. Run parentage explains causality; it cannot manufacture
-  signal authority. The historical reconstruction is a synthesis, not proof of
-  one simultaneous fleet deployment.
-- **Reduce readers without losing evidence.** CLI and Wave status now share the
-  same Work-filtered reader, including its tests. Recent history is bounded;
-  exact child discovery is uncapped; activity includes Runs completing inside
-  the window even when they started earlier. These answer different questions.
-- **Historical archives are outside live architecture discovery.** The checker
-  excludes `.lf/chapters/`, as it excludes generated website docs. Fourteen
-  retired-term quotations initially failed the check. Preserve those exact
-  observations rather than sanitizing history or adding word-specific exceptions.
-  The regression still rejects retired vocabulary in active `.lf/skills/` files.
-- **PM renames preserve identity but not every historical label.** Chapter
-  application found new slugs failing in `lf project status` while stable UUIDs
-  resolved the same Work and captured old plan. Use the archived
-  `application/project-references.json` identities. Current PM and historical
-  execution plans are different facts; never restart a controller or directly
-  rewrite storage just to repaint history.
-- **Read back shared PM writes from the provider.** During memory curation,
-  concurrent branch updates replaced LOO-287's description after a successful
-  write. Refresh, merge both evidence sections, and verify the resulting text;
-  a successful command or stale local snapshot cannot prove the retained notes.
-- **Consolidation does not rebind Task ownership.** LOO-278's files were integrated
-  with `lf rebase --manual` into review-chapter, but its registered checkout and
-  PR chain still name chapter-planning. Installed `lf task` has no supported
-  reassignment; `prepare --name` rejects a different existing workspace and
-  `lf work relocate` supports Waves only. Preserve the original tree and exact
-  history; a supported adoption path must prove preservation before a new writer
-  starts. This is an observed placement gap, not authority to edit the registry.
-- **Current PM and historical Work counts differ.** Deduplicate by stable Work
-  id before dispositions: the chapter observed 175 rows but 174 unique Works.
-  Applied retirement preserved artifacts and history; a PM-complete retired
-  issue does not establish shipment or a won KR. Replaying the archive verifier
-  proves retained receipts, not fresh PM state or publication.
+## Installed worker recovery (2026-10-02 PDT)
+
+Jack Heart authorized recovery of blocked workers and publication/installation
+of the prepared patch. [PR #1415](https://github.com/loopflowstudio/loopflow/pull/1415)
+merged as bfc681ee8; [v0.12.32](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.32)
+published from 8c72e591e78a68227255fd86bfff6a939ded5e8b after release
+[workflow 37099938065](https://github.com/loopflowstudio/loopflow/actions/runs/37099938065).
+The published installer promoted CLI/app after preflight recognized the existing
+Home exactly, with all 33 executable references resolving and no migration.
+GitHub's API identified v0.12.32 while its public latest redirect still selected
+v0.12.31; the checksum-verified published installer with --version v0.12.32
+completed installation. No source build was promoted or runtime data hand-edited.
+
+Installed readback confirms LOO-367 resumed the same saved Flow, passed
+loop-decide and entered implementation iteration 1. Historical unowned Execs no
+longer block resumption; actual current process/Session/Flow ownership still does.
+LOO-285's integrated CI-repair child ownership fix passed focused tests and its
+saved Flow resumed beyond sync. Cross-segment continuation implementation and
+the two distinct automatic settlements remain, including retained telemetry
+failures; this operator-triggered release supplies none of that automatic proof.
+LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
+
+LOO-295's installed reconciliation attached existing merged
+[PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283) to the original
+PR row, recording merge 5bcc40fdff810c39885a31b3fbfd6557f49fde93. The Task stayed
+open and all eight unrelated scratch/loc-explorer files were byte-identical.
+Its current-runtime review/repeat/final-demo acceptance remains unresolved.
+
+A separate retained-data defect remains: `invalid stored landing placement: home`
+from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
+including after LOO-295's successful association, and degrades the CI watcher.
+It also interrupted release settlement after #1417 merged. Supported re-entry
+recognized that existing merge and completed the same v0.12.32; no manual
+record/ref/worktree deletion occurred. The old placement reader/migration needs
+repair with preserved ownership evidence. This is not an empty/healthy backlog.
+
+Jack questioned serial releases. The operator committed to collecting further
+recovery defects into one repair batch, with installed-state preflight, instead
+of starting another immediate release for each discovery; this is an operating
+adjustment, not a claim that Jack approved a new release policy.
+
+Checks: PR and merge-queue CI, candidate workflow and publisher passed; installed
+LOO-367 progression and LOO-295 association/file-preservation readback passed.
+
+## Optional chapters and Task workflows (2026-10-02)
+
+The current briefs for [LOO-366](https://linear.app/loopflow/issue/LOO-366/keep-every-wave-ready-for-work-without-requiring-a-chapter)
+and [LOO-367](https://linear.app/loopflow/issue/LOO-367/start-and-finish-tasks-without-unrelated-workflow-prerequisites),
+read through `lf wave status infrastructure --json` on October 2, record Jack
+Heart's accepted direction: ordinary Projects do not require chapters or a
+default Flow; Tasks do not require a managed Flow or delivery workflow merely
+to exist and record an outcome. Chapters remain optional coordinated resets.
+This supersedes older mandatory-chapter/default-Flow assumptions in this memory;
+it does not establish implementation or authorize a repository reset.
+
+LOO-366 owns explicit Project ensure/adoption and optional resets. LOO-367 owns
+Task admission/completion and preserves unresolved delivery and unfinished work.
+Keep that interface distinct: observational reads must not create Projects, and
+Task operations must not acquire unrelated coordination prerequisites. The
+October 2 Task detail showed LOO-367 starting implementation after Jack's design
+review; LOO-366 remained planning-only (`lf task status` found no local Task).
+Retain the current serial implementation allocation rather than launch a second
+worker during this pass. Neither unchecked current Project KR has outcome proof;
+the metric portfolio and Project metric targets were empty in this observation.
+
+## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
+
+Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
+`drafts/<name>.sql`, and edits it in place until landing; unreleased drafts on
+main are edited rather than undone by a later draft. Draft ids, `-- name:`/`-- id:`
+headers and the `development_migrations` receipt ledger are removed, so the
+applied-draft names, IDs and checksums in the LOO-321 diagnostics below no longer
+exist. Custom Homes keep exact-schema validation and stay disposable.
+`-- depends_on:` still orders drafts across Tasks at the release cut. Mechanics
+live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
+evidence only; not shipped.
+
+## One main Home (LOO-342, branch evidence 2026-09-30)
+
+Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task
+workers, Flow steps and agent tools use the installed CLI and `~/.lf`; explicit
+`LF_HOME` experiments initialize once and require a fresh directory after schema
+changes. This supersedes the older branch-copy, development-promotion and retained
+development-store contracts below. Published installation and main-store migration
+recovery remain. Current behavior belongs in [CLI docs](../../docs/lf.md#use-one-home)
+and [Homes](../../docs/architecture/homes.md#one-main-home). Approval and branch
+verification do not establish release or installed acceptance.
+
+Jack deferred remaining side-store retirement until after release and after their
+processes settle. The 2026-09-30 cleanup receipt records 14 installed stores and
+415 worktree snapshots removed, with these five paths beneath `~/.lf-dev` retained
+because they had live file handles: `installed/local-04115a69e0c34b198bf110976b32f390`,
+`installed/local-0912e9bdc1194a4c9774b060dadd428d`,
+`installed/local-6bd36934695b4eb98083e81e13aad4e7`,
+`installed/local-be852452823d43d7b7fde663651a7590`, and
+`worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
+reinspect live ownership before cleanup. Older running builds can recreate side
+stores until the published cutover. No active database was removed or process killed.
+
+October 2 readback from `lf task status LOO-342 --json` records
+[PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged at
+`6c73356074c47a90491c1ed4de8e063d85eb3a30`; its merge observation was checked at
+18:14 UTC. The Task remains ready with an idle saved `ship` Flow at `pr land -c`.
+This establishes landing, superseding the branch-only delivery evidence above,
+but not installed acceptance or retirement of the retained stores. Resuming that
+completion step was deferred because those obligations remain unproven. Resolve
+their outcome or explicit remaining disposition before treating the Task as done;
+do not recreate a PR merely because the generic action suggests a next PR.
+
+Configured acceptance attempted October 2 at 19:12 UTC after Jack Heart requested
+the checks and retirement. The machine install receipt selects published v0.12.29
+(`61d21f88564783a5fc8f63e385ec035f096fc069`) and `~/.lf/loopflow.db`.
+`gh release view` confirmed [v0.12.29](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.29)
+was still the latest published release (September 30, 23:45 UTC). Git ancestry
+confirms it excludes the October 1 one-Home merge. Installed `lf home id` returned
+the main Home, but an explicit fresh `LF_HOME` through both the public entry gate
+and selected artifact still returned main's identity and Waves without creating
+the experimental database. The available source CLI was v0.12.27. These are
+pre-cutover observations, not failures of the merged implementation. Installed
+acceptance requires a published release containing #1381; do not repeat the same
+checks against v0.12.29 or treat a source-only proof as installed acceptance.
+
+Fresh `lsof +D` inspection found live database handles in all four retained
+`installed/local-*` stores above (15 distinct processes in the initial read).
+No process was stopped and those stores remain untouched. Seven inactive
+worktree snapshots, including `loopflow-growth-thoughts-1c80b40d4504`, were checked
+again individually and moved intact to
+`~/.lf-retired/20261002T191224Z/worktrees/`; `retirement.json` there records exact
+source and destination paths. This retires their old routing locations while
+preserving history; it does not reclaim their disk space. The four live stores
+remain pending until their owners settle. After release, repeat default/source,
+nested Flow/agent and disposable-Home acceptance, then recheck live ownership
+before retiring the remaining stores. LOO-342 remains open.
+
+### Release and acceptance recovery (2026-10-02)
+
+Jack Heart authorized publishing the patch, installation, and the remaining
+one-Home acceptance. [PR #1406](https://github.com/loopflowstudio/loopflow/pull/1406)
+repaired the publisher's installed-CLI command mismatch: staging and finalization
+use `lf release publish`. Six publisher tests and hosted checks passed, and
+v0.12.30 publication completed through `lf release run patch`.
+
+Installed upgrade refused v0.12.30. Its Task-checkout guard opened the old shared
+schema before migration; an isolated preflight also proved the published binary
+still embedded the uncut `remove_ask` draft. Main's #1402 removes the unrelated
+Task guard. The v0.12.31 release batch includes `remove_ask` and its candidate tree
+has no SQL drafts. Publication is not installation acceptance; v0.12.29 remained
+selected after both refused install attempts. Do not manually advance the Home
+or promote a source build to work around these failures.
+
+The v0.12.31 queued run
+[37072469684](https://github.com/loopflowstudio/loopflow/actions/runs/37072469684)
+also exposed missing terminal outcome history after capture completion. The
+recorder queued terminal observations with best-effort telemetry and drained for
+only 250 ms. [PR #1409](https://github.com/loopflowstudio/loopflow/pull/1409), now
+merged, persists terminal outcomes synchronously through the existing Session
+owner, preserves the original receipt on retry, and leaves stream telemetry
+asynchronous. Prepared captures without an admitted Session remain valid. The
+regression disables the recorder, completes twice, removes artifacts, then reads
+the outcome from SQLite; 28 Session-record tests, the scorecard regression and
+all-target Clippy passed, with the regression passing again after sync.
+
+The first v0.12.31 candidate built successfully, but artifact download timed out.
+Re-entry selected newer merged fixes under the same version through release
+[PR #1411](https://github.com/loopflowstudio/loopflow/pull/1411). An exact candidate
+ref creation race also recovered through re-entry, without manually deleting a
+ref or generated worktree. [v0.12.31](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.31)
+then published from `a278d6bc1bd4373f78f27027b8ae249100ef14d3` after
+[workflow 37077794913](https://github.com/loopflowstudio/loopflow/actions/runs/37077794913)
+and signed preparation passed. `lf install` successfully migrated the main Home
+from 0.12.29 through 0.12.31; all 33 executable references resolved in preflight.
+The CLI reports 0.12.31 and promotion installed the matching macOS app.
+
+Configured checks passed on the installed release:
+
+- Installed and current validation-only source CLIs return the same main Home
+  identity, including with a stale `LF_BIN` value.
+- A fresh explicit `LF_HOME` remains empty on initial and repeated reads, and
+  the source CLI reads that same experiment without importing main's data.
+- Installed and source CLIs each complete `sync --plan` as a nested Flow
+  operation on both main and experimental Homes. Both experimental child
+  success receipts are in the experimental database.
+- After an intentional schema change confined to the experiment, the valid
+  `lf monitor list --json` command refuses it, explains disposal, and leaves
+  the schema unchanged without a backup or repair. An earlier probe used the
+  retired `exec` command and was superseded by this valid-command check.
+- An agent-issued `lf home id` uses the published executable, succeeds on main,
+  and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
+  issue, checkout, PR ids and saved Flow invocation match the pre-install read.
+
+Final `lsof` inspection still found 15 processes holding the four retained
+development stores. `lf monitor prune --dry-run --json` reported no registered
+orphan providers; its dead receipt cleanup cannot retire these live stores.
+No legacy process was signaled. The seven archived snapshots remain preserved
+at the retirement path above. Installed routing acceptance is now demonstrated;
+retirement of the four live stores remains the reason LOO-342 is open.
+
+## Environment variables (LOO-341, branch evidence 2026-10-01)
+
+Jack Heart requested an audit of every `LF_*` variable against the policy it
+implements. The inventory is [Environment](../../docs/architecture/environment.md).
+`LF_HOME` is the only Home selector and its database is always
+`$LF_HOME/loopflow.db`; `LF_DB_PATH` and the `LF_CONTROL_*` trio are removed, with
+the other names nothing read. One list of Exec-context names drives both the
+session shell's `unset` and the tmux client's environment, because a tmux server
+copies its first client's environment into every later session. Fixtures open
+their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
+`LF_RUN_ID` presence still decides three behaviours without validating the Run.
+
+## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+
+Jack Heart selected the Task's checkout as its general work set: every
+AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
+SQLite reader supplies Task status and Desktop membership; the app does not
+reconstruct ownership from paths. Membership is additive, includes descendants
+at component boundaries and closed history, and survives a missing checkout.
+It changes neither recorded usage attribution nor process/Flow authority.
+
+The managed Flow remains one marked member for worker progression, claims,
+Task review settlement and worker delivery authority. Independent unfinished
+Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
+during completion, recovery and cleanup. General membership cannot settle or
+signal them. Current mechanics live in the architecture reference; this branch
+entry is not evidence of shipment or configured Desktop acceptance.
+
+## Synced planning integration (LOO-334, 2026-09-30)
+
+Main's landed current-state cutover supersedes the earlier intermediate-schema
+bridge below. Planning now migrates from released Session ownership; it does not
+restore the historical importer or old execution drafts. Managed validation uses
+the single FlowSession driver, after native recovery and completed-Task cleanup.
+Task adoption retains branch/worktree/PR identity without inferring Flow progress.
+
+## Planning and launch preservation (curated 2026-10-02)
+
+The September 28–29 planning, launch-hardening and branch-isolation details are
+preserved in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#earlier-synced-planning-and-runtime-selection-loo-334-2026-09-29).
+The current one-Home and Session cutovers above supersede their development-store
+routing, intermediate migration and Run-owner implementations, not unresolved
+acceptance. Historical test counts remain evidence of those revisions only.
+
+Jack Heart selected one local planning interface: repository Linear authority
+when connected, private plans otherwise; Git shares definitions and bindings.
+Cross-store discovery never grants another participant execution authority.
+Repository definitions establish Waves, not arbitrary Linear Initiatives.
+Jack selected one Initiative per Wave/subwave and portable A/B names; native
+parent relationships depend on provider support. Owning-checkout definitions
+include dirty additions/deletions; context-free reads use fetched configured
+main. No-remote policy and outward definition sync remained unresolved.
+
+LOO-334's durable constraints survive: presence, freshness and execution eligibility
+are separate; omission is not deletion; acquisition time is not provider revision.
+Partial/unknown-revision webhooks invalidate rather than invent complete facts.
+Preserve removal evidence across lookup races. Project revisions cannot order
+independent Initiative/Team relations; contradictions require explicit repair.
+Repository-alias repair moves normalized planning atomically, without combining
+conflicting observations. Explicit relocation and configured Linear completion
+remain unproved. Historical chapter membership requires frozen evidence, not
+reconstruction from current normalized entities. Lost completion responses require
+provider readback; archive acknowledgement never proves KRs or transferred Tasks done.
+Cached-Task outage admission belongs to LOO-326's current review, not these notes.
+
+The launch-hardening incident/design remains at
+[a5d76c576](https://github.com/loopflowstudio/loopflow/blob/a5d76c576609f6efc80a8ca2198480081066c63c/scratch/jack-heart/session-launch-hardening.md).
+Selected-store absence did not establish deletion. Preserve original launch
+failure, executable, data ownership, native identity and pending decision across
+retry; no timestamp-based private-store merging. The original offending binary
+and installation switch initiator remain unknown. Its retry test failed 6/7;
+prepared JSON/window/provider identity did not prove conversation access.
+Configured review continuity across installation and real Ghostty resume remained
+unproved there; later results must name the actual boundary they establish.
+
+LOO-321 / PR #1308's historical isolated-store design and local proofs remain in
+that archive. Source-only fixtures never established Jack's installed worker,
+app acceptance or remote app transport. Home placement is distinct from a data
+directory, and database isolation does not isolate provider or checkout effects.
+Restore saved Task/PR/checkout identity; explicit replacement owns new definitions.
+Authored command removals must cover runtime, app and DTO consumers. Current
+mechanics belong to docs/lf.md and docs/architecture/homes.md; superseded command
+names and store-selection policies are historical evidence, not instructions.
+
+## Managed account identity (LOO-339, branch evidence 2026-09-30)
+
+Jack Heart selected the identity core for [LOO-339](https://linear.app/loopflow/issue/LOO-339)
+delivery and authorized landing and a patch release without review. The earlier
+expanded scope is superseded: [LOO-340](https://linear.app/loopflow/issue/LOO-340)
+owns shared account state across Homes, current status by default, browser
+suppression, Claude cached identity/routing, Flow account bundles and reset credits.
+[LOO-338](https://linear.app/loopflow/issue/LOO-338) owns the command rename;
+this branch retains `lf auth`. Authorization is not evidence of shipment.
+
+The [design](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on.md)
+and [review and gate evidence](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on-review.md)
+are preserved in local history before scratch clearing; remote availability was
+not checked. Current behavior belongs in [subscriptions](../../docs/subscriptions.md).
+
+- **Usage acceptance cannot establish the intended login.** The incident found
+  wrong native logins displayed as verified under configured labels. Shared
+  validation in `provider_account/identity.rs` compares expected email and
+  per-user subject, never shared workspace identity. Codex cached status, routing
+  and readiness inspect current credentials; connect/import and explicit
+  verification also compare `account/read` email with the file identity using
+  file-store mode. Claude connect/import and verification use profile email/UUID,
+  never stale `.claude.json`.
+  Public auth tests cover disagreement, duplicates and relabel refusal; identity
+  tests retain shared-workspace/different-user acceptance.
+- **Reconnect must preserve the live login while authorization waits.** The
+  existing staged connect path installs only after identity and duplicate checks;
+  its paused-browser regression reads the unchanged live credential before
+  completion. The provider-directory install lock serializes Loopflow installs,
+  not native provider writers. This does not prove refresh coordination or sole
+  browser ownership: Codex can still open an extra tab on macOS.
+- **An unavailable identity service is not credential rejection.** `poll_codex`
+  classifies both account and usage RPC errors before decoding identity. The
+  public `account_read_failure_preserves_credentials_unless_revoked` regression
+  proves a 500 preserves connected state while a 401 records missing credentials,
+  retaining other account facts. A plan is separate from quota: observed Pro
+  precedes Plus only among healthy automatic candidates; explicit selection and
+  Session affinity remain authoritative. JSON windows retain dated observations;
+  expired text windows show unknown, not new capacity.
+- **Fixture isolation includes executable selection.** Gate launched real Claude
+  because the harness prepended inherited `LF_BIN`'s directory ahead of stubs.
+  [TESTING.md](../../TESTING.md#test-without-an-installed-loopflow) now requires
+  clearing inherited `LF_*` authority and pinning the compiled source CLI for
+  managed-Run gate invocations. An isolated Home alone is insufficient. The
+  interrupted run remains failed evidence; accidental native credential reads
+  or refresh effects were not audited.
+
+Recorded final isolated materialized Rust checks passed 2,192 tests (13 skipped),
+including seven public auth tests; website passed 78 (three skipped). Formatting,
+all-target Clippy, architecture, migration history and fresh-Home JSON checks
+passed. The original gate receipt remains failed after a screenshot timeout;
+separate successful checks do not rewrite it or provide a reusable final-tree
+receipt. This curation reruns no behavioral checks. Synthetic proofs establish
+neither live OAuth nor installed acceptance. State remains Home-local; recorded
+replay cannot recover another Home's custom database path. LOO-340 owns shared
+authority; this curation authorizes no installed-store repair.
+
+## Account auth consolidation (LOO-320, branch evidence 2026-09-27)
+
+[Make account login, usage, and auth output clear and reliable · LOO-320](https://linear.app/loopflow/issue/LOO-320)
+owns [Account auth consolidation · PR #1307](https://github.com/loopflowstudio/loopflow/pull/1307).
+Jack Heart approved the delivered scope at demo and directed compress →
+update-wave → gate, then queue and land. Cross-account Session continuation and
+native credential refresh coordination are outside this Task and require separate
+Tasks; their follow-up identities are not established by this curation. Ranking
+new Sessions by remaining headroom also remains out of scope.
+
+The [approved design and scope cut](https://github.com/loopflowstudio/loopflow/blob/1891b5ea649c3c21780c264fa83ba5b00452045c/scratch/make-account-login-usage-and.md),
+[demo, approval and final compression proof](https://github.com/loopflowstudio/loopflow/blob/1891b5ea649c3c21780c264fa83ba5b00452045c/scratch/account-demo.md),
+[configured usage failure](https://github.com/loopflowstudio/loopflow/blob/1891b5ea649c3c21780c264fa83ba5b00452045c/scratch/account-login-slice-2.md)
+and [native refresh investigation](https://github.com/loopflowstudio/loopflow/blob/1891b5ea649c3c21780c264fa83ba5b00452045c/scratch/account-refresh-boundary.md)
+retain detailed evidence in local history before scratch clearing. Remote
+availability was not checked. These are branch results, not shipment.
+
+- **Reduce commands while preserving useful objects.** Six auth leaves replace
+  separate profile/access/import/configure/reset and top-level route commands,
+  without aliases. Reusable named Chrome profiles remain; managed accounts and
+  local services, including Linear, remember independent ordered bindings.
+  First-time selection is remembered after success; a last-used browser window
+  is never the fallback. Full-email onboarding stages identity before registration.
+  Current mechanics belong in [subscriptions documentation](../../docs/subscriptions.md).
+- **The browser handoff and printed URL are different evidence.** Claude Code
+  2.1.283 emitted an OSC 8 manual URL before handing a callback URL to its browser
+  helper; both had `code=true`. Parsing OSC alone cannot choose native completion.
+  The provider owns OAuth/callback; the existing flow handle owns the private
+  FIFO, child/readers and cancellable manual input. An input pipe proves manual
+  support, not a requirement to wait for a code. Cached active auth cannot prove
+  that the current authorization attempt or its persistence succeeded.
+- **Read-only inspection includes its dependencies.** Cached status must avoid
+  provider launch, token decryption/import, broker contact and directory creation.
+  An inherited lease has no identity catalog: report uninspected forwarding
+  instead of inventing account rows or contacting its origin. One transient report
+  drives text/JSON; managed presence, local token metadata and server acceptance
+  remain distinct. Cron consumes accepted managed JSON evidence, not exit zero.
+- **Observations retain their own age and owner.** Persist returned windows
+  transactionally before rendering; omitted windows retain source/time and never
+  become fresh or zero. A passed reset proves no new capacity. Verification uses
+  a narrow credential-state writer and preserves routing/cooldown; clearing local
+  cooldown preserves windows. Cached Claude plan metadata is not a live plan.
+  Rejection and acceptance from replaced credentials are discarded, but file
+  comparisons do not exclude native refresh or the final compare/write race.
+- **Selected account precedes Session discovery.** Record the actual selection
+  per attempt in existing Run events, then attach it when the provider Session
+  ID arrives. Retries preserve earlier attribution; an ambient retry cannot
+  inherit the previous managed account. Requested identity is not selected
+  identity. Changing homes alone cannot prove cross-account conversation history.
+
+Four live proofs remain unproven despite delivery approval: browser login without
+pasting a code, first-time managed connection, remembered Linear profile targeting,
+and real Claude/Codex usage windows. The configured Claude probe returned
+`invalid_grant` and obtained no usage payload; the retained `limits[]` decoder
+fixture remains synthetic. Native refresh research found provider-owned directory
+locks and conditional secure-storage writes, including macOS Keychain; Loopflow's
+flock and atomic file replacement do not establish interoperability.
+
+The copied-Home demo exposed two retained limitations: `status --details` failed
+before the copy received `auth_browser_bindings`, and route inspection reported
+stored connected evidence while cached status detected the missing credential.
+Neither was selected as new implementation work at approval. A database copy
+still points at original managed credential homes, so it does not isolate live
+verification. Jack forbids running this draft-bearing branch binary against the
+installed Home. Use disposable Homes with inherited LF_* authority removed for
+source proofs; installation remains owned by ordinary delivery.
+
+Recorded evidence includes 328 focused library passes after rebase, the candidate
+build and eleven empty-Home command checks, and 13 focused synthetic checks plus
+formatting/Clippy after delivery compression. None establishes the four live
+proofs, PTY secrecy/restoration, real manual fallback or installed acceptance.
+Gate made the existing attempt-completion receiver public after finding that
+removing event callbacks had left crate callers unable to consume the result.
+The [Rust API migration](../../docs/subscriptions.md#rust-api-migration) documents
+the source-breaking replacements; it does not claim external consumers migrated.
+Repository-only caller searches cannot prove an exported API has no consumers.
+
+The 2026-09-27 affected gate passed architecture, 250 Python tests, 2,127
+materialized Rust tests (nine skipped), 78 website tests (three skipped),
+formatting/Clippy, migration history, Ruff and shell syntax. Receipt
+`20260928T023432Z-18082-33c4dca6` records the run. One telemetry fixture passed
+after gate terminated its verified stalled SSH-fetch child; this is an intervened
+local result, not unattended fetch proof. Fresh-Home runs/usage/doctor JSON checks
+passed through the materialized candidate; doctor retained empty-history and
+freshness warnings. The gate's source API edit preceded Rust checks and docs
+preceded website checks, but the receipt's initial-tree fingerprint predates
+those edits and is not reusable for the final tree. These results establish
+neither installed acceptance nor the four live proofs. Swift, app/UI and slow
+end-to-end checks remain with CI. No delivery or Task disposition follows from
+this evidence alone.
+
+
+## Task deletion and command ownership (LOO-305, branch evidence 2026-09-27)
+
+[Task removal and command consolidation · LOO-305](https://linear.app/loopflow/issue/LOO-305)
+owns [Task command consolidation · PR #1302](https://github.com/loopflowstudio/loopflow/pull/1302).
+Jack's final scope is provider/local deletion, removal of `pm`/`work`, compression
+and delivery through the saved Flow. Execution settlement remains deferred.
+The accepted command map and detailed proofs survive in local commit
+`4a14c0a47dc6e04be9668fb72b737828565a931d`:
+[design](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/cancel-linear-issues-through-lf.md),
+[implementation evidence](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/implementation-evidence.md),
+[demo](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/task-deletion-installed-demo.md),
+and [compression/rebase proof](https://github.com/loopflowstudio/loopflow/blob/4a14c0a47dc6e04be9668fb72b737828565a931d/scratch/deletion-namespace-compression.md).
+Remote availability was not checked. These are branch results, not shipment.
+
+- **Commands follow their objects.** Task owns create/status/edit/comment/run/
+  complete/delete; Wave owns connection, sync and placement; repo owns reteam
+  and webhooks; `doctor --planning` owns diagnostics. `pm`/`work` and Task
+  abandon/recover have no aliases. Older command spellings below are historical.
+  Current mechanics live in [CLI docs](../../docs/lf.md) and
+  [planning architecture](../../docs/architecture/planning.md).
+- **Identity, confirmation and outcome differ.** Observed issue identity survives
+  refresh/chapter replacement but never authorizes a new provider mutation.
+  Fresh ownership authorizes deletion; acknowledgement or explicit trash evidence
+  confirms it. Missing membership proves neither. Manual confirmation atomically
+  retires Ready Tasks and preserves terminal times, Done outcomes, PRs and Git.
+  Chapter confirmation shares the insertion while retaining its own classification
+  and receipt transaction. Stale snapshots cannot erase positive confirmation;
+  old abandonment/applied receipts cannot manufacture it.
+- **Prepare before filing.** Planning-only creation allocates no checkout or
+  Task row and needs no agent account. Execution creation consumes validated
+  placement, pinned base, Flow/auth and selected Task agent. Retry markers survive
+  notes edits and reuse persisted identity/title. Post-create allocation failure
+  remains recovery work; do not replace preflight with compensating deletion.
+- **Completion and planning have separate writers.** Check provider terminal
+  conflicts before new local Done, including the confirming refresh. Retain merged
+  PR evidence for retries; narrow writes preserve refreshed planning and execution
+  facts. Repeated completion preserves its original event/time.
+- **Checkout identity is its own branch.** Upstream is tracking information and
+  may name main or a stack parent. New branches disable automatic base tracking;
+  publication establishes their own origin branch. Historical Run attribution
+  resolves retained identity independently of launch eligibility. Blank participant
+  overrides fall through to configured/Git names; markerless steers use the
+  provider author without rewriting comments.
+- **Removal is not termination.** A completed capture and released claim can
+  leave a live Exec without an exact Task join. Native per-Run locking cannot
+  establish Task-wide admission or landing settlement. The retained reproduction
+  and deferred scope are in the design's linked evidence; complete Session/Run/
+  activity disappearance and process settlement remain unproven.
+
+The recorded Linux real-binary deletion proof used synthetic Linear and disposable
+stores; macOS platform TLS ignored its child-only CA setting. TESTING.md owns
+that fixture contract. The source demo deleted LOO-299–302 against configured
+Linear, retried successfully and verified refreshed Wave/roadmap absence. It also
+advanced installed-Home drafts and broke the older installed CLI. Jack's later
+steer forbids branch-binary access to that Home and any branch promotion;
+[Installation incident · LOO-321](https://linear.app/loopflow/issue/LOO-321) owns
+recovery. The demo's promotion handoff is superseded. All further source proofs
+use disposable Homes with inherited LF_* authority removed.
+
+Rebase retained main's shortened Flow and Task-agent semantics. Compression moved
+Task scenarios out of OAuth tests and removed duplicated setup/cases, without
+counting moved lines as deleted. Recorded focused checks and Clippy passed;
+no full gate or installed acceptance follows. This curation changes no chapter,
+Task disposition or delivery state.
+
+## Task convergence (LOO-319, curated 2026-10-02)
+
+[LOO-319](https://linear.app/loopflow/issue/LOO-319) and
+[PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301) retain ownership.
+[Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#task-convergence-loo-319-branch-evidence-2026-09-27)
+preserves exact slice/demo evidence and superseded Flow compositions.
+
+Jack Heart selected reconciliation before decision/publication and retained human
+demo and authored delivery. Captured invocations keep their definitions; tests
+must locate captured policy rather than copy current catalog indices. Feedback
+never supplies a verdict, and failed decisions cannot regain authority. Task
+agent choice survives PM refresh and reloads at each launch, including review.
+A PATH-only provider repair failed: executable and Home must agree. The real
+Codex fixture used synthetic feedback and predates generic loop-decide; configured
+Claude launch/resume, real five-minute stall and rendered Desktop agreement
+remain unverified. Local simulated liveness is not signal authority. Preserve
+first PID/birth identity across missing samples; active tool work prevents a
+false stall. TESTING.md owns fixture isolation and disk-resource policy. Source
+verification uses disposable stores; no old branch binary may migrate main.
+
+## Data model and performance decisions (reconciled 2026-09-30)
+
+Jack's rule, verbatim: "The main user objects should line up with the main
+tables in the DB and when we see stuff like this where a main record is
+actually a union over 4 things, we should be suspicious." The trigger was a
+2026-09-26 product-first review of Session/Run/Task/Wave: a Session was four read-time
+projections over four stores (Run dir, `task_flow_positions`,
+`human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
+string in a ranked subject list with a two-value source, mirrored into a
+Task event because the Run could not be queried by Task; every post-launch fact
+(name, completion, attachment) became a sidecar beside the manifest. Reads
+reused the launch resolver, so a bound Session became an orphan when its
+Task's PR merged. The store's `runs` table had the Task FK and no writer.
+
+LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
+the three-owner model in this branch. Run no longer exists as a product object
+or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
+and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
+
+Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
+autonomously, no need to review with me.” Land #1296 as one PR after technical
+verification, without a demo or review wait. The independent resource-recovery,
+publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
+#1360; local main history records them. Exec/Chapter extraction would remove
+only about 10% and requires manual cutting, so the old decomposition is rejected.
+Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
+authorization is not evidence that #1296 merged or that a release migrated data.
+
+**One client, one main Home.** Jack reports only this machine is a client; the
+pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.
+Do not recreate that Home or make fleet compatibility a cutover requirement.
+The reported transfer is not a verified conversion. Branch verification stays
+in disposable Homes with inherited authority removed; no branch binary writes
+the installed Home. Historical import, old-format compatibility and intermediate
+draft preservation are discarded. Keep current Work/links, account routes and
+resumable conversations. Exactly three direct drafts remain: `record_execs`,
+`project_status_chapters` and `session_ownership`; released SQL remains immutable.
+
+**Merge and conversion have different proof.** LOO-298 owns its merge checklist;
+this branch retains the earlier copy at `ab901f1f1:scratch/remaining-work.md`
+in Git history. Configured provider and
+Desktop continuity remain unproven; removing Jack's attendance requirement does
+not turn fixtures into acceptance. Before release conversion, quiesce old writers
+and new launches, preserve a consistent SQLite/filesystem backup and matching
+executable, rehearse current-state retention against the exact candidate, then
+verify the converted state before reopening writers. The private-copy converter
+currently reads live sidecars; its database backup plus those reads is not an
+atomic snapshot. Preserve native IDs, pending reviews, selected captures and
+the manually transferred Tasks, without importing old turns or driver authority.
+
+- **Three owners.** Exec is one actual lf process. AgentSession is one
+  conversation, interactive or headless, surviving driver and engine
+  replacement. FlowSession is one started Flow. History is subordinate to its
+  owner and has no lifecycle of its own.
+- **Every Flow step is an Exec** (2026-09-29): "why not have lf flows actually
+  launch skill execs?" A skill step runs the same `lf skill` command a person
+  would run; an op runs its own command. Flow running skills without an Exec was
+  "a big leak" that reimplemented skill machinery; close it fully. Where direct
+  and Task-step behavior differ, "run directly seems like it wins there always."
+- **Parents are processes.** An agent-issued lf command's parent is the lf
+  process driving that agent ("to be clear i still want being called by an
+  agent process to give you the right parent-lf process"). The word parent means
+  Exec to Exec only; loop and template relations need other words.
+  Implementation matches Session/provider generation and origin to the current driver;
+  a replaced provider retains its proven historical parent. Causal ancestry
+  grants neither Task attribution nor Flow settlement authority. The final
+  schema omits the unused caller-turn token and its intermediate archive;
+  selected native events identify Flow completions.
+- **Definitions compile; runs are skills and ops.** A Flow definition may
+  reference other Flows; starting it compiles them into one graph (Jack's word).
+  A subflow is "more of a lens than an operational entity". Loop passes are not
+  child FlowSessions either (2026-09-30, reversing the earlier "runtime nesting
+  creates parents" rule): a pass is a node and iteration position. The direct
+  ownership migration creates this final shape. Earlier child-pass archive and
+  intermediate-schema conversions are deleted under Jack's compression decision;
+  their older proof is not proof of the final three-draft conversion. Retry keeps
+  its pass, Iterate advances return counters, and one FlowSession owns progression.
+- **An ID names an object.** A captured input is not an object: it is an event
+  in AgentSession history that names its Exec. `RunId` and its side table were
+  deleted. Prefer the word Exec over launch or run where the thing is one agent
+  start under one lf process.
+- **Flow decisions are typed results** of the selected successful turn,
+  modelled on PydanticAI and Jev: the step declares its output schema. The
+  in-turn decide and route commands are removed; Jack said the command "felt
+  wrong". On 2026-09-30 Jack selected Blocked with a required reason in that
+  structured result; the blocked command is removed. A keyed Ask returns
+  feedback to another turn of the same conversation without moving the cursor.
+- **Bind** is write-once null to Task, allowed on done Tasks, and sets Started
+  once. Jack selected prospective usage attribution for now on 2026-09-30;
+  earlier usage retains its recorded owner. Keep this one read-time choice for
+  Intelligence to re-evaluate; do not invent a mid-turn token split.
+- Every denormalization has a validator or is deleted. Method for any model
+  review: derive the user's objects and APIs from the product first, then check
+  the infrastructure for hops.
+- **Naming remains a choice.** Jack kept `session_events` → `agent_events` and
+  the earlier `exec_events` rename proposals open. `run_events` is now deleted;
+  Exec results live on `execs`, so there is no current journal table to rename.
+  This observation neither closes the proposal nor authorizes a new event owner.
+- **Chapters follow Project status.** Each Wave's one In Progress Linear Project
+  shares the chapter name and owns the default Flow; there is no Chapter table
+  or plan packet. Preserve started Tasks and expire only proven untouched backlog.
+  Synthetic second-Home proofs exercise retries and missing evidence; they do
+  not imply a second deployed client or a distributed transaction.
+
+**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
+are checkpointed locally; publication/merge is not established by this entry.
+The release-materialized full Rust run recorded 2,004 passes, seven failures and
+17 skips. Focused repair runs cover all seven failures; the original receipt
+remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
+291-case run had one obsolete import fixture; its eight-case observation repair,
+app/runner builds, boundary check and eight distinct fixture captures passed.
+Formatting, final all-target Clippy, architecture and immutable migration checks
+passed. Required hosted CI still owns the final landing candidate.
+
+The runtime finding was cursor order: stable-ID Session pages must retain ID
+order through projection, or renamed titles can repeat/skip records. Stacking
+fixtures must use the dedicated transaction and establish a published parent;
+generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
+launched a real conflict agent in its disposable repository before that repair;
+output reports no push, but native credential effects were not audited. Provider
+stubs now contain that failure path. This does not establish configured acceptance.
+
+At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
+is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
+it is not a net reduction or a parsed statement count. The retained density
+measurement still names its earlier candidate. Installed conversion remains
+subject to the frozen-snapshot/quiescence obligations above; this gate neither
+migrates nor promotes.
+
+Lessons from implementing it (2026-09-29–30):
+
+- Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
+  unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
+  use focused proofs plus hosted CI between items; run the full local Rust
+  matrix without fail-fast before the final gate.
+- Typed CLI discovery must preserve saved execution: inventory flags reach the
+  SQL reader, selected boundaries resolve captured Skills before the mutable
+  catalog, and Ask escapes reserved Skill names. The main integration has 13
+  focused passes for these paths; it is not configured-provider acceptance.
+- Automatic skill checkpointing must use the same Work binding reader as
+  execution: explicit command `--as`, then checkout, then inherited `LF_AS`.
+  Checking explicit flags alone can commit another contributor's edits in a
+  Task checkout. The repair retains the managed Flow and HEAD; its fixture must
+  establish shared skill content before changing branches, without relying on
+  an incidental checkpoint from another launch.
+- The pinned 0.12.23 worker's output classifier read a quoted sentence in a
+  scratch note as a capability denial. The source fix is on the branch; resume
+  with the actual cause until workers run a release carrying it.
+- Task workers had no transient retry or account failover, so one hitting a
+  provider limit stopped instead of switching accounts. Converging on the direct
+  path fixes it.
+- A worker's claim named the process that launched it, not the worker, so stop
+  and liveness targeted the wrong pid (fixed in `5bd311697`).
+
+Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
+logs record 44/46 affected passes, then both failed Session cases passing focused
+repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
+success. The direct SIGINT proof observes owned-child exit and Exec interruption;
+the retained Task-cancellation settlement case remains distinct. These observations
+are not a full final-tree gate, configured-provider acceptance or installed
+conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
+and final documentation/gate reconciliation remain with the working plan.
+
+Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
+intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
+Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
+`scripts/benchmarks/desktop-performance/record_live.py` records local usage
+without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
+measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
+was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
+zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
+installed build's six-second probe measured 51 ms/s hitches; these different
+windows/builds do not prove a causal improvement. Republishing identical readings
+was found in source and removed; remaining hang causes need profiling.
+
+LOO-300 owns Session streaming, projection caching and the density harness after
+the data-model work. The handoff records passes only for cold-start-to-outline
+and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
+that can skip when SwiftUI exposes no NSTextField; six other tests were removed
+after mounted paint hooks failed to fire. Missing results remain proof gaps.
+Key-to-next-draw and PTY echo are proxies, not glyph presentation. Click ≤100 ms,
+`lf` read ≤300 ms off the main actor and idle ≤5 ms/s hitches remain proposed
+targets until comparable measurements support published budgets.
+
+The earlier S5 active-PR resolver left landed branches unbound. That is historical
+failure evidence, not binding policy: current Session rows own attribution and
+write-once bind permits done/landed Tasks. Preserve current ownership through the
+one-machine conversion; discarded historical attribution needs no importer.
+
+Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
+store gate keys on the registered installation path, not the bytes, so a demo
+app must route through the installed `lf` (`LoopflowDevControl.json` →
+`lf_path`) or be promoted.
+
+## Continuation, delivery and authority lessons (curated 2026-10-02)
+
+The detailed September 23–25 observations, historical schemas, test counts and
+counterexamples remain in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#continuation-and-recovery-lessons-curated-2026-09-25).
+The September 30 model/cutover decisions above supersede Run, Ask, Project-cursor
+and private-store mechanisms there. Archiving detail does not establish remaining
+acceptance or authorize deleting execution history.
+
+- LOO-295 owns continuation; LOO-296 broader restoration. The live demonstration
+  required manual Flow/native-Home corrections and did not prove automatic
+  propagation. Current Task review → decision → repeat → final-demo acceptance
+  remains unproved. OAuth-injection removal fixed one login rejection, not all
+  ambient-account/lease questions. Prior simulated suites and isolated reruns
+  were not a green configured default gate.
+- Capture all alternatives and human boundaries before execution; recover from
+  saved definitions after sources disappear. Invocation identity fences late
+  results independently of reusable versions/generations. Consume actual
+  successful completion evidence under the exact claim. Cursor settlement does
+  not prove external effects happened once. Serialize feedback/reopen writers,
+  persist completion before teardown and preserve published native identity.
+  A finished Flow does not complete its Task. Prove driver and native handoff,
+  not only reducers, including another executable first on PATH.
+- Unknown custom/queued/nested history stays unresolved with bytes/order intact.
+  Inspection does not recompile or launch it. Causal ancestry, age, a missing
+  listener, finished launcher or absent display cannot grant process authority
+  or prove provider death. Preserve original dispositions and exact process
+  receipts, including hashed executable names and PID-reuse rejection.
+- One Task execution snapshot feeds status/actions/roadmap. Current execution
+  evidence wins over dirtiness or next-launch configuration errors. Missing
+  observation must not become idle capacity or a duplicate worker; the earlier
+  LOO-293 duplication came from split readers and that inference. Catalog joins
+  use stable identities and minimal schemas; current hierarchy filters do not
+  rewrite historical attribution. Fixtures isolate all ambient authority and
+  stop only their own identified provider children.
+- Preserve authored PR copy plus the managed Task block; publication alone does
+  not request settlement. Draft opening preserves readiness; promotion records
+  state only after provider success. Exact copy must survive release re-arming.
+  Same-SHA pending/passing/merged changes are progress without another commit.
+  Failed repair must surface its real blocker rather than loop indefinitely.
+- Queue cancellation is distinct from disabling auto-merge: gh 2.101.0 could
+  return success without dequeueing. Reobserve authoritative queue state before
+  replacing a head. Canceling an async waiter does not stop its blocking child;
+  keep the actual checkout lock and effect ownership until descendants finish.
+  Local landing tests did not establish hosted interruption/permissions or
+  orphan cleanup; green-unmergeable PRs and the old Etude -c discrepancy remained
+  unresolved in those records. PR #1289 proved deleted remote-branch recreation
+  only. An empty lease must still reject a branch created after absence was read.
+- Rotation preserves started identities and freezes the boundary's membership,
+  metrics and evaluation time. Failed fresh reads cannot justify retirement;
+  retries consume the frozen boundary and verify uncertain writes at the provider.
+  Deduplicate stable Work IDs; renamed PM labels do not rewrite captured history.
+  LOO-278's integration did not transfer its registered checkout/PR ownership.
+  Historical archives remain outside live architecture discovery.
+
+LOO-286/LOO-287's broader configured continuity obligations are retained where
+not superseded by the accepted cutover: concurrent starts, real provider death
+and same-cursor replacement, late-result rejection, helper non-authority, and
+exact Desktop close/reopen continuity. Their seeded stores, missing executables,
+sleeping children and isolated tests did not prove those outcomes. Old migration
+counterexamples dropped controller-only Task/Project positions; the newer
+current-state cutover's explicitly accepted scope governs disposition, not a
+retroactive claim that those proofs passed. Finite Project Runs and generic
+Wave/Project execution symmetry are superseded, not future implementation mandates.
+
+The deleted lease/liveness stacks (a7044e2b5, 5f7f66833) and repeated prompt-fallback
+add/delete/restore cycle show why failure must be repaired in the operation.
+The full operational cause of run_liveness removal remains unknown. UI projects
+shared evidence and triggers operations; it is not another scheduler or synthetic
+controller. Historical automatic-trigger/default-wait proposals need current
+selection, not automatic resurrection. Current delivery mechanics live in
+[delivery documentation](../../docs/architecture/delivery.md); TESTING.md owns
+populated migration and clean-PATH proofs. Refresh exported skills after changes;
+Wave learning stays with its identified owner, never miscellaneous .lf notes.
+
+## Prompt reduction boundary (2026-09-24)
+
+The `task-viewer` branch removes the unused prompt-direction feature end to end
+and collapses unchecked gather/render wrappers to `PromptComponents` and `String`.
+The context-specific contract is in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
+Keep reductions tied to actual ownership: `WorkCatalog` preserves historical
+identity lookup, `TaskExecutionSnapshot` distinguishes current execution from
+durable Work disposition, and `PreparedLaunchPrompt` carries consumed evidence.
+None is interchangeable with the deleted wrappers. LOO-287 still owns the broader
+architecture pass and its real weekly observations; local deletion and passing
+checks do not complete that Task or establish its KR.
+
+## Installation and command scope (curated 2026-10-02)
+
+[LOO-292](https://linear.app/loopflow/issue/LOO-292) owns installation acceptance;
+LOO-287 retains command-scope reduction. [Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#installation-and-command-scope-branch-evidence-2026-09-24)
+retains September 24 fixtures, failed public v0.12.20 clean-home promotion and
+exact branch evidence. Later installed acceptance above supersedes only the
+boundaries actually exercised, not natural login/wake or first-install recovery.
+
+Installation verifies a pinned published installer; the promotion transaction
+alone activates artifacts/store. Checkout integration is separate. No Git,
+Homebrew, uv, Python or source maintenance belongs in installation. First install
+has no previous selection: preflight must precede ordinary startup authorization,
+and the pinned candidate owns recovery after handoff. Matching version strings
+are insufficient without exact-store preflight and a complete matching macOS app.
+Bound inspection of broken binaries. Do not restore the old Python refresh alias:
+delegation through PATH recursed into the old source updater.
+
+Jack Heart selected login plus weekly installation, Monday 09:00 by default,
+with explicit daily/hourly/five-minute cadence. Preserve launchd label/logs and
+custom install directory, without source WorkingDirectory. Simulated launchctl
+and Linux fixtures do not prove natural macOS timing. Promotion resolves the OS
+account home: HOME/LF_HOME and PATH mocks cannot isolate it. Use disposable OS
+accounts/containers without the real installation; verify failed first activation
+and retained-candidate recovery. Artifact-copy completion and member hashes matter;
+one asynchronous fixture copy produced mismatched bytes and a segfault. Ubuntu
+24.04 reached promotion where Debian bookworm lacked the release's GLIBC versions.
+
+Ordinary-folder absence differs from a genuine Git error; never invent an empty
+repository or silently mutate a default route. Machine commands need no repo
+capture. LOO-287's ordinary-folder/provider-completion and target-first resolution
+remain unproved across every consumer. New-repository creation/configuration/PM
+setup remains unselected. No receipt redesign was selected: switch phase alone
+cannot substitute for durable advancement evidence. Current mechanics and proof
+commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout evidence (LOO-292, 2026-10-02)
 
@@ -73,13 +886,15 @@ nor interactive app acceptance. Preserve those distinctions at the demo review.
 
 ## Shipped
 
-- **Install syncs skills** — the repo refresh and local `--use` paths run `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. First increment of "one command keeps local fresh."
+- **Install syncs skills** — installation runs `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. The former combined repo-refresh path is superseded by the installation contract above.
 - **Deterministic rebase & placement** (rebase-efficiency parent) — `lf rebase` classifies the branch via merge-base diff *before* touching git and picks reset / direct-rebase / rebase-onto-parent / skip-parent-onto-main / noop; only genuinely conflicting authored work escalates to the rebase agent. Disposable branches (no unique commits, generated/checkpoint-only, scratch-only) reset to base instead of burning a long rebase. `scratch/` survives via directory copy to `.lf/tmp/scratch-stash/<branch>-<ts>/`. `--plan` prints the deterministic decision without mutating git. Ops telemetry → ignored `.lf/tmp/metrics/ops.jsonl` (strategy/class/counts, no diffs or secrets). Classifier uses merge-base diffing so upstream-only drift isn't counted as local authored work. E2E: `tests/e2e/test_rebase_efficiency.sh`. This directly attacks the "avoidable long rebase" sharp edge in the daily loop.
-- **Worktree redesign, stages 1–3a** (PR #818) — fixes the #802 fallout: runaway nesting (`loopflow.jack-heart.bugs.20260705_1627.goals`), wave identity that stopped resolving, and land rotation renaming the worktree out from under a running agent.
-  - **Placement (stage 1):** `lf wt create <name>` creates a low-level sibling worktree; `--plan` previews placement without writing. Task and Project Work own their higher-level worktrees. The retired `--fork`/`--main`/`--stack` and intermediate `--sibling`/`--child` flags are not part of the current CLI.
-  - **Identity (stage 2):** `WaveId` (`engine/identity.rs`) — one identity, **two decoupled projections** that are not string-derivable from each other: `dir_component()` = flat `{chain}[.ts]` (author-free, the local worktree dir `{repo}.{dir_component}`) and `branch()` = `{user}/{chain}[.ts]` (author-scoped `/`, glob-able `jack/**`, **remote only** — a `/` can't go in a worktree dir). The dir↔branch link lives on the `Run` record, not string surgery. Wave name = chain segment 0 (keys `wave/<name>/`, chat, pm). Waves/subwaves are stamp-free; workers carry one trailing `.ts` minted at dispatch — the stamp's *presence is the worker marker*. `parse(raw, fallback_user)` is the single input funnel (Postel: liberal in, strict out). `BranchNameConfig`/`branch_names` schema, `format_branch_name`/`generate_word_pair` rotation naming — all retired. Data model doc: `rust/loopflow/src/wave/DATAMODEL.md`.
-  - **Land (stage 3a):** land rotation killed — `rotate_worktree`/`RotationResult` removed. A land never renames the live worktree; the **wave home is permanent** (`<repo>.<wave>` on a stamp-free branch). Workers self-prune once merged; direct commits from the wave home stay possible but discouraged (soft LOOPFLOW.md guidance, not a hard block).
-  - **Rejected delimiters:** `@` (legal in refs but outside GitHub's safe set, shadows `@{upstream}`, breaks pip/CI URL parsing) and `:` (illegal in refs, Finder renders it `/`). Research: every mature stacking tool (Graphite/Sapling/ghstack/gh) keeps lineage in metadata, not the name — so the chain in a name is a *hint*, never parsed for truth (loopflow already has the DAG in `Run.parent_run_id`/`stack_group_id`/`stack_position`).
+- **Worktree redesign (PR #818)** — sibling placement and stable live checkout names
+  repaired runaway nesting, broken Wave lookup and landing-time rename. Names
+  are hints; retained identity/lineage owns associations, not string parsing.
+  Exact stages, rejected delimiters and superseded Run fields remain in
+  [the shipped history](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#shipped).
+  Current Task/PR placement and cleanup contracts supersede older worker
+  self-prune claims; a landing never authorizes moving an active checkout.
 - **`lf pm` speaks wave/project/task** (PR #852) — `status`, `show --project <slug>`, `task create/update/done/move`, `rename`, `sync --plan`. The Linear `teamId` `String!`-vs-`ID!` bug is fixed: creating and closing tasks from the CLI works. `update` survives as a compat alias; the documented path is `task …`.
 - **Native Linear hierarchy for PM** (jack-heart/infra) — Wave→Linear Initiative, Project→Linear Project, Task→Issue, replacing the wave-project-plus-`project:<slug>`-label model. `GOAL.md` frontmatter now carries `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates legacy labeled issues into native Linear Projects, and rewrites `pm.linear_project`→`pm.linear_initiative`. Project definition/KRs round-trip through Linear Project `content`. The live Waves are migrated; Linear is the planning truth.
 - **Linear OAuth token pre-emption** — Linear PKCE access tokens expire in 24 h. Loopflow now persists the non-secret OAuth client ID beside the token (migration `060_provider_token_oauth_client_id`) and refreshes ~20 min before expiry, both on PM access and in the background `token_refresh` trigger. PKCE refresh needs no client secret. A rotated refresh token is persisted; an omitted one preserves the prior token. Proactive-refresh failure while the access token is still valid falls through to the current token and retries later; an expired legacy row with no OAuth config fails safe with a sanitized one-time reconnect command. Directly serves developer-efficiency's "credential expiries pre-empt" KR.
@@ -105,7 +920,7 @@ nor interactive app acceptance. Preserve those distinctions at the demo review.
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
 - **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
-- **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Recovery must use the stable Work id (`lf work abandon task <work-id>`) because higher-level Task commands may inspect a historical worktree that no longer exists.
+- **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Preserve stable identity when the historical checkout is absent. LOO-305 removes the old local-only `work abandon` recovery command; inspect retained facts with explicit `lf task status <task-id>`. Missing Project evidence alone never authorizes provider deletion.
 - **Terminal Task state and current PM routing are authorization boundaries**
   (learned 2026-07-21). An open Linear issue, inherited direction, or sibling
   completion is evidence, never permission to reopen `Done` or `Abandoned`
@@ -113,14 +928,6 @@ nor interactive app acceptance. Preserve those distinctions at the demo review.
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **A live parent Run is not proof of child-control authority** (learned
-  2026-08-22). A relaunched Project can have a healthy provider process yet
-  lack the durable Turn Basis required to reserve its Task Run. Wave-level
-  Task control then correctly fails because only the immediate parent may act.
-  Preserve the existing Task, Work, and PR; do not retry into duplicate Runs
-  or publications. Wake pursuit only when a basis-bearing immediate-parent Run
-  exists. Cross-Work judgment now starts a fresh Work-bound Run and never
-  substitutes for missing immediate-parent control authority.
 - **Historical continuity currently short-circuits daily telemetry** (observed
   2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
   through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
@@ -140,116 +947,60 @@ nor interactive app acceptance. Preserve those distinctions at the demo review.
   branch, index, and working bytes across every release exit; do not file a
   second repair Task for later instances of the same failure.
 
-## Model (design settled)
+## Durable model lessons (curated 2026-10-02)
 
-- Self-hosting is the default. The public repo carries containers, deploy scripts, service units, schedules, and docs; secrets live in Doppler or host-local env, never git.
-- Nightly verifies release-grade artifacts with no publish or deploy side effects; weekly publishes only after equivalent verification passes in the same run.
-- Loopflow carries the primitives; Cadenza mirrors the cadence and shape until a product-specific difference is deliberate and documented.
-- Don't extract a generic multi-product deploy platform before a second or third real deployment proves the shape.
-- Release owns the automation spine, not release-content substance: each product owns its own changelog and provider-specific agent credentials (beyond pass-through/secret wiring).
-- **One writer per worktree is dispatch discipline, not a general lease**
-  (decided 2026-07-10). Worktrees are cheap and placement already exists, so a
-  second writer belongs in another worktree. The store contributes visibility;
-  mutation-specific coordination may still use a narrow local lock, as exact-head
-  PR finalization now does.
-- **The database is durable control state, not a message bus.** Radio,
-  `bus_messages`, `bus_cursors`, channel identity, bylines, and retention are
-  deleted. Authored input is a durable Work Steer. Best-effort process nudges may
-  reduce latency, but the server follow-up must make Home-owned Ready scanning
-  the correctness path so a stopped Project cannot miss child Feedback.
-- **Supported Wave startup is one event-driven Home lifecycle** (decided
-  2026-07-21). `lf start` opens the selected Home registry and uses its current
-  `lf`/`lfd` control pair without promoting or replacing binaries. Daemon boot
-  publishes one attempt-scoped durable `live | failed` receipt and uses a
-  private socket only as the wake edge; `lfd` owns listeners and shares each
-  listener's `starting | live | failed` transition with concurrent callers.
-  Success drains the durable observation outbox before returning. Failure
-  compensates only registry state introduced by that attempt, and one failed
-  Wave never terminates successful siblings. The Mac app uses the same
-  `RegistryQuery.start` receipt path. Reconciliation polling remains recovery,
-  never startup acknowledgement.
-- **Controller evidence is not an agent Run** (learned 2026-07-20). When a
-  merged PR or another controller fact completes a Task, persist the Task
-  lifecycle, Work Epoch, and completion event in one transaction. Never mint a
-  synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
-  with a zero-agent-boundary fixture and repeated reads that count Runs and
-  completion events.
-- **Task resident state is an optional execution overlay** (revised
-  2026-08-27). Lifecycle playhead, gate proposal, provider choice, and
-  continuation live in `task_residents`, not Task identity. The supported
-  resident has one stable local session and restart stops that route before
-  resetting it. Generic Task-bound Runs remain legal and gain no resident or
-  worktree authority from attribution; there is no phase generation or stale
-  writer fence to turn one process into “the Task.”
-- **Phase-owned state needs the same freshness boundary in memory and storage**
-  (learned 2026-07-20). Passive reconciliation may advance a durable Task to
-  finally while its active Run still holds a pre-final snapshot. Refresh a gate
-  proposal only within the same finally epoch; first/loop snapshots keep no
-  proposal and the store's `phase_epoch` fence preserves newer durable truth.
-  Validation runs before SQL, so a persistence fence cannot repair a torn local
-  refresh. Terminal Work remains authoritative over stale resumable failure
-  observations.
-- **A declared human Task FlowStep is the only blocking human-input primitive.**
-  The Task persists one exact flow/node/skill/iteration playhead, launches that
-  named Skill through ordinary `lf --as task:<id>`, and advances only through
-  typed accept/decline settlement. Closing the terminal leaves it waiting.
-   Agent-to-agent questions remain synchronous fresh Runs and own no planning
-   state.
-- **Persisted executable references are an installed-state invariant** (learned
-  2026-07-21). Removing or renaming a builtin flow requires a forward migration
-  for every surviving Task pin, plus catalog resolution before Run reservation.
-  A non-empty stored name is not proof that the installed binary and worktree
-  can execute it.
-- **One Task failure is one atomic durable fact** (learned 2026-07-21). The
-  failure event and Run/Invocation terminal state commit together; if the event
-  cannot persist, the Run stays open and recoverable. Automatic relaunch is
-  progress-relative and bounded, and only durable progress or explicit User
-  input resets its budget. An empty Run slot alone never authorizes retries.
-- **Performance evidence preserves missingness at every boundary** (learned
-  2026-07-21). A provider receipt absent, one missing field, and a reported
-  zero are distinct facts; the first accepted per-Turn receipt wins and a
-  conflicting repeat makes capture partial without rewriting spend. Window a
-  scorecard by the owning fact's terminal time, never its parent's start time,
-  and publish eligible/measured coverage beside every percentile. An absent
-  authority is a named `UNKNOWN`, not permission to infer from observer
-  timestamps, trace text, or zero. Budgets judge evidence; they do not change a
-  correctness result.
+[Earlier model and planning records](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#model-design-settled)
+preserve their exact decisions and implementation history. Current objective,
+accepted optional-workflow direction and authored release schedule supersede old
+nightly/weekly cadence, daemon-chat and mandatory Project assumptions.
 
-## Planning model (settled, PR #852)
+Self-hosting remains the default; credentials follow the repository Doppler
+policy. Products own release substance; avoid a generic deploy platform before
+real consumers require it. One writer per checkout is dispatch discipline;
+mutation-specific locks do not create a general execution authority. Durable
+state is not a message bus, and attributed input cannot manufacture another
+controller. Task completion owns its transaction/event; a merged-PR status read
+must not complete it or mint a synthetic agent execution.
 
-- **Three nouns, distinguished by kind, not size.** Wave = durable operating context (memory, cadence, budget, chat, project selection). Project = one measured bet inside exactly one wave, a definition plus KRs. Task = a concrete change. No project trees, no orphan projects.
-- **Where each noun lives.** Wave = `wave/<wave>/` (`GOAL.md` + `MEMORY.md`). Project = a Linear Project under that Wave's Initiative. Task = a Linear Issue under exactly one Project. Local Project and roadmap mirrors are deleted; SQLite is a read model, not a second authoring surface.
-- **Native Linear hierarchy (shipped, jack-heart/infra): Wave → Linear *Initiative*, Project → Linear *Project*, Task → Linear *Issue*.** Supersedes the label model below. The wave anchors on `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates each legacy `project:<slug>`-labeled issue into a native Linear Project (moving it via `move_item_to_project`), writes `linear_initiative`, and drops `pm.linear_project` **only** once every legacy task carried exactly one recognized label. A task with zero or >1 recognized labels is left behind, `pm.linear_project` is retained, and the `unmigrated` count is reported so a human assigns the label and re-runs `pm init`. Project **definition + KRs live in Linear Project `content`** (`## Definition` / `## KRs` checkbox Markdown), the one-line summary in `description`; Loopflow parses them into typed `PmProject { slug, summary, definition, krs: Vec<PmKr{text,holds}> }` rather than leaking the storage convention. `holds` is a human/loop `[x]` judgment, not derived evidence. A **duplicate or empty derived slug is a hard drift error** (silently choosing one would weaken exactly-one-wave). Seeding is **restart-safe**: `pm init` writes a transient `pm.linear_seed_pending` marker after creating the Initiative and before seeding Projects, resumes only the missing Projects on re-run, and clears the marker on clean completion. Linear permits a Project in many Initiatives; Loopflow enforces exactly-one-*wave* at its own layer and leaves unrelated associations alone. No local Project cache survives as an alternate source of truth.
-- **Superseded — label model (PR #852):** one Linear project per wave, Loopflow projects as `project:<slug>` issue labels. Was the incremental-migration bridge; the native hierarchy above replaces it and reads legacy labels only as migration input.
-- **Open (native hierarchy):** standing quality-frontier projects have no natural Linear completion date; the API allows date-less projects, so leaving frontier bets undated is a product convention, not a schema blocker — don't force a target date on them.
-- **Vocabulary discipline.** Say "Linear project" for the Linear object, "project" for a Loopflow measured bet. No fourth noun — "space" and "provider container" were considered and rejected as user-facing words.
-- **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for a human.
-- **Open question:** `lf pm doctor` and `lf pm sync --plan` are byte-for-byte identical (both call `pm_sync` with `plan: true`). `doctor` earns its keep only as a memorable read-only verb. Collapsing it is a product-surface call, deliberately left to Jack.
+Performance evidence distinguishes missing receipts/fields from measured zero.
+Preserve first accepted usage and conflicting-repeat partiality. Window by the
+owning fact's terminal time; publish measured coverage beside percentiles.
+Unknown authority cannot be inferred from observer time or trace prose.
+
+Wave/Project/Task map to provider-native planning objects; goals/memory/definitions
+remain in Git and plans in their authorized owner. Historical label migration
+and old command names are archived, not current instructions. KRs are explicit
+judgments, never inferred completion. Preserve unrelated provider associations;
+ambiguous moves remain diagnoses. Standing frontier plans need not acquire an
+invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-- **Reduction leftovers from the `minds` review** (triaged; the `TurnFinished`+`BodyFinished` collapse, the `LoopRun` reuse in `bin/lf.rs`, and the stale `playhead.rs` error hint are applied): factor the shared inbox-interrupt arms and lift the lease-renewal block; merge `interrupt_child`/`interrupt_harness` behind one `begin_interrupt`; finish the endpoint-resolver consolidation; inline `require_loop_flow`. `heartbeat_idle` stays — a real scheduler input, and deleting it to satisfy a lint instinct is reshaping production code around tests in reverse.
-- **Live Work/Launches per worktree in `lf status`** — the store already holds
-  their cwd. Visibility, not a general lease (see the one-writer rule above):
-  typing into an occupied tree should be a choice made with open eyes, not a
-  discovery made in history.
-- **Concurrent PM reads on status/sync** — `lf pm show` fetches per-project issue lists concurrently, but `pm status` and `pm sync` still read them sequentially. File if sequential reads become a measured bottleneck.
-- **Drain current buffer** — keep local `lf`, release scripts, and CI aligned with the latest merged release-infra work.
-- **Cadenza release parity** — same nightly/weekly cadence, one-command updater, tests, self-hosted assumptions; document any deliberate divergence.
-- **Cron host bootstrap** — bring up the first maintained `lf cron` host (Mac mini default), Doppler configured, with scheduled checks.
-- **Release feedback loop** — failed nightly/weekly runs surface as attention items or focused fix PRs, distinguishing verification vs publish vs host vs stale-local drift.
-- **Installed-upgrade semantic gate** — resolve every active placed Work's
-  persisted lifecycle through the candidate builtin and repo-local catalogs
-  after migrations, before that binary becomes the Home launcher.
-- **Project terminal-receipt parity** — make Project failure events and
-  Run/Invocation settlement share the atomic receipt boundary now used by
-  Tasks, with a fault-injection proof.
-- **Replicate intentionally** — apply the skeleton to Manabot/Hootro only when they need it.
+The [pre-curation backlog](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter)
+retains historical reduction, Cadenza parity, host bootstrap, release feedback,
+upgrade preservation, instrumentation and replication suggestions. These are
+not current authorization or an instruction to revive retired Project/Run
+owners. Rebase-efficiency follow-ups were resolved by PR #818. Measure actual
+command drift, avoidable agent rebases and post-land repairs before tuning policy;
+the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
+“up/down 5ths” referent remains unresolved and deferred, not dropped.
 
-- **Deferred: "up/down 5ths"** (Jack, 2026-07-06) — referent unresolved. `lf wt` shipped up/down stack navigation this branch; candidates for the phrase are stack level-jumps ("fifth" = a level), circle-of-fifths name generation instead of random word pairs, or a chord-model transpose. Jack said "keep going" — deferred, not dropped.
+## Direct invocation and large inputs (2026-09-25)
 
-The rebase-efficiency follow-ups are resolved by PR #818: config/naming-schema redesign shipped as `WaveId`; `lf wt create` is sibling-only; Task and Project Work own higher-level worktree placement; land rotation and `next`/`advance` are removed.
+Work selectors give direct skills/flows attribution, context and placement;
+`lf task run` owns the managed Task Flow. Direct bound contributions receive
+fresh scratch and leave checkpointing to their caller. Bare names prefer skills;
+explicit verbs resolve their own kind. Reuse the skill-to-invocation loader,
+without one-skill wrappers or name-specific dispatch. Started is written at
+explicit interactive/headless CLI dispatch, after capture and before provider
+launch. Generic capture stays registry-independent: putting Started there broke
+the unavailable-registry regression. Read-only Work resolution and unopened review
+preparation never record execution. LOO-298's derivation from Run rows replaces
+this write only when that model is implemented.
 
-### How to judge rebase efficiency (dogfood metrics from `.lf/tmp/metrics/ops.jsonl`)
-
-Local-only JSONL, reviewed weekly. Key product metrics: **agent-rebase rate** (% of rebases launching an agent), **avoidable rebase-agent rate** (stale/empty/generated-only branches that still launched one — target 0), median `land`→queued/merged time, post-land repair rate, and command-drift rate (prompt-recommended commands the installed `lf` can't parse). Then flip one default at a time: stack-by-default `wt create`, stale-empty reset before rebase, land/advance split, generated-only reset policy. Synthetic-workload replay harness (50–100 disposable histories, current vs classifier in trace mode) is unbuilt — file if tuning thresholds needs it.
+Recursive scratch exceeded both argv capacity and a provider input limit.
+Claude batch input uses text stdin backed by an anonymous file, with system
+instructions in the existing context file; captured and streamed output use the
+same launch path. Curate scratch instead of silently truncating instructions.
+The observed Codex rejected `turn/start` remained waiting; that driver failure
+is still unresolved, and Claude's working input path does not establish a fix.

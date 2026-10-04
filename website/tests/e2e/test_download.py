@@ -9,7 +9,7 @@ def test_download_page_loads(page: Page, base_url: str):
 def test_cli_install_section(page: Page, base_url: str):
     page.goto(f"{base_url}/download")
     cli_section = page.locator(".install-option")
-    assert cli_section.locator("h2", has_text="CLI").is_visible()
+    assert cli_section.locator("h2", has_text="Command line").is_visible()
     assert cli_section.locator("code", has_text="loopflow.studio/install.sh").is_visible()
 
 

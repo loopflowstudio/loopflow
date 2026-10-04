@@ -1,12 +1,20 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerComment,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Home, HomeId, Placement, Steer, SteerComment, TaskId, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub async fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.begin_task_abandon(&task_id)
+        })
+        .await
+    }
+
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -41,14 +49,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
     }
 
-    pub async fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_work_enabled(&work, enabled)
-        })
-        .await
-    }
-
     pub(crate) async fn place_work(
         &self,
         work: &WorkRef,
@@ -57,27 +57,6 @@ impl Store {
         let work = work.clone();
         let home_id = home_id.clone();
         run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
-    }
-
-    pub async fn set_flow_position(
-        &self,
-        work: &WorkRef,
-        position: FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&work, &position)
-        })
-        .await
-    }
-
-    pub async fn flow_position(&self, work: &WorkRef) -> StoreResult<Option<FlowPosition>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.flow_position(&work)).await
-    }
-
-    pub async fn human_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -96,9 +75,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_for_child(&target)).await
     }
 
-    pub async fn work_steers(&self, work: &WorkRef) -> StoreResult<Vec<Steer>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.work_steers(&work)).await
+    pub async fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
     }
 
     pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
@@ -115,18 +94,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&work)).await
     }
 
-    pub(crate) async fn work_steers_for_child(&self, target: &ChildRef) -> StoreResult<Vec<Steer>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.work_steers_for_child(&target)
-        })
-        .await
-    }
-
+    #[cfg(test)]
     pub(crate) async fn append_steer(
         &self,
         work: &WorkRef,
-        author: Author,
+        author: crate::durable::Author,
         text: &str,
     ) -> StoreResult<Steer> {
         let work = work.clone();
@@ -187,21 +159,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_work_remains_disabled_when_moved() {
+    async fn placement_preserves_the_selected_home() {
         let (store, work) = wave_work().await;
         let local = store.local_home().await.unwrap();
-
-        let disabled = store.set_work_enabled(&work, false).await.unwrap();
-        assert!(!disabled.enabled);
 
         let remote = store
             .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
             .await
             .unwrap();
-        assert!(!store.place_work(&work, &remote.id).await.unwrap().enabled);
-        assert!(!store.place_work(&work, &local.id).await.unwrap().enabled);
-
-        assert!(store.set_work_enabled(&work, true).await.unwrap().enabled);
+        assert_eq!(
+            store.place_work(&work, &remote.id).await.unwrap().home_id,
+            remote.id
+        );
+        assert_eq!(
+            store.place_work(&work, &local.id).await.unwrap().home_id,
+            local.id
+        );
     }
 
     #[tokio::test]

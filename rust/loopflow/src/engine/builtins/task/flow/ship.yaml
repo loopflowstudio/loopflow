@@ -1,3 +1,2 @@
-- task-gate
-- record-learnings
-- op: pr land -c
+- gate
+- cmd: task pr land -c

@@ -1,34 +1,34 @@
+pub mod account;
 pub mod activity;
-pub mod ask;
-pub mod auth;
-pub mod chat;
+pub mod bind_attribution;
 pub mod ci;
+pub mod context;
+pub mod context_cost;
 pub mod desktop;
+pub mod discord;
 pub mod doctor;
-#[cfg(test)]
-pub(crate) mod fixtures;
 pub mod flow;
+pub mod flow_inventory;
 pub mod home;
 pub mod install;
 pub mod list;
+pub mod monitor;
 pub mod ops;
+pub mod placement;
 pub mod profile;
-pub mod refresh;
 pub mod replay;
-pub mod reply;
 pub mod run;
 pub mod runs;
+mod runs_watch;
 pub mod screenshot;
 pub mod session;
 pub mod ssh;
-pub mod thread;
 pub mod tokens;
 pub mod top;
 pub mod usage;
 pub mod util;
-pub mod wave_intent;
 pub mod waves;
-pub mod work;
+pub(crate) mod work_catalog;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]
@@ -36,19 +36,4 @@ pub(crate) struct WorkFilter<'a> {
     pub wave: Option<&'a str>,
     pub project: Option<&'a str>,
     pub task: Option<&'a str>,
-}
-
-impl WorkFilter<'_> {
-    pub(crate) fn matches(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-    ) -> bool {
-        self.wave.is_none_or(|expected| wave == Some(expected))
-            && self
-                .project
-                .is_none_or(|expected| project == Some(expected))
-            && self.task.is_none_or(|expected| task == Some(expected))
-    }
 }

@@ -1,4 +1,4 @@
-use crate::engine::{ConcreteStep, Flow, LoadError, Skill, Step, XorPath};
+use crate::engine::{LoadError, Skill, Step, XorPath};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,39 +13,79 @@ const SKILL_FILE_NAME: &str = "SKILL.md";
 // Auto-dispatch: skill or flow
 // =============================================================================
 
-#[derive(Debug)]
-pub enum Target {
-    Skill(Skill),
-    Flow(Flow),
-}
+pub use crate::engine::target::{DefinitionKind, Target};
 
-/// Discover a skill or flow by name. Authored lifecycle entrypoints win their
-/// exact builtin skill collision; other names keep the reusable-skill default.
-pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    if matches!(name, "design" | "launch-plan") {
-        if let Ok(flow) = crate::engine::load_flow(name, repo) {
-            return Ok(Target::Flow(flow));
+/// Execution may fetch external skills; read-only callers use the local resolver.
+pub fn resolve_definition(repo: &Path, name: &str, kind: Option<DefinitionKind>) -> Result<Target> {
+    // Review launches select their captured Skill before touching mutable sources.
+    if kind == Some(DefinitionKind::Skill) {
+        if let Some(skill) = crate::ops::human_session::active_flow_skill(name)? {
+            return Ok(Target::Skill(skill));
         }
     }
-    let skill_error = match discover_skill(repo, name) {
-        Ok(skill) => return Ok(Target::Skill(skill)),
-        Err(err) => err,
+    match resolve_local_definition(repo, name, kind) {
+        Ok(target) => Ok(target),
+        Err(error)
+            if matches!(
+                error.downcast_ref::<LoadError>(),
+                Some(LoadError::SkillNotFound(_) | LoadError::TargetNotFound(_))
+            ) =>
+        {
+            let Some(path) = fetch_npx_skill(repo, name) else {
+                return Err(error);
+            };
+            crate::engine::flow::load_skill_from_path(name, &path)
+                .map(Target::Skill)
+                .map_err(Into::into)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn resolve_local_definition(
+    repo: &Path,
+    name: &str,
+    kind: Option<DefinitionKind>,
+) -> Result<Target> {
+    match crate::engine::target::resolve_definition(repo, name, kind) {
+        Ok(target) => Ok(target),
+        Err(error @ (LoadError::SkillNotFound(_) | LoadError::TargetNotFound(_))) => {
+            match cached_external_skill_path(repo, name) {
+                Some(path) => crate::engine::flow::load_skill_from_path(name, &path)
+                    .map(Target::Skill)
+                    .map_err(Into::into),
+                None => Err(error.into()),
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// architecture-shim: rams-alias
+pub fn cached_external_skill_path(repo: &Path, name: &str) -> Option<PathBuf> {
+    let (prefix, skill_name) = name.split_once('/')?;
+    if prefix == "npx" {
+        return find_cached_npx_skill(&repo.join(".agents/skills"), skill_name);
+    }
+    discover_skill_sources(Some(repo))
+        .iter()
+        .find(|source| source.prefix == prefix)
+        .and_then(|source| find_skill_prompt_path(source, skill_name))
+}
+
+pub(crate) fn definition_source(repo: &Path, name: &str, kind: DefinitionKind) -> String {
+    let path = match kind {
+        DefinitionKind::Flow => crate::engine::flow::find_flow_source_path(name, repo),
+        DefinitionKind::Skill => crate::engine::find_skill_source_path(name, repo)
+            .or_else(|| cached_external_skill_path(repo, name)),
     };
-
-    if !matches!(
-        skill_error.downcast_ref::<LoadError>(),
-        Some(LoadError::SkillNotFound(_))
-    ) {
-        return Err(skill_error);
-    }
-
-    match crate::engine::load_flow(name, repo) {
-        Ok(flow) => Ok(Target::Flow(flow)),
-        Err(LoadError::FlowNotFound(_)) => Err(anyhow::anyhow!(
-            "skill or flow not found: {name}. Run `lf list` to see the catalog."
-        )),
-        Err(err) => Err(err.into()),
-    }
+    path.map(|path| {
+        path.strip_prefix(repo)
+            .unwrap_or(&path)
+            .display()
+            .to_string()
+    })
+    .unwrap_or_else(|| "builtin".to_string())
 }
 
 // =============================================================================
@@ -188,77 +228,28 @@ pub fn list_external_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 // Skill discovery (user, global, builtin, external skills)
 // =============================================================================
 
-/// Discover a skill by name. Tries the engine first (user paths → core builtins
-/// → namespaced builtins → bare-name fallback), then falls back to `npx/<name>`
-/// live fetch.
+/// Resolve a skill, fetching an external definition only when it is absent locally.
 pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
-    match crate::engine::load_skill(name, repo) {
-        Ok(skill) => Ok(skill),
-        Err(LoadError::SkillNotFound(_)) => {
-            if let Some(skill) = find_external_skill(name, Some(repo)) {
-                Ok(skill)
-            } else {
-                Err(LoadError::SkillNotFound(name.to_string()).into())
-            }
+    match resolve_definition(repo, name, Some(DefinitionKind::Skill))? {
+        Target::Skill(skill) => Ok(skill),
+        Target::Command(_) | Target::Flow(_) | Target::Xor(_) => {
+            unreachable!("skill-only resolution cannot select another kind")
         }
-        Err(err) => Err(err.into()),
     }
 }
 
-/// architecture-shim: rams-alias
-/// Resolve an external skill reference like `npx/vercel-labs/deep-research` or
-/// `rams/rams` to a Skill.
-fn find_external_skill(name: &str, repo: Option<&Path>) -> Option<Skill> {
-    let (prefix, skill_name) = name.split_once('/')?;
-    let sources = discover_skill_sources(repo);
+fn fetch_npx_skill(repo: &Path, name: &str) -> Option<PathBuf> {
+    let skill_name = name.strip_prefix("npx/")?;
+    let cache_dir = repo.join(".agents/skills");
 
-    for source in &sources {
-        if source.prefix != prefix {
-            continue;
-        }
-
-        if source.kind == SkillSourceKind::Npx {
-            return find_npx_skill(name, skill_name, repo, source.path.as_deref());
-        }
-
-        if !source
-            .skills
-            .iter()
-            .any(|candidate| candidate == skill_name)
-        {
-            continue;
-        }
-
-        let prompt_path = find_skill_prompt_path(source, skill_name)?;
-        return load_skill_from_path(name, &prompt_path);
-    }
-
-    None
-}
-
-fn find_npx_skill(
-    qualified_name: &str,
-    skill_name: &str,
-    repo: Option<&Path>,
-    cache_path: Option<&Path>,
-) -> Option<Skill> {
-    let repo_root = repo?;
-    let cache_dir = cache_path
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| repo_root.join(".agents/skills"));
-
-    if let Some(path) = find_cached_npx_skill(&cache_dir, skill_name) {
-        return load_skill_from_path(qualified_name, &path);
-    }
-
-    if run_npx_add(skill_name, repo_root) {
+    if run_npx_add(skill_name, repo) {
         if let Some(path) = find_cached_npx_skill(&cache_dir, skill_name) {
-            return load_skill_from_path(qualified_name, &path);
+            return Some(path);
         }
     }
 
-    let found = run_npx_find(skill_name, repo_root)?;
-    if !run_npx_add(&found, repo_root) {
+    let found = run_npx_find(skill_name, repo)?;
+    if !run_npx_add(&found, repo) {
         return None;
     }
 
@@ -268,7 +259,6 @@ fn find_npx_skill(
     find_cached_npx_skill(&cache_dir, skill_name)
         .or_else(|| skill_from_qualified.and_then(|s| find_cached_npx_skill(&cache_dir, s)))
         .or_else(|| find_cached_npx_skill(&cache_dir, &found))
-        .and_then(|path| load_skill_from_path(qualified_name, &path))
 }
 
 fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> {
@@ -319,19 +309,6 @@ fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> 
     }
 
     None
-}
-
-fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
-    let content = std::fs::read_to_string(prompt_path).ok()?;
-
-    Some(Skill {
-        name: name.to_string(),
-        content: Some(content),
-        agent: None,
-        default_agent: None,
-        directions: Vec::new(),
-        action_style: None,
-    })
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
@@ -568,26 +545,6 @@ fn collect_markdown_names(root: &Path, dir: &Path, names: &mut HashSet<String>) 
     }
 }
 
-/// Collect sorted, deduplicated `.md` file stems from the given directories.
-fn list_md_stems(dirs: &[PathBuf]) -> Vec<String> {
-    let mut names = HashSet::new();
-    for dir in dirs {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(name) = path.file_stem() {
-                        names.insert(name.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-    }
-    let mut sorted: Vec<_> = names.into_iter().collect();
-    sorted.sort();
-    sorted
-}
-
 /// Structured result from list_all_skills.
 pub type SkillListResult = (Vec<String>, Vec<String>, Vec<String>, Vec<(String, String)>);
 
@@ -643,110 +600,13 @@ pub fn list_all_skills(repo: Option<&Path>) -> SkillListResult {
 }
 
 // =============================================================================
-// Direction discovery
-// =============================================================================
-
-/// List builtin + repo directions for display.
-pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
-    let mut directions: HashSet<String> = crate::engine::builtins::builtin_direction_names()
-        .into_iter()
-        .map(|name| name.to_string())
-        .collect();
-    directions.extend(
-        crate::engine::builtins::builtin_direction_group_names()
-            .into_iter()
-            .map(|name| name.to_string()),
-    );
-
-    if let Some(repo) = repo {
-        directions.extend(list_user_direction_names(repo));
-    }
-
-    let mut list: Vec<_> = directions.into_iter().collect();
-    list.sort();
-    list
-}
-
-fn list_user_direction_names(repo: &Path) -> HashSet<String> {
-    let directions_dir = repo.join(".lf/directions");
-    let mut names: HashSet<String> = list_md_stems(std::slice::from_ref(&directions_dir))
-        .into_iter()
-        .collect();
-    let Ok(entries) = std::fs::read_dir(&directions_dir) else {
-        return names;
-    };
-
-    let mut group_dirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(group_name) = path.file_name() {
-                names.insert(group_name.to_string_lossy().to_string());
-            }
-            group_dirs.push(path);
-        }
-    }
-
-    names.extend(list_md_stems(&group_dirs));
-    names
-}
-
-// =============================================================================
 // Built-in flow metadata for formatted listing
 // =============================================================================
 
 // Generated by build.rs from the flows/ directory structure.
 pub use crate::engine::builtins::BUILTIN_FLOW_CATEGORIES;
 
-/// Describe every builtin flow as authored and after nested flows are expanded.
-pub fn builtin_flow_infos(repo: Option<&Path>) -> HashMap<String, FlowInfo> {
-    let repo = repo.unwrap_or_else(|| Path::new("/__loopflow_catalog__"));
-    crate::engine::builtins::builtin_flow_names()
-        .into_iter()
-        .filter_map(|name| load_flow_info(name, repo).map(|info| (name.to_string(), info)))
-        .collect()
-}
-
-/// All builtin flow names (from BUILTIN_FLOW_CATEGORIES).
-pub fn builtin_flows() -> HashSet<String> {
-    BUILTIN_FLOW_CATEGORIES
-        .iter()
-        .flat_map(|(_, flows)| flows.iter().map(|f| (*f).to_string()))
-        .collect()
-}
-
-// =============================================================================
-// Flow discovery and skill chain extraction
-// =============================================================================
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowInfo {
-    pub name: String,
-    pub written: String,
-    pub collapsed: String,
-}
-
-/// List user-defined flows with their authored and expanded forms for display.
-pub fn list_user_flows(repo: &Path) -> Vec<FlowInfo> {
-    crate::engine::flow::repo_flow_names(repo)
-        .into_iter()
-        .filter_map(|name| load_flow_info(&name, repo))
-        .collect()
-}
-
-fn load_flow_info(name: &str, repo: &Path) -> Option<FlowInfo> {
-    let flow = crate::engine::load_flow(name, repo).ok()?;
-    let written = format_written_steps(&flow.items);
-    let concrete = crate::engine::expand_flow(&flow, repo).ok()?;
-    let collapsed = format_collapsed_steps(&concrete, repo).ok()?;
-    Some(FlowInfo {
-        name: name.to_string(),
-        written,
-        collapsed,
-    })
-}
-
-fn format_written_steps(steps: &[Step]) -> String {
+pub fn format_written_steps(steps: &[Step]) -> String {
     if steps.is_empty() {
         return "∅".to_string();
     }
@@ -758,68 +618,28 @@ fn format_written_steps(steps: &[Step]) -> String {
 }
 
 fn format_written_step(step: &Step) -> String {
-    match step {
-        Step::Skill(skill) => skill.skill.name.clone(),
-        Step::Op(op) => op.to_string(),
-        Step::FlowRef(name) => name.clone(),
-        Step::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths, format_written_path),
+    match &step.target {
+        Target::Flow(flow) => flow.name.clone(),
+        target => format_target(target),
     }
 }
 
-fn format_written_path(path: &XorPath) -> String {
-    if let Some(flow) = &path.flow {
-        return flow.clone();
-    }
-    if let Some(skill) = &path.skill {
-        return skill.clone();
-    }
-    if path.steps.is_empty() {
-        return "∅".to_string();
-    }
-    path.steps
-        .iter()
-        .map(|skill| skill.skill.name.as_str())
-        .collect::<Vec<_>>()
-        .join(" → ")
-}
-
-fn format_collapsed_steps(steps: &[ConcreteStep], repo: &Path) -> Result<String, LoadError> {
-    if steps.is_empty() {
-        return Ok("∅".to_string());
-    }
-    steps
-        .iter()
-        .map(|step| format_collapsed_step(step, repo))
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join(" → "))
-}
-
-fn format_collapsed_step(step: &ConcreteStep, repo: &Path) -> Result<String, LoadError> {
-    match step {
-        ConcreteStep::Skill(skill) => Ok(skill.skill.name.clone()),
-        ConcreteStep::Op(op) => Ok(op.item.to_string()),
-        ConcreteStep::Xor(xor) => {
-            let mut paths = HashMap::new();
-            for (name, path) in &xor.paths {
-                let steps = crate::engine::flow::load_xor_path_items(path, repo)?;
-                paths.insert(name.clone(), format_collapsed_steps(&steps, repo)?);
-            }
-            Ok(format_xor(xor.router.as_deref(), &paths, String::clone))
-        }
+pub(crate) fn format_target(target: &Target) -> String {
+    match target {
+        Target::Skill(skill) => skill.name.clone(),
+        Target::Command(command) => command.to_string(),
+        Target::Flow(flow) => format_written_steps(&flow.items),
+        Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
     }
 }
 
-fn format_xor<T>(
-    router: Option<&str>,
-    paths: &HashMap<String, T>,
-    format_path: impl Fn(&T) -> String,
-) -> String {
+fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
     let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{name}]"));
     let mut names: Vec<_> = paths.keys().collect();
     names.sort();
     let rendered = names
         .into_iter()
-        .map(|name| format!("{name}: {}", format_path(&paths[name])))
+        .map(|name| format!("{name}: {}", format_written_steps(&paths[name].steps)))
         .collect::<Vec<_>>()
         .join(" | ");
     format!("{label}{{{rendered}}}")
@@ -827,9 +647,38 @@ fn format_xor<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{discover_skill, resolve_definition, Target};
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn operate_resolves_to_repo_and_wave_operate_stays_explicit() {
+        let tmp = TempDir::new().unwrap();
+        for (name, expected) in [
+            ("operate", "repo/operate"),
+            ("repo/operate", "repo/operate"),
+            ("wave/operate", "wave/operate"),
+        ] {
+            let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
+                panic!("expected a skill for {name}");
+            };
+            assert_eq!(skill.name, expected);
+        }
+
+        let skills = tmp.path().join(".lf/skills/repo");
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(skills.join("operate.md"), "Repository operation override").unwrap();
+        for name in ["operate", "repo/operate"] {
+            let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
+                panic!("expected a skill for {name}");
+            };
+            assert_eq!(skill.name, "repo/operate");
+            assert_eq!(
+                skill.content.as_deref(),
+                Some("Repository operation override")
+            );
+        }
+    }
 
     #[test]
     fn discover_skill_loads_user_namespaced_override() {
@@ -838,13 +687,12 @@ mod tests {
         fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
         fs::write(
             skills_dir.join("office-hours.md"),
-            "---\ninteractive: false\ndirections: [gstack]\n---\n# user override\n",
+            "---\ninteractive: false\n---\n# user override\n",
         )
         .expect("write skill");
 
         let skill = discover_skill(tmp.path(), "gstack/office-hours").expect("discover skill");
 
-        assert_eq!(skill.directions, vec!["gstack".to_string()]);
         assert!(skill
             .content
             .as_deref()
@@ -860,24 +708,25 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_entrypoints_select_the_human_flows_not_the_reusable_skills() {
+    fn untyped_names_resolve_available_definitions() {
         let tmp = TempDir::new().expect("tempdir");
-
-        let Target::Flow(design) = discover_target(tmp.path(), "design").expect("design flow")
-        else {
-            panic!("design must select its reviewed flow");
-        };
-        assert_eq!(design.name, "design");
-
-        let Target::Flow(launch) = discover_target(tmp.path(), "launch-plan").expect("launch flow")
-        else {
-            panic!("launch-plan must select its reviewed flow");
-        };
-        assert_eq!(launch.name, "launch-plan");
-
-        assert!(matches!(
-            discover_target(tmp.path(), "implement").expect("ordinary skill"),
-            Target::Skill(_)
-        ));
+        for name in ["design", "launch-plan", "debug", "unbreak", "implement"] {
+            assert!(
+                matches!(
+                    resolve_definition(tmp.path(), name, None).unwrap(),
+                    Target::Skill(_)
+                ),
+                "{name}"
+            );
+        }
+        for name in ["code", "incident", "feature", "vsm-operate"] {
+            assert!(
+                matches!(
+                    resolve_definition(tmp.path(), name, None).unwrap(),
+                    Target::Flow(_)
+                ),
+                "{name}"
+            );
+        }
     }
 }

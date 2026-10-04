@@ -14,15 +14,10 @@ mkdir -p "$demo_home"
 run_lf() {
   env \
     -u LF_BIN \
-    -u LF_DB_PATH \
-    -u LF_CONTROL_BIN \
-    -u LF_CONTROL_HOME \
-    -u LF_CONTROL_DB_PATH \
     -u LF_ACCOUNT_LEASE \
     -u LF_ACCOUNT_SELECTION \
     -u LF_RUN_ID \
     -u LF_RUN_DIR \
-    -u LF_PARENT_RUN_ID \
     -u LF_PROVIDER_ACCOUNT_ID \
     RUST_LOG=warn \
     LF_HOME="$demo_home" \
@@ -32,7 +27,7 @@ run_lf() {
 case "${1:-claude}" in
   claude|codex|opencode)
     agent="${1:-claude}"
-    run_lf -i --tui -m "$agent" : "test"
+    run_lf --mode tui -m "$agent" : "test"
     echo
     echo "Session saved. List it with:"
     echo "  scripts/launch-resumable-ux-demo.sh list"
@@ -47,7 +42,7 @@ case "${1:-claude}" in
       echo "usage: scripts/launch-resumable-ux-demo.sh open <SESSION> [--replace|--try]" >&2
       exit 2
     fi
-    run_lf session open "${@:2}"
+    run_lf session connect "${@:2}"
     ;;
   complete)
     if [[ -z "${2:-}" ]]; then

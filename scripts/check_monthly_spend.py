@@ -384,7 +384,7 @@ def main() -> int:
     if report.over_budget:
         print(
             "monthly automation spend exceeds "
-            f"{_money(report.budget)}; stop and get human approval",
+            f"{_money(report.budget)}; stop and ask for approval",
             file=sys.stderr,
         )
         return 2

@@ -1,34 +1,21 @@
 ---
-requires: code on branch
-produces: published/updated PR
+requires: a reviewable change and publication authority
+produces: published or updated PR
 ---
-Generate a PR title/body, then call the mechanical ops command.
+Publish the current change when the caller's publication boundary is satisfied.
 
-## Goal
+Inspect the diff against its actual base, including uncommitted work, the
+accepted outcome and verification. A completed implementation or reconciliation
+step does not establish that required behavior works. Resolve clear gaps;
+return a concrete blocker when the publication criteria do not hold.
 
-Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
+Run `lf pr publish`. The command owns pushing and PR creation/update, consumes
+valid prepared copy, and otherwise generates copy through its pr-message
+template. It marks the PR ready and returns the URL without opening a browser.
+Use explicit title/body overrides only when the caller supplied or revised them.
+Inspect the returned PR for scope, supported claims and material proof limits;
+correct its copy through the same operation when necessary.
 
-## Workflow
-
-1. Inspect branch changes.
-   ```bash
-   git log origin/main..HEAD --oneline
-   git diff origin/main...HEAD --stat
-   ```
-
-2. Write a concise title and markdown body:
-   - title: lowercase, optional area prefix
-   - body answers what the reviewer is asking: What's the intention? What are the assumptions? What does it accomplish? How do I evaluate it?
-     - **Try it!** — lead with this. Commands to run, what they'll see. Include metrics/results when measurable (before/after numbers, benchmarks, test outputs).
-     - **Intent** — one paragraph. Why this change exists and what it accomplishes.
-     - **Assumptions** — what this relies on being true.
-     - **Key decisions** — non-obvious choices and why.
-     - **Not included** — intentional omissions, if any.
-
-3. Publish or refresh the PR with explicit fields. This pushes and creates or
-   updates the PR, then prints its state and URL — it opens no browser.
-   ```bash
-   lf pr publish --title "<title>" --body "<body>"
-   ```
-   `lf pr open` does the same publish and then opens the PR for review; use it
-   only when a human explicitly asked to see the PR.
+Keep publication separate from merge. This skill neither arms auto-merge nor
+completes the Task. Open the review page with `lf pr open` only when requested.
+Preserve unrelated active contributions rather than staging them as this change.

@@ -42,8 +42,10 @@ fn remote_branch_exists(repo: &TestRepo, name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn gh_no_pr_script() -> &'static str {
-    r#"#!/bin/sh
+fn gh_no_pr_script() -> String {
+    let unarmed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", None);
+    format!(
+        r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -59,7 +61,7 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'false'
+  echo '{unarmed}'
   exit 0
 fi
 
@@ -74,6 +76,7 @@ fi
 
 exit 0
 "#
+    )
 }
 
 fn noop_open_script() -> &'static str {
@@ -81,6 +84,8 @@ fn noop_open_script() -> &'static str {
 }
 
 fn gh_land_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -100,7 +105,7 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 
@@ -119,7 +124,23 @@ exit 0
     )
 }
 
-fn gh_watched_land_script(log_path: &str) -> String {
+fn gh_finite_land_script(log_path: &str, awaiting_queue: bool, merge_race: bool) -> String {
+    let merge_state = if awaiting_queue { "behind" } else { "blocked" };
+    let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
+    let unarmed = support::github_merge_response(1, "$head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(
+        1,
+        "$head",
+        "OPEN",
+        merge_state,
+        Some(if awaiting_queue {
+            "awaiting_queue"
+        } else {
+            "auto"
+        }),
+    );
+    let merged = support::github_merge_response(1, "$head", "MERGED", "UNKNOWN", None)
+        .replace("\"oid\":\"$head\"", "\"oid\":\"merge-head\"");
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -136,7 +157,30 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
+  # A request-only projection discards the server's merged state at this boundary.
+  case "$*" in *--jq*) echo false; exit 0 ;; esac
+  head="$(git rev-parse HEAD)"
+  if [ ! -f "$auto_state" ]; then
+    cat <<JSON
+{unarmed}
+JSON
+  elif [ "{merge_race}" = true ] || [ -z "$LF_TEST_REPAIR_PROOF" ] || [ -f "$LF_TEST_REPAIR_PROOF" ]; then
+    cat <<JSON
+{merged}
+JSON
+  else
+    cat <<JSON
+{armed}
+JSON
+  fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -147,8 +191,36 @@ if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
 fi
+if [ "$1 $2" = "api --include" ]; then
+  # The CI watcher's REST reads: one open PR whose required check failed.
+  for path do :; done
+  head="$(git rev-parse watched-land 2>/dev/null || git rev-parse HEAD)"
+  case "$path" in
+    */pulls\?*)
+      if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
+        body="[{{\"number\":1,\"head\":{{\"ref\":\"watched-land\",\"sha\":\"$head\"}},\"base\":{{\"ref\":\"main\",\"sha\":\"base\"}}}}]"
+      else
+        body='[]'
+      fi ;;
+    */rules/branches/*)
+      body='[{{"type":"required_status_checks","parameters":{{"required_status_checks":[{{"context":"fixture-check"}}]}}}}]' ;;
+    */check-runs*)
+      body='{{"total_count":1,"check_runs":[{{"name":"fixture-check","status":"completed","conclusion":"failure","details_url":null,"started_at":"2026-08-21T00:00:00Z","completed_at":"2026-08-21T00:05:00Z","check_suite":{{"id":1}}}}]}}' ;;
+    */status*)
+      body='{{"statuses":[]}}' ;;
+    *)
+      printf 'HTTP/2.0 404 Not Found\r\n\r\n{{}}'
+      exit 1 ;;
+  esac
+  printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Reset: 0\r\n\r\n%s' "$body"
+  exit 0
+fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
+  if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
+    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    exit 0
+  fi
   echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
   exit 0
 fi
@@ -166,24 +238,18 @@ fn initialize_landing_store(path: &std::path::Path) {
             ))
             .unwrap(),
     );
-    let connection = rusqlite::Connection::open(path).unwrap();
-    let migrated = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .unwrap();
-    if !migrated {
-        connection
-            .execute_batch(&loopflow::store::migrations::migration_sql_for_test(
-                "pr_landings",
-            ))
-            .unwrap();
-    }
 }
 
 fn gh_existing_pr_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
+    let queued = support::github_merge_response(
+        912,
+        "fixture-head",
+        "OPEN",
+        "CLEAN",
+        Some("queued:PR_fixture"),
+    );
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -198,7 +264,11 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ] || [ -f "$queue_state" ]; then echo 'true'; else echo 'false'; fi
+  case "$*" in
+    *dequeuePullRequest*) rm -f "$queue_state"; exit 0 ;;
+  esac
+  if [ -f "$queue_state" ]; then echo '{queued}';
+  elif [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -206,7 +276,7 @@ if [ "$1 $2" = "pr view" ]; then
   exit 0
 fi
 if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
-  rm -f "$auto_state" "$queue_state"
+  rm -f "$auto_state"
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then
@@ -219,6 +289,7 @@ exit 0
 }
 
 fn gh_auto_failure_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", None);
     format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -231,7 +302,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'false'
+  echo '{unarmed}'
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -327,7 +398,7 @@ fn land_preserves_main_on_failure() {
 
     assert!(result.is_err());
     let _ = Command::new("git")
-        .args(["rebase", "--abort"])
+        .args(["merge", "--abort"])
         .current_dir(repo.path())
         .status();
     let _ = Command::new("git")
@@ -428,7 +499,180 @@ fn land_clears_scratch_and_preserves_gitkeep() {
 }
 
 #[test]
-fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
+fn final_preparation_keeps_published_history_when_the_base_changes() {
+    for (manual_merge, advance_base) in [(false, false), (true, false), (false, true)] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.stage_all();
+        repo.commit("track empty scratch");
+        repo.push();
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "reviewed change");
+        repo.stage_all();
+        repo.commit("reviewed change");
+        repo.push_new_branch("feature");
+        let published_head = repo.head_sha();
+        if advance_base {
+            repo.checkout("main");
+            repo.create_file("upstream.txt", "new upstream work");
+            repo.stage_all();
+            repo.commit("advance main");
+            repo.push();
+            repo.checkout("feature");
+        }
+        let gh_log = home.path().join("gh.log");
+        let script = gh_existing_pr_script(gh_log.to_str().unwrap())
+            .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
+        let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+        let options = LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("reviewed change".to_string()),
+            pr_body: Some("ready".to_string()),
+            agent: None,
+        };
+        if manual_merge {
+            submit(repo.path(), &options, &NullProgress).unwrap();
+        } else {
+            land(repo.path(), &options, &NullProgress).unwrap();
+        }
+        if advance_base {
+            assert_ne!(repo.head_sha(), published_head);
+            assert!(
+                loopflow::engine::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
+            );
+            assert_eq!(
+                fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
+                "new upstream work"
+            );
+        } else {
+            assert_eq!(repo.head_sha(), published_head);
+        }
+        assert_eq!(
+            fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+            "reviewed change"
+        );
+        let remote = Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", "refs/heads/feature"])
+            .output()
+            .unwrap();
+        assert!(remote.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&remote.stdout).trim(),
+            repo.head_sha()
+        );
+    }
+}
+
+#[test]
+fn final_preparation_preserves_published_copy_only_for_the_same_head() {
+    for (manual_merge, changed_head, body_override) in [
+        (false, false, None),
+        (true, false, None),
+        (false, false, Some("Updated checks")),
+        (false, true, None),
+    ] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.stage_all();
+        repo.commit("track empty scratch");
+        repo.push();
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "reviewed change");
+        repo.stage_all();
+        repo.commit("reviewed change");
+        repo.push_new_branch("feature");
+        let published_head = repo.head_sha();
+        if changed_head {
+            repo.create_file("feature.txt", "new behavior");
+            repo.stage_all();
+            repo.commit("change the behavior");
+        }
+        let log_path = home.path().join("gh.log");
+        let title_path = home.path().join("title");
+        let body_path = home.path().join("body");
+        let edit = format!(
+            r#"if [ "$1 $2" = "pr edit" ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) printf '%s' "$2" > '{}'; shift 2 ;;
+      --body) printf '%s' "$2" > '{}'; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  exit 0
+fi
+"#,
+            title_path.display(),
+            body_path.display()
+        );
+        let script = gh_existing_pr_script(log_path.to_str().unwrap())
+            .replace("git rev-parse HEAD", "git rev-parse @{upstream}")
+            .replace(
+                r#"\"state\":\"OPEN\""#,
+                r#"\"state\":\"OPEN\",\"title\":\"reviewed title\",\"body\":\"Reviewed behavior. 272 tests passed.\""#,
+            )
+            .replace("if [ \"$1 $2\" = \"pr view\" ]; then", &format!("{edit}if [ \"$1 $2\" = \"pr view\" ]; then"));
+        let provider = if changed_head {
+            agent_script()
+        } else {
+            "#!/bin/sh\necho 'published copy needs no provider' >&2\nexit 71\n".to_string()
+        };
+        let _env = EnvGuard::with_home(
+            &[("gh", script.as_str()), ("codex", provider.as_str())],
+            Some(home.path()),
+        );
+        let options = LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: body_override.map(str::to_string),
+            agent: Some("codex".to_string()),
+        };
+        if manual_merge {
+            submit(repo.path(), &options, &NullProgress).unwrap();
+        } else {
+            land(repo.path(), &options, &NullProgress).unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(title_path).unwrap(),
+            if changed_head {
+                "generated title"
+            } else {
+                "reviewed title"
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(body_path).unwrap(),
+            body_override.unwrap_or(if changed_head {
+                "generated body"
+            } else {
+                "Reviewed behavior. 272 tests passed."
+            })
+        );
+        if !changed_head {
+            assert_eq!(repo.head_sha(), published_head);
+        }
+    }
+}
+
+#[test]
+fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("first.txt", "first");
@@ -471,13 +715,13 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
             next_slug: None,
             worktree: None,
             commit_message: None,
-            pr_title: Some("collapsed change".to_string()),
+            pr_title: Some("merged change".to_string()),
             pr_body: Some("proof".to_string()),
             agent: None,
         },
         &NullProgress,
     )
-    .expect("land collapsed history");
+    .expect("land preserved history");
 
     let output = |args: &[&str]| {
         let result = Command::new("git")
@@ -488,7 +732,9 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
         assert!(result.status.success(), "git {:?} failed", args);
         String::from_utf8_lossy(&result.stdout).trim().to_string()
     };
-    assert_eq!(output(&["rev-list", "--count", "origin/main..HEAD"]), "1");
+    assert!(
+        output(&["log", "--format=%s", "origin/main..HEAD"]).contains("checkpoint: first slice")
+    );
     assert_eq!(
         output(&["rev-parse", "HEAD"]),
         Command::new("git")
@@ -510,15 +756,17 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
         vec!["refs/heads/feature"],
         "submit/land must push only the verified final head"
     );
-    assert!(
-        !output(&[
-            "for-each-ref",
-            "--format=%(refname)",
-            "refs/loopflow/recovery/"
-        ])
-        .is_empty(),
-        "the pre-collapse head must remain recoverable"
+    // GitHub owns the squash. Exercise that Git operation with the published tree.
+    let final_tree = output(&["rev-parse", "HEAD^{tree}"]);
+    let original_main = output(&["rev-parse", "main"]);
+    output(&["checkout", "main"]);
+    output(&["merge", "--squash", "feature"]);
+    output(&["commit", "-m", "Squash PR"]);
+    assert_eq!(
+        output(&["rev-list", "--count", &format!("{original_main}..HEAD")]),
+        "1"
     );
+    assert_eq!(output(&["rev-parse", "HEAD^{tree}"]), final_tree);
 }
 
 #[test]
@@ -621,8 +869,8 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("expected" ) && message.contains("empty")),
-        "an empty final replay must fail before push: {result:?}"
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no authored changes remain") && message.contains("empty")),
+        "an empty final integration must fail before push: {result:?}"
     );
     assert_eq!(
         Command::new("git")
@@ -641,7 +889,7 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
             && !gh_calls.contains("pr edit")
             && !gh_calls.contains("pr ready")
             && !gh_calls.contains("pr merge"),
-        "GitHub must not be mutated for an empty replay: {gh_calls}"
+        "GitHub must not be mutated for an empty integration: {gh_calls}"
     );
 }
 
@@ -650,7 +898,7 @@ fn land_missing_pr_error_includes_branch_name() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
         &[
-            ("gh", gh_no_pr_script()),
+            ("gh", &gh_no_pr_script()),
             ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
@@ -734,7 +982,7 @@ fn submit_and_land_make_no_presentation_attempt() {
     let marker = marker_dir.path().join("present.log");
     let open_script = counting_open_script(&marker);
 
-    // submit prepares the PR for a human to merge — and presents nothing.
+    // submit prepares the PR for the reviewer to merge — and presents nothing.
     let submit_repo = TestRepo::new();
     submit_repo.create_branch("feature");
     submit_repo.create_file("feature.txt", "feature");
@@ -844,7 +1092,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     )
     .expect("submit");
 
-    // submit prepares but never merges — that click is the human's.
+    // submit prepares but never merges — that click belongs to the reviewer.
     let log = fs::read_to_string(&log_path).expect("read gh log");
     // Assigns the PR to the current user for a required, manual merge.
     assert!(log.contains("pr edit --add-assignee @me"));
@@ -891,7 +1139,7 @@ fn submit_records_user_merge_for_a_managed_task() {
         },
         &NullProgress,
     )
-    .expect("managed Task submits for human review");
+    .expect("managed Task submits for review");
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -903,7 +1151,7 @@ fn submit_records_user_merge_for_a_managed_task() {
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
-        "submit must prepare the Task PR for human review: {log}"
+        "submit must prepare the Task PR for review: {log}"
     );
     assert!(!log.contains("merge --auto"));
 }
@@ -1002,6 +1250,7 @@ fn latest_land_disposition_wins_before_merge() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("refresh published PR".to_string()),
             body: Some("same head".to_string()),
             agent: None,
@@ -1015,6 +1264,15 @@ fn latest_land_disposition_wins_before_merge() {
         .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
+    let copy = preserved
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .expect("refreshed reviewer copy");
+    assert_eq!(copy.title, "refresh published PR");
+    assert!(copy.body.starts_with("same head\n\n<!--"));
+    assert!(copy.body.contains("Merging PR 1 completes the Task."));
+    assert!(!copy.body.contains("no Task settlement is requested"));
     let preserved = preserved.merge_request().expect("preserved merge request");
     assert_eq!(preserved.after_merge, AfterMerge::CompleteTask);
     assert_eq!(preserved.head_sha, head);
@@ -1063,9 +1321,9 @@ fn latest_land_disposition_wins_before_merge() {
         .presentation
         .as_ref()
         .expect("Task identity survives refresh and land");
-    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert_eq!(presentation.title, "test title");
     assert!(presentation.body.starts_with(
-        "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+        "test body\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
@@ -1077,6 +1335,27 @@ fn latest_land_disposition_wins_before_merge() {
     assert_eq!(merge.head_sha, revised_head);
     assert_eq!(merge.after_merge, AfterMerge::ContinueTask);
     assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            draft: false,
+            title: Some(presentation.title.clone()),
+            body: Some(presentation.body.clone()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("refresh continuing PR with its existing managed context");
+    let refreshed = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let refreshed_copy = refreshed
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .unwrap();
+    assert_eq!(refreshed_copy, presentation);
     let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains(&format!(
         "pr merge 912 --squash --auto --match-head-commit {revised_head}"
@@ -1178,11 +1457,103 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
 }
 
 #[test]
+fn non_task_land_preserves_the_queued_head_and_requested_copy() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let copy = format!(
+        r#"if [ "$1 $2" = "pr edit" ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) printf '%s' "$2" > '{}/title'; shift 2 ;;
+      --body) printf '%s' "$2" > '{}/body'; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  exit 0
+fi
+"#,
+        home.path().display(),
+        home.path().display(),
+    );
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref())
+        .replace("git rev-parse HEAD", "git rev-parse @{upstream}")
+        .replacen(
+            "if [ \"$1 $2\" = \"pr list\" ]; then",
+            &format!("{copy}if [ \"$1 $2\" = \"pr list\" ]; then"),
+            1,
+        );
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    repo.create_branch("jack/queued-replay");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch("jack/queued-replay");
+    let head = repo.head_sha();
+    let queue = log_path.with_extension("log.queued");
+    fs::write(&queue, "queued").unwrap();
+    fs::write(home.path().join("title"), "existing title").unwrap();
+    fs::write(home.path().join("body"), "existing body").unwrap();
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut options = LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some("revised title".to_string()),
+        pr_body: None,
+        agent: None,
+    };
+    land(repo.path(), &options, &NullProgress).unwrap();
+    assert_eq!(
+        fs::read_to_string(home.path().join("title")).unwrap(),
+        "revised title"
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("body")).unwrap(),
+        "existing body"
+    );
+
+    options.pr_title = None;
+    options.pr_body = Some("revised body".to_string());
+    land(repo.path(), &options, &NullProgress).unwrap();
+    options.pr_body = None;
+    land(repo.path(), &options, &NullProgress).unwrap();
+    assert_eq!(repo.head_sha(), head);
+    assert!(queue.exists(), "replay must preserve queue membership");
+    assert_eq!(
+        fs::read_to_string(home.path().join("title")).unwrap(),
+        "revised title"
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("body")).unwrap(),
+        "revised body"
+    );
+}
+
+#[test]
 fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
+    assert_non_task_land_publishes_changed_source(true);
+}
+
+#[test]
+fn non_task_land_publishes_dirty_source_instead_of_resuming_the_old_head() {
+    assert_non_task_land_publishes_changed_source(false);
+}
+
+fn assert_non_task_land_publishes_changed_source(committed: bool) {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
-    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref())
+        .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
     let _env = EnvGuard::with_lf_home(
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
@@ -1193,14 +1564,19 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
+    repo.create_file("repair.txt", "new source after the queued head");
+    if committed {
+        repo.stage_all();
+        repo.commit("repair the queued head");
+    }
     fs::write(format!("{}.queued", log_path.display()), "queued")
         .expect("seed remote auto-merge state");
     let hook = repo.bare_path().join("hooks/pre-receive");
     fs::write(
         &hook,
         format!(
-            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
-            log_path.display()
+            "#!/bin/sh\nif [ -f '{}.queued' ]; then echo 'branch is queued' >&2; exit 1; fi\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display(), log_path.display()
         ),
     )
     .expect("write remote push hook");
@@ -1213,7 +1589,7 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     land(
         repo.path(),
         &LandOptions {
-            strict: true,
+            strict: committed,
             local: false,
             create_pr: false,
             complete: false,
@@ -1228,17 +1604,22 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
     )
     .expect("non-Task land");
 
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    let disable = log
-        .find("pr merge 912 --disable-auto")
-        .expect("queued Auto is revoked");
-    let push = log.find("git-push").expect("prepared head is pushed");
-    let arm = log
-        .rfind("pr merge 912 --squash --auto --match-head-commit")
-        .expect("prepared head is re-armed");
-    assert!(
-        disable < push && push < arm,
-        "unexpected settlement order:\n{log}"
+    assert!(!log_path.with_extension("log.queued").exists());
+    let published = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{branch}")])
+        .output()
+        .unwrap();
+    assert!(published.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&published.stdout).trim(),
+        repo.head_sha()
+    );
+    assert!(log_path.with_extension("log.auto").exists());
+    assert_eq!(
+        fs::read_to_string(repo.path().join("repair.txt")).unwrap(),
+        "new source after the queued head"
     );
 }
 
@@ -1292,7 +1673,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
         &[
-            ("gh", gh_no_pr_script()),
+            ("gh", &gh_no_pr_script()),
             ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
@@ -1377,6 +1758,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "task",
             "pr",
             "arm",
             "--strict",
@@ -1416,80 +1798,399 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 }
 
 #[test]
-fn lf_pr_land_waits_for_authoritative_merged_observation() {
-    let repo = TestRepo::new();
-    let github_remote = "https://github.com/loopflowstudio/loopflow.git";
-    let local_remote = repo.bare_path().to_string_lossy().to_string();
-    let status = Command::new("git")
-        .args([
-            "config",
-            &format!("url.{local_remote}.insteadOf"),
-            github_remote,
-        ])
-        .current_dir(repo.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let status = Command::new("git")
-        .args(["remote", "set-url", "origin", github_remote])
-        .current_dir(repo.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let log_path = repo.bare_path().join("watched-gh.log");
-    let script = gh_watched_land_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
-    let worktree = repo.create_named_worktree("watched-land");
-    fs::write(worktree.join("feature.txt"), "feature").unwrap();
-    let status = Command::new("git")
-        .args(["add", "."])
-        .current_dir(&worktree)
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let status = Command::new("git")
-        .args(["commit", "-m", "feature work"])
-        .current_dir(&worktree)
-        .status()
-        .unwrap();
-    assert!(status.success());
+fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
+    for (repair, blocked, awaiting_queue, merge_race, flow, fail_start) in [
+        (false, false, false, true, false, false),
+        (false, false, false, false, false, false),
+        (true, false, false, false, false, false),
+        (true, false, false, false, false, true),
+        (true, true, false, false, false, false),
+        (true, false, true, false, false, false),
+        (true, false, false, false, true, false),
+    ] {
+        let repo = TestRepo::new();
+        let github_remote = "https://github.com/loopflowstudio/loopflow.git";
+        let local_remote = repo.bare_path().to_string_lossy().to_string();
+        let status = Command::new("git")
+            .args([
+                "config",
+                &format!("url.{local_remote}.insteadOf"),
+                github_remote,
+            ])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["remote", "set-url", "origin", github_remote])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let log_path = repo.bare_path().join("watched-gh.log");
+        let script = gh_finite_land_script(
+            log_path.to_string_lossy().as_ref(),
+            awaiting_queue,
+            merge_race,
+        );
+        let repair_commands = r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
+  export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
+  while [ ! -f "$LF_TEST_REPAIR_LAUNCHES.release" ]; do sleep 0.05; done
+  echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
+  if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
+  "$LF_TEST_BIN" task sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
+  if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
+    git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
+  fi
+fi"#;
+        let codex = codex_app_server_script(
+            if blocked {
+                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
+            } else {
+                r#"{"status":"published","summary":"Synced the linked worktree; the same head can now merge."}"#
+            },
+            "",
+        )
+        .replace(
+            "read -r turn_start\n",
+            &format!("read -r turn_start\n{repair_commands}\n"),
+        );
+        let _env = EnvGuard::new(&[
+            ("gh", script.as_str()),
+            ("codex", codex.as_str()),
+            ("open", noop_open_script()),
+            ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nif [ \"$LF_TEST_FAIL_START\" = 1 ] && [ ! -f \"$LF_TEST_REPAIR_LAUNCHES.failed\" ]; then touch \"$LF_TEST_REPAIR_LAUNCHES.failed\"; exit 1; fi\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\nexit 0\n"),
+        ]);
+        let worktree = repo.create_named_worktree("watched-land");
+        fs::write(worktree.join("feature.txt"), "feature").unwrap();
+        fs::create_dir_all(worktree.join(".lf")).unwrap();
+        fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        if flow {
+            fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
+            fs::write(
+                worktree.join(".lf/flows/repair-proof.yaml"),
+                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+            )
+            .unwrap();
+        }
+        let status = Command::new("git")
+            .args(["add", "."])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "-m", "feature work"])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
 
-    let lf_home = repo.path().join("lf-home");
-    let database = lf_home.join("loopflow.db");
-    initialize_landing_store(&database);
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args([
-            "pr",
-            "land",
-            "--strict",
-            "--title",
-            "watched landing",
-            "--body",
-            "Observe GitHub before returning.",
-        ])
-        .current_dir(&worktree)
-        .env_remove("LF_GIT_OPERATION_ID")
-        .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID")
-        .env("LF_HOME", &lf_home)
-        .env("LF_DB_PATH", &database)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "lf pr land failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
-        "land returned without merged evidence: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let gh_log = fs::read_to_string(log_path).unwrap();
-    assert!(
-        gh_log
-            .lines()
-            .any(|line| line.starts_with("api -H Accept:")),
-        "land never read the authoritative PR state: {gh_log}"
-    );
+        let lf_home = repo.path().join("lf-home");
+        let database = lf_home.join("loopflow.db");
+        initialize_landing_store(&database);
+        let repair_proof = repo.path().join(".git/landing-repair-proof");
+        let sync_log = repo.bare_path().join("repair-sync.log");
+        let repair_launches = repo.bare_path().join("repair-launches.log");
+        let command = || {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
+                .current_dir(&worktree)
+                .env_remove("LF_GIT_OPERATION_ID")
+                .env_remove("LF_TRACE_ID")
+                .env_remove("LF_PROCESS_ID")
+                .env("LF_HOME", &lf_home)
+                .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("LF_TEST_SYNC_LOG", &sync_log)
+                .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
+                .env("LF_TEST_FAIL_START", if fail_start { "1" } else { "0" })
+                .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
+                .env(
+                    "LF_TEST_REPAIR_PROOF",
+                    if repair {
+                        repair_proof.as_os_str()
+                    } else {
+                        std::ffi::OsStr::new("")
+                    },
+                );
+            command
+        };
+        let handed_off = if flow {
+            command()
+                .args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"])
+                .output()
+                .unwrap()
+        } else {
+            command()
+                .args([
+                    "pr",
+                    "land",
+                    "--strict",
+                    "--title",
+                    "finite landing",
+                    "--body",
+                    "Retain delivery for later checks.",
+                ])
+                .output()
+                .unwrap()
+        };
+        assert_eq!(
+            handed_off.status.success(),
+            !flow,
+            "{}",
+            String::from_utf8_lossy(&handed_off.stderr)
+        );
+        if flow {
+            assert!(String::from_utf8_lossy(&handed_off.stderr)
+                .contains("waiting for human input or delivery"));
+        }
+        assert!(!repair_launches.exists());
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let initial: (String, i64) = conn
+            .query_row(
+                "SELECT id,exit_code FROM execs WHERE parent_exec_id IS NULL",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(initial.1, i64::from(flow));
+        let state: String = conn
+            .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(state, "watching");
+        // The scheduled check observes delivery; the watcher starts repairs.
+        let check: &[&str] = if repair {
+            &["repo", "ci", "watch", "--once"]
+        } else {
+            &["pr", "reconcile"]
+        };
+        if repair {
+            let observed = command().args(["pr", "reconcile"]).output().unwrap();
+            assert!(
+                observed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&observed.stderr)
+            );
+            let repairs: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ci_incidents WHERE repair_exec_id IS NOT NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                repairs, 0,
+                "a delivery check records failures without repairing"
+            );
+        }
+        let mut output = command().args(check).output().unwrap();
+        if fail_start {
+            let reserved: String = conn
+                .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert!(
+                !repair_launches.exists(),
+                "failed launch performed no repair"
+            );
+            output = command().args(check).output().unwrap();
+            let recovered: (String, i64) = conn
+                .query_row(
+                    "SELECT repair_session_id,repair_retries FROM ci_incidents",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                recovered,
+                (reserved, 1),
+                "recovery retains the reserved conversation"
+            );
+        }
+        if repair {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN execs e ON e.id=c.repair_exec_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+            assert!(
+                !finished,
+                "check must return before the provider turn finishes"
+            );
+            let overlap = command().args(check).output().unwrap();
+            assert!(
+                overlap.status.success(),
+                "{}",
+                String::from_utf8_lossy(&overlap.stderr)
+            );
+            fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN execs e ON e.id=c.repair_exec_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+                if done {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "detached repair did not finish: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let detected: bool = conn
+                .query_row(
+                    "SELECT provider_completed_at IS NOT NULL FROM ci_incidents",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(detected, "the watcher records when the provider finished");
+            let owner: String = conn
+                .query_row(
+                    "SELECT DISTINCT exec_id FROM session_events WHERE kind='started'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|error| {
+                    let reason: Option<String> = conn
+                        .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    panic!(
+                        "repair never started: {error}; {reason:?}; sync: {}",
+                        fs::read_to_string(&sync_log).unwrap_or_default()
+                    );
+                });
+            assert_ne!(
+                owner, initial.0,
+                "repair belongs to the later reconcile process"
+            );
+            let parent: (Option<String>, i64) = conn
+                .query_row(
+                    "SELECT parent_exec_id,exit_code FROM execs WHERE id=?1",
+                    [&owner],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                parent.1,
+                i64::from(blocked),
+                "{}\nNested sync: {}",
+                String::from_utf8_lossy(&output.stderr),
+                fs::read_to_string(&sync_log).unwrap_or_default()
+            );
+            let via_agent: bool = conn
+                .query_row(
+                    "SELECT via_agent FROM execs WHERE parent_exec_id=?1",
+                    [&owner],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(via_agent, "the repair agent invokes the nested sync");
+            let check = parent
+                .0
+                .expect("repair has a separate checking parent Exec");
+            assert_ne!(check, owner);
+            let exit: i64 = conn
+                .query_row("SELECT exit_code FROM execs WHERE id=?1", [&check], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(exit, 0, "checking process exited independently");
+            assert_eq!(
+                fs::read_to_string(&repair_launches)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+        }
+        if blocked {
+            let error: String = conn
+                .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert!(error.contains("GitHub credential revoked; reconnect it before retrying."));
+            assert!(!repair_proof.exists());
+            let repeated = command().args(check).output().unwrap();
+            assert!(
+                repeated.status.success(),
+                "a useful blocked check is not a failed observation"
+            );
+            assert_eq!(
+                fs::read_to_string(&repair_launches)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            continue;
+        }
+        assert!(
+            output.status.success(),
+            "{}\nNested sync: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(&sync_log).unwrap_or_default()
+        );
+        if repair {
+            let state: String = conn
+                .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(state, "watching");
+            let output = command().args(["pr", "reconcile"]).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let state: String = conn
+            .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(state, "merged");
+        if flow {
+            assert!(
+                worktree.exists(),
+                "saved Flow retains its checkout after merge"
+            );
+            let id: String = conn
+                .query_row("SELECT id FROM flow_sessions", [], |row| row.get(0))
+                .unwrap();
+            let output = command().args(["flow", "resume", &id]).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let state: String = conn
+                .query_row("SELECT state FROM flow_sessions", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(state, "completed");
+            let events: Vec<String> = conn
+                .prepare("SELECT kind FROM flow_events ORDER BY seq")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(events, ["operation_started", "operation_completed"]);
+        } else {
+            assert!(!worktree.exists());
+            assert!(!local_branch_exists(&repo, "watched-land"));
+            assert!(!remote_branch_exists(&repo, "watched-land"));
+        }
+        if repair {
+            let repaired_head = fs::read_to_string(&repair_proof).unwrap();
+            let merged_head: String = conn
+                .query_row("SELECT observed_head_sha FROM pr_landings", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(repaired_head.trim(), merged_head);
+        }
+    }
 }

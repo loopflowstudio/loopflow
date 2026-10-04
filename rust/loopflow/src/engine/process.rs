@@ -5,9 +5,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
-/// The SSH destination by which the current foreground `lf` was reached.
-/// It is invocation context, not durable Home identity.
-pub(crate) const SSH_TARGET_ENV: &str = "LF_SSH_TARGET";
 
 /// Owns a child process group until its work is known to be complete.
 ///
@@ -62,8 +59,6 @@ fn terminate_process_group(pid: u32) {
     crate::engine::platform::kill_process(pid);
 }
 
-const TMUX_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
-
 pub(crate) fn current_process_group_id() -> Option<u32> {
     // SAFETY: getpgrp has no preconditions and does not dereference memory.
     let process_group = unsafe { libc::getpgrp() };
@@ -71,139 +66,30 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
 }
 
 pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if let Some(path) = select_binary_override(
-        crate::build_info::provenance(),
-        std::env::var_os(crate::store::CONTROL_BIN_ENV),
-        std::env::var_os("LF_BIN"),
-    ) {
-        return path;
-    }
-
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
+    if crate::store::custom_home_selected() {
+        if let Some(path) = std::env::var_os("LF_BIN").filter(|value| !value.is_empty()) {
+            return PathBuf::from(path);
         }
+        if let Some(path) = std::env::var_os("CARGO_BIN_EXE_lf") {
+            return PathBuf::from(path);
+        }
+    } else if let Ok(Some(cli)) =
+        crate::machine_install::root().and_then(|root| crate::machine_install::installed_cli(&root))
+    {
+        return cli.path;
     }
-
     if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
+        if current.file_name().is_some_and(|name| name == "lf") {
             return current;
         }
         if let Some(parent) = current.parent() {
             let sibling = parent.join("lf");
-            if sibling.exists() {
+            if sibling.is_file() {
                 return sibling;
             }
         }
     }
-
-    PathBuf::from("lf")
-}
-
-pub(crate) fn resolve_lfd_binary() -> PathBuf {
-    let cargo_override = std::env::var("CARGO_BIN_EXE_lfd")
-        .ok()
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from);
-    let lf = resolve_lf_binary();
-    let lf_sibling = lf
-        .parent()
-        .map(|parent| parent.join("lfd"))
-        .filter(|path| path.is_file());
-    let invoked_sibling = std::env::args_os()
-        .next()
-        .map(PathBuf::from)
-        .and_then(|invoked| invoked.parent().map(|parent| parent.join("lfd")))
-        .filter(|path| path.is_file());
-    let path_binary = which_on_path(Path::new("lfd"));
-    let current = std::env::current_exe().ok().filter(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lfd")
-    });
-
-    select_lfd_binary(
-        crate::build_info::provenance(),
-        cargo_override,
-        lf_sibling,
-        invoked_sibling,
-        path_binary,
-        current,
-    )
-}
-
-pub(crate) fn resolve_lfd_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_lfd_binary();
-    if candidate.is_absolute() {
-        return if candidate.is_file() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lfd binary {} does not exist; install the current Home control pair",
-                candidate.display()
-            ))
-        };
-    }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; install lfd beside the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-fn select_lfd_binary(
-    provenance: crate::build_info::BuildProvenance,
-    cargo_override: Option<PathBuf>,
-    lf_sibling: Option<PathBuf>,
-    invoked_sibling: Option<PathBuf>,
-    path_binary: Option<PathBuf>,
-    current_lfd: Option<PathBuf>,
-) -> PathBuf {
-    if let Some(path) = cargo_override {
-        return path;
-    }
-    if provenance == crate::build_info::BuildProvenance::Development {
-        if let Some(path) = lf_sibling {
-            return path;
-        }
-    }
-    invoked_sibling
-        .or(path_binary)
-        .or(current_lfd)
-        .unwrap_or_else(|| PathBuf::from("lfd"))
-}
-
-fn select_binary_override(
-    provenance: crate::build_info::BuildProvenance,
-    control: Option<std::ffi::OsString>,
-    ordinary: Option<std::ffi::OsString>,
-) -> Option<PathBuf> {
-    let selected = if provenance.is_release() {
-        control.or(ordinary)
-    } else {
-        ordinary
-    }?;
-    if selected.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(selected))
-    }
-}
-
-/// The launch-boundary counterpart to [`select_binary_override`]: it takes only
-/// the ordinary `LF_BIN` value and has no control input at all. The current
-/// Home is never resolved through `LF_CONTROL_BIN`, in any provenance — that
-/// pin is the historical binary a legacy body must stop relaunching through.
-fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    ordinary
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    which_on_path(Path::new("lf")).unwrap_or_else(|| PathBuf::from("lf"))
 }
 
 /// Resolve the `lf` a Work launch will use: an absolute path that exists.
@@ -213,6 +99,13 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
+    if !crate::store::custom_home_selected() {
+        if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
+        {
+            cli.verify()?;
+            return Ok(cli.path);
+        }
+    }
     let candidate = resolve_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
@@ -236,104 +129,19 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 ///
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
 /// may repoint it while a resident body is running, so the body carries the
-/// canonical target in `LF_CONTROL_BIN`. A later body launch deliberately
+/// canonical target in `LF_BIN`. A later body launch deliberately
 /// resolves the current Home again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
     std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
 }
 
-/// Capture the current process's control context — this process's `lf`, store,
-/// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
-/// build this honors `LF_CONTROL_*`, so a running body hands its own Run context
-/// (not the machine's Home) to the provider CLI it spawns.
-///
-/// This is NOT the launch resolver. Use [`current_home_execution_context`] to
-/// launch or relaunch Work: launching through the control context would
-/// perpetuate the historical binary a legacy body was created with.
-pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
-    let db_path = crate::store::database_path_from_env()
+/// Capture the resolved CLI and Home for a provider child.
+pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
+    crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
     Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_pinned_lf_binary()?,
-        db_path,
         lf_home: crate::store::lf_home_dir(),
-    })
-}
-
-/// Resolve the current Home `lf` binary, never the historical `LF_CONTROL_BIN`.
-///
-/// `resolve_lf_binary` prefers `LF_CONTROL_BIN` in a release build — the pin a
-/// legacy body carries from whichever binary created it. Relaunching through
-/// that is exactly the stranding this resolver exists to prevent, so the
-/// control override is deliberately skipped: `LF_BIN` (the current Home), then
-/// the installed `lf` on `PATH`, then this executable, then the bare name.
-pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
-    if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
-        return bin;
-    }
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    if let Some(installed) = which_on_path(Path::new("lf")) {
-        return installed;
-    }
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
-    PathBuf::from("lf")
-}
-
-/// The current Home `lf`, resolved to an absolute path that exists. Mirrors
-/// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
-pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_current_home_lf_binary();
-    if candidate.is_absolute() {
-        return if candidate.exists() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the current Home lf",
-                candidate.display()
-            ))
-        };
-    }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-/// Resolve the current Home execution context for launching Work: the
-/// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
-///
-/// This is the launch/relaunch boundary resolver. Work created under one
-/// binary and resumed under another launches through the current Home — its
-/// worktree, provider history, and directives are unaffected by which binary
-/// first created it.
-pub(crate) fn current_home_execution_context() -> Result<crate::child::ChildExecutionContext> {
-    let db_path = crate::store::current_home_database_path()
-        .map_err(|error| anyhow!("cannot resolve the current Home database path: {error}"))?;
-    Ok(crate::child::ChildExecutionContext {
-        lf_bin: resolve_current_home_lf_binary_checked()?,
-        db_path,
-        lf_home: crate::store::current_home_lf_home_dir(),
     })
 }
 
@@ -349,138 +157,13 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    let target = format!("={session_name}");
-    let mut command = tokio::process::Command::new("tmux");
-    command.args(["has-session", "-t", &target]);
-    tmux_session_exists_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
-}
-
-pub(crate) async fn send_tmux_input(session_name: &str, input: &str) -> Result<()> {
-    let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "-l", "--", input])
-        .status()
-        .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to send input to tmux session {session_name}"
-        ));
-    }
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "Enter"])
-        .status()
-        .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to submit input to tmux session {session_name}"
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) async fn stop_tmux_session(session_name: &str) -> Result<()> {
-    let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["kill-session", "-t", &target])
-        .status()
-        .await?;
-    if status.success() {
-        return Ok(());
-    }
-    if !tmux_session_exists(session_name).await? {
-        return Ok(());
-    }
-    Err(anyhow!("failed to stop tmux session {session_name}"))
-}
-
-async fn tmux_session_exists_with_timeout(
-    command: &mut tokio::process::Command,
-    timeout: std::time::Duration,
-) -> Result<bool> {
-    command
-        .stdout(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let output = match tokio::time::timeout(timeout, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(error.into()),
-        Err(_) => return Err(anyhow!("tmux session probe timed out")),
-    };
-    if output.status.success() {
-        return Ok(true);
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("can't find session")
-        || stderr.contains("no server running")
-        || stderr.contains("no sessions")
-        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
-    {
-        Ok(false)
-    } else {
-        Err(anyhow!("tmux session probe failed: {}", stderr.trim()))
-    }
-}
-
-pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_lf_session_with_env(session, cwd, argv, &[]).await
-}
-
-/// Start a machine-Home process through the current installed/dev control pair,
-/// ignoring a historical body's `LF_CONTROL_*` pins.
-pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_home_session_with_env(session, cwd, argv, &[]).await
-}
-
-pub(crate) async fn start_home_session_with_env(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let context = current_home_execution_context()?;
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    environment.extend_from_slice(env);
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
-
-pub(crate) async fn start_home_session_for_install_selection(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    selection: &crate::machine_install::InstallSelection,
-    switch_id: Option<&str>,
-) -> Result<()> {
-    let cli = selection
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Cli)
-        .ok_or_else(|| anyhow!("install switch target has no CLI"))?;
-    cli.verify()?;
-    let lf_home = selection
-        .store
-        .parent()
-        .ok_or_else(|| anyhow!("install switch target store has no Home directory"))?
-        .to_path_buf();
-    let context = crate::child::ChildExecutionContext {
-        lf_bin: cli.path.clone(),
-        db_path: selection.store.clone(),
-        lf_home,
-    };
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    if let Some(switch_id) = switch_id {
-        environment.push((crate::machine_install::INSTALL_SWITCH_ENV, switch_id));
-    }
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
-
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
     cwd: &Path,
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let context = pinned_execution_context()?;
+    let context = execution_context()?;
     start_session_with_context(session, cwd, argv, env, context).await
 }
 
@@ -491,11 +174,15 @@ async fn start_session_with_context(
     env: &[(&str, &str)],
     context: crate::child::ChildExecutionContext,
 ) -> Result<()> {
-    let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
-        .into_iter()
-        .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
-        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-        .collect::<Vec<_>>();
+    let inherited_context = [
+        "LF_TRACE_ID",
+        "LF_PROCESS_ID",
+        crate::lf::WORK_DECLARATION_ENV,
+    ]
+    .into_iter()
+    .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
+    .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+    .collect::<Vec<_>>();
     let mut child_env = env
         .iter()
         .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
@@ -505,59 +192,35 @@ async fn start_session_with_context(
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone())),
     );
-    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    extend_session_control_context(&mut child_env, &context);
     let environment = child_env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(argv, &environment);
+    let shell_command = lf_session_shell_command(cwd, argv, &environment);
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
     context: &crate::child::ChildExecutionContext,
-    provenance: crate::build_info::BuildProvenance,
 ) {
     let pinned = [
-        (
-            crate::store::CONTROL_BIN_ENV,
-            context.lf_bin.to_string_lossy().to_string(),
-        ),
-        (
-            crate::store::CONTROL_HOME_ENV,
-            context.lf_home.to_string_lossy().to_string(),
-        ),
-        (
-            crate::store::CONTROL_DB_PATH_ENV,
-            context.db_path.to_string_lossy().to_string(),
-        ),
+        ("LF_BIN", context.lf_bin.to_string_lossy().to_string()),
+        ("LF_HOME", context.lf_home.to_string_lossy().to_string()),
     ];
     for (key, value) in pinned {
         if !child_env.iter().any(|(existing, _)| existing == key) {
             child_env.push((key.to_string(), value));
         }
     }
-    if !provenance.is_release() {
-        for (ordinary, control) in [
-            ("LF_HOME", crate::store::CONTROL_HOME_ENV),
-            ("LF_DB_PATH", crate::store::CONTROL_DB_PATH_ENV),
-        ] {
-            if child_env.iter().any(|(existing, _)| existing == ordinary) {
-                continue;
-            }
-            let value = child_env
-                .iter()
-                .find(|(key, _)| key == control)
-                .map(|(_, value)| value.clone());
-            if let Some(value) = value {
-                child_env.push((ordinary.to_string(), value));
-            }
-        }
-    }
 }
 
-pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
+pub(crate) fn lf_session_shell_command(
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> String {
     let command = argv
         .iter()
         .map(|arg| shell_escape(arg))
@@ -565,14 +228,21 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .join(" ");
     let env = env
         .iter()
+        .filter(|(key, value)| *key != crate::lf::WORK_DECLARATION_ENV || !value.is_empty())
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = format!(
+        "if [ -n \"${{LF_FORWARDED_SECRET_NAMES:-}}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset {} {}; export LF_USER_NAME=\"\"",
+        PROCESS_CONTEXT_ENV.join(" "),
+        FORWARDED_AUTHORITY_ENV.join(" "),
+    );
+    // A long-lived tmux server can retain a deleted cwd despite new-session -c.
+    let enter_directory = format!("cd -- {} || exit", shell_escape(&cwd.to_string_lossy()));
     if env.is_empty() {
-        format!("{clear_context}; exec {command}")
+        format!("{enter_directory}; {clear_context}; exec {command}")
     } else {
-        format!("{clear_context}; exec env {env} {command}")
+        format!("{enter_directory}; {clear_context}; exec env {env} {command}")
     }
 }
 
@@ -582,6 +252,14 @@ pub(crate) async fn start_tmux_session(
     shell_command: &str,
 ) -> Result<()> {
     let mut command = tokio::process::Command::new("tmux");
+    command.current_dir(cwd);
+    command.process_group(0);
+    // This client may start the tmux server, whose environment every later
+    // session inherits, including ones a person opens by hand.
+    for name in PROCESS_CONTEXT_ENV {
+        command.env_remove(name);
+    }
+    command.env_remove(crate::engine::config::USER_NAME_ENV);
     for name in forwarded_authority_env_names() {
         command.env_remove(name);
     }
@@ -599,7 +277,7 @@ pub(crate) async fn start_tmux_session(
         ])
         .status()
         .await
-        .map_err(|err| anyhow!("tmux failed to spawn: {err}"))?;
+        .map_err(|err| anyhow!("tmux failed to spawn in {cwd}: {err}"))?;
     if !status.success() {
         return Err(anyhow!("tmux failed to launch session '{session}'"));
     }
@@ -610,27 +288,55 @@ pub(crate) async fn start_tmux_session(
     Ok(())
 }
 
+/// What one lf process is: its Home, binary, Exec, Flow step and claims. A new
+/// session starts without any of it and receives only what its launch names.
+const PROCESS_CONTEXT_ENV: &[&str] = &[
+    crate::lf::WORK_DECLARATION_ENV,
+    crate::ops::flow_run::FLOW_STEP_ENV,
+    crate::ops::human_session::HUMAN_SESSION_ENV,
+    crate::ops::human_session::PREPARED_CAPTURE_ENV,
+    crate::ops::human_session::REVIEW_CAPTURE_ENV,
+    crate::session_record::RUN_DIR_ENV,
+    crate::journal::LF_TRACE_ID_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
+    crate::work::wave::context::WAVE_ID_ENV,
+    crate::durable::RUN_ID_ENV,
+    crate::durable::TASK_WORKER_CLAIM_ENV,
+    crate::exec::AGENT_CALLER_ENV,
+    crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
+    crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
+    crate::lf::TASK_SKILL_OPTIONS_ENV,
+    crate::machine_install::INSTALL_SWITCH_ENV,
+    crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
+    "LF_TERMINAL_ID",
+    "LF_TERMINAL_TTY",
+    "LOOPFLOW_DIRECTIVE_FILE",
+    "LOOPFLOW_FLOW_NAME",
+    "LF_BIN",
+    "LF_HOME",
+];
+
+/// Credentials and account authority forwarded to one process, never onward.
+const FORWARDED_AUTHORITY_ENV: &[&str] = &[
+    crate::provider_account::lease::ACCOUNT_LEASE_ENV,
+    crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+    crate::ops::pm::FORWARDED_PM_TOKEN_ENV,
+    crate::ops::pm::FORWARDED_PM_PROVIDER_ENV,
+    "LF_FORWARDED_SECRET_NAMES",
+    DISCORD_TOKEN_ENV,
+    "GH_TOKEN",
+    "OPENCODE_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "OPENAI_API_KEY",
+];
+
 fn forwarded_authority_env_names() -> Vec<String> {
-    let mut names = vec![
-        crate::provider_account::lease::ACCOUNT_LEASE_ENV.to_string(),
-        crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
-        "LF_FORWARDED_PM_TOKEN".to_string(),
-        "LF_FORWARDED_PM_PROVIDER".to_string(),
-        "LF_FORWARDED_SECRET_NAMES".to_string(),
-        crate::engine::process::SSH_TARGET_ENV.to_string(),
-        "LF_LINEAR_WEBHOOK_SECRET".to_string(),
-        "LF_LINEAR_VIEWER_ID".to_string(),
-        "LF_GITHUB_WEBHOOK_SECRET".to_string(),
-        "LF_GITHUB_WEBHOOK_URL".to_string(),
-        "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
-        DISCORD_TOKEN_ENV.to_string(),
-        "GH_TOKEN".to_string(),
-        "OPENCODE_API_KEY".to_string(),
-        "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-        "ANTHROPIC_API_KEY".to_string(),
-        "CODEX_ACCESS_TOKEN".to_string(),
-        "OPENAI_API_KEY".to_string(),
-    ];
+    let mut names = FORWARDED_AUTHORITY_ENV
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<_>>();
     if let Ok(forwarded) = std::env::var("LF_FORWARDED_SECRET_NAMES") {
         names.extend(forwarded.split_whitespace().map(str::to_string));
     }
@@ -652,44 +358,95 @@ pub(crate) fn tmux_session_slug(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
-        tmux_session_exists_with_timeout, DISCORD_TOKEN_ENV,
+        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
+        DISCORD_TOKEN_ENV,
     };
-    use crate::build_info::BuildProvenance;
-    use crate::child::ChildExecutionContext;
 
-    #[tokio::test]
-    async fn hanging_tmux_probe_is_bounded() {
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command.args(["-c", "sleep 5"]);
-
-        let started = tokio::time::Instant::now();
-        let result =
-            tmux_session_exists_with_timeout(&mut command, std::time::Duration::from_millis(20))
-                .await;
-
-        assert!(result.is_err());
-        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    #[test]
+    fn detached_child_enters_quoted_directory_and_reports_missing_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("checkout with 'quotes'");
+        std::fs::create_dir(&cwd).unwrap();
+        let command = lf_session_shell_command(&cwd, &["pwd".into(), "-P".into()], &[]);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir(&cwd).unwrap();
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
     }
 
-    #[tokio::test]
-    async fn missing_tmux_socket_means_no_session() {
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command.args([
-            "-c",
-            "echo 'error connecting to /tmp/tmux-1001/default (No such file or directory)' >&2; exit 1",
-        ]);
-
-        let exists =
-            tmux_session_exists_with_timeout(&mut command, std::time::Duration::from_millis(100))
-                .await
-                .unwrap();
-
-        assert!(!exists);
+    #[test]
+    #[ignore = "requires a local tmux executable; uses an isolated server"]
+    fn detached_child_recovers_deleted_tmux_server_directory() {
+        let directory = tempfile::Builder::new()
+            .prefix("lf-tmux-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = directory.path().join("socket");
+        let original = directory.path().join("deleted");
+        let cwd = directory.path().join("checkout with 'quotes'");
+        let output_path = directory.path().join("pwd");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&cwd).unwrap();
+        let tmux = || {
+            let mut command = std::process::Command::new("tmux");
+            command
+                .env_remove("TMUX")
+                .args(["-S"])
+                .arg(&socket)
+                .args(["-f", "/dev/null"]);
+            command
+        };
+        assert!(tmux()
+            .current_dir(&original)
+            .args(["new-session", "-d", "-s", "anchor", "sleep 15"])
+            .status()
+            .unwrap()
+            .success());
+        std::fs::remove_dir(&original).unwrap();
+        let command = lf_session_shell_command(
+            &cwd,
+            &[
+                "/bin/sh".into(),
+                "-c".into(),
+                format!(
+                    "pwd -P > {}",
+                    super::shell_escape(output_path.to_str().unwrap())
+                ),
+            ],
+            &[],
+        );
+        let launched = tmux()
+            .args(["new-session", "-d", "-s", "child", "-c"])
+            .arg(&cwd)
+            .args(["/bin/sh", "-lc", &command])
+            .status()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !output_path.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let output = std::fs::read_to_string(&output_path);
+        let _ = tmux().arg("kill-server").status();
+        assert!(launched.success());
+        assert_eq!(
+            output.unwrap().trim(),
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
     }
 
     #[test]
@@ -715,131 +472,83 @@ mod tests {
     }
 
     #[test]
-    fn development_ignores_stale_control_binary_override() {
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Development,
-                Some("/production/lf".into()),
-                Some("/development/lf".into()),
-            ),
-            Some(PathBuf::from("/development/lf"))
-        );
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Release,
-                Some("/production/lf".into()),
-                Some("/ambient/lf".into()),
-            ),
-            Some(PathBuf::from("/production/lf"))
-        );
-    }
-
-    #[test]
-    fn release_daemon_resolution_prefers_the_promoted_target_over_a_stale_store_sibling() {
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Release,
-                None,
-                Some(PathBuf::from("/home/op/.lf/bin/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/home/op/.local/bin/lfd")
-        );
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Development,
-                None,
-                Some(PathBuf::from("/repo/target/debug/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/repo/target/debug/lfd")
-        );
-    }
-
-    /// The launch boundary must resolve the current Home lf (B), never the
-    /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
-    /// legacy Work bodies. Contrast the two selectors under release provenance:
-    /// the old override picks the control pin A, the current-Home selector
-    /// picks B and has no way to reach A at all.
-    #[test]
-    fn current_home_binary_never_resolves_through_the_control_pin() {
-        // Old behavior (the bug): a release build prefers LF_CONTROL_BIN (A),
-        // even when the current Home LF_BIN (B) is present.
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Release,
-                Some("/old/A/lf".into()),
-                Some("/current/B/lf".into()),
-            ),
-            Some(PathBuf::from("/old/A/lf")),
-        );
-        // Fixed: the current-Home selector has no control input, so with
-        // LF_BIN=B it resolves B — A is unreachable, in any provenance.
-        assert_eq!(
-            select_current_home_binary(Some("/current/B/lf".into())),
-            Some(PathBuf::from("/current/B/lf")),
-        );
-        // Empty or absent LF_BIN falls through to PATH/installed lf, never to A.
-        assert_eq!(select_current_home_binary(None), None);
-        assert_eq!(select_current_home_binary(Some("".into())), None);
-    }
-
-    #[test]
-    fn persisted_control_binary_wins_over_relaunching_callers_binary() {
-        let mut environment = vec![(
-            crate::store::CONTROL_BIN_ENV.to_string(),
-            "/persisted/lf".to_string(),
-        )];
-        let caller = ChildExecutionContext {
-            lf_bin: PathBuf::from("/caller/lf"),
-            lf_home: PathBuf::from("/caller/home"),
-            db_path: PathBuf::from("/caller/loopflow.db"),
-        };
-
-        extend_session_control_context(&mut environment, &caller, BuildProvenance::Release);
-
-        assert!(environment.iter().any(|(key, value)| {
-            key == crate::store::CONTROL_BIN_ENV && value == "/persisted/lf"
-        }));
-        assert!(!environment
-            .iter()
-            .any(|(key, value)| { key == crate::store::CONTROL_BIN_ENV && value == "/caller/lf" }));
-    }
-
-    #[test]
     fn lf_session_clears_parent_identity_and_exports_its_own() {
         let argv = vec![
             "lf".to_string(),
-            "__work".to_string(),
+            "work".to_string(),
+            "execute".to_string(),
             "task".to_string(),
             "tsk_123".to_string(),
         ];
-        let command = lf_session_shell_command(&argv, &[("LF_WAVE_ID", "infra")]);
+        let command =
+            lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
-        assert!(command.starts_with(
+        assert!(command.contains(
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH"));
-        assert!(command.contains("LF_INSTALL_SWITCH LF_BIN"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
-        assert!(command.ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"));
+        assert!(command
+            .ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' 'work' 'execute' 'task' 'tsk_123'"));
+    }
+
+    #[test]
+    fn lf_session_drops_a_stale_run_step_binary_and_home() {
+        let argv = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_STEP-}${LF_BIN-}${LF_HOME-unset}\""
+                .into(),
+        ];
+        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
+        let output = std::process::Command::new("sh")
+            .args(["-c", &command])
+            .env("LF_RUN_ID", "run_dead")
+            .env("LF_RUN_DIR", "/dead/run")
+            .env("LF_FLOW_STEP", "{}")
+            .env("LF_BIN", "/stale/lf")
+            .env("LF_HOME", "/stale/home")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "unset");
     }
 
     #[test]
     fn lf_session_without_explicit_identity_does_not_inherit_its_parent() {
         let argv = vec!["lf".to_string(), "wave".to_string(), "child".to_string()];
 
-        let command = lf_session_shell_command(&argv, &[]);
+        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_WORK_ADVANCE_CLAIM"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
+    }
+
+    #[test]
+    fn preferred_name_in_durable_sessions_requires_explicit_context() {
+        let argv = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf '%s' \"${LF_USER_NAME-unset}\"".into(),
+        ];
+        for name in [None, Some("Maya")] {
+            let env = name
+                .map(|name| vec![(crate::engine::config::USER_NAME_ENV, name)])
+                .unwrap_or_default();
+            let command = lf_session_shell_command(std::path::Path::new("."), &argv, &env);
+            let output = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .env(crate::engine::config::USER_NAME_ENV, "Jack")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                name.unwrap_or_default()
+            );
+        }
     }
 
     #[test]
@@ -856,8 +565,6 @@ mod tests {
         }
         assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
         assert!(names.iter().any(|name| name == "GH_TOKEN"));
-        assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
-        assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));
         assert!(names.iter().any(|name| name == "LF_DISCORD_TOKEN"));
         assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
         assert!(names.iter().any(|name| name == "STRIPE_KEY"));
@@ -868,7 +575,11 @@ mod tests {
         assert!(forwarded_authority_env_names()
             .iter()
             .any(|name| name == DISCORD_TOKEN_ENV));
-        let command = lf_session_shell_command(&["lf".into(), "wave".into()], &[]);
+        let command = lf_session_shell_command(
+            std::path::Path::new("."),
+            &["lf".into(), "wave".into()],
+            &[],
+        );
         assert!(command.contains("unset "));
         assert!(command.contains(DISCORD_TOKEN_ENV));
     }
@@ -877,24 +588,30 @@ mod tests {
     fn lf_session_replaces_tmux_invocation_context() {
         let argv = vec![
             "lf".to_string(),
-            "__work".to_string(),
+            "work".to_string(),
+            "execute".to_string(),
             "task".to_string(),
             "tsk_123".to_string(),
         ];
         let command = lf_session_shell_command(
+            std::path::Path::new("."),
             &argv,
             &[
                 ("LF_TRACE_ID", "run-1"),
                 ("LF_PROCESS_ID", "process-1"),
-                ("LF_DB_PATH", "/tmp/current.db"),
                 ("LF_HOME", "/tmp/lf"),
             ],
         );
 
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_WORK_ADVANCE_CLAIM"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
-            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
     }
+}
+
+#[cfg(not(test))]
+pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    start_lf_session_with_env(session, cwd, argv, &[]).await
 }

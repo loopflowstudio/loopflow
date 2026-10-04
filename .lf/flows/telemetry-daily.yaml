@@ -1,2 +1,3 @@
-- op: doctor
-- op: __telemetry-scorecard
+- cmd: doctor
+- cmd: __telemetry-scorecard
+- cmd: usage --weekly

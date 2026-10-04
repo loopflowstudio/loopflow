@@ -1,0 +1,1 @@
+{"v":1,"seq":1,"at":"2026-09-24T00:00:00Z","kind":{"type":"playhead_changed","event":{"kind":"invocation_started","invocation_id":"old-wave","flow":"wave"},"playhead":{"stack":[{"id":"old-wave","flow":"wave","steps":[{"Skill":{"skill":{"name":"wave/operate","content":"Captured governance"},"policy":{},"flow_parents":[]}}],"cursor":0,"iteration":2,"queue":[]}],"active":null}}}

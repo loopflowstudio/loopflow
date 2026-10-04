@@ -1,7 +1,4 @@
-// Starts and controls the local Wave backing a WaveChat pane.
-//
-// Loopflow uses the same `lf start <name>` lifecycle as the CLI. lfd owns the
-// detached listener; quitting the app never kills a wave.
+// Launch Tasks and local sessions through the CLI.
 
 #if os(macOS)
 import Foundation
@@ -11,7 +8,7 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-struct TaskStartReceipt: Decodable, Sendable, Equatable {
+struct TaskCreateReceipt: Decodable, Sendable, Equatable {
     let issueIdentifier: String
     let project: String
     let wave: String
@@ -22,57 +19,37 @@ private struct DevelopmentControlConfig: Decodable {
 }
 
 enum LocalWaveAgentLauncher {
-    /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
-    /// The server performs resident, registry, and discovery-file cleanup.
-    static func stopWave(repoPath: String, waveName: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
-    }
-
-    static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
-        [lfPath, "stop", waveName]
-    }
-
-    /// Start a filed Task through the same durable lifecycle command as the CLI.
-    /// `lf task run` owns Project Work startup, worktree placement, and the
-    /// Task process; the app does not reproduce any of those decisions.
+    /// Start a filed Task through the same bounded worker command as the CLI.
+    /// `lf task run` owns Project lookup, worktree placement, Flow selection,
+    /// and the Task worker; the app does not reproduce those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
         try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Create and start one Task with the normal PM and worker lifecycle.
+    /// Create one Task, then start its normal bounded worker path.
     static func startTask(
         repoPath: String,
         title: String,
-        project: String,
+        wave: String,
         directive: String
-    ) throws -> TaskStartReceipt {
+    ) throws -> TaskCreateReceipt {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
         let stdout = try runCheckedOutput(
-            taskStartCommand(
+            taskCreateCommand(
                 lfPath: lfPath,
                 title: title,
-                project: project,
+                wave: wave,
                 directive: directive
             ),
             cwd: origin
         )
-        return try taskStartReceipt(stdout)
+        return try taskCreateReceipt(stdout)
     }
 
-    /// Restart existing Task Work without creating another worktree or
-    /// status record.
-    static func resumeTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
-    /// Queue the audited Task interrupt. The Task runner decides how the live
+    /// Queue the audited Task interrupt. The Task worker decides how the live
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
@@ -80,51 +57,68 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    /// Open the branch's PR for human review from `worktree`. This delegates to
-    /// `lf pr open` — the single presentation boundary — instead of building a
+    /// Open the branch's PR for review from `worktree`. This delegates to
+    /// `lf task pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
     /// honored in one place. Only an explicit user review action calls this;
-    /// background app work publishes with `lf pr publish`.
+    /// background app work publishes with `lf task pr publish`.
     static func reviewPullRequest(worktree: String) throws {
         let lfPath = try controlLfPath()
         try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
     }
 
     static func pullRequestReviewCommand(lfPath: String) -> [String] {
-        [lfPath, "pr", "open"]
+        [lfPath, "task", "pr", "open"]
     }
 
-    static func taskRunCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "run", issue]
+    /// Ensure Task Work and its checkout without starting a worker; returns
+    /// the authoritative worktree.
+    static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
+        let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        return try taskCheckoutWorkspace(stdout)
     }
 
-    static func taskStartCommand(
-        lfPath: String,
-        title: String,
-        project: String,
-        directive: String
-    ) -> [String] {
-        [
-            lfPath, "task", "start", project, title,
-            "--directive", directive,
-            "--json",
-        ]
+    static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskStartReceipt(_ stdout: String) throws -> TaskStartReceipt {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+    static func taskCheckoutWorkspace(_ stdout: String) throws -> WorkspaceIdentity {
         do {
-            return try decoder.decode(TaskStartReceipt.self, from: Data(stdout.utf8))
+            return try JSONDecoder().decode(WorkspaceIdentity.self, from: Data(stdout.utf8))
         } catch {
             throw LocalLfError(
-                errorDescription: "lf task start returned an invalid receipt: \(error.localizedDescription)"
+                errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }
 
-    static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "resume", issue]
+    static func taskRunCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "--task", issue, "flow", "start"]
+    }
+
+    static func taskCreateCommand(
+        lfPath: String,
+        title: String,
+        wave: String,
+        directive: String
+    ) -> [String] {
+        [
+            lfPath, "task", "create", "--run", "--wave", wave, "--title", title,
+            "--notes", directive,
+            "--json",
+        ]
+    }
+
+    static func taskCreateReceipt(_ stdout: String) throws -> TaskCreateReceipt {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(TaskCreateReceipt.self, from: Data(stdout.utf8))
+        } catch {
+            throw LocalLfError(
+                errorDescription: "lf task create --run returned an invalid receipt: \(error.localizedDescription)"
+            )
+        }
     }
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
@@ -133,9 +127,8 @@ enum LocalWaveAgentLauncher {
 
     /// Return the CLI that owns the Home this Mac client controls.
     ///
-    /// Installed apps use their registered bundled helper. A development app
-    /// carries an explicit pointer to the machine install gate so Finder and
-    /// scripted launches see the same selected Home as terminal `lf`.
+    /// Use an explicitly configured helper when present; otherwise use the
+    /// bundled CLI, which shares the app's protocol and selects its own Home.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         developmentConfig: URL? = Bundle.main.url(
@@ -177,9 +170,9 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
+        guard let result = run([lfPath] + subargs, cwd: cwd, input: input) else {
             throw LocalLfError(
                 errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
             )
@@ -201,6 +194,17 @@ enum LocalWaveAgentLauncher {
     }
 
     // MARK: - Process plumbing
+
+    static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        return process
+    }
 
     private static func runChecked(_ args: [String], cwd: String) throws {
         _ = try runCheckedOutput(args, cwd: cwd)
@@ -225,19 +229,16 @@ enum LocalWaveAgentLauncher {
 
     private static func run(
         _ args: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        input: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
-        let process = Process()
+        let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
-        if let cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-        }
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin
 
         let outHandle = stdout.fileHandleForReading
         let errHandle = stderr.fileHandleForReading
@@ -250,7 +251,7 @@ enum LocalWaveAgentLauncher {
 
         // Drain both pipes while the child is still writing. A pipe holds 64KB;
         // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf tokens --json` says about 120KB. `lf runs`/`lf doctor`
+        // that, and `lf repo tokens --json` says about 120KB. `lf runs`/`lf doctor`
         // are small, which is why this only ever bit the largest reader.
         let collector = OutputCollector()
         let group = DispatchGroup()
@@ -258,8 +259,20 @@ enum LocalWaveAgentLauncher {
         queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
         queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
 
+        if let input, let stdin {
+            // lf can exit before reading; report the failed write instead of taking SIGPIPE.
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            queue.async(group: group) {
+                defer { try? stdin.fileHandleForWriting.close() }
+                do { try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+                catch { collector.setInputError(error.localizedDescription) }
+            }
+        }
         process.waitUntilExit()
         group.wait()
+        if process.terminationStatus == 0, let error = collector.inputError {
+            return (1, "", "Could not send draft to lf: \(error)")
+        }
 
         return (
             process.terminationStatus,
@@ -275,6 +288,10 @@ private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var out = Data()
     private var err = Data()
+    private var inputFailure: String?
+
+    var inputError: String? { lock.withLock { inputFailure } }
+    func setInputError(_ message: String) { lock.withLock { inputFailure = message } }
 
     var stdout: Data { lock.withLock { out } }
     var stderr: Data { lock.withLock { err } }

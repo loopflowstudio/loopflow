@@ -1,0 +1,6 @@
+{
+  "state": "stalled",
+  "reason": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.",
+  "step": null,
+  "captured": 12
+}

@@ -19,14 +19,10 @@ path = "src/bin/lf.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
-[[bin]]
-name = "lfd"
-path = "src/bin/lfd.rs"
-
 # --- Dependencies from loopflow-engine ---
 [dependencies]
 clap = { version = "4.6", features = ["derive", "env"] }
-dirs = "6"
+dirs = "7"
 ignore = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -60,13 +56,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # --- Runtime dependencies ---
 async-trait = "0.1"
 aes-gcm = "0.10"
-axum = { version = "0.8", features = ["ws"] }
 base64 = "0.23"
 bytes = "1"
 cron = "0.17"
 futures-util = "0.3"
 gethostname = "1.1"
-hmac = "0.12"
 ipnet = "2"
 libc = "0.2"
 reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
@@ -75,19 +69,20 @@ fs2 = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-tower-http = { version = "0.7", features = ["trace"] }
+tokio-tungstenite = "0.30"
 tempfile = "3.27"
 
+# ARM file-selection latency includes hashing the executable for install authority.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+
 [dev-dependencies]
+axum = "0.8"
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
 
 [build-dependencies]
-hex = "0.4"
-sha2 = "0.10"
-
-[[bench]]
-name = "wave_stream"
-harness = false
+rusqlite = { version = "0.40", features = ["backup", "bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -6,7 +6,7 @@ Compress text into a target token budget without silently dropping important inf
 
 ## Goal
 
-Produce a smaller artifact that preserves the decisions, facts, risks, names, dates, and structure a downstream agent or human needs. Compression is not truncation. Shape the information so it fits.
+Produce a smaller artifact that preserves the decisions, facts, risks, names, dates, and structure the next reader needs. Compression is not truncation. Shape the information so it fits.
 
 ## Workflow
 

@@ -626,8 +626,6 @@ struct WorkspaceNavigationTests {
             }
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        await model.refreshProcessActivity()
-        #expect(model.processActivity.errorMessage == nil)
         let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No active Tasks in this repository.") }
         if hasUnplannedWork {

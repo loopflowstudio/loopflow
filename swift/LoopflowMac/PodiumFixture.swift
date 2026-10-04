@@ -15,7 +15,6 @@ enum PodiumFixture {
                 model.applyFixture(
                     roadmap: .available(snapshot),
                     waves: .available([]),
-                    processActivity: .available(try emptyProcessActivity()),
                     workActivity: .available(try emptyWorkActivity()),
                     repos: [],
                     fixed: true
@@ -23,25 +22,18 @@ enum PodiumFixture {
             case .mockWaves, .sessionFixtures:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: PodiumReading<RoadmapSnapshot>
-                let processActivity: PodiumReading<ActivitySnapshot>
                 let workActivity: PodiumReading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
-                    processActivity = .available(try loadProcessActivity(sourceFile: sourceFile))
                     workActivity = .available(try loadWorkActivity(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
-                    processActivity = .loading
                     workActivity = .loading
                 case .error:
                     reading = .unavailable(
                         lastGood: nil,
                         reason: "the local registry is unreachable"
-                    )
-                    processActivity = .unavailable(
-                        lastGood: nil,
-                        reason: "live process evidence is unavailable"
                     )
                     workActivity = .unavailable(
                         lastGood: nil,
@@ -51,7 +43,6 @@ enum PodiumFixture {
                 model.applyFixture(
                     roadmap: reading,
                     waves: .available(fixture.waves),
-                    processActivity: processActivity,
                     workActivity: workActivity,
                     repos: fixture.repos,
                     fixed: true
@@ -70,7 +61,6 @@ enum PodiumFixture {
                     reason: "Podium fixture unavailable: \(error.localizedDescription)"
                 ),
                 waves: .unavailable(lastGood: nil, reason: error.localizedDescription),
-                processActivity: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 workActivity: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 repos: [],
                 fixed: true
@@ -94,19 +84,9 @@ enum PodiumFixture {
         return (roadmap, waves, repos)
     }
 
-    private static func loadProcessActivity(sourceFile: String) throws -> ActivitySnapshot {
-        let url = try fixtureURL(named: "activity_snapshot.json", sourceFile: sourceFile)
-        return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(contentsOf: url))
-    }
-
     private static func loadWorkActivity(sourceFile: String) throws -> WorkActivitySnapshot {
         let url = try fixtureURL(named: "work_activity_snapshot.json", sourceFile: sourceFile)
         return try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(contentsOf: url))
-    }
-
-    private static func emptyProcessActivity() throws -> ActivitySnapshot {
-        let json = #"{"schema_version":1,"observed_at":1784606400,"nodes":[],"provider_processes":[]}"#
-        return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(json.utf8))
     }
 
     private static func emptyWorkActivity() throws -> WorkActivitySnapshot {

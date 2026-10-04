@@ -228,7 +228,7 @@ struct TaskHistoryFilterTests {
         let roadmap = try await query.roadmap()
         let wave = try #require(roadmap.waves.first)
         let model = PodiumModel(query: query)
-        model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), processActivity: .loading, workActivity: .loading, repos: [])
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
         await model.loadFlowCatalog()
         model.select(.wave(id: wave.wave.id))
         model.taskHistoryNow = now

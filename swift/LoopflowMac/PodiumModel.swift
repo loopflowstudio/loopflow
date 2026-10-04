@@ -242,7 +242,6 @@ final class PodiumModel {
         }
     }
     private(set) var waves: PodiumReading<[Wave]> = .loading
-    private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
     private(set) var activeSessions: PodiumReading<ActiveSessionsSnapshot> = .loading
     private(set) var isRefreshingActiveSessions = false
     private(set) var activeSessionsNeedsRetry = false
@@ -279,8 +278,8 @@ final class PodiumModel {
     private let query: RegistryQuery
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
+    @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
     private var roadmapGeneration = 0
-    private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
     init(query: RegistryQuery, repoPath: String? = nil) {
@@ -378,17 +377,6 @@ final class PodiumModel {
             clearSelectionIfOutsideScope()
         }
         await refreshWorkActivity()
-    }
-
-    func refreshProcessActivity() async {
-        guard !usesFixedFixture, !isRefreshing, !processActivityRefreshInFlight else { return }
-        processActivityRefreshInFlight = true
-        defer { processActivityRefreshInFlight = false }
-
-        let previous = processActivity.value
-        if previous == nil { processActivity = .loading }
-        let next = reading(from: await readProcessActivity(), lastGood: previous)
-        if processActivity != next { processActivity = next }
     }
 
     /// First demand starts a window-owned reader; navigation never restarts it.
@@ -628,13 +616,26 @@ final class PodiumModel {
 
     func refreshSessions() async {
         guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
-        sessionsGeneration &+= 1
-        let generation = sessionsGeneration
-        let repoPath = repoPath
         guard let repoPath else {
             sessions = .available([])
             return
         }
+        // The periodic reader and full refresh share one enumeration. Joining
+        // also lets callers wait for all pages instead of invalidating each other.
+        if let refresh = sessionsRefresh,
+           refresh.repo == repoPath, refresh.generation == sessionsGeneration {
+            await refresh.task.value
+            return
+        }
+        sessionsGeneration &+= 1
+        let generation = sessionsGeneration
+        let task = Task { await readSessions(repoPath: repoPath, generation: generation) }
+        sessionsRefresh = (repoPath, generation, task)
+        await task.value
+        if sessionsRefresh?.generation == generation { sessionsRefresh = nil }
+    }
+
+    private func readSessions(repoPath: String, generation: Int) async {
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
@@ -930,7 +931,6 @@ final class PodiumModel {
     func applyFixture(
         roadmap: PodiumReading<RoadmapSnapshot>,
         waves: PodiumReading<[Wave]>,
-        processActivity: PodiumReading<ActivitySnapshot>,
         workActivity: PodiumReading<WorkActivitySnapshot>,
         repos: [PortfolioRepo],
         fixed: Bool = false
@@ -938,7 +938,6 @@ final class PodiumModel {
         self.roadmap = roadmap
         if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
         self.waves = waves
-        self.processActivity = processActivity
         self.workActivity = workActivity
         self.repos = repos
         authoredWavesByRepo = [:]
@@ -1030,16 +1029,6 @@ final class PodiumModel {
             let waves = try await query.allWaves()
             await Self.resolveRepoOrigins(waves.map(\.repo))
             return .success(waves)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    private func readProcessActivity() async -> Result<ActivitySnapshot, Error> {
-        do {
-            let snapshot = try await query.processActivity()
-            await Self.resolveRepoOrigins(snapshot.nodes.compactMap(\.repo))
-            return .success(snapshot)
         } catch {
             return .failure(error)
         }

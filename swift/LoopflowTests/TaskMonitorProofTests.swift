@@ -151,7 +151,7 @@ struct TaskMonitorProofTests {
             wire["waves"] = waves
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
             model.applyFixture(roadmap: .available(snapshot), waves: model.waves,
-                processActivity: model.processActivity, workActivity: model.workActivity, repos: model.repos)
+                workActivity: model.workActivity, repos: model.repos)
             try await settle(window)
             #expect(model.selection == .task(id: "issue-review"))
             #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)

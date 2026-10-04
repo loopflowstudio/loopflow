@@ -37,7 +37,7 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([staleWorktree]),
-            processActivity: .available(fixture.processActivity),
+
             workActivity: .available(fixture.workActivity),
             repos: [PortfolioRepo(path: "/src/loopflow", lastOpened: .distantPast)]
         )
@@ -94,7 +94,7 @@ struct PodiumModelTests {
         wire["waves"] = waves
         let updated = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(updated), waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+            workActivity: .available(fixture.workActivity), repos: [])
         #expect(model.task(id: "issue-now")?.task.task.name == "Updated while selected")
         var projects = try #require(waves[0]["projects"] as? [String: Any])
         var plans = try #require(projects["items"] as? [[String: Any]])
@@ -108,7 +108,7 @@ struct PodiumModelTests {
         wire["waves"] = waves
         let transferring = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(transferring), waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+            workActivity: .available(fixture.workActivity), repos: [])
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
         #expect(model.task(id: "issue-now")?.task.task.name == "Updated while selected")
@@ -125,7 +125,7 @@ struct PodiumModelTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         let model = PodiumModel(query: fixture.query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+            workActivity: .available(fixture.workActivity), repos: [])
         model.select(.wave(id: "wave-1"))
 
         let view = WorkSurfaceView(model: model)
@@ -141,7 +141,7 @@ struct PodiumModelTests {
         let deferred = DeferredActivityResponse()
         let model = PodiumModel(query: RegistryQuery { _, _ in await deferred.response() }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+            workActivity: .available(fixture.workActivity), repos: [])
         model.select(.project(id: "old-plan"))
         let lookup = try #require(model.historyLookup)
         await deferred.waitUntilRequested()
@@ -182,116 +182,20 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity),
+
             workActivity: .available(fixture.workActivity),
             repos: []
         )
 
         await model.refresh()
-        await model.refreshProcessActivity()
 
         #expect(model.roadmap.value == fixture.roadmap)
         #expect(model.roadmap.errorMessage == "registry unavailable")
         #expect(model.waves.value == fixture.waves)
         #expect(model.waves.errorMessage == "registry unavailable")
-        #expect(model.processActivity.value == fixture.processActivity)
-        #expect(model.processActivity.errorMessage == "registry unavailable")
         #expect(model.workActivity.value == fixture.workActivity)
         #expect(model.workActivity.errorMessage == "registry unavailable")
         #expect(model.visibleWaves.count == 2)
-    }
-
-    @Test("A slow process read does not hold back fleet, Sessions, or roadmap")
-    func slowProcessReadDoesNotBlockDurableState() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let deferred = DeferredProcessResponse()
-        let query = RegistryQuery { args, _ in
-            switch args.first {
-            case "roadmap": fixture.roadmapJSON
-            case "wave" where args.dropFirst().first == "list": fixture.wavesJSON
-            case "session": #"{"entries":[],"next":null}"#
-            case "activity": fixture.workActivityJSON
-            case "ps": try await deferred.response(args: args)
-            default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
-            }
-        }
-        let model = PodiumModel(query: query)
-
-        let processRefresh = Task { await model.refreshProcessActivity() }
-        await deferred.waitUntilRequested()
-        await model.refresh()
-
-        #expect(model.visibleWaves.count == 2)
-        #expect(model.visibleRoadmaps.map(\.wave.name) == ["product", "context"])
-        #expect(model.sessions.value == [])
-
-        await deferred.release(
-            try fixture.processActivityJSON(providersLive: true, observedAt: 3)
-        )
-        await processRefresh.value
-    }
-
-    @Test("Live refresh changes only process evidence and preserves its last good frame")
-    func liveRefreshChangesOnlyProcessEvidence() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let frames = LiveProcessFrames(frames: [
-            try fixture.processActivityJSON(providersLive: true, observedAt: 1),
-            try fixture.processActivityJSON(providersLive: true, observedAt: 2),
-        ])
-        let query = RegistryQuery { args, _ in
-            try await frames.next(args: args)
-        }
-        let model = PodiumModel(query: query)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-
-        await model.refreshProcessActivity()
-        #expect(model.processActivity.value?.observedAt == 1)
-        #expect(model.processActivity.value?.nodes.count == 3)
-
-        await model.refreshProcessActivity()
-        #expect(model.processActivity.value?.observedAt == 2)
-        #expect(model.processActivity.value?.nodes.count == 3)
-
-        await model.refreshProcessActivity()
-        #expect(model.processActivity.value?.observedAt == 2)
-        #expect(model.processActivity.errorMessage == "no process frame available")
-        #expect(await frames.commands == [
-            ["ps", "--json"],
-            ["ps", "--json"],
-            ["ps", "--json"],
-        ])
-    }
-
-    @Test("Live process refreshes never overlap")
-    func liveProcessRefreshesNeverOverlap() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let deferred = DeferredProcessResponse()
-        let query = RegistryQuery { args, _ in
-            try await deferred.response(args: args)
-        }
-        let model = PodiumModel(query: query)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-
-        let first = Task { await model.refreshProcessActivity() }
-        await deferred.waitUntilRequested()
-        await model.refreshProcessActivity()
-        #expect(await deferred.requestCount == 1)
-
-        await deferred.release(try fixture.processActivityJSON(providersLive: true, observedAt: 3))
-        await first.value
-        #expect(model.processActivity.value?.observedAt == 3)
     }
 
     @Test("Authored Waves remain visible without active Runs")
@@ -313,7 +217,7 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([]),
-            processActivity: .available(fixture.processActivity),
+
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -357,13 +261,13 @@ struct PodiumModelTests {
             name: "product",
             repo: origin.path,
             status: .ready,
-            
+
         )
         let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([registered]),
-            processActivity: .available(fixture.processActivity),
+
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -438,7 +342,7 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
-            processActivity: .available(fixture.processActivity),
+
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -546,41 +450,9 @@ struct PodiumModelTests {
     }
 }
 
-@Suite("Podium process signal")
-struct PodiumOutputSignalTests {
-    @Test("Exact provider process state drives the signal")
-    func processStateDrivesSignal() throws {
-        let fixture = try PodiumTestFixture.load()
-        let empty = try JSONDecoder().decode(
-            ActivitySnapshot.self,
-            from: Data(fixture.processActivityJSON(providersLive: false, observedAt: 1).utf8)
-        )
-
-        #expect(PodiumSignalState.from(empty) == .off)
-        #expect(PodiumSignalState.from(empty).lens == .black)
-        #expect(PodiumSignalState.from(fixture.processActivity) == .blocked)
-        #expect(PodiumSignalState.from(fixture.processActivity).lens == .blue)
-
-        let silentWorker = ActivityNode(
-            id: "provider:1",
-            parentId: nil,
-            kind: .providerProcess,
-            label: "codex",
-            repo: "/src/loopflow",
-            worktree: nil,
-            wave: "product",
-            pid: 1,
-            startedAt: 1,
-            state: .working
-        )
-        #expect(PodiumSignalState.from(nodes: [silentWorker]) == .producing)
-    }
-}
-
 private struct PodiumTestFixture {
     let roadmap: RoadmapSnapshot
     let waves: [Wave]
-    let processActivity: ActivitySnapshot
     let workActivity: WorkActivitySnapshot
     let workActivityData: Data
     let roadmapJSON: String
@@ -597,13 +469,6 @@ private struct PodiumTestFixture {
             .appendingPathComponent("tests/fixtures/dto")
         let roadmapData = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: roadmapData)
-        let processActivityData = try Data(
-            contentsOf: fixtures.appendingPathComponent("activity_snapshot.json")
-        )
-        let processActivity = try JSONDecoder().decode(
-            ActivitySnapshot.self,
-            from: processActivityData
-        )
         let workActivityData = try Data(
             contentsOf: fixtures.appendingPathComponent("work_activity_snapshot.json")
         )
@@ -619,14 +484,12 @@ private struct PodiumTestFixture {
         let waves = snapshots.map { $0.toWave() }
         let roadmapJSON = try #require(String(data: roadmapData, encoding: .utf8))
         let wavesJSON = try #require(String(data: waveData, encoding: .utf8))
-        let processActivityJSON = try #require(String(data: processActivityData, encoding: .utf8))
         let workActivityJSON = try #require(String(data: workActivityData, encoding: .utf8))
         let activityArguments = ActivityArguments()
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmapJSON
             case "wave" where args.dropFirst().first == "list": return wavesJSON
-            case "ps": return processActivityJSON
             case "session": return #"{"entries":[],"next":null}"#
             case "activity":
                 await activityArguments.record(args)
@@ -637,7 +500,6 @@ private struct PodiumTestFixture {
         return PodiumTestFixture(
             roadmap: roadmap,
             waves: waves,
-            processActivity: processActivity,
             workActivity: workActivity,
             workActivityData: workActivityData,
             roadmapJSON: roadmapJSON,
@@ -659,17 +521,7 @@ private struct PodiumTestFixture {
         return try #require(String(data: data, encoding: .utf8))
     }
 
-    func processActivityJSON(providersLive: Bool, observedAt: Int64) throws -> String {
-        let encoded = try JSONEncoder().encode(processActivity)
-        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        if !providersLive {
-            let nodes = try #require(object["nodes"] as? [[String: Any]])
-            object["nodes"] = nodes.filter { $0["kind"] as? String == "exec" }
-        }
-        object["observed_at"] = observedAt
-        let data = try JSONSerialization.data(withJSONObject: object)
-        return try #require(String(data: data, encoding: .utf8))
-    }
+
 }
 
 private actor ActivityArguments {
@@ -705,50 +557,4 @@ private actor DeferredActivityResponse {
     }
 }
 
-private actor LiveProcessFrames {
-    private var frames: [String]
-    private(set) var commands: [[String]] = []
-
-    init(frames: [String]) {
-        self.frames = frames
-    }
-
-    func next(args: [String]) throws -> String {
-        commands.append(args)
-        guard !frames.isEmpty else {
-            throw RegistryQueryError("no process frame available")
-        }
-        return frames.removeFirst()
-    }
-}
-
-private actor DeferredProcessResponse {
-    private var responseContinuation: CheckedContinuation<String, Error>?
-    private var requestContinuation: CheckedContinuation<Void, Never>?
-    private(set) var requestCount = 0
-
-    func response(args: [String]) async throws -> String {
-        guard args == ["ps", "--json"] else {
-            throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
-        }
-        requestCount += 1
-        return try await withCheckedThrowingContinuation { continuation in
-            responseContinuation = continuation
-            requestContinuation?.resume()
-            requestContinuation = nil
-        }
-    }
-
-    func waitUntilRequested() async {
-        if responseContinuation != nil { return }
-        await withCheckedContinuation { continuation in
-            requestContinuation = continuation
-        }
-    }
-
-    func release(_ response: String) {
-        responseContinuation?.resume(returning: response)
-        responseContinuation = nil
-    }
-}
 #endif

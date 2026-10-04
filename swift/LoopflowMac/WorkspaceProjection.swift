@@ -49,11 +49,24 @@ struct WorkspaceProjection {
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
-        func attached(to taskId: String?) -> [SessionRecord] {
-            guard let taskId else { return [] }
-            let records = sessions.filter { $0.primaryScope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
-            matched.formUnion(records.map(\.id))
-            return records
+        var taskSessions: [String: [SessionRecord]] = [:]
+        var waveSessions: [String: [SessionRecord]] = [:]
+        // Index the shared memberships once. A Session may belong to more than
+        // one Task; workspace and explicit membership must not duplicate a row.
+        for session in sessions {
+            var taskIds = Set(session.taskIds)
+            if let taskId = session.workspace?.taskId { taskIds.insert(taskId) }
+            let visibleMemberships = taskIds.intersection(visibleTaskIds)
+            if session.primaryScope == nil {
+                for taskId in visibleMemberships {
+                    taskSessions[taskId, default: []].append(session)
+                }
+            }
+            if visibleMemberships.isEmpty {
+                let waveId = session.work?.kind == .wave ? session.work?.id
+                    : (session.work?.kind == .project ? session.waveId : nil)
+                if let waveId { waveSessions[waveId, default: []].append(session) }
+            }
         }
         waves = roadmaps.map { wave in
             let repo = wave.wave.repo
@@ -61,16 +74,13 @@ struct WorkspaceProjection {
                 id: WorkspaceNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
                 sessions: {
-                    let records = sessions.filter {
-                        !($0.workspace?.taskId.map(visibleTaskIds.contains) ?? false) && !$0.taskIds.contains(where: visibleTaskIds.contains)
-                            && ($0.work == .wave(id: wave.wave.id)
-                                || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
-                    }
+                    let records = waveSessions[wave.wave.id] ?? []
                     matched.formUnion(records.map(\.id))
                     return records
                 }(),
                 tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
-                    let records = attached(to: task.runtime?.workId)
+                    let records = task.runtime.flatMap { taskSessions[$0.workId] } ?? []
+                    matched.formUnion(records.map(\.id))
                     return WorkspaceTask(
                         id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                         task: task, sessions: records

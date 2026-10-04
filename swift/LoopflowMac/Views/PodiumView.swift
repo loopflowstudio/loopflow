@@ -89,16 +89,6 @@ struct PodiumView: View {
                 persistedRepos: portfolioService.repos
             )
         }
-        .task {
-            while !Task.isCancelled {
-                await model.refreshProcessActivity()
-                do {
-                    try await Task.sleep(for: .seconds(2))
-                } catch {
-                    return
-                }
-            }
-        }
         .task(id: model.repoPath) {
             await model.refresh()
             while !Task.isCancelled {
@@ -133,45 +123,6 @@ struct PodiumView: View {
                 do { try await Task.sleep(for: .seconds(2)) }
                 catch { return }
             }
-        }
-    }
-}
-
-enum PodiumSignalState: Equatable {
-    case off
-    case producing
-    case blocked
-    case waiting
-    case unknown
-
-    static func from(_ snapshot: ActivitySnapshot) -> PodiumSignalState {
-        from(nodes: snapshot.nodes)
-    }
-
-    static func from(nodes: [ActivityNode]) -> PodiumSignalState {
-        let providers = nodes.filter { $0.kind == .providerProcess }
-        if providers.contains(where: { $0.state == .stalled }) { return .blocked }
-        if providers.contains(where: { $0.state == .working }) { return .producing }
-        if providers.contains(where: { $0.state == .waiting }) { return .waiting }
-        return .off
-    }
-
-    var lens: WaveLensColor {
-        switch self {
-        case .off: .black
-        case .producing: .green
-        case .blocked: .blue
-        case .waiting, .unknown: .unknown
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .off: "Off"
-        case .producing: "Producing"
-        case .blocked: "Blocked"
-        case .waiting: "Waiting"
-        case .unknown: "Unknown"
         }
     }
 }

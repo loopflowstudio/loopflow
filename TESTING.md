@@ -526,6 +526,15 @@ Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
 or successful retry, `--flow-blocked` for keyed feedback continuation, and
 `--public-connect` for a live headless-to-terminal handoff.
+`--shared-provider-home` proves Loopflow and plain Codex share one home signed
+in as one stored account at a time: switching, saved-back logins, isolation,
+and provider conversation IDs in `lf session`.
+`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
+target/debug/lf --output <dir>` proves the same for Claude with synthetic
+logins and a local endpoint: a Claude started after a switch sends the login
+Loopflow installed, a shared launch gets no account home or credential
+variable, and an isolated launch stays in its account's home. On macOS it
+writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Homes and stops only its identified
 engine children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior

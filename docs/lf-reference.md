@@ -51,6 +51,8 @@ Open Loopflow or run its CLI
 | `--model / -m` | Model to use (harness or harness:model) |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
+| `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
+| `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
 | `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
 | `--mode` | Choose the provider surface; omission inherits configuration and terminal context |
@@ -225,7 +227,7 @@ Read this conversation's native start, usage and completion receipts
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
 | `--json` | json Default: false. |
 | `--after` | Continue after an observed event sequence Default: 0. |
 | `--limit` | limit Default: 100. |
@@ -256,7 +258,7 @@ Connect to the live conversation, or resume its saved history
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
 | `--json` | json Default: false. |
 | `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
@@ -288,7 +290,7 @@ Complete a review or interactive session
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
 | `--help / -h` | Print help |
 
 ## lf session rename
@@ -297,7 +299,7 @@ Rename a Session; a human name is never replaced by a suggestion
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
 | `<name>` | name |
 | `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
 | `--json` | json Default: false. |
@@ -309,7 +311,7 @@ Assign a Task to a Session that has none; the Task never changes after
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
 | `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
 | `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
 | `--json` | json Default: false. |
@@ -427,6 +429,15 @@ Spend one banked Codex reset for this named login
 | `--idempotency-key` | Reuse this key when retrying the same redemption |
 | `--credit-id` | Opaque credit ID returned by live status (otherwise the service chooses) |
 | `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf account <provider> use
+
+Sign the provider's ordinary home in as a stored login:
+
+| Argument | What it does |
+|---|---|
+| `<email>` | email |
 | `--help / -h` | Print help |
 
 ## lf account route

@@ -3,8 +3,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use crate::ops::cron::calendar;
 use anyhow::{anyhow, Result};
-use chrono::{Datelike, Local, LocalResult, NaiveDate, TimeZone, Utc};
+use chrono::{Local, Utc};
 use time::{Duration, OffsetDateTime};
 
 use crate::exec::Exec;
@@ -415,7 +416,6 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             receipt.source == CronSource::Scheduled
                 && receipt.wave == obligation.wave
                 && receipt.flow == obligation.flow
-                && receipt.target_kind == obligation.target_kind
                 && receipt.home_id == obligation.home_id
                 && receipt.schedule == obligation.schedule.expression()
                 && receipt.started_at >= interval.start
@@ -538,7 +538,8 @@ fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<Expected
             end: start + 120,
         });
     }
-    let start = scheduled_at_or_before(
+    let start = calendar::at_or_before(
+        &Local,
         now,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
@@ -546,46 +547,13 @@ fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<Expected
     if start < obligation.activated_at {
         return None;
     }
-    let end = scheduled_after(
+    let end = calendar::after(
+        &Local,
         start,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
     )?;
     Some(ExpectedInterval { start, end })
-}
-
-fn scheduled_at_or_before(now: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(now, 0).single()?.date_naive();
-    for _ in 0..370 {
-        if let Some(timestamp) = scheduled_on(date, hour, minute) {
-            if timestamp <= now {
-                return Some(timestamp);
-            }
-        }
-        date = date.pred_opt()?;
-    }
-    None
-}
-
-fn scheduled_after(timestamp: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(timestamp, 0).single()?.date_naive();
-    for _ in 0..370 {
-        date = date.succ_opt()?;
-        if let Some(next) = scheduled_on(date, hour, minute) {
-            if next > timestamp {
-                return Some(next);
-            }
-        }
-    }
-    None
-}
-
-fn scheduled_on(date: NaiveDate, hour: u32, minute: u32) -> Option<i64> {
-    match Local.with_ymd_and_hms(date.year(), date.month(), date.day(), hour, minute, 0) {
-        LocalResult::Single(value) => Some(value.timestamp()),
-        LocalResult::Ambiguous(first, _) => Some(first.timestamp()),
-        LocalResult::None => None,
-    }
 }
 
 fn format_interval(interval: ExpectedInterval) -> String {
@@ -792,9 +760,9 @@ mod tests {
 
     fn obligation(activated_at: i64) -> CronObligation {
         CronObligation {
+            target_kind: CronTargetKind::Flow,
             wave: "infrastructure".to_string(),
             flow: "telemetry-daily".to_string(),
-            target_kind: CronTargetKind::Flow,
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
             home_id: HomeId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
@@ -810,10 +778,11 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 123,
+            runner_started_at: None,
             home_id: obligation.home_id.clone(),
             wave: obligation.wave.clone(),
             flow: obligation.flow.clone(),
-            target_kind: obligation.target_kind,
+            target_kind: CronTargetKind::Flow,
             source,
             schedule: obligation.schedule.expression().to_string(),
             repo: PathBuf::from("/src/loopflow"),
@@ -997,5 +966,20 @@ mod tests {
         let mut event = row(DAY, "completed");
         event.repo = Some("loopflow".to_string());
         assert_eq!(status_of(&[event], "identity"), Status::Fail);
+    }
+    #[test]
+    fn skill_to_flow_cutover_preserves_firing_but_triggered_receipt_does_not_count() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        let interval = latest_due_interval(&cron, now).unwrap();
+        let mut prior = receipt(&cron, interval.start + 60, CronSource::Scheduled);
+        prior.target_kind = CronTargetKind::Skill;
+        cron.receipts.push(prior);
+        assert_eq!(
+            check_continuity(&[], &[cron.clone()], now).status,
+            Status::Ok
+        );
+        cron.receipts[0].source = CronSource::Triggered;
+        assert_eq!(check_continuity(&[], &[cron], now).status, Status::Fail);
     }
 }

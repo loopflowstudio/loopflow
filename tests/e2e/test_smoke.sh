@@ -36,7 +36,7 @@
   mkdir -p .lf/skills
   echo "# Test" > .lf/skills/debug.md
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf-prompt -- \
+  "$ROOT_DIR/target/debug/lf-prompt" \
     --repo "$repo_dir" \
     --skill debug \
     --surface headless \
@@ -44,7 +44,7 @@
     --diff false \
     | grep -q "Test"
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- task wt create smoke-test >/dev/null
+  "$ROOT_DIR/target/debug/lf" task wt create smoke-test >/dev/null
 
   repo_name=$(basename "$repo_dir")
   wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"
@@ -58,7 +58,7 @@
   echo "change" > file.txt
   git add file.txt
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- \
+  "$ROOT_DIR/target/debug/lf" \
     commit -m "smoke test" >/dev/null
 
   git log -1 --pretty=%B | grep -q "smoke test"

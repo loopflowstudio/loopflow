@@ -780,3 +780,389 @@ mod tests {
     fn retained_flows_keep_their_delivery_and_review_boundaries() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
+            (
+                "code",
+                &[
+                    "implement",
+                    "compress",
+                    "sync",
+                    "realign",
+                    "loop-decide",
+                    "pr-publish",
+                    "pr-review",
+                ],
+                &[6],
+                1,
+            ),
+            ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
+            ("refresh", &["sync", "realign"], &[], 0),
+            ("task-design", &["kickoff", "review-design"], &[1], 0),
+            ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
+            (
+                "pursue",
+                &[
+                    "implement",
+                    "compress",
+                    "sync",
+                    "realign",
+                    "loop-decide",
+                    "pr-publish",
+                ],
+                &[],
+                1,
+            ),
+            ("deploy", &["gate", "pr land"], &[], 0),
+            ("ship", &["gate", "pr land -c"], &[], 0),
+            ("ship-demo", &["gate", "demo", "pr land -c"], &[1], 0),
+            ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
+        ];
+        for (name, labels, humans, returns) in cases {
+            let flow = load_flow(name, repo.path()).unwrap();
+            let graph = FlowGraph::new(*name, &compile_flow(&flow, repo.path()).unwrap());
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .map(|s| s.label.as_str())
+                    .collect::<Vec<_>>(),
+                *labels,
+                "{name}"
+            );
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| s.human.then_some(i))
+                    .collect::<Vec<_>>(),
+                *humans,
+                "{name}"
+            );
+            assert_eq!(
+                graph
+                    .steps
+                    .iter()
+                    .filter(|s| s.returns_to.is_some())
+                    .count(),
+                *returns,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_integrates_upstream_before_realigning() {
+        let repo = tempfile::tempdir().unwrap();
+        let flow = load_flow("refresh", repo.path()).unwrap();
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
+        let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(labels, ["sync", "realign"]);
+        assert_eq!(graph.steps[0].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[1].kind, FlowNodeKind::Skill);
+    }
+
+    #[test]
+    fn feature_has_one_pursuit_then_demo_and_forward_delivery() {
+        let repo = tempfile::tempdir().unwrap();
+        let flow = load_flow("feature", repo.path()).unwrap();
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
+        let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "kickoff",
+                "review-design",
+                "implement",
+                "compress",
+                "sync",
+                "realign",
+                "loop-decide",
+                "pr-publish",
+                "demo",
+                "compress",
+                "sync",
+                "realign",
+                "gate",
+                "pr land -c"
+            ]
+        );
+        let implement = graph.steps[2].key;
+        let returns: Vec<_> = graph
+            .steps
+            .iter()
+            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.id.clone(), to)))
+            .collect();
+        assert_eq!(returns, [(Some("decide".to_string()), &implement)]);
+        assert!(graph.steps[1].human && graph.steps[8].human);
+        assert_eq!(graph.steps[13].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[5].sources, ["feature", "pursue", "refresh"]);
+    }
+
+    #[test]
+    fn repeated_decisions_keep_independent_counts_and_a_pass_scoped_completion() {
+        let steps = vec![
+            skill("design", Some("design"), false, None),
+            skill("implement", Some("implement"), false, None),
+            skill("loop-decide", Some("decide"), false, Some("implement")),
+            skill("demo", Some("demo"), true, None),
+            skill(
+                "loop-decide",
+                Some("decide_delivery"),
+                false,
+                Some("implement"),
+            ),
+            skill("land", None, false, None),
+        ];
+        let cursor = ExecutionCursor {
+            index: 1,
+            iteration: 3,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([("decide".into(), 2), ("decide_delivery".into(), 1)]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        assert_eq!(projection.current, Some(1));
+        // Only the opening step is complete; earlier passes' decisions are not.
+        assert_eq!(projection.completed, [0]);
+        let counts: Vec<_> = projection
+            .returns
+            .iter()
+            .map(|edge| (edge.decider, edge.traversals))
+            .collect();
+        assert_eq!(counts, [(2, 2), (4, 1)]);
+        assert_eq!(flow_iterations(&steps, &cursor), [vec![2, 1]]);
+        // Moving beyond one span does not collapse its independent count.
+        let later = ExecutionCursor {
+            index: 3,
+            iteration: 99,
+            ..cursor
+        };
+        assert_eq!(flow_iterations(&steps, &later), [vec![2, 1]]);
+    }
+
+    #[test]
+    fn a_selected_xor_path_is_drawn_honestly_with_captured_ids() {
+        let branch = ConcreteXor {
+            router: Skill::named("xor-route"),
+            paths: HashMap::from([
+                (
+                    "fix".to_string(),
+                    ConcretePath {
+                        description: "Fix it".into(),
+                        steps: vec![
+                            skill("patch", Some("patch"), false, None),
+                            skill("check", Some("check"), false, Some("patch")),
+                        ],
+                    },
+                ),
+                (
+                    "skip".to_string(),
+                    ConcretePath {
+                        description: "Nothing to do".into(),
+                        steps: Vec::new(),
+                    },
+                ),
+            ]),
+            sources: Vec::new(),
+        };
+        let steps = vec![
+            skill("kickoff", None, false, None),
+            ConcreteStep::Xor(branch),
+        ];
+        let graph = FlowGraph::new("routed", &steps);
+        let xor = &graph.steps[1];
+        assert_eq!(xor.kind, FlowNodeKind::Xor);
+        assert_eq!(
+            xor.paths
+                .iter()
+                .map(|path| path.name.as_str())
+                .collect::<Vec<_>>(),
+            ["fix", "skip"]
+        );
+        assert_eq!(xor.paths[0].steps[1].key, 3);
+        assert_eq!(xor.paths[0].steps[1].returns_to, Some(2));
+
+        let cursor = ExecutionCursor {
+            index: 1,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([("xor:1:fix/check".into(), 4)]),
+                ..Default::default()
+            },
+            child: Some(Box::new(NestedCursor::Xor {
+                selected: "fix".into(),
+                cursor: ExecutionCursor {
+                    index: 1,
+                    iteration: 2,
+                    progress: crate::engine::transitions::FlowProgress {
+                        repeats: BTreeMap::from([("check".into(), 2)]),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            })),
+            ..Default::default()
+        };
+        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        assert_eq!(projection.current, Some(3));
+        assert_eq!(projection.completed, [0, 1, 2]);
+        // The active child's own count wins over an older settled visit.
+        assert_eq!(projection.returns[0].traversals, 2);
+        assert_eq!(flow_iterations(&steps, &cursor), [vec![], vec![2]]);
+    }
+
+    #[test]
+    fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
+        use crate::engine::invocation::QueuedInvocation;
+        use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
+
+        fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
+            ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("route"),
+                paths: paths
+                    .into_iter()
+                    .map(|(name, steps)| {
+                        (
+                            name.into(),
+                            ConcretePath {
+                                description: name.into(),
+                                steps,
+                            },
+                        )
+                    })
+                    .collect(),
+                sources: Vec::new(),
+            })
+        }
+        fn begin() -> ConcreteStep {
+            skill("patch", Some("begin"), false, None)
+        }
+        fn check() -> ConcreteStep {
+            skill("check", Some("check"), false, Some("begin"))
+        }
+        let steps = vec![
+            begin(),
+            branch(vec![
+                ("zeta", vec![begin(), check()]),
+                (
+                    "alpha",
+                    vec![
+                        begin(),
+                        branch(vec![("fix", vec![begin(), check()])]),
+                        check(),
+                    ],
+                ),
+            ]),
+            check(),
+        ];
+        let invocation = QueuedInvocation::new("nested", steps).unwrap();
+        let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/flow_numeric_nested.json"
+        ))
+        .unwrap();
+        let TaskFlowRecord::Pinned(pinned) = fixture.record else {
+            panic!("pinned fixture")
+        };
+        let graph = FlowGraph::new("nested", &invocation.steps);
+        assert_eq!(graph, pinned.graph);
+        // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.
+        // Compare every cursor with the existing storage identity algorithm.
+        fn cursors(steps: &[ConcreteStep]) -> Vec<ExecutionCursor> {
+            let mut result = Vec::new();
+            for (index, step) in steps.iter().enumerate() {
+                result.push(ExecutionCursor {
+                    index,
+                    ..Default::default()
+                });
+                if let ConcreteStep::Xor(branch) = step {
+                    for (selected, path) in &branch.paths {
+                        for child in cursors(&path.steps) {
+                            result.push(ExecutionCursor {
+                                index,
+                                child: Some(Box::new(NestedCursor::Xor {
+                                    selected: selected.clone(),
+                                    cursor: child,
+                                })),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
+            result
+        }
+        let mut ids = Vec::new();
+        for cursor in cursors(&invocation.steps) {
+            let id = invocation.node_id(&cursor).unwrap();
+            ids.push(id);
+            assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
+            assert_eq!(graph.node_at(id).unwrap().key, id);
+        }
+        ids.sort();
+        assert_eq!(ids, (0..10).collect::<Vec<_>>());
+        let cursor = ExecutionCursor {
+            index: 1,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([("check".into(), 3)]),
+                ..Default::default()
+            },
+            child: Some(Box::new(NestedCursor::Xor {
+                selected: "alpha".into(),
+                cursor: ExecutionCursor {
+                    index: 1,
+                    child: Some(Box::new(NestedCursor::Xor {
+                        selected: "fix".into(),
+                        cursor: ExecutionCursor {
+                            index: 1,
+                            progress: crate::engine::transitions::FlowProgress {
+                                repeats: BTreeMap::from([("check".into(), 2)]),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                    })),
+                    ..Default::default()
+                },
+            })),
+            ..Default::default()
+        };
+        let projection = project_cursor(&graph, &cursor);
+        assert_eq!(projection.current, pinned.current);
+        assert_eq!(projection.completed, pinned.completed);
+        assert_eq!(projection.returns, pinned.returns);
+        assert_eq!(
+            flow_iterations(&invocation.steps, &cursor),
+            pinned.iterations
+        );
+        // Settled nested counts retain their runtime keys, including inactive paths.
+        let settled = ExecutionCursor {
+            index: 2,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([
+                    ("xor:1:alpha/xor:1:fix/check".into(), 7),
+                    ("xor:1:zeta/check".into(), 4),
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let projection = project_cursor(&graph, &settled);
+        assert_eq!(projection.current, Some(9));
+        assert_eq!(projection.completed, [0, 1]);
+        assert_eq!(
+            projection
+                .returns
+                .iter()
+                .map(|r| (r.decider, r.traversals))
+                .collect::<Vec<_>>(),
+            [(5, 7), (6, 0), (8, 4), (9, 0)]
+        );
+        let finished = ExecutionCursor {
+            index: 3,
+            ..Default::default()
+        };
+        assert_eq!(project_cursor(&graph, &finished).current, None);
+        assert_eq!(project_cursor(&graph, &finished).completed, [0, 1, 9]);
+    }
+}

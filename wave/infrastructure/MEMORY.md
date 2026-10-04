@@ -652,30 +652,14 @@ the manually transferred Tasks, without importing old turns or driver authority.
   Synthetic second-Home proofs exercise retries and missing evidence; they do
   not imply a second deployed client or a distributed transaction.
 
-**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
-are checkpointed locally; publication/merge is not established by this entry.
-The release-materialized full Rust run recorded 2,004 passes, seven failures and
-17 skips. Focused repair runs cover all seven failures; the original receipt
-remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
-291-case run had one obsolete import fixture; its eight-case observation repair,
-app/runner builds, boundary check and eight distinct fixture captures passed.
-Formatting, final all-target Clippy, architecture and immutable migration checks
-passed. Required hosted CI still owns the final landing candidate.
-
-The runtime finding was cursor order: stable-ID Session pages must retain ID
-order through projection, or renamed titles can repeat/skip records. Stacking
-fixtures must use the dedicated transaction and establish a published parent;
-generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
-launched a real conflict agent in its disposable repository before that repair;
-output reports no push, but native credential effects were not audited. Provider
-stubs now contain that failure path. This does not establish configured acceptance.
-
-At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
-is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
-it is not a net reduction or a parsed statement count. The retained density
-measurement still names its earlier candidate. Installed conversion remains
-subject to the frozen-snapshot/quiescence obligations above; this gate neither
-migrates nor promotes.
+**Integrated gate, 2026-09-30.** Its receipts, the production-line estimate and
+the compression checkpoint are retired to
+`cd344891b611914adf44eeb53844193d7a987d2c:wave/infrastructure/MEMORY.md` under
+this heading; none established configured acceptance or installed conversion.
+Retained lessons: stable-ID Session pages keep ID order through projection, or
+renamed titles repeat/skip records; stacking fixtures use the dedicated
+transaction with a published parent; a bad saved-sync fixture once launched a
+real conflict agent, so provider stubs must contain that path.
 
 Lessons from implementing it (2026-09-29–30):
 
@@ -701,15 +685,6 @@ Lessons from implementing it (2026-09-29–30):
   path fixes it.
 - A worker's claim named the process that launched it, not the worker, so stop
   and liveness targeted the wrong pid (fixed in `5bd311697`).
-
-Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
-logs record 44/46 affected passes, then both failed Session cases passing focused
-repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
-success. The direct SIGINT proof observes owned-child exit and Exec interruption;
-the retained Task-cancellation settlement case remains distinct. These observations
-are not a full final-tree gate, configured-provider acceptance or installed
-conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
-and final documentation/gate reconciliation remain with the working plan.
 
 Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
@@ -737,10 +712,16 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
-store gate keys on the registered installation path, not the bytes, so a demo
-app must route through the installed `lf` (`LoopflowDevControl.json` →
-`lf_path`) or be promoted.
+**Desktop read costs (LOO-304, branch evidence 2026-10-04).** Sampling the
+installed 0.12.32 reads under host load 85–107 found the 2 s Session page
+launching `git rev-parse` for every recorded checkout (p50 16.9 s, n=20) and
+roadmap (p50 30.6 s, n=8) spending 64% scanning all 119k Execs once per Task
+for the completion gate, plus a CLI digest per Task. The branch resolves
+worktree roots from the filesystem, reads only unfinished Execs through a
+partial index, and verifies the CLI once per process. On one store snapshot the
+per-Task Exec read fell from p50 54.9 ms to 0.69 ms with identical unfinished
+sets. No end-to-end candidate timing, rendered journey or soak exists yet.
+
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

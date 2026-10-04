@@ -54,8 +54,15 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-fn exec_ids(selector: &str) -> String {
-    format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
+fn exec_ids(selector: &str, unfinished: bool) -> String {
+    // The filter sits inside the checkout arm so it reads `execs_unfinished`
+    // instead of comparing every retained Exec's cwd.
+    let unfinished = if unfinished {
+        "ae.completed_at IS NULL AND "
+    } else {
+        ""
+    };
+    format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({unfinished}{})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
         UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
@@ -79,6 +86,16 @@ impl SqliteStore {
 
     /// Read all three owners in one SQLite snapshot, including closed history.
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
+        self.read_task_work(task, false)
+    }
+
+    /// Every Session and Flow, with only the Execs that have not finished.
+    /// Completion and recovery checks never consult a finished Exec.
+    pub(crate) fn task_work_with_unfinished_execs(&self, task: &TaskId) -> StoreResult<TaskWork> {
+        self.read_task_work(task, true)
+    }
+
+    fn read_task_work(&self, task: &TaskId, unfinished_execs: bool) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let sessions = tx
@@ -115,9 +132,14 @@ impl SqliteStore {
         }
         let execs = tx
             .prepare(&format!(
-                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
                 super::execs::EXEC_SELECT,
-                exec_ids("?1")
+                if unfinished_execs {
+                    "e.completed_at IS NULL AND"
+                } else {
+                    ""
+                },
+                exec_ids("?1", unfinished_execs)
             ))?
             .query_map([task.as_str()], super::execs::read_exec)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -384,6 +406,33 @@ mod tests {
         assert_eq!(work.execs.len(), 2);
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
         assert!(work.execs.iter().any(|exec| exec.id == bound_exec));
+        // Completion checks keep every Session and Flow but skip finished Execs.
+        assert!(store
+            .task_work_with_unfinished_execs(&task)
+            .unwrap()
+            .execs
+            .is_empty());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE execs SET completed_at=NULL,outcome=NULL WHERE id IN (?1,?2)",
+                params![mechanical, sibling],
+            )
+            .unwrap();
+        let unfinished = store.task_work_with_unfinished_execs(&task).unwrap();
+        assert_eq!(
+            unfinished
+                .execs
+                .iter()
+                .map(|exec| &exec.id)
+                .collect::<Vec<_>>(),
+            [&mechanical]
+        );
+        assert_eq!(unfinished.sessions, work.sessions);
+        assert_eq!(unfinished.flows.len(), work.flows.len());
+        assert_eq!(store.task_work(&task).unwrap().execs.len(), 2);
         assert_eq!(
             store.session_task_ids("manual").unwrap(),
             std::slice::from_ref(&task)

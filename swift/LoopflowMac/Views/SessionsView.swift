@@ -896,8 +896,8 @@ struct SessionsContentView: View {
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
             if model.sessions.errorMessage == nil {
-                workspace.initializeMaterials(sessionCount: visibleSessionItems.filter {
-                    $0.record.primaryScope == nil && $0.record.workspace?.identity == record.workspace?.identity
+                workspace.initializeMaterials(sessionCount: model.visibleSessions.filter {
+                    $0.primaryScope == nil && $0.workspace?.identity == record.workspace?.identity
                 }.count)
             }
             if alongside {

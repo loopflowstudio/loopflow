@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct SessionsStoreTests {
     @Test("Filtered refresh retains Sessions without creating local terminals")
-    func reconcileTracksTheTaskPlayhead() throws {
+    func filteredRefreshRetainsSessions() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([
             session(id: "a", state: "waiting"),

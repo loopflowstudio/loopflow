@@ -219,9 +219,11 @@ final class PodiumModel {
 
     /// Visibility never changes Task membership or retained native surfaces.
     var visibleSessions: [SessionRecord] {
-        (sessions.value ?? []).filter {
-            $0.state != .closed && (navigation.showsHeadlessSessions || $0.interactive)
-        }
+        (sessions.value ?? []).filter(isSessionVisible)
+    }
+
+    func isSessionVisible(_ session: SessionRecord) -> Bool {
+        session.state != .closed && (navigation.showsHeadlessSessions || session.interactive)
     }
 
     var visibleWorkspace: WorkspaceProjection {
@@ -650,8 +652,8 @@ final class PodiumModel {
                       !Task.isCancelled else { return }
                 records += page.entries
                 let seen = Set(records.map(\.id))
-                // Partial enumeration cannot establish absence. Keep existing panes
-                // until the last page, including records added locally during this read.
+                // Keep prior rows until enumeration finishes, and preserve records
+                // added locally during this read. Native panes have their own lifetime.
                 let retained = (sessions.value ?? []).filter {
                     !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id))
                 }

@@ -167,6 +167,51 @@ pub(crate) async fn start_lf_session_with_env(
     start_session_with_context(session, cwd, argv, env, context).await
 }
 
+pub(crate) async fn start_lf_session_inheriting(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+    inherit: &(dyn Fn(&mut std::process::Command) + Send + Sync),
+) -> Result<()> {
+    let context = execution_context()?;
+    let environment = session_environment(env, &context);
+    let environment = environment
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect::<Vec<_>>();
+    let shell = lf_session_shell_command(cwd, argv, &environment);
+    let logs = context.lf_home.join("logs");
+    std::fs::create_dir_all(&logs)?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logs.join(format!("{session}.log")))?;
+    let mut command = std::process::Command::new("sh");
+    command
+        .args(["-c", &shell])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    inherit(&mut command);
+    // SAFETY: setsid affects only the child and is async-signal-safe. The repair
+    // Exec keeps its own lifetime after the release controller exits.
+    unsafe {
+        std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 async fn start_session_with_context(
     session: &str,
     cwd: &Path,
@@ -174,6 +219,19 @@ async fn start_session_with_context(
     env: &[(&str, &str)],
     context: crate::child::ChildExecutionContext,
 ) -> Result<()> {
+    let child_env = session_environment(env, &context);
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(cwd, argv, &environment);
+    start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+}
+
+fn session_environment(
+    env: &[(&str, &str)],
+    context: &crate::child::ChildExecutionContext,
+) -> Vec<(String, String)> {
     let inherited_context = [
         "LF_TRACE_ID",
         "LF_PROCESS_ID",
@@ -192,13 +250,8 @@ async fn start_session_with_context(
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone())),
     );
-    extend_session_control_context(&mut child_env, &context);
-    let environment = child_env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(cwd, argv, &environment);
-    start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+    extend_session_control_context(&mut child_env, context);
+    child_env
 }
 
 fn extend_session_control_context(

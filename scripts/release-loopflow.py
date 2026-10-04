@@ -35,7 +35,18 @@ def run(
 ) -> subprocess.CompletedProcess:
     print(f"$ {' '.join(cmd)}", flush=True)
     try:
-        return subprocess.run(cmd, cwd=cwd, check=check, timeout=timeout, env=env)
+        return subprocess.run(
+            cmd,
+            cwd=cwd,
+            check=check,
+            timeout=timeout,
+            env=env,
+            pass_fds=tuple(
+                int(os.environ[name])
+                for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD")
+                if name in os.environ
+            ),
+        )
     except subprocess.TimeoutExpired as exc:
         print(f"Timed out after {timeout}s: {' '.join(cmd)}", flush=True)
         raise RuntimeError(f"command timed out after {timeout}s") from exc
@@ -51,6 +62,11 @@ def run_capture(
     try:
         return subprocess.run(
             cmd,
+            pass_fds=tuple(
+                int(os.environ[name])
+                for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD")
+                if name in os.environ
+            ),
             cwd=cwd,
             capture_output=True,
             text=True,

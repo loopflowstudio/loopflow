@@ -565,6 +565,7 @@ fn execute_target(
                             &repo_root,
                             &options,
                             &loopflow::ops::NullProgress,
+                            &|_| {},
                         )?;
                     }
                     Ok(())
@@ -1771,7 +1772,7 @@ fn execute_command(
             all,
         }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::flow::execute_step(id, *version)
+            loopflow::lf::commands::flow::execute_step(id, *version, cli)
         }),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),

@@ -73,6 +73,12 @@ deserializes every registered persisted JSON column into its current Rust type
 and reports all incompatible rows together; any failure rolls back the complete
 migration transaction.
 
+Retired Home landing supervision stays in `pr_landings.retired_supervisor_json`
+with its original Home, PID, heartbeat and generation. The migration advances
+the claim generation and clears executable supervision without changing delivery
+intent, failures or terminal history. Older executables cannot acquire another
+Home claim. Historical PIDs are evidence only; they must never be signaled locally.
+
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
 database. The filename carries the previously applied migration and a fingerprint

@@ -82,11 +82,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     task: task.clone(),
                     orphan: *orphan,
                     search: search.clone(),
-                    interactive: if *needs_me {
-                        None
-                    } else {
-                        interactive.interactive()
-                    },
+                    interactive: interactive.interactive(),
                     history: *history,
                     limit: *limit,
                     offset: *offset,

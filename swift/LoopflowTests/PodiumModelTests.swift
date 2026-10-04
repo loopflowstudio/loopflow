@@ -374,7 +374,7 @@ struct PodiumModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
@@ -399,7 +399,7 @@ struct PodiumModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
         let model = PodiumModel(query: query, repoPath: "/src/first")
@@ -424,7 +424,7 @@ struct PodiumModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = PodiumModel(query: query, repoPath: "/src/first")

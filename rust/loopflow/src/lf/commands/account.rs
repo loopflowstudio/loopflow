@@ -68,17 +68,14 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    if let Some(misuse) = AccountCommand::misuse(cmd, provider, cached || details || json) {
+        bail!(misuse);
+    }
     match (cmd, provider) {
         (Some(AccountCommand::Use { email }), Some(provider)) => {
             rt.block_on(use_account(provider.as_str(), email))
         }
-        (Some(AccountCommand::Use { .. }), None) => {
-            bail!("name the provider: lf account <provider> use <email>")
-        }
-        (Some(cmd), None) if !(cached || details || json) => rt.block_on(run_async(cmd)),
-        (Some(_), _) => bail!(
-            "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone"
-        ),
+        (Some(cmd), _) => rt.block_on(run_async(cmd)),
         (None, provider) => rt.block_on(account_status::run(provider, !cached, details, json)),
     }
 }

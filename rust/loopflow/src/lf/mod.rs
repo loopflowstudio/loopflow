@@ -137,6 +137,29 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Reject argument combinations the derive cannot express, as the usage
+    /// errors they are, before anything runs.
+    pub fn checked(self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Account {
+            cmd,
+            provider,
+            cached,
+            details,
+            json,
+        }) = &self.command
+        {
+            if let Some(misuse) =
+                AccountCommand::misuse(cmd.as_ref(), *provider, *cached || *details || *json)
+            {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!("{misuse}\n"),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
     /// Forward prompt and provider options to a captured step. Work and the
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
@@ -1475,6 +1498,27 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl AccountCommand {
+    /// `use` is the one verb that takes its provider first; a provider or an
+    /// overview flag before any other verb belongs to bare `lf account`.
+    pub fn misuse(
+        cmd: Option<&Self>,
+        provider: Option<crate::provider_auth::Provider>,
+        overview_flags: bool,
+    ) -> Option<&'static str> {
+        match (cmd, provider) {
+            (Some(Self::Use { .. }), None) => {
+                Some("name the provider: lf account <provider> use <email>")
+            }
+            (Some(Self::Use { .. }), Some(_)) | (None, _) => None,
+            (Some(_), None) if !overview_flags => None,
+            (Some(_), _) => Some(
+                "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone",
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]

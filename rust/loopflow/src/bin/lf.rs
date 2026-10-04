@@ -1321,7 +1321,7 @@ fn run() -> anyhow::Result<()> {
         })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
-    let cli = match Cli::try_parse_from(args.clone()) {
+    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");

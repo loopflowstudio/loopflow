@@ -17,9 +17,9 @@ With Codex accounts A and B stored and A active:
 ```bash
 lf -m codex : "say hi"          # runs as A in ~/.codex
 codex resume <native-id>        # plain Codex finds that conversation
-lf account use codex B          # from now on
+lf account codex use B          # from now on
 lf -m codex : "say hi"          # runs as B; plain `codex` is B too
-lf account use codex A --now    # everyone now; A still works after its token rotated
+lf account codex use A --now    # everyone now; A still works after its token rotated
 lf --account codex=B --isolate -m codex : "say hi"   # stays on B in its own home
 ```
 
@@ -115,7 +115,7 @@ distinct from Loopflow's refusal to connect some completed Sessions.
 - **Activation** (`provider_account/activation.rs`): under the provider credential lock, save the native credential back to the stored profile with the same identity; if it matches none, store it as a new profile; install the selected profile's credential by atomic rename (Codex `auth.json`; Claude Keychain item on macOS, `.credentials.json` elsewhere). Already active: no-op.
 - **Launch wrapper** (`ProviderAccountRoute::launch_as`, chosen name): no account named, or the named account already active → spawn. Otherwise lock, activate, spawn, record, unlock, return the child without waiting. Built without “record”: the lock is held across activate and spawn only, and recording the launch as a running shared agent arrives with slice 3. Isolated → today's `apply` path unchanged. All five sites call it and nothing else touches account environment.
 - **Selection:** in shared mode routing returns the active account while it is eligible. When it is strained or unavailable, routing calls the switch at “everyone now” toward the next eligible account, since every shared agent is on the failing one; until slice 3 it switches at “from now on”. In isolated mode selection is unchanged from today.
-- **Switch command** (chosen: `lf account use <provider> <account> [--now]`; the account namespace is `lf account`, there is no `lf auth`): the only writer of a shared account change. Bare is “from now on” and is built; `--now` is “everyone now”, which also resumes each running shared Codex agent under the new account, keeping its conversation and native ID, and arrives with slice 3.
+- **Switch command** (`lf account <provider> use <account> [--now]`, named by Jack Heart 2026-10-03: “it should be lf account codex use jack@loopflow.studio”): the only writer of a shared account change. Bare is “from now on” and is built; `--now` is “everyone now”, which also resumes each running shared Codex agent under the new account, keeping its conversation and native ID, and arrives with slice 3.
 - **Modes:** `--isolate` and `--shared` are bare global flags beside `--account` / `--only-account`, mutually exclusive. They travel in `LF_ACCOUNT_ISOLATION` beside `LF_ACCOUNT_SELECTION`, and a Flow invocation captures the mode in an optional `isolate` field beside its captured accounts. Chosen default key: `isolate: true` in `.lf/config.yaml`; config loading already merges `~/.lf/config.yaml` under the repository file, so a Home-level default works too. Resolution: flag, then config, then shared.
 
 **Source of truth and records.** The native credential decides the active account. One draft migration (`shared_provider_homes`) adds: a switch log `provider_account_switches` (provider, account, time, strength, cause: person or exhaustion), and `isolated` on `provider_session_accounts` so resume returns to the home the conversation started in. Rows that predate the change are isolated. Usage attribution reads the switch log and provider-reported identity; a launch's named account is not evidence of what a shared agent later used. Historical usage is never rewritten.
@@ -165,7 +165,7 @@ Session-store symlinks or a history synchronizer between homes. A second place t
 
 One Task, complete end state above. Each slice leaves the tree working.
 
-1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), `launch_as` at all five sites, shared-mode selection, `lf account use` at “from now on”, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
+1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), `launch_as` at all five sites, shared-mode selection, `lf account <provider> use` at “from now on”, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
    - Quota probes, reset redemption, launch readiness and lease credentials read the native home for the active account (`activation::credential_home`).
    - A shared conversation resumes under whichever account is active; the account it began under is not a pin. Before this, reconnecting one switched the native home back.
    - A launch naming several accounts stays on the active one it includes; naming only another account moves to it.
@@ -180,7 +180,6 @@ Owed besides slice 3, from “Done when”: a Loopflow-started Claude conversati
 ## Remaining questions
 
 - **Research before slice 3 (Jack):** “would have to research what aspects of the experience most impact the seamlessness of having your sessions interrupted”. For an attached terminal session and a headless worker separately: what the person sees; whether unsent input, scrollback and the attached client survive; whether an in-flight tool call can run twice; gap length; whether the agent notices; what history shows. Sets whether a mid-turn agent is interrupted at once or moved when its turn ends.
-- **Command name:** `lf account use … [--now]` is a planning choice; Jack has not named it.
 - **Config levels:** repository and Home `config.yaml` both work; whether a Wave-level default is also wanted is open.
 - **“Pinned binary”:** only the account's own home, or more.
 - **SSH-forwarded Codex:** the lease exports `CODEX_ACCESS_TOKEN`, which `provider_auth/mod.rs` records as the wrong credential type. Untouched here; whether a remote Home activates a forwarded credential is open.

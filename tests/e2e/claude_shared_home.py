@@ -159,7 +159,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
         return done
 
     def use(name: str) -> str:
-        return lf("account", "use", "claude", f"{name}@example.com").stdout
+        return lf("account", "claude", "use", f"{name}@example.com").stdout
 
     def plain_claude() -> str:
         """Claude as a person runs it in the native home; the login it sent."""

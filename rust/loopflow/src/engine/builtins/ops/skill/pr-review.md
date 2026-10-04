@@ -2,14 +2,15 @@
 requires: PR or branch diff, source code, and available design context
 produces: self-contained HTML walkthrough of user behavior, key data models, and APIs
 ---
-Create a code-centered HTML walkthrough that helps a design collaborator review a PR's behavior, data models, and APIs.
+Create a minimalist HTML walkthrough centered on user behaviors, data structures, and APIs, with fewer, larger code excerpts.
 
 Assume the reader helped design the change and knows its goals, but does not
 know the implementation. Show the user's actions, the few concepts representing
 them, and the APIs that change their state. Treat implementation as evidence,
 not a commitment: expose where the code fits the intended experience and where
 a product choice remains. Let real snippets carry the review; use prose to
-connect them and explain consequential choices.
+connect them and explain consequential choices. Spend the page on a few useful
+code examples, with restrained typography, generous whitespace, and little decoration.
 
 ## Workflow
 
@@ -22,34 +23,57 @@ connect them and explain consequential choices.
    not required.
 
 2. **Map the experience to the code.** Open with a short goal and delivered
-   scope, then a compact map that fits on one desktop screen:
+   scope, then a short map written for someone who does not know the code:
 
-   | User action and visible result | Concept / key type | State-changing API |
+   | When you… | What happens | Where the code controls this |
    | --- | --- | --- |
-   | A concrete interaction | The record or value representing it | The operation responsible |
+   | Reopen a saved draft | The last saved text appears so editing can continue. | `open_draft` loads the saved record and returns its text to the editor. |
 
-   Use actual names and link to the walkthrough's excerpts. Choose the few
-   models and APIs that explain the product contract; omit incidental helpers
-   and exhaustive file inventories. Show what owns state, what is derived,
+   Use concrete actions and complete explanations of their visible results.
+   Explain what each named type or API controls; a symbol alone is not an
+   explanation. Avoid compressed labels such as “Resume → recorded mode,”
+   unexplained field names, or headings such as “owners” that require knowing
+   the implementation. Keep the map short by choosing fewer rows, not by
+   removing the words that explain the behavior. Link each row to its excerpts.
+
+   Choose the few data structures and APIs that explain the product contract;
+   omit incidental helpers and exhaustive file inventories. Show what owns state, what is derived,
    and which distinctions the caller must understand. Make changes from the
    base explicit. Existing mechanisms can supply context without being claimed
    as this PR's work.
 
-3. **Build the review around snippets.** Organize a few stops around the key
-   concepts and interactions. Each stop uses this shape:
+3. **Choose fewer, larger snippets.** Organize a few stops around the user
+   behaviors and the data structures and APIs that produce them. Each stop connects:
 
-   - **Behavior:** one sentence or a concrete action → result example.
-   - **Model:** a short real type, schema, or declaration showing the relevant
+   - **Behavior:** a concrete action and its result, stated in plain language.
+   - **Data structure:** a real type, schema, or declaration showing the relevant
      fields, relationships, or states.
    - **API:** the public signature and decisive implementation branch showing
      how that state changes and what the caller receives.
    - **Review note:** a brief annotation for ownership, a surprising tradeoff,
      a mismatch, or a product decision that the snippets do not explain alone.
 
-   Adapt the shape to the change. Show a shared model once and link back to it;
+   For CLI behavior, lead with a terminal transcript: the actual command and
+   arguments someone types, followed by the relevant output they see. Show the
+   important error and recovery command where they explain the contract. Prefer
+   captured runs; identify their revision and relevant setup. If a command is
+   silent, say so and show the observable result instead of inventing output.
+   Mark omissions and redact secrets. Label unexecuted examples as illustrative
+   or expected from source, never as observed output. Pair the transcript with
+   the data structure and API excerpts that explain its result; a command list
+   or test log alone is not the walkthrough.
+
+   These are reading priorities, not four required panels. Adapt to the change.
+   Show a shared data structure once and link back to it;
    do not force a new type or a finding into every stop. For prose or config
    changes, show the instructions or declarations that control behavior. Prefer
    before/after snippets when they reveal a changed contract more clearly.
+
+   Prefer one or two substantial excerpts per stop: a complete relevant type,
+   function, or coherent branch with enough surrounding code to explain it.
+   Combine adjacent fragments from the same symbol. Avoid a gallery of tiny
+   snippets that makes the reader reconstruct control flow across captions.
+   More lines should supply context, not unrelated implementation detail.
 
    Keep central snippets visible and larger than their accompanying commentary.
    Usually one or two sentences per annotation suffice. Cut paragraphs that
@@ -88,12 +112,18 @@ connect them and explain consequential choices.
    and any small scripts; no network fonts, CDN libraries, or build step. Escape
    source and diff text so code is displayed without executing it.
 
-   Give the model and API excerpts the visual emphasis: readable code, compact
-   source captions, short annotations, and anchor navigation through the concept
-   map. Use side-by-side models or before/after APIs when comparison helps; stack
-   them on narrow screens. Keep central code out of disclosure controls and use
-   disclosures for secondary implementation and evidence. Support keyboard
-   navigation and printing. A diagram earns space only when it clarifies state
+   Use a minimalist editorial layout: a short title, quiet navigation, clear
+   typography, generous whitespace, and a restrained palette. Avoid decorative
+   hero sections, badges, repeated card frames, and dashboard chrome. Give code
+   most of the space, with a readable font size and compact source captions.
+
+   Default to one wide reading column so larger excerpts remain readable. Use
+   side-by-side excerpts only when direct comparison helps and neither becomes
+   cramped; stack them on narrow screens. Let the opening map stack into labeled rows on narrow
+   screens rather than squeezing explanations into tiny columns. Keep central
+   code out of disclosure controls and use disclosures for secondary
+   implementation and evidence. Support keyboard navigation and printing.
+   A diagram earns space only when it clarifies state
    ownership or a transition better than the excerpts.
 
    Render through an available browser capture tool (in Loopflow,
@@ -102,10 +132,14 @@ connect them and explain consequential choices.
    overflow, and disclosures. Fix defects before delivery. If rendering is
    unavailable, state the limit. Recheck excerpts against the named revisions.
 
-   Read only the behavior labels, models, and API snippets: can the collaborator
-   explain the normal path, failure, and recovery? Then read the annotations:
+   Read the opening map without following links or knowing any symbols: is it
+   clear what the caller does, what happens, and what the named code controls?
+   Then read only the behavior labels, models, and API snippets: can the
+   collaborator explain the normal path, failure, and recovery? Read the annotations:
    does each add a connection, constraint, evidence limit, or decision the code
-   cannot communicate alone? Remove the rest.
+   cannot communicate alone? Remove the rest. Finally, can adjacent snippets be
+   combined, or a visual element removed, without losing meaning? Prefer the
+   version with fewer pieces and more readable code.
 
 ## Delivery
 

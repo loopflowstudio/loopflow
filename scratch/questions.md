@@ -2,7 +2,6 @@
 
 ## For Jack
 
-- Command name: built as `lf account use <provider> <account>`, since accounts live under `lf account` and there is no `lf auth`. A planning choice, not his.
 - Isolation default: `isolate: true` works in the repository and Home `config.yaml`; is a Wave-level default also wanted?
 - A native login Loopflow has never seen is stored as an explicit-only account, so automatic routing does not start spending it. Confirm.
 - Launch-driven switches (the active account is strained, or a launch names another account) are “from now on” until slice 3 builds “everyone now”.

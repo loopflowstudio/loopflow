@@ -284,7 +284,6 @@ pub enum Commands {
         cmd: SessionCommand,
     },
     /// Refresh account access and capacity, or manage logins and routing
-    #[command(args_conflicts_with_subcommands = true)]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
@@ -1460,8 +1459,10 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Sign the provider's ordinary home in as a stored login, from now on
-    Use { provider: String, email: String },
+    /// Sign the provider's ordinary home in as a stored login, from now on:
+    /// `lf account <provider> use <email>`
+    #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
+    Use { email: String },
     /// Explain configured and automatic account selection, or replace a route
     #[command(args_conflicts_with_subcommands = true)]
     Route {
@@ -1955,6 +1956,17 @@ mod tests {
             Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { lf_args, .. } })
                 if lf_args == vec!["--account", "reserve", "task", "pursue"]
         ));
+    }
+
+    #[test]
+    fn account_use_takes_its_provider_before_the_verb() {
+        let cli =
+            Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Account {
+            cmd: Some(AccountCommand::Use { email }),
+            provider: Some(crate::provider_auth::Provider::Codex),
+            ..
+        }) if email == "jack@loopflow.studio"));
     }
 
     #[test]

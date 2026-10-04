@@ -431,13 +431,12 @@ Spend one banked Codex reset for this named login
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf account use
+## lf account <provider> use
 
 Sign the provider's ordinary home in as a stored login, from now on
 
 | Argument | What it does |
 |---|---|
-| `<provider>` | provider |
 | `<email>` | email |
 | `--help / -h` | Print help |
 

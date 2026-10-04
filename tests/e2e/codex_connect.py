@@ -818,7 +818,7 @@ def _shared_provider_home_contract(
         return done.stdout
 
     def use(name: str) -> None:
-        lf("account", "use", "codex", f"{name}@example.com")
+        lf("account", "codex", "use", f"{name}@example.com")
 
     def rows(query: str, *values: object) -> list[tuple]:
         with sqlite3.connect(_database(env)) as database:

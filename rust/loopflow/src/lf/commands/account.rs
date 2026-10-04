@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
@@ -68,9 +68,18 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    match cmd {
-        Some(cmd) => rt.block_on(run_async(cmd)),
-        None => rt.block_on(account_status::run(provider, !cached, details, json)),
+    match (cmd, provider) {
+        (Some(AccountCommand::Use { email }), Some(provider)) => {
+            rt.block_on(use_account(provider.as_str(), email))
+        }
+        (Some(AccountCommand::Use { .. }), None) => {
+            bail!("name the provider: lf account <provider> use <email>")
+        }
+        (Some(cmd), None) if !(cached || details || json) => rt.block_on(run_async(cmd)),
+        (Some(_), _) => bail!(
+            "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone"
+        ),
+        (None, provider) => rt.block_on(account_status::run(provider, !cached, details, json)),
     }
 }
 
@@ -115,7 +124,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             )
             .await
         }
-        AccountCommand::Use { provider, email } => use_account(provider, email).await,
+        AccountCommand::Use { .. } => unreachable!("run handles use with its provider"),
         AccountCommand::Route {
             cmd,
             repo,

@@ -298,13 +298,13 @@ exit; a forwarded SSH credential still needs its origin broker.
 ```bash
 lf -m codex : "say hi"                    # runs in ~/.codex as the active account
 codex resume                              # plain Codex sees that conversation
-lf account use codex work@                # ~/.codex is now work@, for lf and codex
+lf account codex use work@                # ~/.codex is now work@, for lf and codex
 lf account route                          # shows the mode and the active account
 lf --isolate --account codex=work@ -m codex : "say hi"   # stays in work@'s own home
-lf account use claude work@               # the same for ~/.claude and plain claude
+lf account claude use work@               # the same for ~/.claude and plain claude
 ```
 
-`lf account use` is the only command that changes which stored account a
+`lf account <provider> use` is the only command that changes which stored account a
 provider's home is signed in as. It first saves the current login back to its
 stored account, so a token the provider refreshed while active is kept; a login
 Loopflow has never seen is kept as a new explicit-only account.

@@ -2794,6 +2794,25 @@ pub(crate) async fn reconcile_task_pr(
     reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await
 }
 
+pub(crate) fn reconcile_checkout_pr(repo: &Path) -> OpsResult<Option<TaskPr>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let Some(mut task) = task_for_checkout(&store, repo).await? else {
+            return Ok(None);
+        };
+        let pr = reconcile_task_pr_observation(
+            &store,
+            &mut task,
+            crate::ops::pr::PrReadFreshness::Fresh,
+        )
+        .await?;
+        if let Observation::Degraded { reason, .. } = task.observation {
+            return Err(task_error(reason));
+        }
+        Ok(pr)
+    })
+}
+
 /// Apply a watched landing's authoritative merged observation to its Task.
 /// The landing owns Auto settlement; Task and Project runners do not poll or
 /// infer it from process liveness.
@@ -2981,16 +3000,13 @@ async fn reconcile_task_pr_observation(
         task.observation = Observation::NotRequired;
         return Ok(Some(pr));
     }
-    // GitHub is a reconciliation input, not the Task's store of record. Read the
-    // one persisted PR by number (a single bounded REST call, never `gh pr
-    // list`); an unpublished working PR has no number and is not read remotely.
-    // Recent attempts are reused across processes. A quota/network/GitHub failure
-    // opens a durable circuit and keeps the cached row rather than erroring the
-    // control command that triggered reconcile.
-    let Some(number) = pr.github().map(|github| github.number) else {
+    // Ordinary status does not enumerate unpublished branches. Explicit fresh
+    // reconciliation can recover a publication whose GitHub identity was lost.
+    let number = pr.github().map(|github| github.number);
+    if number.is_none() && matches!(freshness, crate::ops::pr::PrReadFreshness::Cached) {
         task.observation = Observation::NotRequired;
         return Ok(Some(pr));
-    };
+    }
     let now = time::OffsetDateTime::now_utc();
     // A fresh caller must never receive the store's warm head observation.
     if matches!(freshness, crate::ops::pr::PrReadFreshness::Cached) {
@@ -3000,48 +3016,53 @@ async fn reconcile_task_pr_observation(
         }
     }
     let previous = pr.clone();
-    let github_pr =
-        match crate::ops::pr::observe_pr_by_number(&task.worktree, number, &pr.branch, freshness) {
-            crate::ops::pr::PrObservation::Fresh(info) => {
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                task.observation = Observation::Fresh { observed_at: now };
-                info
-            }
-            crate::ops::pr::PrObservation::NotFound => {
-                // The PR ref was deleted remotely; a merge (if any) is already
-                // persisted. Cache the successful absence briefly and keep the
-                // settled/working state.
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                pr.updated_at = now;
-                store.update_task_pr(&pr).await.map_err(task_error)?;
-                task.observation = Observation::Fresh { observed_at: now };
-                return Ok(Some(pr));
-            }
-            crate::ops::pr::PrObservation::Degraded { reason } => {
-                let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Degraded {
-                        reason: reason.clone(),
-                    },
-                });
-                // `updated_at` remains the time of the cached PR data, not the
-                // failed attempt. Only the observation metadata changes.
-                store.update_task_pr(&pr).await.map_err(task_error)?;
-                task.observation = Observation::Degraded {
-                    reason,
-                    cached_as_of: pr.updated_at,
-                    retry_at,
-                };
-                return Ok(Some(pr));
-            }
-        };
+    let observation = match number {
+        Some(number) => {
+            crate::ops::pr::observe_pr_by_number(&task.worktree, number, &pr.branch, freshness)
+        }
+        None => crate::ops::pr::observe_pr_by_branch(&task.worktree, &pr.branch),
+    };
+    let github_pr = match observation {
+        crate::ops::pr::PrObservation::Fresh(info) => {
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            task.observation = Observation::Fresh { observed_at: now };
+            info
+        }
+        crate::ops::pr::PrObservation::NotFound => {
+            // The PR ref was deleted remotely; a merge (if any) is already
+            // persisted. Cache the successful absence briefly and keep the
+            // settled/working state.
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            pr.updated_at = now;
+            store.update_task_pr(&pr).await.map_err(task_error)?;
+            task.observation = Observation::Fresh { observed_at: now };
+            return Ok(Some(pr));
+        }
+        crate::ops::pr::PrObservation::Degraded { reason } => {
+            let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Degraded {
+                    reason: reason.clone(),
+                },
+            });
+            // `updated_at` remains the time of the cached PR data, not the
+            // failed attempt. Only the observation metadata changes.
+            store.update_task_pr(&pr).await.map_err(task_error)?;
+            task.observation = Observation::Degraded {
+                reason,
+                cached_as_of: pr.updated_at,
+                retry_at,
+            };
+            return Ok(Some(pr));
+        }
+    };
     let number = u32::try_from(github_pr.number).map_err(|_| {
         task_error(format!(
             "pull request #{} exceeds supported range",
@@ -3234,7 +3255,7 @@ pub(crate) async fn task_recovery_adoption(
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &task.worktree;
     let identifier = &task.plan.identifier;
-    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    let blockers = lifecycle::recovery_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -5333,6 +5354,7 @@ mod tests {
     };
     use crate::work::wave::Wave;
     use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
 
     struct TaskFixture {
         _database: tempfile::TempDir,
@@ -5371,6 +5393,123 @@ mod tests {
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
         task_fixture_at(identifier, repository).await
+    }
+
+    #[test]
+    fn explicit_reconciliation_recovers_merged_delivery_without_completing_work() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let _environment = EnvRestore::capture(&["PATH"]);
+        let repo = loopflow_test_support::TestRepo::new();
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args([
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/example/repo.git"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let bin = tempfile::tempdir().unwrap();
+        let gh = bin.path().join("gh");
+        std::fs::write(
+            &gh,
+            "#!/bin/sh\nfixture=$(dirname \"$0\")\ncase \"$1\" in\npr) cat \"$fixture/discovery.json\" ;;\napi) cat \"$fixture/pr.json\" ;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prior_path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&prior_path)),
+            )
+            .unwrap(),
+        );
+        std::fs::write(
+            bin.path().join("pr.json"),
+            serde_json::json!({
+                "number":1283,"html_url":"https://github.com/example/repo/pull/1283",
+                "state":"closed","merged":true,"mergeable_state":null,
+                "merge_commit_sha":"merged-commit","merged_at":"2026-09-25T21:56:42Z",
+                "head":{"sha":"authored-head"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let viewer = repo.path().join("unrelated-viewer.html");
+        std::fs::write(&viewer, "keep this authored artifact").unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for (discovery, merged) in [
+            ("[]", false),
+            ("[{\"number\":1283},{\"number\":1284}]", false),
+            ("invalid response", false),
+            ("[{\"number\":1283}]", true),
+        ] {
+            std::fs::write(bin.path().join("discovery.json"), discovery).unwrap();
+            let mut fixture = runtime.block_on(task_fixture_at("RECOVER-PR", repo.path().into()));
+            let before = runtime
+                .block_on(fixture.store.task_prs(&fixture.task.id))
+                .unwrap();
+            let cached = runtime
+                .block_on(super::reconcile_task_pr(&fixture.store, &mut fixture.task))
+                .unwrap()
+                .unwrap();
+            assert!(cached.publication.is_none());
+            let pr = runtime
+                .block_on(super::reconcile_task_pr_observation(
+                    &fixture.store,
+                    &mut fixture.task,
+                    crate::ops::pr::PrReadFreshness::Fresh,
+                ))
+                .unwrap()
+                .unwrap();
+            assert_eq!(pr.id, before[0].id);
+            assert_eq!(
+                pr.merge_commit.as_deref(),
+                merged.then_some("merged-commit")
+            );
+            assert_eq!(
+                pr.github().map(|github| github.number),
+                merged.then_some(1283)
+            );
+            assert_eq!(
+                runtime
+                    .block_on(fixture.store.task_prs(&fixture.task.id))
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_ne!(
+                runtime
+                    .block_on(super::task_work_status(&fixture.store, &fixture.task))
+                    .unwrap(),
+                WorkStatus::Done
+            );
+            assert_eq!(
+                std::fs::read_to_string(&viewer).unwrap(),
+                "keep this authored artifact"
+            );
+            if merged {
+                let saved = runtime
+                    .block_on(fixture.store.task_prs(&fixture.task.id))
+                    .unwrap()
+                    .remove(0);
+                let repeated = runtime
+                    .block_on(super::reconcile_task_pr_observation(
+                        &fixture.store,
+                        &mut fixture.task,
+                        crate::ops::pr::PrReadFreshness::Fresh,
+                    ))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(repeated, saved);
+            } else {
+                assert!(pr.publication.is_none());
+            }
+        }
     }
 
     #[tokio::test]
@@ -5469,7 +5608,7 @@ mod tests {
             .unwrap();
         let claimed = fixture.store.task_flow(&child.id).await.unwrap().unwrap();
         assert!(
-            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+            super::lifecycle::recovery_execution_blockers(&fixture.store, &fixture.task)
                 .unwrap()
                 .iter()
                 .any(|reason| reason.contains(flow.id()))
@@ -5490,6 +5629,108 @@ mod tests {
         );
         assert_eq!(
             fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
+    #[test]
+    fn task_work_recovery_keeps_history_without_treating_it_as_execution_authority() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("RECOVER-HISTORY", repo.path().into()));
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["checkout", "-b", "test/task-recovery-fixture"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let managed = runtime.block_on(claim_stop_fixture(&fixture, 999_999));
+        let exec = crate::exec::Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: None,
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some("historical diagnostic".into()),
+            repo: None,
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture.store.sqlite.record_exec(&exec).unwrap();
+        assert!(runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .is_ok());
+        for blockers in [
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task),
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task),
+        ] {
+            assert!(blockers
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(exec.id.as_str())));
+        }
+
+        // The same missing receipt still blocks when it owns a current Session.
+        let session = fixture.store.sqlite.test_session(
+            "competing-session",
+            &crate::session_record::new_artifact_key(),
+        );
+        fixture
+            .store
+            .sqlite
+            .claim_session_driver(&session.id, None, &exec.id, true)
+            .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?1,interactive=1 WHERE id=?2",
+            rusqlite::params![repo.path().to_str().unwrap(), session.id],
+        )
+        .unwrap();
+        let refusal = runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .unwrap_err();
+        assert!(refusal.to_string().contains(exec.id.as_str()), "{refusal}");
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        assert!(runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .is_ok());
+
+        // A completed conversation cannot exempt a genuinely live process.
+        let root = ledger.home().join(crate::journal::EXEC_PROCESS_ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        let pid = std::process::id();
+        let receipt = crate::journal::ExecProcessReceipt {
+            schema_version: 1,
+            trace_id: exec.trace_id.to_string(),
+            exec_id: exec.id.to_string(),
+            pid,
+            started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
+        };
+        let path = root.join(format!("{pid}.json"));
+        std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let refusal = runtime
+            .block_on(super::task_recovery_adoption(&fixture.store, &fixture.task))
+            .unwrap_err();
+        assert!(refusal.to_string().contains(exec.id.as_str()), "{refusal}");
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.task_flow(&fixture.task.id))
+                .unwrap(),
             Some(managed)
         );
     }

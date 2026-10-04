@@ -127,9 +127,15 @@ pub fn plan_sync(
     };
     // A stacked child's scratch deletion is intentional history. Resetting to
     // the parent would discard it and copy the parent's notes back into the child.
-    let strategy = if fork_base.is_some() || crate::engine::worktrees::is_resident_worktree(repo)? {
+    let resident = crate::engine::worktrees::is_resident_worktree(repo)?;
+    let strategy = if fork_base.is_some() || resident {
         if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
+        } else if fork_base.is_none() && landed(repo, &base_ref)? {
+            // A resident branch outlives its squash-merged PRs. Once the base
+            // holds everything it committed, restart it from the base instead
+            // of carrying the merged commits into every later PR.
+            SyncStrategy::ResetToBase
         } else {
             SyncStrategy::MergeTarget
         }
@@ -138,7 +144,7 @@ pub fn plan_sync(
     };
 
     let scratch_stashed =
-        matches!(strategy, SyncStrategy::ResetToBase) && repo.join("scratch").exists();
+        !resident && matches!(strategy, SyncStrategy::ResetToBase) && repo.join("scratch").exists();
 
     Ok(SyncPlan {
         branch,
@@ -544,7 +550,29 @@ fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
         .unwrap_or_else(|| "manual resolution required".to_string())
 }
 
+/// True when merging the base into HEAD would add nothing the base lacks.
+fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args(["merge-tree", "--write-tree", base_ref, "HEAD"])
+        .output()?;
+    // A conflicted merge exits 1: the branch still differs from the base.
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim()
+            == rev_parse(repo, &format!("{base_ref}^{{tree}}"))?)
+}
+
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
+    if !plan.scratch_stashed && crate::engine::worktrees::is_resident_worktree(repo)? {
+        progress.status(&format!(
+            "{} has landed; restarting it from {}...",
+            plan.branch, plan.base_ref
+        ));
+        // --keep moves the branch without touching uncommitted edits, and
+        // refuses rather than overwriting one the base also changed.
+        git(repo, &["reset", "--keep", &plan.base_ref])?;
+        return Ok(());
+    }
     let stash_path = if repo.join("scratch").exists() {
         let path = scratch_stash_path(repo, &plan.branch);
         if let Some(parent) = path.parent() {

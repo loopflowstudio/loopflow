@@ -1285,6 +1285,12 @@ fn resident_refresh_preserves_local_plans_and_followup_after_merge() {
         std::fs::read_to_string(resident.path.join("scratch/plan.md")).unwrap(),
         "private\n"
     );
+    // Everything committed had landed, so the branch restarts from main
+    // instead of carrying its squash-merged commit into the next PR.
+    assert_eq!(
+        git(&resident.path, &["rev-parse", "HEAD"]),
+        git(&resident.path, &["rev-parse", "origin/main"])
+    );
     loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Followup"))
         .unwrap();
     assert!(git(
@@ -1292,6 +1298,14 @@ fn resident_refresh_preserves_local_plans_and_followup_after_merge() {
         &["diff", "origin/main...HEAD", "--", "memory.md"]
     )
     .contains("+followup"));
+    assert_eq!(
+        git(
+            &resident.path,
+            &["rev-list", "--count", "origin/main..HEAD"]
+        )
+        .trim(),
+        "1"
+    );
 }
 
 #[test]

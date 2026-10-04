@@ -292,8 +292,8 @@ impl CodexConnection {
         let session = self.session_id.clone();
         let runtime = tokio::runtime::Handle::current();
         // A second connection can transfer the driver in another process.
-        // Keep the SQLite comparison and bounded socket dispatch in one
-        // transaction, rather than checking before an asynchronous queue.
+        // Keep the driver comparison and bounded socket dispatch under the
+        // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
             let outcome = store.with_session_driver(&session, &driver, || {
                 runtime.block_on(async {

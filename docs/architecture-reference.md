@@ -216,6 +216,13 @@ interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
+Native dispatch and driver claim, release, and exit share a Session-scoped OS
+lock beside the canonical database path. Driver validation releases the SQLite
+mutex before provider I/O; history and other Sessions keep using the database.
+Lock acquisition has an OS-clock deadline independent of the provider reactor.
+Lock files retain their inode across process exit; deleting a live lock file
+would let two processes own different locks for the same Session.
+
 Connect transfers the driver while retaining the live conversation. Client
 replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
 conversations running. Flow retry can resume the recorded native conversation on

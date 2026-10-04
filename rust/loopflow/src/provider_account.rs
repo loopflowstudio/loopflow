@@ -150,12 +150,13 @@ pub(crate) struct RateLimitSignal {
     pub windows: Vec<crate::store::AccountLimitWindow>,
 }
 
+/// The two ways a conversation reaches its account.
 #[derive(Clone)]
 enum AccountRouteAuthority {
-    /// Isolated: the conversation runs in the account's own home.
-    Local {
-        store: SharedStore,
+    /// The conversation runs in the account's own home.
+    Isolated {
         home: PathBuf,
+        ledger: AccountLedger,
     },
     /// The conversation runs in the provider's native home, signed in as
     /// this account. `home` is the stored profile.
@@ -165,14 +166,19 @@ enum AccountRouteAuthority {
         cause: activation::SwitchCause,
         launched_at: i64,
     },
-    Direct {
-        home: PathBuf,
-        lf_home: PathBuf,
-    },
-    Lease {
-        client: lease::AccountLeaseClient,
-        access_token: String,
-    },
+}
+
+/// Whose account record an isolated route checks and reports to.
+#[derive(Clone)]
+enum AccountLedger {
+    /// This Home's catalog.
+    Store(SharedStore),
+    /// A recorded Run's catalog, read to check identity. Replay names the
+    /// account it requires and records nothing.
+    Replay(SharedStore),
+    /// The origin of an `lf ssh` session, which owns the account and lent
+    /// this home its login.
+    Origin(lease::AccountLeaseClient),
 }
 
 #[derive(Clone)]
@@ -216,11 +222,8 @@ pub(crate) struct ProviderAccountRoute {
 impl std::fmt::Debug for ProviderAccountRoute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let credential = match self.authority {
-            AccountRouteAuthority::Local { .. } | AccountRouteAuthority::Direct { .. } => {
-                "account_home"
-            }
+            AccountRouteAuthority::Isolated { .. } => "account_home",
             AccountRouteAuthority::Shared { .. } => "native_home",
-            AccountRouteAuthority::Lease { .. } => "access_token",
         };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
@@ -289,7 +292,45 @@ impl ProviderAccountRoute {
 
     #[cfg(test)]
     pub(crate) fn is_forwarded(&self) -> bool {
-        matches!(self.authority, AccountRouteAuthority::Lease { .. })
+        matches!(
+            self.authority,
+            AccountRouteAuthority::Isolated {
+                ledger: AccountLedger::Origin(_),
+                ..
+            }
+        )
+    }
+
+    /// An account home on this machine, signed in with a login its origin lent.
+    pub(crate) fn forwarded(
+        client: lease::AccountLeaseClient,
+        provider: Provider,
+        resolution: &lease::LeaseResolution,
+    ) -> Result<Self, ProviderAccountError> {
+        let home = crate::store::lf_home_dir()
+            .join("accounts")
+            .join(provider.as_str())
+            .join(format!("forwarded-{}", resolution.account_id));
+        let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        ensure_account_home_at(&operator_home, &home, provider)?;
+        activation::write_login(provider, &home, resolution.login().as_bytes())?;
+        Ok(Self {
+            provider,
+            account_id: resolution.account_id.clone(),
+            resume_requested_session: resolution.resume_requested_session,
+            authority: AccountRouteAuthority::Isolated {
+                home,
+                ledger: AccountLedger::Origin(client),
+            },
+        })
+    }
+
+    /// Where this route's usage is recorded, if anywhere.
+    fn ledger(&self) -> AccountLedger {
+        match &self.authority {
+            AccountRouteAuthority::Isolated { ledger, .. } => ledger.clone(),
+            AccountRouteAuthority::Shared { store, .. } => AccountLedger::Store(Arc::clone(store)),
+        }
     }
 
     #[cfg(test)]
@@ -313,10 +354,9 @@ impl ProviderAccountRoute {
     /// home keeps its login in a file whatever the mirrored config selects.
     pub(crate) fn provider_args(&self) -> &'static [&'static str] {
         match (self.provider, &self.authority) {
-            (
-                Provider::Codex,
-                AccountRouteAuthority::Local { .. } | AccountRouteAuthority::Direct { .. },
-            ) => &["-c", "cli_auth_credentials_store=\"file\""],
+            (Provider::Codex, AccountRouteAuthority::Isolated { .. }) => {
+                &["-c", "cli_auth_credentials_store=\"file\""]
+            }
             _ => &[],
         }
     }
@@ -329,9 +369,20 @@ impl ProviderAccountRoute {
     pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
         self.check_identity().await?;
         match &self.authority {
-            AccountRouteAuthority::Local { home, .. }
-            | AccountRouteAuthority::Shared { home, .. }
-            | AccountRouteAuthority::Direct { home, .. } => {
+            // Only the origin can refresh a lent login; here it is there or not.
+            AccountRouteAuthority::Isolated {
+                home,
+                ledger: AccountLedger::Origin(_),
+            } => {
+                if !activation::has_login(self.provider, home) {
+                    return Err(ProviderAccountError::NoAuthenticatedAccount {
+                        provider: self.provider,
+                        accounts: format!("{} (forwarded login is unusable)", self.account_id),
+                    });
+                }
+            }
+            AccountRouteAuthority::Isolated { home, .. }
+            | AccountRouteAuthority::Shared { home, .. } => {
                 let home = self.credential_home(home);
                 crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
                     .await
@@ -348,13 +399,6 @@ impl ProviderAccountRoute {
                         ),
                     })?;
             }
-            AccountRouteAuthority::Lease { access_token, .. } if access_token.trim().is_empty() => {
-                return Err(ProviderAccountError::NoAuthenticatedAccount {
-                    provider: self.provider,
-                    accounts: format!("{} (forwarded credential is empty)", self.account_id),
-                });
-            }
-            AccountRouteAuthority::Lease { .. } => {}
         }
         self.check_identity().await?;
         Ok(())
@@ -362,23 +406,16 @@ impl ProviderAccountRoute {
 
     async fn check_identity(&self) -> Result<(), ProviderAccountError> {
         let (store, home) = match &self.authority {
-            AccountRouteAuthority::Local { store, home }
-            | AccountRouteAuthority::Shared { store, home, .. } => (Arc::clone(store), home),
-            AccountRouteAuthority::Direct { lf_home, home } => {
-                let path = if *lf_home == crate::store::lf_home_dir() {
-                    crate::store::database_path_from_env()
-                        .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))?
-                } else {
-                    lf_home.join("loopflow.db")
-                };
-                (
-                    Arc::new(crate::store::Store {
-                        sqlite: crate::store::sqlite::SqliteStore::open_read_only(&path)?,
-                    }),
-                    home,
-                )
+            AccountRouteAuthority::Isolated {
+                home,
+                ledger: AccountLedger::Store(store) | AccountLedger::Replay(store),
             }
-            _ => return Ok(()),
+            | AccountRouteAuthority::Shared { store, home, .. } => (Arc::clone(store), home),
+            // The origin checked the login it lent.
+            AccountRouteAuthority::Isolated {
+                ledger: AccountLedger::Origin(_),
+                ..
+            } => return Ok(()),
         };
         let accounts = store
             .list_provider_accounts(Some(self.provider.as_str()))
@@ -412,28 +449,10 @@ impl ProviderAccountRoute {
         for name in PROVIDER_CREDENTIAL_ENV_VARS {
             command.env_remove(name);
         }
-        match (self.provider, &self.authority) {
-            (
-                Provider::Claude,
-                AccountRouteAuthority::Local { home, .. }
-                | AccountRouteAuthority::Direct { home, .. },
-            ) => {
-                command.env("CLAUDE_CONFIG_DIR", home);
+        if let AccountRouteAuthority::Isolated { home, .. } = &self.authority {
+            if let Some(name) = activation::home_env(self.provider) {
+                command.env(name, home);
             }
-            (Provider::Claude, AccountRouteAuthority::Lease { access_token, .. }) => {
-                command.env("CLAUDE_CODE_OAUTH_TOKEN", access_token);
-            }
-            (
-                Provider::Codex,
-                AccountRouteAuthority::Local { home, .. }
-                | AccountRouteAuthority::Direct { home, .. },
-            ) => {
-                command.env("CODEX_HOME", home);
-            }
-            (Provider::Codex, AccountRouteAuthority::Lease { access_token, .. }) => {
-                command.env("CODEX_ACCESS_TOKEN", access_token);
-            }
-            _ => {}
         }
     }
 
@@ -479,22 +498,21 @@ impl ProviderAccountRoute {
         &self,
         provider_session_id: &str,
     ) -> Result<(), ProviderAccountError> {
-        match &self.authority {
-            AccountRouteAuthority::Local { store, .. }
-            | AccountRouteAuthority::Shared { store, .. } => {
+        match self.ledger() {
+            AccountLedger::Store(store) => {
                 store
                     .pin_provider_session_route(
                         self.provider,
                         provider_session_id,
                         &self.account_id,
-                        matches!(self.authority, AccountRouteAuthority::Local { .. }),
+                        matches!(self.authority, AccountRouteAuthority::Isolated { .. }),
                     )
                     .await?;
             }
-            AccountRouteAuthority::Lease { client, .. } => {
+            AccountLedger::Origin(client) => {
                 client.pin_session(self.provider, provider_session_id, &self.account_id)?;
             }
-            AccountRouteAuthority::Direct { .. } => {}
+            AccountLedger::Replay(_) => {}
         }
         Ok(())
     }
@@ -503,17 +521,16 @@ impl ProviderAccountRoute {
         &self,
         signal: &RateLimitSignal,
     ) -> Result<(), ProviderAccountError> {
-        match &self.authority {
-            AccountRouteAuthority::Local { store, .. }
-            | AccountRouteAuthority::Shared { store, .. } => {
+        match self.ledger() {
+            AccountLedger::Store(store) => {
                 let account_id = self.used_account().await?;
-                record_rate_limit_signal(store, self.provider, &account_id, signal, "stream")
+                record_rate_limit_signal(&store, self.provider, &account_id, signal, "stream")
                     .await?;
             }
-            AccountRouteAuthority::Lease { client, .. } => {
+            AccountLedger::Origin(client) => {
                 client.record_health(self.provider, &self.account_id, signal)?;
             }
-            AccountRouteAuthority::Direct { .. } => {}
+            AccountLedger::Replay(_) => {}
         }
         Ok(())
     }
@@ -550,9 +567,8 @@ impl ProviderAccountRoute {
         let reason = reason.to_string();
         _run_blocking_account(self.provider, "invalidate", move |runtime| {
             runtime.block_on(async {
-                match &route.authority {
-                    AccountRouteAuthority::Local { store, .. }
-                    | AccountRouteAuthority::Shared { store, .. } => {
+                match route.ledger() {
+                    AccountLedger::Store(store) => {
                         store
                             .record_provider_account_credential_invalidated(
                                 route.provider.as_str(),
@@ -561,13 +577,12 @@ impl ProviderAccountRoute {
                             )
                             .await?
                     }
-                    AccountRouteAuthority::Lease { client, .. } => client
-                        .record_credential_invalidated(
-                            route.provider,
-                            &route.account_id,
-                            &reason,
-                        )?,
-                    AccountRouteAuthority::Direct { .. } => {}
+                    AccountLedger::Origin(client) => client.record_credential_invalidated(
+                        route.provider,
+                        &route.account_id,
+                        &reason,
+                    )?,
+                    AccountLedger::Replay(_) => {}
                 }
                 Ok(())
             })
@@ -794,7 +809,10 @@ fn link_shared_path(_source: &Path, _target: &Path) -> Result<(), ProviderAccoun
     Ok(())
 }
 
-pub(crate) async fn prepare_account_access_token(
+/// Refresh one account's login and return the copy to lend an `lf ssh`
+/// target: the same login without its refresh token, so only this Home can
+/// renew it.
+pub(crate) async fn prepare_lendable_login(
     provider: Provider,
     account: &ProviderAccount,
     accounts: &[ProviderAccount],
@@ -827,7 +845,13 @@ pub(crate) async fn prepare_account_access_token(
     identity::check_current_identity(account, accounts)
         .await
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    Ok(access_token)
+    activation::lendable_login(provider, &home, &access_token).ok_or_else(|| {
+        ProviderAccountError::ForwardingCredential {
+            provider,
+            account_id: account.account_id.clone(),
+            reason: "stored login cannot be read".to_string(),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1007,7 +1031,10 @@ pub(crate) async fn resolve_provider_account_exact(
         provider,
         account_id,
         resume_requested_session: selection.resume_requested_session,
-        authority: AccountRouteAuthority::Local { store, home },
+        authority: AccountRouteAuthority::Isolated {
+            home,
+            ledger: AccountLedger::Store(store),
+        },
     }))
 }
 
@@ -1111,9 +1138,9 @@ async fn resolve_merged_provider_account(
                     provider,
                     account_id: candidate.account.account_id.clone(),
                     resume_requested_session: resumed,
-                    authority: AccountRouteAuthority::Local {
-                        store: Arc::clone(store),
+                    authority: AccountRouteAuthority::Isolated {
                         home: home.clone(),
+                        ledger: AccountLedger::Store(Arc::clone(store)),
                     },
                 }));
             }
@@ -1124,15 +1151,11 @@ async fn resolve_merged_provider_account(
                     provider_session_id.map(str::to_string),
                 ) {
                     Ok(resolution) => {
-                        return Ok(Some(ProviderAccountRoute {
+                        return Ok(Some(ProviderAccountRoute::forwarded(
+                            client.clone(),
                             provider,
-                            account_id: resolution.account_id.clone(),
-                            resume_requested_session: resolution.resume_requested_session,
-                            authority: AccountRouteAuthority::Lease {
-                                client: client.clone(),
-                                access_token: resolution.access_token().to_string(),
-                            },
-                        }));
+                            &resolution,
+                        )?));
                     }
                     Err(error) => last_forwarded_error = Some(error),
                 }
@@ -1607,15 +1630,7 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                 {
                     let resolution =
                         client.resolve_exact(provider, &account_id, provider_session_id.clone())?;
-                    let route = ProviderAccountRoute {
-                        provider,
-                        account_id: resolution.account_id.clone(),
-                        resume_requested_session: resolution.resume_requested_session,
-                        authority: AccountRouteAuthority::Lease {
-                            client,
-                            access_token: resolution.access_token().to_string(),
-                        },
-                    };
+                    let route = ProviderAccountRoute::forwarded(client, provider, &resolution)?;
                     route.verify_ready().await?;
                     return Ok(Some(route));
                 }
@@ -1644,11 +1659,23 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
             }
             let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
             ensure_account_home_at(&operator_home, &home, provider)?;
+            let catalog = if lf_home == crate::store::lf_home_dir() {
+                crate::store::database_path_from_env()
+                    .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))?
+            } else {
+                lf_home.join("loopflow.db")
+            };
+            let catalog = Arc::new(crate::store::Store {
+                sqlite: crate::store::sqlite::SqliteStore::open_read_only(&catalog)?,
+            });
             let route = ProviderAccountRoute {
                 provider,
                 account_id,
                 resume_requested_session: false,
-                authority: AccountRouteAuthority::Direct { home, lf_home },
+                authority: AccountRouteAuthority::Isolated {
+                    home,
+                    ledger: AccountLedger::Replay(catalog),
+                },
             };
             route.verify_ready().await?;
             Ok(Some(route))
@@ -1766,6 +1793,22 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn a_lent_login_keeps_its_identity_and_cannot_be_renewed() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("auth.json"),
+            r#"{"tokens":{"access_token":"stale","refresh_token":"renew","id_token":"h.e30.s"}}"#,
+        )
+        .unwrap();
+        let lent = activation::lendable_login(Provider::Codex, temp.path(), "fresh").unwrap();
+        let lent: serde_json::Value = serde_json::from_str(&lent).unwrap();
+        assert_eq!(
+            lent["tokens"],
+            serde_json::json!({"access_token": "fresh", "refresh_token": "", "id_token": "h.e30.s"})
+        );
+    }
 
     #[test]
     fn explicit_account_selector_matches_email_exactly_or_by_unique_prefix() {
@@ -1933,9 +1976,9 @@ mod tests {
             provider: Provider::Codex,
             account_id: parse_account_id("reserve").unwrap(),
             resume_requested_session: false,
-            authority: AccountRouteAuthority::Local {
-                store,
+            authority: AccountRouteAuthority::Isolated {
                 home: temp.path().join("codex-reserve"),
+                ledger: AccountLedger::Store(store),
             },
         };
         let mut command = Command::new("codex");
@@ -1996,9 +2039,9 @@ mod tests {
                     provider: Provider::Claude,
                     account_id: parse_account_id("primary").unwrap(),
                     resume_requested_session: false,
-                    authority: AccountRouteAuthority::Local {
-                        store: store.clone(),
+                    authority: AccountRouteAuthority::Isolated {
                         home: claude_home.clone(),
+                        ledger: AccountLedger::Store(store.clone()),
                     },
                 },
                 "CLAUDE_CONFIG_DIR",
@@ -2009,9 +2052,9 @@ mod tests {
                     provider: Provider::Codex,
                     account_id: parse_account_id("reserve").unwrap(),
                     resume_requested_session: false,
-                    authority: AccountRouteAuthority::Local {
-                        store,
+                    authority: AccountRouteAuthority::Isolated {
                         home: codex_home.clone(),
+                        ledger: AccountLedger::Store(store),
                     },
                 },
                 "CODEX_HOME",
@@ -2053,9 +2096,9 @@ mod tests {
             provider: Provider::Claude,
             account_id: account_id.clone(),
             resume_requested_session: false,
-            authority: AccountRouteAuthority::Local {
-                store: store.clone(),
+            authority: AccountRouteAuthority::Isolated {
                 home: temp.path().join("primary"),
+                ledger: AccountLedger::Store(store.clone()),
             },
         };
 

@@ -23,7 +23,7 @@
 
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
 - A conversation started under A resumes under B across different workspaces or plans.
-- SSH-forwarded Codex: the lease exports `CODEX_ACCESS_TOKEN`, recorded in `provider_auth/mod.rs` as the wrong credential type. Untouched by this plan.
+- A login lent over `lf ssh` working against each provider's real service: only synthetic probes were run.
 
 ## Assumptions made while building slice 2
 

@@ -428,8 +428,9 @@ lf ssh my-company --wave shipper wave/operate
 ```
 
 The origin does not copy account homes or refresh credentials. It advertises
-the catalog first and serves one access token only after the target selects a
-forwarded identity. See [Security](/docs/security#what-crosses-ssh-for-a-subscription-account)
+the catalog first and lends one login, without its refresh token, only after
+the target selects a forwarded identity. The target runs that conversation in
+a home of its own for that identity. See [Security](/docs/security#what-crosses-ssh-for-a-subscription-account)
 for the broker, process-lifetime, and remote trust boundary.
 
 ## OpenCode Zen

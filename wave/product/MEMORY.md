@@ -5,6 +5,33 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Task conversation correction (2026-10-04)
+
+Jack Heart requested one ongoing Task conversation for interactive design/review,
+with ordinary `lf -b` headless work. Product labels are Session for interactive
+and Run for headless; both retain AgentSession identity/history through mode changes.
+Any number of Task conversations remains valid, independently of primary selection.
+One Waiting state and `--waiting` replace needs-me; `--interactive` stays a mode
+filter. Provider signals plus quiet time without outstanding tools may yield false
+positives. Claude uses only binary stream-json, never SDK/hooks/permission hosts.
+
+Jack requested deleting Task-worker/managed-Flow authority, mutable Flow switching,
+and automatic database-backed recovery; callers inspect history/effect evidence
+and own recovery. Delete `lf session ready`, `lf session complete` and their review
+handshake, including other completion consumers. Conversational feedback supplies
+the exact boundary result without closing the conversation or a renamed handshake.
+These decisions supersede conflicting older constraints below, not retained
+membership, native surface ownership, historical attribution or proof obligations.
+
+Jack requested loop-decide alternatives, then clarified that removal needs a
+replacement and must not block accepted work; retaining it is acceptable. No
+replacement is approved. LOO-353 kickoff remains draft pending review-design;
+sleeping runner, observation storage, feedback delivery and timeout are proposals.
+Main at `c5dc238b0` still creates separate review Sessions; harness input capability
+does not prove native conversation delivery. No production or configured proof was
+performed by kickoff. Remaining workspace/remote/performance/defaults/website work
+stays with LOO-353; LOO-366/367 retain their separate policy scope.
+
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
 Jack Heart accepted a Task workspace that keeps Sessions, shells and files

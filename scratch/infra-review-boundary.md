@@ -1,15 +1,13 @@
-# Infrastructure PR review
+# One pursuit, explicit reviews
 
-Jack Heart requested infrastructure delivery reviews use `pr-review` instead of
-`demo`. Existing saved Task Flows stay unchanged; Jack will redirect their reviews.
+Jack Heart requested one pursuit without a demo or outer return loop. The earlier
+separate infrastructure Flow is superseded: `pursue` loops through implementation,
+compress, refresh and loop-decide, then publishes; `code` adds human `pr-review`;
+`feature` keeps design review, then pursuit, demo, queue and landing.
 
-`.lf/flows/code-review.yaml` preserves feature's design review, implementation
-loop, publication, feedback loop, gate and landing. The delivery review remains
-`human: true` and uses the PR walkthrough skill. Producing HTML does not complete
-the review; Session completion and the following loop-decide retain navigation.
+Existing saved Flows remain unchanged. Jack will redirect existing reviews.
+Remaining activation: publish and land the definitions, release/install them,
+then set the infrastructure Project default to `code`, preserving its KRs and
+targets. No shared default should select the old code semantics prematurely.
 
-Remaining activation: publish and land the authored Flow, then change the current
-infrastructure Project's default Flow to `code-review`, preserving KRs and targets.
-Do not select it in the shared plan before fresh Task checkouts can resolve it.
-
-Check: `lf flow show` expands both Flows identically except demo → pr-review; `git diff --check` passes.
+Checks: `cargo test -p loopflow --lib engine::flow` — 55 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed.

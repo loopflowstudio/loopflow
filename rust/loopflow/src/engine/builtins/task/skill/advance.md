@@ -43,8 +43,8 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish, human demo, and another loop-decide).
-Both decisions have explicit edges to implementation. Do not repeat initial
+→ loop-decide, repeated on Iterate, then pr-publish). `code` adds a human
+PR walkthrough after pursuit. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, use the complete feature Flow. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.

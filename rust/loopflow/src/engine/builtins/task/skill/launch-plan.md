@@ -94,9 +94,8 @@ launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → refresh
 → loop-decide. Refresh runs sync → realign. Iterate returns to implementation;
-Advance publishes, then reaches a human demo. Its completion returns feedback to another loop-decide
-whose explicit edge also targets implement. The `feature` Flow
-retains the initial design review. Preserve intent, constraints, and done-when
+Advance publishes and ends the pursuit. `code` adds a human PR walkthrough;
+`feature` adds the initial design review, then a demo and landing after pursuit. Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.
 
 Finish with a short accounting of the selected work and its design/evidence

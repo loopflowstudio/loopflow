@@ -1,2 +1,5 @@
-- implement
-- compress
+- flow: pursue
+- step:
+    id: review_delivery
+    name: pr-review
+    human: true

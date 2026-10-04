@@ -780,7 +780,20 @@ mod tests {
     fn retained_flows_keep_their_delivery_and_review_boundaries() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
-            ("code", &["implement", "compress"], &[], 0),
+            (
+                "code",
+                &[
+                    "implement",
+                    "compress",
+                    "task sync",
+                    "realign",
+                    "loop-decide",
+                    "pr-publish",
+                    "pr-review",
+                ],
+                &[6],
+                1,
+            ),
             (
                 "queue",
                 &["compress", "task sync", "realign", "gate"],
@@ -799,11 +812,9 @@ mod tests {
                     "realign",
                     "loop-decide",
                     "pr-publish",
-                    "demo",
-                    "loop-decide",
                 ],
-                &[6],
-                2,
+                &[],
+                1,
             ),
             ("deploy", &["gate", "task pr land"], &[], 0),
             ("ship", &["gate", "task pr land -c"], &[], 0),
@@ -856,7 +867,7 @@ mod tests {
     }
 
     #[test]
-    fn feature_draws_both_returns_to_implement_with_forward_delivery() {
+    fn feature_has_one_pursuit_then_demo_and_forward_delivery() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("feature", repo.path()).unwrap();
         let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
@@ -873,7 +884,6 @@ mod tests {
                 "loop-decide",
                 "pr-publish",
                 "demo",
-                "loop-decide",
                 "compress",
                 "task sync",
                 "realign",
@@ -887,15 +897,9 @@ mod tests {
             .iter()
             .filter_map(|node| node.returns_to.as_ref().map(|to| (node.id.clone(), to)))
             .collect();
-        assert_eq!(
-            returns,
-            [
-                (Some("decide".to_string()), &implement),
-                (Some("decide_delivery".to_string()), &implement)
-            ]
-        );
+        assert_eq!(returns, [(Some("decide".to_string()), &implement)]);
         assert!(graph.steps[1].human && graph.steps[8].human);
-        assert_eq!(graph.steps[14].kind, FlowNodeKind::Op);
+        assert_eq!(graph.steps[13].kind, FlowNodeKind::Op);
         assert_eq!(graph.steps[5].sources, ["feature", "pursue", "refresh"]);
     }
 

@@ -40,7 +40,10 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
 ## Checks
 
+- After sync with main: `cargo test -p loopflow --lib -- harness::dispatch` — 3 passed.
 - `cargo test -p loopflow --lib -- engine::worktrees harness::dispatch ops::wt`:
   32 passed; `--test worktree_tests`: 26 passed; clippy `-D warnings` clean.
   Both dispatch tests fail (deadlock detected) with the previous `block_on` +
   worker-blocking reader restored.
+
+- After main sync: `cargo test -p loopflow --test worktree_tests` — 26 passed.

@@ -1,0 +1,570 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LOO-367 — Tasks keep purpose; execution stays optional</title><style>*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:#f5f2eb;color:#252b29;font:17px/1.6 system-ui,-apple-system,sans-serif}a{color:#155e67;text-underline-offset:3px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #bd5b30;outline-offset:4px}.skip{position:absolute;left:12px;top:-80px}.skip:focus{top:12px;background:white;padding:10px}header,main,footer{max-width:1300px;margin:auto;padding:42px 48px}header{padding-top:70px;border-bottom:1px solid #b8beb6}.eyebrow,.number{font:700 12px/1.5 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#155e67}h1{font:500 clamp(38px,5vw,68px)/1.04 Georgia,serif;max-width:900px;margin:20px 0}h2{font:500 32px/1.18 Georgia,serif;margin:0}h3{font:600 21px/1.3 system-ui}p{margin:0 0 18px}.dek{max-width:800px;font-size:22px;line-height:1.5}.scope{border-left:3px solid #bd5b30;padding-left:18px;margin:28px 0;color:#4c5652;font-size:14px;overflow-wrap:anywhere}.route{display:flex;gap:9px 24px;flex-wrap:wrap;padding:20px 0 0;font-size:14px}.route a{font-weight:650}section{padding:48px 0;border-bottom:1px solid #c7ccc4}.section-head{display:flex;gap:22px;align-items:baseline;margin-bottom:28px}.spread{display:grid;grid-template-columns:minmax(240px,.82fr) minmax(0,1.3fr);gap:38px}.prose{max-width:490px}.source{min-width:0}figure{margin:0 0 24px;border:1px solid #c5cfc9;background:#fffefa;min-width:0}figcaption{padding:12px 16px;background:#e8ede7;font-size:12px;line-height:1.6;overflow-wrap:anywhere}figcaption strong{font-size:13px}figcaption span{color:#53605a}pre{margin:0;padding:18px;overflow:auto;max-width:100%;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4;color:#203a35}p code,li code{font-size:.9em;overflow-wrap:anywhere}.callout{padding:18px;border-left:3px solid #bd5b30;background:#efe6d7}details{margin-top:18px;padding:16px 20px;background:#eceee8}summary{cursor:pointer;font-weight:650;color:#155e67}details[open] summary{margin-bottom:20px}details figure{max-width:100%}.evidence{width:100%;border-collapse:collapse;font-size:15px}.evidence td,.evidence th{text-align:left;vertical-align:top;padding:16px;border-bottom:1px solid #c7ccc4}.evidence th{width:23%;color:#155e67}footer{font-size:13px;color:#53605a;padding-bottom:60px}ol{padding-left:24px}li{margin-bottom:12px}.full-note{max-width:880px}.pill{background:#e3eae3;color:#235347;padding:5px 10px;font-size:12px;font-weight:700;display:inline-block} @media(max-width:720px){header,main,footer{padding:26px 20px}header{padding-top:45px}.spread{grid-template-columns:1fr;gap:12px}.prose{max-width:none}h2{font-size:28px}.dek{font-size:19px}.section-head{gap:14px}section{padding:32px 0}pre{font-size:11px}.evidence th,.evidence td{display:block;width:100%;padding:10px 0}.evidence th{border:0}.route{gap:10px 17px}details{padding:14px 12px}} @media print{body{background:white;font-size:11pt}header,main,footer{padding:20px 0;max-width:none}.spread{display:block}.prose{max-width:none}.route,.skip{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:8pt}figure{break-inside:avoid}details{display:block}details>*{display:block!important}section{break-before:auto}a{color:inherit}h2{font-size:23pt}}</style></head><body><a class="skip" href="#admit">Skip to walkthrough</a><header><div class="eyebrow">Loopflow / LOO-367 / Code walkthrough / October 4, 2026</div><h1>Tasks keep purpose.<br>Execution stays optional.</h1><p class="dek">A reading route from binding a research conversation to recording its outcome, with the boundaries that preserve unfinished delivery.</p><span class="pill">Local branch comparison · product review open</span><div class="scope"><strong>Base</strong> 8c72e591e78a68227255fd86bfff6a939ded5e8b<br><strong>Head</strong> c5dbcb72ce1c1016c0febfa0484aaee70e421ac3<br>No published diff is established. Code excerpts come from the exact local head; revision-pinned GitHub links may be unavailable until publication. The supplied Task PR base is used, not a guessed merge base.<br>Uncommitted context: scratch/questions.md and scratch/task-purpose-demo.md. Their review direction is labeled separately from committed implementation. This HTML is a new local artifact. No source code or existing notes were edited.</div><nav aria-label="Reading route" class="route"><a href="#admit">01 Bind</a><a href="#confirm">02 Confirm</a><a href="#flows">03 Run a Flow</a><a href="#complete">04 Complete</a><a href="#retain">05 Retain work</a><a href="#delivery">06 Deliver later</a><a href="#desktop">07 Desktop</a><a href="#evidence">08 Evidence</a></nav></header><main><section id="admit"><div class="section-head"><span class="number">01</span><h2>A conversation can gain a Task without gaining a checkout</h2></div><div class="spread"><div class="prose"><p>Binding an existing conversation admits its planning issue, then attaches the conversation to that Task. It does not allocate a checkout, PR or Flow.</p><p>The first new boundary is <strong>optional placement</strong>: a path and slug exist together, or neither exists. A missing retained checkout remains different from never having allocated one.</p><p>Admission still needs valid Project and Wave ownership for a new row. An already registered Task returns directly. Project availability and optional chapter resets belong to LOO-366.</p><p class="callout">Before: binding required an already registered Task. Now: binding can admit the issue. Preview remains observational.</p></div><div class="source"><figure><figcaption><strong>bind</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/human_session.rs#L1726-L1735">rust/loopflow/src/ops/human_session.rs · L1726–1735</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>pub(crate) async fn bind(store: &amp;SharedStore, id: &amp;str, task: &amp;str) -&gt; Result&lt;SessionRecord&gt; {
+    let session = binding_session(store, id).await?;
+    let task = crate::ops::task::admit_task(store, &amp;session.cwd, task).await?;
+    let session = store
+        .bind_session(&amp;session.id, session.captured, &amp;task.id)
+        .await
+        .map_err(|error| match error {
+            crate::store::StoreError::InvalidAuthority(reason) =&gt; anyhow!(reason),
+            error =&gt; anyhow!(error),
+        })?;</code></pre></figure><figure><figcaption><strong>admit_task · unplaced record</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L967-L988">rust/loopflow/src/ops/task.rs · L967–988</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    store
+        .admit_task(&amp;Task {
+            id: crate::work::task::TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new(resolved.item.id).map_err(task_error)?,
+                identifier: resolved.item.identifier,
+                title: resolved.item.name,
+                description: resolved.item.description,
+                pm_snapshot_synced_at: resolved.observed_at,
+            },
+            wave_id: project.wave_id,
+            project_id: project.id,
+            workspace: None,
+            pm_writeback: PmWritebackState::Current,
+            agent: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        })
+        .await
+        .map_err(task_error)</code></pre></figure></div></div><details><summary>Admission ownership, race handling, and preview</summary><figure><figcaption><strong>admit_task · resolve ownership</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L938-L965">rust/loopflow/src/ops/task.rs · L938–965</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>pub async fn admit_task(store: &amp;SharedStore, repo: &amp;Path, selector: &amp;str) -&gt; OpsResult&lt;Task&gt; {
+    let existing = match crate::durable::TaskId::parse(selector) {
+        Ok(id) =&gt; store.get_task(&amp;id).await,
+        Err(_) =&gt; store.get_task_by_issue(selector).await,
+    }
+    .map_err(task_error)?;
+    if let Some(task) = existing {
+        return Ok(task);
+    }
+    let resolved =
+        crate::ops::task_pm::resolve_task_async(repo, selector, crate::ops::pm::PmRefresh::Auto)
+            .await?;
+    require_startable_issue(&amp;resolved.item)?;
+    let project = store
+        .get_project_by_project(&amp;resolved.project.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| {
+            task_error(&quot;Task&#x27;s owning Project is unavailable; sync its planning first&quot;)
+        })?;
+    let wave = store
+        .get_wave(&amp;project.wave_id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error(&quot;Task&#x27;s owning Wave is unavailable&quot;))?;
+    if wave.slug() != resolved.wave {
+        return Err(task_error(&quot;Task&#x27;s Project and Wave ownership disagree&quot;));
+    }</code></pre></figure><figure><figcaption><strong>admit_task · one row per issue</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/sqlite/children.rs#L57-L73">rust/loopflow/src/store/sqlite/children.rs · L57–73</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    pub fn admit_task(&amp;self, task: &amp;Task) -&gt; StoreResult&lt;Task&gt; {
+        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = transaction
+            .query_row(
+                &amp;format!(&quot;{TASK_COLUMNS} WHERE t.external_issue_id=?1&quot;),
+                [task.plan.id.as_str()],
+                map_task_row,
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            return Ok(existing);
+        }
+        insert_initial_task(&amp;transaction, task, None)?;
+        transaction.commit()?;
+        Ok(task.clone())
+    }</code></pre></figure><figure><figcaption><strong>preview_binding</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/human_session.rs#L1757-L1787">rust/loopflow/src/ops/human_session.rs · L1757–1787</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let session = binding_session(store, id).await?;
+    let registered = match crate::durable::TaskId::parse(task) {
+        Ok(id) =&gt; store.get_task(&amp;id).await?,
+        Err(_) =&gt; store.get_task_by_issue(task).await?,
+    };
+    if let Some(task) = registered {
+        return Ok(SessionBindingPreview {
+            session_id: session.id,
+            task_id: Some(task.id.to_string()),
+            identifier: task.plan.identifier,
+            title: task.plan.title,
+        });
+    }
+    let resolved = crate::ops::task_pm::resolve_task_async(
+        &amp;session.cwd,
+        task,
+        crate::ops::pm::PmRefresh::Auto,
+    )
+    .await?;
+    Ok(SessionBindingPreview {
+        session_id: session.id,
+        task_id: None,
+        identifier: resolved.item.identifier,
+        title: resolved.item.name,
+    })
+}
+
+async fn binding_session(store: &amp;SharedStore, id: &amp;str) -&gt; Result&lt;AgentSession&gt; {
+    match crate::session_record::parse_artifact_key(id) {
+        Ok(run_id) =&gt; store.session_for_artifact(&amp;run_id).await?,
+        Err(_) =&gt; store.session(id).await?,</code></pre></figure><figure><figcaption><strong>map_task_row · reject half-present placement</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/sqlite/children.rs#L1652-L1670">rust/loopflow/src/store/sqlite/children.rs · L1652–1670</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        project_id: ProjectId::from_raw(row.get::&lt;_, String&gt;(12)?),
+        workspace: match (
+            row.get::&lt;_, Option&lt;String&gt;&gt;(6)?,
+            row.get::&lt;_, Option&lt;String&gt;&gt;(7)?,
+        ) {
+            (Some(path), Some(slug)) =&gt; Some(crate::work::task::TaskWorkspace {
+                worktree: PathBuf::from(path),
+                slug,
+            }),
+            (None, None) =&gt; None,
+            _ =&gt; {
+                return Err(invalid_column(
+                    6,
+                    StoreError::InvalidData(&quot;incomplete Task placement&quot;.into()),
+                ))
+            }
+        },
+        agent: row.get(15)?,
+        abandon_intent,</code></pre></figure></details></section><section id="confirm"><div class="section-head"><span class="number">02</span><h2>An unrelated Wave refresh no longer invalidates the Task operation</h2></div><div class="spread"><div class="prose"><p>After an issue mutation, confirmation reads that issue by stable identity. A successful edit no longer waits for the whole Wave snapshot to refresh.</p><p>Ownership and outcome checks remain: a moved issue or an unconfirmed completion still produces an error. This narrows the required evidence; it does not make provider evidence optional.</p><p>Planning-only completion already existed in the base. Its summary marker and retry behavior are retained; this diff changes the confirmation dependency.</p></div><div class="source"><figure><figcaption><strong>pm_update_async · issue confirmation</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/pm.rs#L1277-L1296">rust/loopflow/src/ops/pm.rs · L1277–1296</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let reconcile = async {
+        progress.status(&amp;format!(&quot;confirming Task {}&quot;, item.identifier));
+        let confirmed = resolve_owned_issue(repo, &amp;item.id).await?;
+        if confirmed.wave != wave {
+            return Err(OpsError::Message(format!(
+                &quot;updated Task {} now belongs to wave/{}, expected wave/{wave}&quot;,
+                item.identifier, confirmed.wave
+            )));
+        }
+        let item = &amp;confirmed.item;
+        if completing {
+            validate_completion_outcome(item)?;
+            if !item.completed {
+                return Err(OpsError::Message(format!(
+                    &quot;Linear has not confirmed completion of {}&quot;,
+                    item.identifier
+                )));
+            }
+        }
+        let store = pm_store().await?;</code></pre></figure></div></div><details><summary>Creation uses the same narrower confirmation; planning completion retains its summary marker</summary><figure><figcaption><strong>create_task · confirm created issue</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task_pm.rs#L99-L116">rust/loopflow/src/ops/task_pm.rs · L99–116</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let (issue, prepared) =
+        crate::ops::pm::pm_create_task_idempotent(repo, wave, title, report, marker, prepare)
+            .await?;
+    let resolved = resolve_task_async(repo, &amp;issue, PmRefresh::Force)
+        .await
+        .map_err(|error| OpsError::Message(format!(
+            &quot;Linear task {issue} is committed, but its planning could not be confirmed: {error}. Retry the same `lf task create` command, retaining its original options, to reuse the issue&#x27;s creation marker.&quot;
+        )))?;
+    if resolved.wave != wave {
+        return Err(OpsError::Message(format!(
+            &quot;Linear task {issue} belongs to wave/{}, expected wave/{wave}&quot;,
+            resolved.wave
+        )));
+    }
+    Ok((resolved, prepared))
+}
+
+pub async fn complete_task(</code></pre></figure><figure><figcaption><strong>complete_planning_task · retained summary publication</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/pm.rs#L1344-L1367">rust/loopflow/src/ops/pm.rs · L1344–1367</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let publish_summary = async {
+        let client = issue_client(repo).await?;
+        // Completion has one summary, including after an uncertain publication.
+        // Its marker also keeps this outcome from becoming new Task direction.
+        let marker = format!(&quot;&lt;!-- loopflow-completed:{} --&gt;&quot;, result.id);
+        if client
+            .find_comment_with_marker(&amp;result.id, &amp;marker)
+            .await
+            .map_err(pm_to_ops)?
+            .is_none()
+        {
+            super::linear_observe::publish_comment(
+                &amp;client,
+                &amp;result.id,
+                &amp;format!(&quot;Completed: {summary}&quot;),
+                &amp;marker,
+            )
+            .await?;
+        }
+        Ok::&lt;(), OpsError&gt;(())
+    };
+    publish_summary.await.map_err(|cause| OpsError::Message(format!(
+        &quot;Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task complete {issue} --summary &lt;original-summary&gt;`.&quot;
+    )))</code></pre></figure></details></section><section id="flows"><div class="section-head"><span class="number">03</span><h2>An explicit Flow uses the same driver with or without a Task</h2></div><div class="spread"><div class="prose"><p><code>lf flow start ordinary</code> and <code>lf --task ISSUE flow start ordinary</code> enter the same Flow runner. Attribution adds the selected context and directory.</p><p>The exact branch matters: the explicit-template route applies when placement, directive, reason and retry options are absent. Bare Task startup can instead resume or select its managed Flow. Taskless startup requires a template.</p><p>Managed startup now admits without allocation unless placement flags request it. The captured Flow owns its directory, so continuation does not need to invent a Task checkout.</p><p class="callout">Finishing a Flow leaves the Task open. Task completion no longer silently ends its managed Flow. Managed planning is checked before launching new work, rather than before consuming every saved result.</p></div><div class="source"><figure><figcaption><strong>dispatch · explicit Flow start</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/bin/lf.rs#L1834-L1855">rust/loopflow/src/bin/lf.rs · L1834–1855</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            let directory = loopflow::repo::working_directory()?;
+            let implicit = loopflow::lf::commands::run::implicit_binding(cli)?;
+            if let Some(template) = template.as_deref().filter(|_| {
+                name.is_none()
+                    &amp;&amp; stack_on.is_none()
+                    &amp;&amp; directive.is_none()
+                    &amp;&amp; reason.is_none()
+                    &amp;&amp; !retry
+            }) {
+                let selected = binding.or(implicit.as_ref());
+                let cwd = selected
+                    .map(|binding| binding.cwd.as_path())
+                    .unwrap_or(&amp;directory);
+                let flow = loopflow::engine::flow::load_authored_flow(template, cwd)?;
+                return loopflow::lf::commands::flow::run(&amp;flow, None, cli, cwd, selected);
+            }
+            let task = cli
+                .task
+                .clone()
+                .or_else(|| {
+                    binding
+                        .or(implicit.as_ref())</code></pre></figure><figure><figcaption><strong>task_run · allocation is explicit</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L438-L451">rust/loopflow/src/ops/task.rs · L438–451</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>pub fn task_run(repo: &amp;Path, issue: &amp;str, options: TaskExecOptions) -&gt; OpsResult&lt;TaskSnapshot&gt; {
+    let admission_repo = task_repository(repo, Some(issue))?;
+    if options.name.is_some() || options.stack_on.is_some() {
+        return prepare_task(&amp;admission_repo, issue, options, true)
+            .and_then(|task| task_snapshot(&amp;task));
+    }
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = admit_task(&amp;store, &amp;admission_repo, issue).await?;
+        if task_work_status(&amp;store, &amp;task).await? != WorkStatus::Ready {
+            return Err(task_error(format!(
+                &quot;Task {} is terminal and cannot advance&quot;,
+                task.plan.identifier
+            )));</code></pre></figure></div></div><details><summary>Saved results, launch validation, and cwd migration</summary><figure><figcaption><strong>resolve_launch_task</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/lf/commands/flow.rs#L656-L684">rust/loopflow/src/lf/commands/flow.rs · L656–684</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        }
+    }
+
+    /// Resolve and validate the managed Task only when preparing new work.
+    async fn resolve_launch_task(&amp;self, flow: &amp;FlowSession) -&gt; Result&lt;Option&lt;Task&gt;&gt; {
+        let Some(task_id) = &amp;flow.task_id else {
+            return Ok(None);
+        };
+        if !self
+            .store
+            .task_flow(task_id)
+            .await?
+            .is_some_and(|managed| managed.id() == flow.id())
+        {
+            return Ok(None);
+        }
+        let task = self
+            .store
+            .get_task(task_id)
+            .await?
+            .context(&quot;Task disappeared&quot;)?;
+        crate::ops::task::resolve_managed_task_planning(
+            &amp;self.store,
+            &amp;task,
+            crate::ops::pm::PmRefresh::Auto,
+        )
+        .await?;
+        Ok(Some(task))
+    }</code></pre></figure><figure><figcaption><strong>execute operation · validate only new work</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/lf/commands/flow.rs#L790-L801">rust/loopflow/src/lf/commands/flow.rs · L790–801</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        _ctx: ExecutionContext,
+    ) -&gt; Result&lt;SkillOutcome&gt; {
+        let flow = self.begin().await?;
+        if !self.store.sqlite.flow_operation_completed(flow.id())? {
+            self.resolve_launch_task(&amp;flow).await?;
+            eprintln!(&quot;op: {}&quot;, ops.item.display_name());
+            execute_child(&amp;self.store, &amp;flow, self.launcher).await?;
+        }
+        Ok(landing_outcome(
+            self.store.operation_landing(flow.id()).await?,
+        ))
+    }</code></pre></figure><figure><figcaption><strong>optional_task_workspace.sql · captured directory</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/migrations/drafts/optional_task_workspace.sql#L1-L9">rust/loopflow/src/store/migrations/drafts/optional_task_workspace.sql · L1–9</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>-- A Flow owns its launch directory independently of optional Task delivery.
+DROP TRIGGER validate_invocation_cwd_insert;
+DROP TRIGGER validate_invocation_cwd_update;
+
+-- Freeze the directory previously projected from retained Task placement.
+-- Missing historical placement stays unknown; do not invent the caller&#x27;s cwd.
+UPDATE flow_sessions
+SET cwd = (SELECT worktree FROM tasks WHERE id = flow_sessions.task_id)
+WHERE cwd IS NULL AND task_id IS NOT NULL;</code></pre></figure></details></section><section id="complete"><div class="section-head"><span class="number">04</span><h2>“Complete Task” records an outcome through the shared operation</h2></div><div class="spread"><div class="prose"><p><strong>Representative scenario:</strong> a research conversation is bound to an unplaced Task. Jack enters “Measured startup” in Desktop and presses Complete Task.</p><ol><li>Desktop requires a nonempty outcome and sends the same CLI command used by an agent.</li><li>The Rust operation finds the registered Task. An unregistered planning issue uses the pre-existing planning completion path instead.</li><li>For a registered Task, the retained-work and delivery gate must pass before the outcome is appended and the Task is completed.</li><li>Desktop refreshes on success and displays an operation error on failure.</li></ol><p>The supplied outcome is a Task progress event. The terminal event says “Task completed.” Task state and the terminal event share a transaction; the supplied summary is appended before it.</p><p>This scenario explains the source path; it is <strong>not a newly observed Desktop interaction</strong>.</p></div><div class="source"><figure><figcaption><strong>TaskFlowView · outcome and completion</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/swift/LoopflowMac/Views/TaskFlowView.swift#L150-L167">swift/LoopflowMac/Views/TaskFlowView.swift · L150–167</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            if !task.task.completed {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    TextField(&quot;Task outcome&quot;, text: $outcome, axis: .vertical)
+                        .accessibilityIdentifier(&quot;task-outcome&quot;)
+                    Button(&quot;Complete Task&quot;) {
+                        completing = true
+                        completionError = nil
+                        Task {
+                            defer { completing = false }
+                            do { try await model.completeTask(task, wave: wave, summary: outcome) }
+                            catch { completionError = error.localizedDescription }
+                        }
+                    }
+                    .disabled(completing || outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier(&quot;task-complete&quot;)
+                    if let completionError {
+                        Text(completionError).foregroundStyle(WorkspaceTone.blocked.ink).textSelection(.enabled)
+                    }</code></pre></figure><figure><figcaption><strong>RegistryQuery.completeTask · CLI entry</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/swift/Loopflow/Services/RegistryQuery.swift#L160-L162">swift/Loopflow/Services/RegistryQuery.swift · L160–162</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    public func completeTask(issue: String, summary: String, cwd: String?) async throws {
+        _ = try await run([&quot;task&quot;, &quot;complete&quot;, issue, &quot;--summary&quot;, summary], cwd)
+    }</code></pre></figure><figure><figcaption><strong>task_complete · select existing writer</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L4120-L4137">rust/loopflow/src/ops/task.rs · L4120–4137</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>pub fn task_complete(repo: &amp;Path, issue: &amp;str, summary: String) -&gt; OpsResult&lt;Option&lt;Task&gt;&gt; {
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err(task_error(&quot;completion summary cannot be empty&quot;));
+    }
+    let registered = block_on_task(async {
+        task_store()
+            .await?
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)
+    })?;
+    if registered.is_some() {
+        return complete_task(issue, summary).map(Some);
+    }
+    block_on_task(super::pm::complete_planning_task(repo, issue, &amp;summary))?;
+    Ok(None)
+}</code></pre></figure><figure><figcaption><strong>complete_task · outcome then transition</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L4188-L4203">rust/loopflow/src/ops/task.rs · L4188–4203</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        reconcile_pm_writeback(&amp;store, &amp;mut task, None).await?;
+        store
+            .append_task_event(&amp;task.id, &amp;TaskEventKind::Progress { summary })
+            .await
+            .map_err(task_error)?;
+        // Every other condition is now proven, so the rotation&#x27;s empty artifact
+        // is retired in the completion transaction. Retaining its branch identity
+        // lets cleanup retry after a crash without guessing what it may delete.
+        store
+            .complete_task(&amp;task, gate.discardable_successor.as_ref())
+            .await
+            .map_err(|error| task_error(format!(&quot;failed to complete Task: {error}&quot;)))?;
+        cleanup_completed_task(&amp;store, &amp;task).await?;
+        Ok(task)
+    })
+}</code></pre></figure></div></div><details><summary>State change, CLI result, and Desktop refresh</summary><figure><figcaption><strong>complete_task_work_in · state and terminal event</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/sqlite/children.rs#L1031-L1051">rust/loopflow/src/store/sqlite/children.rs · L1031–1051</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    }
+    if conn.execute(
+        &quot;UPDATE tasks SET work_state=&#x27;done&#x27;, work_terminal_at=?2
+         WHERE id=?1 AND work_state=&#x27;ready&#x27;&quot;,
+        params![task.id.as_str(), now_unix()],
+    )? != 1
+    {
+        return Err(StoreError::InvalidData(format!(
+            &quot;Task {} Work changed while completion was being recorded&quot;,
+            task.id
+        )));
+    }
+    insert_task_event_in(
+        conn,
+        &amp;task.id,
+        &amp;TaskEventKind::Completed {
+            summary: &quot;Task completed&quot;.to_string(),
+        },
+    )?;
+    Ok(())
+}</code></pre></figure><figure><figcaption><strong>TaskCommand::Complete · visible CLI result</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/bin/lf.rs#L1140-L1158">rust/loopflow/src/bin/lf.rs · L1140–1158</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        TaskCommand::Complete {
+            issue,
+            summary,
+            json,
+        } =&gt; match loopflow::ops::task::task_complete(repo, issue, summary.clone())? {
+            Some(task) =&gt; print_task(&amp;task, *json),
+            None =&gt; {
+                let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;
+                if *json {
+                    println!(&quot;{}&quot;, serde_json::to_string_pretty(&amp;resolved.item)?);
+                } else {
+                    println!(
+                        &quot;{}: completed {}&quot;,
+                        resolved.item.identifier, resolved.item.name
+                    );
+                }
+                Ok(())
+            }
+        },</code></pre></figure><figure><figcaption><strong>PodiumModel.completeTask · refresh</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/swift/LoopflowMac/PodiumModel.swift#L734-L737">swift/LoopflowMac/PodiumModel.swift · L734–737</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    func completeTask(_ task: RoadmapTask, wave: WaveSnapshot, summary: String) async throws {
+        try await query.completeTask(issue: task.task.identifier, summary: summary, cwd: WaveOrigin.resolve(wave.repo))
+        await refresh()
+    }</code></pre></figure></details></section><section id="retain"><div class="section-head"><span class="number">05</span><h2>The working conversation can finish the Task and keep talking</h2></div><div class="spread"><div class="prose"><p>An agent-issued completion can exempt its own current conversation from unfinished-work checks. The relationship must match the stored provider generation and exact driver parent. Merely sharing the checkout grants no exemption.</p><p>The allowance is restricted to ordinary conversations and to completion. A pending review is not the requesting conversation. Unknown or live independent execution still blocks.</p><p><strong>Done does not mean deleted.</strong> Cleanup runs the stricter retained-work check. A conversation still using a checkout, or an unfinished managed Flow, keeps it in place. Cleanup can be retried after that work settles.</p><p>Accepted intent: Jack Heart confirmed on October 2 that the working conversation may complete its Task before its own turn ends. The broader experience remains under review.</p></div><div class="source"><figure><figcaption><strong>requesting_conversation · authority match</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L706-L729">rust/loopflow/src/ops/task/lifecycle.rs · L706–729</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    if exec.via_agent != Some(true) {
+        return Ok(None);
+    }
+    let Some(driver) = store.sqlite.session_driver(&amp;session).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if driver.provider_generation != generation
+        || !driver
+            .exec_id
+            .as_ref()
+            .is_some_and(|id| exec.parent_exec_id.as_ref() == Some(id))
+    {
+        return Ok(None);
+    }
+    let Some(record) = store.sqlite.session(&amp;session).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if record.kind != crate::session::SessionKind::Conversation {
+        return Ok(None);
+    }
+    Ok(Some((session, driver)))
+}</code></pre></figure><figure><figcaption><strong>cleanup_completed_task · retain unfinished work</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L18-L44">rust/loopflow/src/ops/task/lifecycle.rs · L18–44</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>pub(crate) async fn cleanup_completed_task(store: &amp;SharedStore, task: &amp;Task) -&gt; OpsResult&lt;()&gt; {
+    let Some(workspace) = &amp;task.workspace else {
+        return Ok(());
+    };
+    if super::task_work_status(store, task).await? != WorkStatus::Done {
+        return Ok(());
+    }
+    let blockers = associated_work_blockers(store, task)?;
+    if !blockers.is_empty() {
+        eprintln!(
+            &quot;Task {} is complete; retained checkout: {}&quot;,
+            task.plan.identifier,
+            blockers.join(&quot;; &quot;)
+        );
+        return Ok(());
+    }
+    if let Some(position) = store.task_flow(&amp;task.id).await.map_err(task_error)? {
+        if !position.finished {
+            eprintln!(
+                &quot;Task {} is complete; retained checkout for unfinished Flow {}.&quot;,
+                task.plan.identifier,
+                position.id(),
+            );
+            return Ok(());
+        }
+    }
+    let result = async {</code></pre></figure></div></div><details><summary>How the exception is confined and independent execution remains protected</summary><figure><figcaption><strong>execution_blockers · completion-only allowance</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L573-L582">rust/loopflow/src/ops/task/lifecycle.rs · L573–582</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    work: &amp;crate::task_work::TaskWork,
+    check: ExecutionCheck,
+) -&gt; OpsResult&lt;Vec&lt;String&gt;&gt; {
+    let requesting = if matches!(check, ExecutionCheck::Complete) {
+        requesting_conversation(store)?
+    } else {
+        None
+    };
+    let mut blockers = Vec::new();
+    let mut managed_execs = HashSet::new();</code></pre></figure><figure><figcaption><strong>execution_blockers · conversation exemption</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L619-L625">rust/loopflow/src/ops/task/lifecycle.rs · L619–625</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    }
+    for session in work.sessions.iter().filter(|session| !session.managed) {
+        if session.kind == crate::session::SessionKind::Conversation
+            &amp;&amp; requesting.as_ref().is_some_and(|(id, _)| id == &amp;session.id)
+        {
+            continue;
+        }</code></pre></figure><figure><figcaption><strong>execution_blockers · current caller and liveness</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L657-L685">rust/loopflow/src/ops/task/lifecycle.rs · L657–685</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let caller = crate::journal::current_exec_id();
+    for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
+        if caller.as_ref() == Some(&amp;exec.id)
+            || managed_execs.contains(&amp;exec.id)
+            || requesting.as_ref().is_some_and(|(_, driver)| {
+                driver.exec_id.as_ref() == Some(&amp;exec.id) || driver.provider_exec_id == exec.id
+            })
+        {
+            continue;
+        }
+        let blocks = match crate::journal::exec_process_evidence(&amp;store.sqlite, &amp;exec.id) {
+            crate::journal::ProcessIdentityEvidence::Dead =&gt; false,
+            crate::journal::ProcessIdentityEvidence::Live =&gt; true,
+            crate::journal::ProcessIdentityEvidence::Unknown =&gt; {
+                matches!(check, ExecutionCheck::RetainWork | ExecutionCheck::Complete)
+                    || observed_execs.contains(exec.id.as_str())
+                    || session_execs.contains(&amp;exec.id)
+                    || exec.caller_session_id.as_ref().is_some_and(|id| {
+                        work.sessions
+                            .iter()
+                            .any(|session| &amp;session.id == id &amp;&amp; session.completed_at.is_none())
+                    })
+            }
+        };
+        if blocks {
+            blockers.push(format!(
+                &quot;Exec {} has live or unresolved execution; inspect `lf mon show {}`&quot;,
+                exec.id, exec.id
+            ));</code></pre></figure></details></section><section id="delivery"><div class="section-head"><span class="number">06</span><h2>Choosing delivery later preserves identity—and its promises still bind</h2></div><div class="spread"><div class="prose"><p>First checkout allocation updates the admitted Task in place and inserts its first PR in the same transaction. The Task id and its bound conversation remain.</p><p>Once delivery exists, completion still refuses an open or publishing PR. An unpublished PR is also a promise, even if it has no commits, unless it is the narrowly defined empty successor after landed work.</p><p>Independent unfinished Flows block completion. Missing checkout or uncertain follow-up evidence remains a refusal, rather than an empty-work assumption. These protections build on LOO-355 delivery and LOO-358 membership.</p></div><div class="source"><figure><figcaption><strong>insert_task_with_worktree · attach placement</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/sqlite/children.rs#L100-L110">rust/loopflow/src/store/sqlite/children.rs · L100–110</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            let workspace = task
+                .require_workspace()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            let changed = transaction.execute(&quot;UPDATE tasks SET worktree=?2, workspace_slug=?3 WHERE id=?1 AND worktree IS NULL AND workspace_slug IS NULL AND external_issue_id=?4 AND project_id=?5&quot;,
+                params![task.id.as_str(), workspace.worktree.display().to_string(), workspace.slug, task.plan.id.as_str(), task.project_id.as_str()])?;
+            if changed != 1 {
+                return Err(StoreError::InvalidData(&quot;Task already has placement&quot;.into()));
+            }
+            insert_task_pr(&amp;transaction, pr)?;
+        } else {
+            insert_initial_task(&amp;transaction, task, Some(pr))?;</code></pre></figure><figure><figcaption><strong>completion_gate · open and publishing PRs</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L4463-L4468">rust/loopflow/src/ops/task.rs · L4463–4468</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            PrPhase::Open =&gt; gate.blockers.push(format!(
+                &quot;pull request {which} is open; merge it or run `lf task pr abandon`&quot;
+            )),
+            PrPhase::Publishing =&gt; gate.blockers.push(format!(
+                &quot;pull request {which} is still publishing; wait for it to land or run `lf task pr abandon`&quot;
+            )),</code></pre></figure><figure><figcaption><strong>associated_blockers · independent Flows</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task/lifecycle.rs#L528-L538">rust/loopflow/src/ops/task/lifecycle.rs · L528–538</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>    let work = store.sqlite.task_work(&amp;task.id).map_err(task_error)?;
+    let mut blockers = execution_blockers(store, &amp;work, check)?;
+    for flow in work.flows.iter().filter(|flow| !flow.managed) {
+        if flow.summary.state == crate::session::FlowSummaryState::Current {
+            blockers.push(format!(
+                &quot;Flow {} is unfinished; inspect `lf flow show {} --sessions`&quot;,
+                flow.summary.id, flow.summary.id
+            ));
+        }
+    }
+    Ok(blockers)</code></pre></figure></div></div><details><summary>The retained unpublished-PR distinction</summary><figure><figcaption><strong>completion_gate · unpublished work</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/task.rs#L4473-L4490">rust/loopflow/src/ops/task.rs · L4473–4490</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>                CommittedFollowUp::ProvenEmpty if has_merged_predecessor =&gt; {
+                    gate.discardable_successor = Some(pr.clone());
+                }
+                CommittedFollowUp::ProvenEmpty =&gt; gate.blockers.push(format!(
+                    &quot;pull request {which} is unpublished; publish and merge it or run `lf task pr abandon`&quot;
+                )),
+                CommittedFollowUp::Range { .. } =&gt; gate.blockers.push(format!(
+                    &quot;follow-up work is committed on unpublished pull request {which}; \
+                     publish and merge it or run `lf task pr abandon`&quot;
+                )),
+                CommittedFollowUp::Unprovable { reason } =&gt; gate.blockers.push(format!(
+                    &quot;cannot prove unpublished pull request {which} is empty: {reason}&quot;
+                )),
+            },
+            PrPhase::Merged | PrPhase::Abandoned =&gt; {}
+        }
+    }
+</code></pre></figure></details></section><section id="desktop"><div class="section-head"><span class="number">07</span><h2>Desktop shows independent Flows beside the managed selection</h2></div><div class="spread"><div class="prose"><p>The Task pane draws independent Flow members from the shared Task-work snapshot. Each card shows saved progress and offers Resume or Retry for that exact Flow id.</p><p>Managed controls continue to use the managed selection. The new outcome entry is placed in the Flow pane even for a Task that uses no Flow.</p><p class="callout"><strong>Product judgment remains open:</strong> does placing Task completion inside the Flow pane make purpose and execution clear enough? This is a review question about the implemented placement, not an agreed redesign.</p></div><div class="source"><figure><figcaption><strong>TaskFlowView · independent members</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/swift/LoopflowMac/Views/TaskFlowView.swift#L143-L147">swift/LoopflowMac/Views/TaskFlowView.swift · L143–147</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            if let work = model.taskWork[task.id].value {
+                ForEach(work.flows.filter { !$0.managed }) { member in
+                    IndependentTaskFlowView(model: model, task: task, wave: wave, member: member)
+                }
+            }</code></pre></figure><figure><figcaption><strong>IndependentTaskFlowView · progress and exact-id resume</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/swift/LoopflowMac/Views/TaskFlowView.swift#L1168-L1189">swift/LoopflowMac/Views/TaskFlowView.swift · L1168–1189</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>            Text(member.name ?? member.id).font(.headline)
+            Text(&quot;Flow · \(member.state)&quot;)
+            if let detail {
+                Text(&quot;\(detail.completed.count) completed steps&quot;)
+                if let current = detail.current, let node = detail.graph.node(current) {
+                    Text(&quot;Current: \(node.label)&quot;)
+                }
+                if let failure = detail.failure { Text(failure.reason).textSelection(.enabled) }
+                if member.state == &quot;current&quot; {
+                    Button(detail.failure == nil ? &quot;Resume&quot; : &quot;Retry&quot;) {
+                        resuming = true
+                        error = nil
+                        Task {
+                            defer { resuming = false }
+                            do {
+                                try await model.resumeFlow(id: member.id, retry: detail.failure != nil, task: task, wave: wave)
+                                self.detail = try await model.flowDetail(id: member.id)
+                            } catch { self.error = error.localizedDescription }
+                        }
+                    }
+                    .disabled(resuming || detail.failure?.restartRequired == true)
+                }</code></pre></figure></div></div></section><section id="evidence"><div class="section-head"><span class="number">08</span><h2>What the evidence supports—and what still needs review</h2></div><table class="evidence"><tbody><tr><th>Inspected source</th><td>Binding/admission, completion authority, first allocation, cleanup, shared Flow dispatch, and Desktop controls are implemented. These are source conclusions, not live acceptance.</td></tr><tr><th>Inspected scenarios</th><td>The stateful completion fixture checks no placement, identity preservation, stale-caller refusal, unknown/live independent Exec refusal, retained checkout and later cleanup. Driver and merge evidence are seeded. The Flow CLI test runs two operations with and without attribution; it does not cover native provider/review/retry behavior.</td></tr><tr><th>Recorded passes</th><td>The design records 9 task_without_delivery lib tests, 8 ops::run tests, 1 independent Flow DTO test, 23 Swift DTO tests, formatting and all-target Clippy at 25d339fb1. Those commands were not rerun for this walkthrough.</td></tr><tr><th>Walkthrough checks</th><td>All 35 excerpts were rechecked against the named local revision. Desktop (1440px) and narrow (390px) renders were inspected. Browser checks confirmed anchor navigation, disclosure toggling and no page-wide overflow; code panels scroll horizontally. Product suites were not rerun.</td></tr><tr><th>Still unverified</th><td>The design assigns broader CLI lifecycle, provider/review/retry and Desktop interaction acceptance to gate. Latest Task status records publication blocked on these gaps. No published PR or merge is recorded.</td></tr><tr><th>Product review</th><td>The October 4 working note records Jack Heart keeping product/demo review open. The earlier setup-only demo conclusion is insufficient to describe the remaining judgment. No review waiver or delivery authorization is inferred.</td></tr></tbody></table><details><summary>Read the decisive fixture assertions</summary><figure><figcaption><strong>assert_bound_task_completion · retained conversation and outcome</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/ops/pm/task_planning_tests.rs#L540-L565">rust/loopflow/src/ops/pm/task_planning_tests.rs · L540–565</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        if active {
+            assert!(fixture.store.sqlite.session_has_pending_turn(&amp;original.id).unwrap());
+            fixture.store.sqlite.record_session_event(&amp;original.id, &quot;research-thread&quot;, &quot;turn&quot;, crate::session::SessionEventKind::Completed, &amp;json!({&quot;status&quot;:&quot;completed&quot;,&quot;text&quot;:&quot;Task complete; findings retained&quot;})).unwrap();
+            assert!(!fixture.store.sqlite.session_has_pending_turn(&amp;original.id).unwrap());
+            let connection = rusqlite::Connection::open(&amp;fixture.database).unwrap();
+            connection.execute(&quot;UPDATE execs SET completed_at=2 WHERE completed_at IS NULL&quot;, []).unwrap();
+        }
+        let retry = crate::ops::task::task_complete(&amp;repo, &quot;FIX-1&quot;, &quot;Must not replace&quot;.into()).unwrap().unwrap();
+        assert_eq!(completed.id, task.id);
+        assert_eq!(retry.id, task.id);
+        let retained = runtime.block_on(fixture.store.session(&amp;original.id)).unwrap().unwrap();
+        assert_eq!(retained.artifact_key, original.artifact_key);
+        assert_eq!(retained.task_id, Some(task.id.clone()));
+        assert!(retained.completed_at.is_none());
+        assert!(repo.join(&quot;unrelated.txt&quot;).exists());
+        if let Some(workspace) = &amp;task.workspace {
+            assert!(!workspace.worktree.exists(), &quot;settled checkout should be cleaned up on completion retry&quot;);
+            assert_eq!(runtime.block_on(fixture.store.task_prs(&amp;task.id)).unwrap().len(), 1);
+        } else {
+            assert!(runtime.block_on(fixture.store.task_prs(&amp;task.id)).unwrap().is_empty());
+        }
+        let events = runtime.block_on(fixture.store.task_events_after(&amp;task.id, 0)).unwrap();
+        assert_eq!(events.iter().filter(|event| matches!(&amp;event.kind, TaskEventKind::Progress { summary } if summary == &quot;Measured startup&quot;)).count(), 1);
+        assert!(fixture.store.sqlite.task_work(&amp;task.id).unwrap().flows.is_empty());
+    });
+    server.abort();</code></pre></figure><figure><figcaption><strong>explicit Flow CLI fixture · persisted result</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/tests/flow_tests.rs#L83-L109">rust/loopflow/tests/flow_tests.rs · L83–109</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(state, &quot;completed&quot;);
+        assert_eq!(
+            Path::new(&amp;cwd).canonicalize().unwrap(),
+            repo.path().canonicalize().unwrap()
+        );
+        assert_eq!(associated, task.as_ref().map(|task| task.id.to_string()));
+        let completed: i64 = conn.query_row(&quot;SELECT count(*) FROM flow_events WHERE kind=&#x27;operation_completed&#x27; AND outcome=&#x27;completed&#x27;&quot;, [], |row| row.get(0)).unwrap();
+        assert_eq!(completed, 2);
+        if let Some(task) = task {
+            assert_eq!(
+                runtime
+                    .block_on(store.work_status(&amp;loopflow::durable::WorkRef::Task(task.id.clone())))
+                    .unwrap(),
+                loopflow::durable::WorkStatus::Ready
+            );
+            assert!(runtime
+                .block_on(store.get_task(&amp;task.id))
+                .unwrap()
+                .unwrap()
+                .workspace
+                .is_none());
+            assert!(runtime
+                .block_on(store.task_prs(&amp;task.id))
+                .unwrap()</code></pre></figure></details><h3>One concrete source inconsistency</h3><p class="full-note">The existing store comment still says cleanup settles the selected Flow. This branch removes that settlement and retains an unfinished Flow instead (stop 05). The comment is stale; no production code was changed during this walkthrough.</p><figure><figcaption><strong>complete_task · stale comment</strong><br><a href="https://github.com/loopflowstudio/loopflow/blob/c5dbcb72ce1c1016c0febfa0484aaee70e421ac3/rust/loopflow/src/store/sqlite/children.rs#L319-L323">rust/loopflow/src/store/sqlite/children.rs · L319–323</a><br><span>Local branch; remote availability unverified · c5dbcb72c</span></figcaption><pre tabindex="0"><code>        update_task_pm_writeback_in(&amp;transaction, &amp;task.id, &amp;task.pm_writeback, task.updated_at)?;
+        complete_task_work_in(&amp;transaction, task)?;
+        // Cleanup settles the selected Flow after both driver and step exit.
+        transaction.commit()?;
+        Ok(())</code></pre></figure><h3>Questions worth discussing</h3><div class="full-note"><p>Is the distinction between a Task outcome, a continuing conversation, and retained execution legible in the visible result? Is the Flow pane the right place for a no-Flow Task’s completion control? The implementation supplies concrete material for those questions; it does not settle them.</p><p>References: <a href="jack-heart/start-and-finish-tasks-without.md">current design and recorded checks</a> · <a href="questions.md">working product-review direction</a> · <a href="task-purpose-demo.md">earlier setup-only demo note</a>.</p></div></section></main><footer>Prepared for Jack Heart. This walkthrough explains implementation and review boundaries; it is not a merge decision or proof of installed behavior. Excerpts are escaped verbatim, with explicit line ranges; supporting sections use native disclosure controls. No network assets are required.</footer><script>
+let printExpanded=[];
+addEventListener('beforeprint',()=>{printExpanded=[...document.querySelectorAll('details:not([open])')];printExpanded.forEach(d=>d.open=true)});
+addEventListener('afterprint',()=>{printExpanded.forEach(d=>d.open=false)});
+</script></body></html>

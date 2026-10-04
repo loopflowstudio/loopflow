@@ -2,11 +2,123 @@
 
 Implementation plan · LOO-367 · drafted 2026-10-02, reconciled 2026-10-03
 
+## Authorized revision · 2026-10-04
+
+Jack Heart ended this review and requested an lf pursue process to redo the code
+against the revised design. This section governs the next implementation pass;
+older implementation descriptions below are evidence, not a competing specification.
+
+- Default the normal open-ended-conversation → focused-Task transition to a
+  worktree ready for edits. Preserve the conversation and Task identities/history.
+  Planning-only filing/inspection need not allocate execution placement. Optional
+  absence of placement is a supported case, not the primary working experience.
+- A checkout alone creates no PR or Flow obligation. Remove the coupling that
+  creates an unpublished first PR merely to obtain placement. Use existing owners;
+  introduce no replacement Task workflow or configurable policy framework.
+- Completing a research/no-change Task clears its disposable worktree even when
+  nothing was published or merged. Keep the conversation available and the outcome
+  visible. Resolve how execution leaves that worktree safely within the existing
+  Session machinery; an indefinitely retained checkout is not success. Preserve
+  pre-existing edits and actual independent work. Explain real blockers without
+  manufacturing a delivery requirement from allocation.
+- Retain issue-specific confirmation and shared Flow execution. Integrate against
+  LOO-353's removal of Task workers/privileged managed Flows; use a common Flow
+  presentation rather than deepening the managed/independent split. Do not implement
+  LOO-353's entire deletion project here or restore its retired machinery during sync.
+- LOO-353 explicitly deletes Session ready/complete APIs. It does not establish
+  deletion of Task completion, so do not independently remove that operation on the
+  strength of the earlier ambiguous remark.
+
+Choose routine implementation mechanics autonomously and record consequential
+tradeoffs. Prove the normal transition, edits landing in the intended checkout,
+no-landing cleanup, preserved conversation/history/outcome, and real-blocker recovery
+through public operations. Reuse valid evidence; add focused tests for changed
+behavior. Run the authored pursue sequence and return at its next human demo.
+This authorizes revision and that Flow's preparation/publication, not landing or
+installed-Home promotion. Preserve all review notes and the separate research result
+([LOO-379](https://linear.app/loopflow/issue/LOO-379)); do not absorb its repair scope.
+
 Jack Heart's accepted direction is recorded in the Task brief and
 [Task workspace review](../../docs/reviews/task-workspace.md): Task supplies
 purpose, context and continuity; execution and delivery are optional. There is
 no Task workflow to introduce. The mechanisms below describe branch implementation;
 acceptance remains incomplete and implementation does not imply additional product approval.
+
+## Working product direction · 2026-10-04
+
+During the code walkthrough, Jack Heart questioned making Task association without
+a checkout the primary experience. Jack described the common path as an open-ended
+Session becoming focused on a Task, then said: “I *think* its better to default to
+having a worktree just in case they start editing stuff”. Record this as a preferred
+default under discussion, not final acceptance of the implementation.
+
+Revise the normal conversation-to-Task path around having a worktree ready for edits.
+The no-checkout capability below remains branch behavior and an earlier acceptance
+scenario; it no longer establishes the desired default. Separate worktree creation
+from PR and Flow obligations. Before implementation, resolve how the existing
+conversation continues in that worktree and how any edits already made in its
+original directory are preserved. No move, restart, or transfer policy is agreed yet.
+Current first-checkout allocation also creates a PR record; simply calling that
+operation during binding would preserve the coupling this review is questioning.
+
+Jack then required that completing a Task associated with an opened worktree clears
+that worktree even when nothing landed. A speculative worktree must be reclaimable
+after research or a no-change outcome; publication or merge is not a prerequisite
+for its cleanup. This supersedes the current gate's refusal of an empty first
+unpublished PR when that record exists solely because checkout allocation created
+it. Allocation must not manufacture a delivery promise.
+
+Implementation direction: separate the default checkout from delivery obligations,
+then use the existing completion/cleanup owners to remove an otherwise disposable
+Task worktree without a merged predecessor. Preserve the October 2 conversation
+continuity requirement. Determine how an open conversation leaves a disposable
+checkout so cleanup can happen safely; merely leaving it retained forever would
+not meet Jack's requested outcome. Actual unfinished edits, independent live work
+and real unresolved delivery retain their protections; Jack did not request a
+blanket discard operation.
+
+Required proof: focus a conversation into a Task with a fresh worktree, record a
+research/no-change outcome, complete without publishing or merging anything, and
+observe the worktree removed while Task identity, outcome and conversation history
+remain. Also prove that real retained-work blockers still explain what must be
+resolved. The existing first-allocation fixture simulates a merged PR, so it does
+not establish this no-landed-change scenario.
+
+The remainder describes the existing implementation and earlier plan. Review remains
+open; this direction authorizes no delivery or Task completion. Feedback is retained
+in [the review note](../task-purpose-demo.md).
+
+### Related removal work · October 4 readback
+
+Jack Heart reported separate work removing Task workers and possibly the completion
+API. Fresh `lf task status LOO-353 --json` identifies
+[LOO-353](https://linear.app/loopflow/issue/LOO-353) as the worker-removal owner.
+Its October 4 brief requires deleting privileged managed-Flow selection and all
+special Task-worker machinery, using ordinary background execution, and showing
+equally rich progress for every associated Flow. It also removes `lf session ready`
+and `lf session complete`, with review feedback staying in the ongoing conversation.
+These are accepted directions in that Task, not evidence of implementation here.
+
+Do not deepen this branch's managed-versus-independent UI split or preserve worker
+mechanisms merely to satisfy its earlier plan. Item 7's general Flow display is the
+right direction; a common presentation for all associated Flows is the candidate
+integration target. Coordinate remaining cuts with LOO-353 rather than duplicate
+its deletion work. LOO-353 explicitly leaves Task admission/completion with LOO-367;
+its brief removes Session completion APIs, not explicitly `lf task complete`.
+The Task-completion API's final disposition therefore remains unresolved despite
+Jack's expectation that completion API work is being removed elsewhere.
+
+The walkthrough's question about Task outcome, continuing conversation and retained
+execution asks whether finishing work leaves an understandable visible result:
+the Task disposition, continued access to the same conversation, and removal of its
+disposable worktree or a concrete reason for retention. It does not propose three
+new user-facing statuses or require retaining the existing completion handshake.
+
+Jack Heart subsequently confirmed this visible result and the common Flow-display
+direction: “yeah that all sounds right”. Treat outcome visibility, continued
+conversation access, no-landing cleanup and concrete retention explanations as
+accepted experience. This does not accept the existing implementation, settle the
+exact conversation handoff, remove another API, or authorize delivery.
 
 ## Review decision · 2026-10-02
 

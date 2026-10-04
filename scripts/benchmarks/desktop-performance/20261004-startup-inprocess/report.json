@@ -14,31 +14,31 @@
       {
         "verb": "home",
         "file": "home.json",
-        "ms": 1057.7,
+        "ms": 1380.0,
         "bytes": 136
       },
       {
         "verb": "wave",
         "file": "waves.json",
-        "ms": 1981.2,
+        "ms": 2285.9,
         "bytes": 24580
       },
       {
         "verb": "roadmap",
         "file": "roadmap.json",
-        "ms": 16361.4,
-        "bytes": 606626
+        "ms": 13142.9,
+        "bytes": 607848
       },
       {
         "verb": "activity",
         "file": "activity.json",
-        "ms": 2956.3,
-        "bytes": 40166
+        "ms": 2178.0,
+        "bytes": 27686
       },
       {
         "verb": "session",
         "file": "sessions-0.json",
-        "ms": 8135.5,
+        "ms": 5280.2,
         "bytes": 60062
       }
     ]
@@ -46,7 +46,7 @@
   "scenarios": [
     {
       "scenario": "uncached",
-      "attempted": 5,
+      "attempted": 20,
       "usable_from": [
         "read"
       ],
@@ -55,22 +55,27 @@
       ],
       "content_kept": true,
       "init_main_thread": {
-        "samples": 5,
-        "median_ms": 0.1,
-        "p95_ms": null,
-        "max_ms": 172.0
+        "samples": 20,
+        "median_ms": 27.6,
+        "p95_ms": 36.4,
+        "max_ms": 42.0
       },
       "usable": {
-        "samples": 5,
-        "median_ms": 16371.1,
-        "p95_ms": null,
-        "max_ms": 16555.0
+        "samples": 20,
+        "median_ms": 13181.1,
+        "p95_ms": 13186.7,
+        "max_ms": 13192.1
       },
       "settled": {
-        "samples": 5,
-        "median_ms": 16371.1,
-        "p95_ms": null,
-        "max_ms": 16555.0
+        "samples": 20,
+        "median_ms": 13181.1,
+        "p95_ms": 13186.7,
+        "max_ms": 13192.1
+      },
+      "reads_finished_until_usable": {
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
       },
       "reads_until_settled": {
         "activity": 1,
@@ -82,7 +87,7 @@
     },
     {
       "scenario": "saved",
-      "attempted": 5,
+      "attempted": 20,
       "usable_from": [
         "saved"
       ],
@@ -91,23 +96,24 @@
       ],
       "content_kept": true,
       "init_main_thread": {
-        "samples": 5,
-        "median_ms": 11.7,
-        "p95_ms": null,
-        "max_ms": 13.7
+        "samples": 20,
+        "median_ms": 9.6,
+        "p95_ms": 9.8,
+        "max_ms": 9.9
       },
       "usable": {
-        "samples": 5,
-        "median_ms": 11.7,
-        "p95_ms": null,
-        "max_ms": 13.7
+        "samples": 20,
+        "median_ms": 9.6,
+        "p95_ms": 9.8,
+        "max_ms": 9.9
       },
       "settled": {
-        "samples": 5,
-        "median_ms": 16380.6,
-        "p95_ms": null,
-        "max_ms": 16389.2
+        "samples": 20,
+        "median_ms": 13163.3,
+        "p95_ms": 13164.9,
+        "max_ms": 13165.0
       },
+      "reads_finished_until_usable": {},
       "reads_until_settled": {
         "activity": 1,
         "roadmap": 1,
@@ -118,7 +124,7 @@
     },
     {
       "scenario": "saved_offline",
-      "attempted": 5,
+      "attempted": 20,
       "usable_from": [
         "saved"
       ],
@@ -127,27 +133,65 @@
       ],
       "content_kept": true,
       "init_main_thread": {
-        "samples": 5,
-        "median_ms": 10.1,
-        "p95_ms": null,
-        "max_ms": 11.8
+        "samples": 20,
+        "median_ms": 9.5,
+        "p95_ms": 9.7,
+        "max_ms": 9.8
       },
       "usable": {
-        "samples": 5,
-        "median_ms": 10.1,
-        "p95_ms": null,
-        "max_ms": 11.8
+        "samples": 20,
+        "median_ms": 9.5,
+        "p95_ms": 9.7,
+        "max_ms": 9.8
       },
       "settled": {
-        "samples": 5,
-        "median_ms": 63.2,
-        "p95_ms": null,
-        "max_ms": 64.3
+        "samples": 20,
+        "median_ms": 62.4,
+        "p95_ms": 63.4,
+        "max_ms": 63.7
       },
+      "reads_finished_until_usable": {},
       "reads_until_settled": {
         "activity": 1,
         "roadmap": 1,
         "session": 1,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    },
+    {
+      "scenario": "warm_reopen",
+      "attempted": 20,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 20,
+        "median_ms": 6.5,
+        "p95_ms": 6.7,
+        "max_ms": 6.7
+      },
+      "usable": {
+        "samples": 20,
+        "median_ms": 6.5,
+        "p95_ms": 6.7,
+        "max_ms": 6.7
+      },
+      "settled": {
+        "samples": 20,
+        "median_ms": 13160.3,
+        "p95_ms": 13161.8,
+        "max_ms": 13162.7
+      },
+      "reads_finished_until_usable": {},
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
         "wave": 1
       },
       "usable_within_budget": true

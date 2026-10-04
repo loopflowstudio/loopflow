@@ -44,6 +44,13 @@ public enum WaveOrigin {
         return cache[key] ?? repoPath
     }
 
+    /// Record a path already known to be its own origin, so resolving it runs no `git`.
+    public static func remember(origin: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[cacheKey(origin)] = origin
+    }
+
     private static func cacheKey(_ repoPath: String) -> String {
         let normalized = URL(fileURLWithPath: repoPath).standardizedFileURL.path
         guard normalized != "/" else { return normalized }

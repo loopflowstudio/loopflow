@@ -58,6 +58,8 @@ LOO-300's work; it is not in this tree.
 with signpost intervals.
 
 `startup.py` measures when the model first holds outline content for an
-uncached launch, a launch with a saved workspace, and a saved launch whose
-reads fail. It runs without a display, so it reports no first frame, CPU,
-memory or stalls; `20261004-startup-inprocess/` is its first receipt.
+uncached launch, a launch with a saved workspace, a saved launch whose reads
+fail, and a second window in the process that saved. Twenty samples by default,
+with `lf` reads counted before usable and until settled. It runs without a
+display, so it reports no first frame, CPU, memory or stalls;
+`20261004-startup-inprocess/` is its receipt.

@@ -30,13 +30,19 @@ Before this Task every launch waited on all of these: the window body waited on
 - **It keeps wire text, not models.** Restore runs the decoder live reads use,
   so an incompatible file fails to decode and is skipped. Versioned envelope;
   absent/corrupt/other-version files load as nothing and are removed.
-- **Saved text is quiet.** On save, every pinned Flow becomes `unknown`, every
-  Flow control unavailable, every Session `unknown` with only its `open` action
-  (`lf session connect` re-validates). No credentials are read or stored.
-  Not quieted: each Task's `condition` state and reason and the Wave rows are
-  shown as last read under `Updating…`; no test bounds what a stale reason says.
+- **Saved text is quiet.** On save, every pinned Flow and Task condition becomes
+  `unknown`, every Flow control unavailable, every Session `unknown` with only
+  its `open` action (`lf session connect` re-validates). No credentials are read
+  or stored. Wave rows are shown as last read under `Updating…`.
 - **Bounded:** 8 most recent repositories, 8 MB per read. Only the default
   interactive Session listing is saved; explicit history is read on request.
+- **One model per window, one constructor:** `PodiumModel.window` builds the
+  workspace window's and the Portfolio window's model from the saved workspace.
+  `RoadmapView` and the Portfolio Task sheet render their window's model.
+- **No `git` before first frame on a returning launch:** a launch repository the
+  saved workspace was scoped to is used as saved; `refreshPortfolio` re-checks
+  it off the main thread and re-scopes if it stopped being a main checkout.
+  A second window in the process opens from the snapshot already in memory.
 - **One refresh owner:** `PodiumModel.keepWorkspaceCurrent()` replaces the two
   view-owned loops whose Session reads overlapped at launch and superseded each
   other. Planning (15 s) and Sessions (2 s) keep separate cadences.
@@ -52,11 +58,8 @@ Before this Task every launch waited on all of these: the window body waited on
   `Reading workspace Home` and their per-part error lines; the two
   `.task(id: repoPath)` refresh loops in `PodiumView`.
 - Done: the Portfolio Task sheet's own 15 s loop (now `keepWorkspaceCurrent`).
-- Remaining: the Portfolio window still builds private `PodiumModel`s without
-  the cache: `RoadmapView.init`, whose own `ProgressView("Loading workspace…")`
-  waits on a full roadmap read, and `WavesView`'s Task sheet (one model per
-  opened Task). Both use the one vocabulary and refresh owner but neither opens
-  from saved text. Fold them onto the window's model or delete with their window.
+- Done: `RoadmapView`'s private model and 15 s loop, and the per-Task model
+  the Portfolio sheet built; synchronous `resolveLaunchRepo` in `PodiumView.init`.
 
 ## Remaining work
 
@@ -67,26 +70,25 @@ Before this Task every launch waited on all of these: the window body waited on
    launches or mutates live work), 20+ samples for p95, first frame, main-thread
    stalls, CPU/RSS, subprocess counts, warm reopen, and refresh arriving after a
    selection or repository change. Headless equivalent delivered:
-   `startup.py` + `20261004-startup-inprocess/` (usable from saved text in
-   12 ms median vs 16.4 s uncached; offline keeps content). LOO-371's snapshot
+   `startup.py` + `20261004-startup-inprocess/` (20 samples: usable from saved text
+   in 9.6 ms median / 9.8 p95 vs 13.2 s uncached; offline keeps content). LOO-371's snapshot
    runner is not on main; reuse it when it lands.
-2. **Critical-path costs still on the main thread before first frame:**
-   `WaveOrigin.resolve` (two `git` execs) and `PortfolioDiscovery.resolveLaunchRepo`
-   in `PodiumView.init`. Measure with the runner first, then move or cache.
-3. **Repository list** still appears only after discovery; save it if measured.
+2. **First launch still runs `git` on the main thread** (no saved workspace to
+   name the repository): 28 ms median, 36 p95 in `PodiumModel.init`. A `--repo` worktree path
+   and `LOOPFLOW_DEV_WAVE_REPO` also resolve synchronously or re-scope after
+   the background check.
+3. **Repository list** still appears only after discovery; not measured, not saved.
 4. **`lf ps --json` every 2 s** (1.2 s each) stays a separate loop; steady-state
    cost belongs to LOO-304. The 12–15 s `roadmap`/`session list` reads are CLI
    latency (LOO-375 owns `wt list`; no owner yet for these two).
 5. Selection saved per repository is the Work selection only; the open Session
    is not restored (see `scratch/questions.md`).
-6. **Acceptance scenarios with no evidence yet:** warm reopen, a slow (not
-   failed) provider, and p95 for any scenario (five samples). Refresh arriving
-   after a repository change is covered for Sessions by a headless test; after
-   a selection change it relies on the existing roadmap generation check, with
-   no startup-specific test.
+6. **Evidence still in-process only:** warm reopen, slow provider and a refresh
+   after a selection change have headless tests and `startup.py` scenarios, not
+   rendered proof. The Portfolio window's shared model has no view test.
 
 ## Checks
 
-- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests"`: 10 tests passed after realign's Home-mismatch selection repair (2026-10-04); the wider 61-test focused run predates it. Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
-- Saved-roadmap cost on Jack's real 607 KB payload, debug build, in-process: quieting 28 ms (cache queue), decode 9 ms (main thread). Lower-level timing only.
-- `startup.py run --samples 5` on a capture of Jack's Home: passed, receipt in `scripts/benchmarks/desktop-performance/20261004-startup-inprocess/`.
+- `scripts/test_desktop.sh -Xswiftc -gnone --filter "<16 workspace, navigation, Session-store and roadmap suites>"`: 124 tests passed (2026-10-04), including 14 `WorkspaceCacheTests`. Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
+- `startup.py run --samples 20` on a fresh capture of Jack's Home: passed; receipt replaced in `20261004-startup-inprocess/`. In-process timing only.
+- Compress: `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|RoadmapViewTests|SessionsStoreTests"`: 76 tests in 7 suites passed.

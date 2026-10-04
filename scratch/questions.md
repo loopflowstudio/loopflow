@@ -15,7 +15,11 @@
   `lf session list` (12.4 s) on Jack's Home have no owning Task. Candidate
   measure: p95 wall time of those two reads against the real store; cheapest
   producer is the startup runner's `lf` interval table.
-- **Task condition text is saved as read.** Flow execution, Flow controls and
-  Session state are quieted; a Task's `condition` reason is not, and may still
-  say what a worker was doing. Choice for Jack: blank it to `unknown` in saved
-  text, or keep the last reading under `Updating…`.
+- **Task condition is quieted in saved text** (state `unknown`, reason "Shown
+  from the last launch…"), the safe default. Reversible choice for Jack: keep
+  the last reading under `Updating…` instead. Rows grouped by condition (NOW)
+  sit under unknown until the fresh read.
+- **The Portfolio window was folded, not deleted.** It now shares one cached
+  model per window; whether that window should exist at all is Jack's call.
+- **Portfolio Work list now follows the repository filter.** The old private
+  model kept the repository it was first built with.

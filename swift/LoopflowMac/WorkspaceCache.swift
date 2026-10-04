@@ -3,7 +3,7 @@
 //
 // It holds the wire text of successful reads, restored through the decoder
 // live reads use, so an incompatible file fails to decode instead of drifting.
-// Saved text carries no Flow execution state, no Session state and no legal
+// Saved text carries no Flow execution or Task condition, no Session state and no legal
 // action beyond opening: a stale file cannot claim a process is live or
 // authorize a mutation. It is display evidence, never authority; the first
 // successful read of each part replaces it.
@@ -44,6 +44,8 @@ final class WorkspaceCache: @unchecked Sendable {
     private let url: URL
     private let queue = DispatchQueue(label: "studio.loopflow.workspace-cache", qos: .utility)
     private var snapshot = WorkspaceSnapshot()
+    /// Whether `snapshot` already holds this process's view of the file.
+    private var loaded = false
     /// Hashes of the last raw text per part, so an unchanged poll writes nothing.
     private var lastInput: [String: Int] = [:]
 
@@ -63,6 +65,9 @@ final class WorkspaceCache: @unchecked Sendable {
     /// An unusable file is removed so the next save starts clean.
     func load() -> WorkspaceSnapshot? {
         queue.sync {
+            // A later window in this process opens from what is already held.
+            if loaded { return snapshot }
+            loaded = true
             guard let data = try? Data(contentsOf: url) else { return nil }
             guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
                   envelope.version == Self.version else {
@@ -154,7 +159,8 @@ final class WorkspaceCache: @unchecked Sendable {
         return String(decoding: quiet, as: UTF8.self)
     }
 
-    /// Every pinned Flow becomes `unknown` and every Flow control unavailable.
+    /// Every pinned Flow and Task condition becomes `unknown` and every Flow
+    /// control unavailable.
     static func quietRoadmap(_ text: String) -> String? {
         func quiet(_ value: Any) -> Any {
             if let array = value as? [Any] { return array.map(quiet) }
@@ -162,6 +168,12 @@ final class WorkspaceCache: @unchecked Sendable {
             if object["kind"] as? String == "pinned", object["execution"] != nil {
                 object["execution"] = TaskFlowExecution.unknown.rawValue
                 object["reason"] = savedReason
+            }
+            // A Task's condition describes what its worker was doing at the last read.
+            if var condition = object["condition"] as? [String: Any], condition["state"] != nil {
+                condition["state"] = TaskConditionState.unknown.rawValue
+                condition["reason"] = savedReason
+                object["condition"] = condition
             }
             if let controls = object["controls"] as? [[String: Any]] {
                 object["controls"] = controls.map { control in

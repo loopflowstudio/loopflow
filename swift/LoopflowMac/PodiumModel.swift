@@ -314,11 +314,44 @@ final class PodiumModel {
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
+    /// A launch repository taken from the saved workspace without running
+    /// `git`; `refreshPortfolio` checks it off the main thread.
+    @ObservationIgnored private var unverifiedRepoPath: String?
+
     init(query: RegistryQuery, repoPath: String? = nil, cache: WorkspaceCache? = nil) {
         self.query = query
         self.cache = cache
         self.repoPath = repoPath.map(WaveOrigin.resolve)
         if let saved = cache?.load() { restore(saved) }
+    }
+
+    /// A window's model, scoped to the first candidate that names a repository.
+    /// One the saved workspace was last scoped to opens without running `git`.
+    init(query: RegistryQuery, launchCandidates: [String], cache: WorkspaceCache?) {
+        self.query = query
+        self.cache = cache
+        let saved = cache?.load()
+        for candidate in launchCandidates {
+            let path = candidate.normalizedFilePath
+            if saved?.repositories[path] != nil {
+                repoPath = path
+                unverifiedRepoPath = path
+                WaveOrigin.remember(origin: path)
+            } else {
+                repoPath = PortfolioDiscovery.resolveLaunchRepo(candidate)
+            }
+            if repoPath != nil { break }
+        }
+        if let saved { restore(saved) }
+    }
+
+    /// The model every window builds: saved workspace first, except in fixture
+    /// and proof runs, which render only what they read.
+    static func window(query: RegistryQuery, launchCandidates: [String] = []) -> PodiumModel {
+        let model = PodiumModel(query: query, launchCandidates: launchCandidates,
+                                cache: AppTestMode.current() == nil ? .home : nil)
+        PodiumFixture.applyIfRequested(to: model)
+        return model
     }
 
     var workspaceStatus: WorkspaceStatus {
@@ -474,10 +507,6 @@ final class PodiumModel {
 
     /// One explicit read of everything, for a change the cadence should not wait on.
     func refresh() async {
-        guard !usesFixedFixture, !isRefreshing else {
-            taskHistoryNow = Date()
-            return
-        }
         async let sessions: Void = refreshSessions()
         await refreshPlanning()
         await sessions
@@ -653,6 +682,11 @@ final class PodiumModel {
             persistedRepos: persistedRepos
         )
         await Self.resolveRepoOrigins(discovered.map(\.path))
+        if let trusted = unverifiedRepoPath {
+            unverifiedRepoPath = nil
+            let checked = await Task.detached { PortfolioDiscovery.resolveLaunchRepo(trusted) }.value
+            if repoPath == trusted, checked != trusted { setRepoPath(checked) }
+        }
         repos = discovered
         authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: discovered)
         if repoPath == nil, let initialRepoPath {

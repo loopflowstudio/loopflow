@@ -813,7 +813,7 @@ no owning Task (LOO-375 owns `wt list` only).
   Keep it inside the Home; a different `lf home id` drops content and selection.
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
-- The in-process replay (12 ms saved vs 16.4 s uncached, five samples) is
+- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
   lower-level timing. Agent runs have no Aqua session, so first frame, p95,
   stalls and CPU remain unmeasured; the 400/1000 ms targets are not established.
 - Still true from June: a listener or Home process never gates a read. The

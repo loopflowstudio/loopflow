@@ -63,7 +63,7 @@ def capture(repo: Path, output: Path) -> None:
 
 
 def _p95(values: list[float]) -> float | None:
-    return sorted(values)[math.ceil(len(values) * 0.95) - 1] if len(values) >= 20 else None
+    return round(sorted(values)[math.ceil(len(values) * 0.95) - 1], 1) if len(values) >= 20 else None
 
 
 def summarize(output: Path, manifest: dict) -> dict:
@@ -91,6 +91,7 @@ def summarize(output: Path, manifest: dict) -> dict:
             "init_main_thread": stats("init_main_thread_ms"),
             "usable": usable,
             "settled": stats("settled_ms"),
+            "reads_finished_until_usable": rows[-1]["reads_finished_until_usable"],
             "reads_until_settled": rows[-1]["reads_until_settled"],
             "usable_within_budget": usable["max_ms"] is not None and usable["max_ms"] <= BUDGET_USABLE_MS,
         })
@@ -102,12 +103,22 @@ def summarize(output: Path, manifest: dict) -> dict:
         "scenarios": scenarios,
     }
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    lines = ["| Scenario | Usable from | Usable median / max ms | Init on main thread median ms | Settled median ms | Status | Reads |", "|---|---|---|---|---|---|---|"]
+    lines = [
+        "| Scenario | Samples | Usable from | Usable median / p95 / max ms | Init on main thread median / p95 ms "
+        "| Settled median ms | Status | `lf` reads before usable | `lf` reads until settled |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+
+    def counts(reads: dict) -> str:
+        return ", ".join(f"{verb} {count}" for verb, count in sorted(reads.items())) or "none"
+
     for row in scenarios:
-        reads = ", ".join(f"{verb} {count}" for verb, count in sorted(row["reads_until_settled"].items()))
         lines.append(
-            f"| {row['scenario']} | {'/'.join(row['usable_from'])} | {row['usable']['median_ms']} / {row['usable']['max_ms']} "
-            f"| {row['init_main_thread']['median_ms']} | {row['settled']['median_ms']} | {'/'.join(row['status'])} | {reads} |"
+            f"| {row['scenario']} | {row['usable']['samples']} | {'/'.join(row['usable_from'])} "
+            f"| {row['usable']['median_ms']} / {row['usable']['p95_ms']} / {row['usable']['max_ms']} "
+            f"| {row['init_main_thread']['median_ms']} / {row['init_main_thread']['p95_ms']} "
+            f"| {row['settled']['median_ms']} | {'/'.join(row['status'])} "
+            f"| {counts(row['reads_finished_until_usable'] or {})} | {counts(row['reads_until_settled'])} |"
         )
     (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report
@@ -139,7 +150,7 @@ def main() -> int:
     running = commands.add_parser("run")
     running.add_argument("--capture", type=Path, required=True)
     running.add_argument("--output", type=Path, required=True)
-    running.add_argument("--samples", type=int, default=5)
+    running.add_argument("--samples", type=int, default=20)
     args = parser.parse_args()
     if args.command == "capture":
         capture(args.repo.expanduser().resolve(), args.output)

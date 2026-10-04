@@ -45,6 +45,7 @@ struct WorkspaceCacheTests {
         guard case .pinned(let live) = liveFlow.record else { Issue.record("fixture Flow is not pinned"); return }
         #expect(live.execution == .running)
         #expect(first.sessions.value?.first?.state == .active)
+        #expect(first.task(id: "issue-now")?.task.condition.reason != WorkspaceCache.savedReason)
         saving.flush()
 
         let returning = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
@@ -54,6 +55,9 @@ struct WorkspaceCacheTests {
         #expect(pinned.execution == .unknown)
         #expect(pinned.current == live.current)
         #expect(flow.controls.allSatisfy { $0.unavailable == WorkspaceCache.savedReason })
+        let conditions = returning.roadmap.value?.waves.flatMap { $0.tasks.items.map(\.condition) } ?? []
+        #expect(!conditions.isEmpty)
+        #expect(conditions.allSatisfy { $0.state == .unknown && $0.reason == WorkspaceCache.savedReason })
         let session = try #require(returning.sessions.value?.first)
         #expect(session.state == .unknown)
         #expect(session.actions.map(\.kind) == [.open])
@@ -145,16 +149,108 @@ struct WorkspaceCacheTests {
         let source = try Source()
         let cache = WorkspaceCache(directory: directory)
         let model = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
-        await source.holdSessions()
+        await source.hold("session")
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.setRepoPath("/src/other")
-        await source.releaseSessions()
+        await source.release()
         await read.value
         cache.flush()
 
         #expect(model.sessions.value == nil)
         #expect(WorkspaceCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
+    }
+
+    @Test("A slow provider keeps the saved workspace usable under Updating…")
+    func slowProviderKeepsSaved() async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let saving = WorkspaceCache(directory: directory)
+        await PodiumModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
+        saving.flush()
+
+        let returning = PodiumModel(query: source.query, repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
+        await source.hold("roadmap")
+        let read = Task { await returning.refresh() }
+        await source.waitForHeldRead()
+
+        #expect(returning.workspaceStatus == .updating)
+        #expect(returning.task(id: "issue-now") != nil)
+        #expect(returning.sessions.value?.isEmpty == false)
+        let navigator = WorkspaceNavigator(model: returning, onOpenSession: { _ in })
+        let texts = try navigator.inspect().findAll(ViewType.Text.self).map { try $0.string() }
+        #expect(texts.filter { $0.contains("…") } == ["Updating…"])
+
+        await source.release()
+        await read.value
+        #expect(returning.workspaceStatus == .current)
+    }
+
+    @Test("A refresh that finishes after a selection change keeps the newer selection")
+    func refreshAfterSelectionChange() async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let saving = WorkspaceCache(directory: directory)
+        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: saving)
+        await first.refresh()
+        first.select(.task(id: "issue-now"))
+        saving.flush()
+
+        let cache = WorkspaceCache(directory: directory)
+        let returning = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        #expect(returning.selection == .task(id: "issue-now"))
+        await source.hold("roadmap")
+        let read = Task { await returning.refresh() }
+        await source.waitForHeldRead()
+        returning.select(.wave(id: "wave-1"))
+        await source.release()
+        await read.value
+        cache.flush()
+
+        #expect(returning.selection == .wave(id: "wave-1"))
+        #expect(returning.navigation.content == .details)
+        #expect(returning.workspaceStatus == .current)
+        #expect(WorkspaceCache(directory: directory).load()?.repositories[Self.repo]?.selection == .wave(id: "wave-1"))
+    }
+
+    @Test("Another window in the same process opens from the workspace already held")
+    func warmReopen() async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let cache = WorkspaceCache(directory: directory)
+        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        await first.refresh()
+        cache.flush()
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("workspace.json"))
+
+        let reads = await source.reads
+        let reopened = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+
+        #expect(reopened.workspaceStatus == .updating)
+        #expect(reopened.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
+        #expect(reopened.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
+        #expect(await source.reads == reads)
+    }
+
+    @Test("A saved launch repository opens without git and is checked afterwards")
+    func savedLaunchRepository() async throws {
+        let directory = try temporaryDirectory()
+        let source = try Source()
+        let saving = WorkspaceCache(directory: directory)
+        await PodiumModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
+        saving.flush()
+
+        // `/src/loopflow` is no repository here, so only the saved workspace can scope the window.
+        let unknown = PodiumModel(query: source.query, launchCandidates: [Self.repo],
+                                  cache: WorkspaceCache(directory: try temporaryDirectory()))
+        #expect(unknown.repoPath == nil)
+        let returning = PodiumModel(query: source.query, launchCandidates: ["/src/missing", Self.repo],
+                                    cache: WorkspaceCache(directory: directory))
+        #expect(returning.repoPath == Self.repo)
+        #expect(returning.sessions.value?.isEmpty == false)
+
+        await returning.refreshPortfolio(initialRepoPath: nil)
+        #expect(returning.repoPath == nil)
     }
 
     @Test("Explicit history is read on request, never saved")
@@ -215,7 +311,8 @@ private actor Source {
     private let roadmap: String
     private let sessions: String
     private var failed = false
-    private var holding = false
+    private var holding: String?
+    private(set) var reads = 0
     private var held: CheckedContinuation<Void, Never>?
     private var arrived: CheckedContinuation<Void, Never>?
 
@@ -230,32 +327,32 @@ private actor Source {
 
     func fail() { failed = true }
     func recover() { failed = false }
-    func holdSessions() { holding = true }
+    func hold(_ verb: String) { holding = verb }
 
     func waitForHeldRead() async {
         if held != nil { return }
         await withCheckedContinuation { arrived = $0 }
     }
 
-    func releaseSessions() {
-        holding = false
+    func release() {
+        holding = nil
         held?.resume()
         held = nil
     }
 
     private func read(_ args: [String]) async throws -> String {
+        reads += 1
         if failed { throw RegistryQueryError("offline") }
+        if holding == args.first {
+            await withCheckedContinuation { continuation in
+                held = continuation
+                arrived?.resume()
+                arrived = nil
+            }
+        }
         switch args.first {
         case "roadmap": return roadmap
-        case "session":
-            if holding {
-                await withCheckedContinuation { continuation in
-                    held = continuation
-                    arrived?.resume()
-                    arrived = nil
-                }
-            }
-            return sessions
+        case "session": return sessions
         case "wave": return "[]"
         case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")

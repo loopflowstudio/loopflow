@@ -26,17 +26,9 @@ struct PodiumView: View {
         self.initialRepoPath = initialRepoPath
         self.query = query
         self.taskLinks = taskLinks
-        let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
-            ? loadLoopflowState()?.selectedRepoPath
-                .flatMap(PortfolioDiscovery.resolveLaunchRepo)
-            : nil
-        let startingRepoPath = initialRepoPath
-            .flatMap(PortfolioDiscovery.resolveLaunchRepo)
-            ?? restoredRepoPath
-        // Fixture and proof runs render only what they read; nothing saved is restored.
-        let model = PodiumModel(query: query, repoPath: startingRepoPath,
-                                cache: AppTestMode.current() == nil ? .home : nil)
-        PodiumFixture.applyIfRequested(to: model)
+        let restored = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
+            ? loadLoopflowState()?.selectedRepoPath : nil
+        let model = PodiumModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         _model = State(initialValue: model)
         _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
     }

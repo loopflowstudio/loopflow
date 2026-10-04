@@ -34,10 +34,13 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
 - `engine::git::is_squash_merged` stays: `work/wave/relocate.rs` uses it.
 - Removed: `worktrees::upstream_branch`, `enrich_worktrees_network`,
-  `ops::wt_diff_stat`. Nothing to preserve beyond the listing tests.
+  `list_worktrees_local`, `ops::wt_diff_stat`. `lf wt delete` needed only
+  paths and branches, so it reads `list_porcelain`; the integration tests use
+  `list_worktrees`.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- engine::worktrees harness::dispatch`: 22 passed.
+- `cargo test -p loopflow --lib -- engine::worktrees harness::dispatch ops::wt`:
+  32 passed; `--test worktree_tests`: 26 passed; clippy `-D warnings` clean.
   Both dispatch tests fail (deadlock detected) with the previous `block_on` +
   worker-blocking reader restored.

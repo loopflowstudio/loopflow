@@ -485,9 +485,11 @@ fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
         .collect()
 }
 
-/// Local branches with no commit beyond `target`, in one Git process. `None`
-/// when the target cannot be read.
-fn branches_within(repo: &Path, target: &str) -> Option<HashSet<String>> {
+/// Local branches with no commit beyond `target`, in one Git process.
+///
+/// An unreadable target leaves every branch's own commits unproven absent, so
+/// none is reported as contained.
+fn branches_within(repo: &Path, target: &str) -> HashSet<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -498,15 +500,15 @@ fn branches_within(repo: &Path, target: &str) -> Option<HashSet<String>> {
             "--format=%(refname)",
             "refs/heads",
         ])
-        .output()
-        .ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
+        .output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|line| line.strip_prefix("refs/heads/"))
             .map(str::to_string)
-            .collect()
-    })
+            .collect(),
+        _ => HashSet::new(),
+    }
 }
 
 /// Answers that depend only on a branch commit and the merge target's commit.
@@ -821,22 +823,13 @@ fn list_remote_branches(repo: &Path) -> HashSet<String> {
     .collect()
 }
 
-/// List worktrees using only local git operations. No network calls.
-///
-/// Returns `(default_branch, states)`.
+/// Worktree states from local Git alone. No network calls.
 ///
 /// `squash_merged` and `fresh` come from local history. `merged` is always
 /// `false` here: a branch already contained in the merge target has no commits
 /// of its own, which the listing calls fresh, so only PR evidence establishes
 /// a merge. `remote_gone` is `false` and `pull_request` is `None` until network
 /// enrichment.
-pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
-    let default_branch = get_default_branch(repo)?;
-    let items = list_porcelain(repo)?;
-    let states = local_states(repo, &default_branch, items);
-    Ok((default_branch, states))
-}
-
 fn local_states(
     repo: &Path,
     default_branch: &str,
@@ -850,13 +843,11 @@ fn local_states(
         let within = scope.spawn(|| branches_within(repo, &merge_target));
         let branches = local_branches(repo);
         let within = within.join().expect("listing worker panicked");
-        // An unreadable target leaves every branch's own commits unproven
-        // absent, so none is reported as contained.
-        let has_commits = |branch: &str| within.as_ref().is_none_or(|set| !set.contains(branch));
+        // Only a branch with commits of its own can have been squash-merged.
         let candidates: Vec<String> = items
             .iter()
             .filter_map(|(_, branch)| branch.as_deref())
-            .filter(|branch| *branch != default_branch && has_commits(branch))
+            .filter(|branch| *branch != default_branch && !within.contains(*branch))
             .filter_map(|branch| branches.get(branch).map(|branch| branch.head.clone()))
             .collect();
         let squash_merged = match CommitFacts::load(repo, &merge_target) {
@@ -882,10 +873,7 @@ fn local_states(
                 .and_then(|branch| branch.upstream.clone())
                 .filter(|upstream| upstream != default_branch);
             let is_default = branch.as_deref() == Some(default_branch);
-            let has_commits = is_default
-                || branch
-                    .as_deref()
-                    .is_some_and(|b| within.as_ref().is_none_or(|set| !set.contains(b)));
+            let has_commits = is_default || branch.as_deref().is_some_and(|b| !within.contains(b));
             let squash_merged = !is_default
                 && has_commits
                 && known.is_some_and(|branch| squash_merged.contains(&branch.head));

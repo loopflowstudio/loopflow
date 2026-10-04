@@ -23,7 +23,7 @@ use tokio::runtime::{Handle, RuntimeFlavor};
 use crate::store::{StoreError, StoreResult};
 
 /// Longest a native write may hold the Session fence.
-pub(super) const DISPATCH_LIMIT: Duration = Duration::from_secs(2);
+const DISPATCH_LIMIT: Duration = Duration::from_secs(2);
 
 struct Unpark(Thread);
 

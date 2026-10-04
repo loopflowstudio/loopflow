@@ -144,7 +144,8 @@ impl SqliteStore {
     pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events start WHERE start.session_id=?1
-            AND start.kind='started' AND NOT EXISTS(SELECT 1 FROM session_events done
+            AND start.kind='started' AND NOT EXISTS(SELECT 1 FROM session_events retired WHERE retired.session_id=start.session_id AND retired.receipt_key='task_restart:stopped')
+            AND NOT EXISTS(SELECT 1 FROM session_events done
                 WHERE done.session_id=start.session_id AND done.kind='completed'
                 AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))",
             [session], |row| row.get(0))?)

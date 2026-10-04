@@ -642,6 +642,7 @@ fn spawn_session_command_with_env(
 
 fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static str {
     match reason {
+        ProviderClientStopReason::Retired => "Review retired by Task restart.",
         ProviderClientStopReason::Moved => "Session moved to another terminal.",
         ProviderClientStopReason::Completed => "Session completed elsewhere.",
     }

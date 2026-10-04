@@ -243,6 +243,7 @@ pub(crate) struct ProviderClientRef {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProviderClientStopReason {
+    Retired,
     Moved,
     Completed,
 }

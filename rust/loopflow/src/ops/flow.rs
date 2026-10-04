@@ -12,14 +12,23 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
     abandon_branch, arm, commit_workflow, create_or_update_pr, release_bump, release_check,
-    release_notes, release_publish, release_run, release_status, release_tag, submit,
-    AbandonOptions, CommitOptions, LandOptions, PrOptions,
+    release_notes, release_publish, release_status, release_tag, submit, AbandonOptions,
+    CommitOptions, LandOptions, PrOptions,
 };
 
 pub fn execute_flow_command(
     repo: &Path,
     item: &FlowCommand,
     progress: &impl Progress,
+) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
+    execute_flow_command_with_cron(repo, item, progress, None)
+}
+
+pub(crate) fn execute_flow_command_with_cron(
+    repo: &Path,
+    item: &FlowCommand,
+    progress: &impl Progress,
+    cron_receipt: Option<&crate::ops::cron::accounting::CronExecution>,
 ) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
     let argv = crate::lf::navigation::normalize_args(item.argv())
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
@@ -71,12 +80,13 @@ pub fn execute_flow_command(
                     ..CommitOptions::for_task("commit")
                 },
                 progress,
+                &|_| {},
             )?;
             Ok(())
         }
         Some(Commands::Repo {
             cmd: RepoCommand::Release { cmd },
-        }) => execute_release(repo, cmd, progress),
+        }) => execute_release(repo, cmd, progress, cron_receipt),
         Some(Commands::Home {
             cmd:
                 crate::lf::HomeCommand::Doctor {
@@ -349,14 +359,32 @@ fn execute_pr(
     result.map(|()| None)
 }
 
-fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -> OpsResult<()> {
+fn execute_release(
+    repo: &Path,
+    cmd: ReleaseCommand,
+    progress: &impl Progress,
+    cron_receipt: Option<&crate::ops::cron::accounting::CronExecution>,
+) -> OpsResult<()> {
     match cmd {
+        ReleaseCommand::History { .. } => Err(OpsError::Message(
+            "release history is a read-only CLI operation".into(),
+        )),
         ReleaseCommand::Run { version, target } => {
-            release_run(
+            if cron_receipt.is_none() {
+                crate::ops::release_run(
+                    repo,
+                    version.as_deref().unwrap_or("patch"),
+                    target.as_deref(),
+                    progress,
+                )?;
+                return Ok(());
+            }
+            crate::ops::release::release_run_with_cron(
                 repo,
                 version.as_deref().unwrap_or("patch"),
                 target.as_deref(),
                 progress,
+                cron_receipt,
             )?;
             Ok(())
         }

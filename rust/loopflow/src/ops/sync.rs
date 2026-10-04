@@ -333,7 +333,7 @@ fn finish_sync(
         // Sync owns a force-push path rather than the ordinary commit helper,
         // but it must cross the same Task settlement fence first.
         let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
-        crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
+        crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
         push_synced_branch(repo, &verification.branch)?;
         crate::ops::commit::verify_remote_branch_head(
             repo,
@@ -1015,6 +1015,7 @@ mod tests {
                         ..crate::ops::CommitOptions::for_task("commit")
                     },
                     &crate::ops::NullProgress,
+                    &|_| {},
                 )
                 .unwrap();
             }

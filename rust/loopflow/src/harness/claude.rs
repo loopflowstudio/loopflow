@@ -110,9 +110,10 @@ impl ClaudeHarness {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut cmd);
-        }
+        let activation = match &self.account_route {
+            Some(route) => route.launch_as(cmd.as_std_mut()).await?,
+            None => None,
+        };
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -137,6 +138,7 @@ impl ClaudeHarness {
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        drop(activation);
         if let Some((store, session, driver)) = &owner {
             let recorded = (|| -> Result<()> {
                 if let Some(pid) = child.id() {
@@ -373,9 +375,6 @@ impl Harness for ClaudeHarness {
         let mut version_command = Command::new("claude");
         version_command.arg("--version");
         super::configure_agent_env(&mut version_command, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut version_command);
-        }
         let output = version_command.output().await;
         match output {
             Ok(out) if out.status.success() => {

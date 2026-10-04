@@ -1,10 +1,14 @@
+pub mod accounting;
+pub(crate) mod calendar;
+pub mod history;
+
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
@@ -109,6 +113,8 @@ impl FromStr for CronTargetKind {
 #[non_exhaustive]
 pub enum CronSource {
     Scheduled,
+    Triggered,
+    Recovery,
     Manual,
 }
 
@@ -126,6 +132,7 @@ pub struct CronReceipt {
     pub schema_version: u32,
     pub id: CronReceiptId,
     pub runner_pid: u32,
+    pub runner_started_at: Option<i64>,
     pub home_id: HomeId,
     pub wave: String,
     pub flow: String,
@@ -142,11 +149,20 @@ pub struct CronReceipt {
     pub error: Option<String>,
 }
 
+impl CronReceipt {
+    pub(crate) fn runner_evidence(&self) -> crate::journal::ProcessIdentityEvidence {
+        self.runner_started_at.map_or(
+            crate::journal::ProcessIdentityEvidence::Unknown,
+            |started_at| crate::journal::process_identity_evidence(self.runner_pid, started_at),
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CronObligation {
+    pub(crate) target_kind: CronTargetKind,
     pub(crate) wave: String,
     pub(crate) flow: String,
-    pub(crate) target_kind: CronTargetKind,
     pub(crate) schedule: CronSchedule,
     pub(crate) home_id: HomeId,
     pub(crate) activated_at: i64,
@@ -211,13 +227,13 @@ impl Launchctl for SystemLaunchctl {
     fn trigger(&self, label: &str) -> OpsResult<()> {
         let service = launchd_service(label)?;
         let output = Command::new("launchctl")
-            .args(["kickstart", "-k", &service])
+            .args(["kickstart", &service])
             .output()?;
         if output.status.success() {
             return Ok(());
         }
         Err(OpsError::CommandFailed {
-            command: format!("launchctl kickstart -k {service}"),
+            command: format!("launchctl kickstart {service}"),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
     }
@@ -236,7 +252,21 @@ pub fn add_cron(
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
         let prior = read_cron_obligation(&path)?;
-        if same_obligation(&prior, spec) {
+        let prior_spec = read_cron_spec(&path)?;
+        retain_installed_obligation(&prior_spec, prior.activated_at, now)?;
+        if matches!(prior_spec.flow.as_str(), "release-run" | "telemetry-daily")
+            && (prior_spec.host.lf_home != spec.host.lf_home
+                || prior_spec.host.home_id != spec.host.home_id
+                || prior_spec.working_directory.canonicalize()?
+                    != spec.working_directory.canonicalize()?)
+        {
+            accounting::close(&prior_spec, now)?;
+        }
+        if same_obligation(&prior, spec)
+            && prior_spec.host.lf_home == spec.host.lf_home
+            && prior_spec.working_directory.canonicalize()?
+                == spec.working_directory.canonicalize()?
+        {
             prior.activated_at
         } else {
             now
@@ -244,6 +274,10 @@ pub fn add_cron(
     } else {
         now
     };
+    if matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
+        let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
+        accounting::observe(spec, activated_at, now, &zone)?;
+    }
     if path.exists() {
         let _ = launchctl.unload(&path);
     }
@@ -263,9 +297,38 @@ pub fn remove_cron(
         return Ok(None);
     }
     let cron = inspect_cron(&path, launchctl)?;
+    if matches!(cron.flow.as_str(), "release-run" | "telemetry-daily") {
+        let spec = read_cron_spec(&path)?;
+        let now = Utc::now().timestamp();
+        retain_installed_obligation(&spec, cron.activated_at, now)?;
+        accounting::close(&spec, now)?;
+    }
     launchctl.unload(&path)?;
     fs::remove_file(&path)?;
     Ok(Some(cron))
+}
+
+fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> OpsResult<()> {
+    if !matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
+        return Ok(());
+    }
+    let repo = spec.working_directory.canonicalize()?;
+    // The predecessor keeps its observed timezone. Only a legacy job without
+    // retained evidence needs today's zone, explicitly unknown before now.
+    let retained = accounting::read(&spec.host.lf_home)?.iter().any(|s| {
+        s.repo == repo
+            && s.home_id == spec.host.home_id
+            && s.wave == spec.wave
+            && s.flow == spec.flow
+            && s.schedule == spec.schedule.expression()
+            && s.installation_activated_at == activated_at
+            && s.closed_at.is_none()
+    });
+    if !retained {
+        let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
+        accounting::observe(spec, activated_at, now, &zone)?;
+    }
+    Ok(())
 }
 
 pub fn list_crons(
@@ -443,12 +506,58 @@ pub fn run_cron(
     placed_home: &HomeId,
     source: CronSource,
 ) -> OpsResult<CronReceipt> {
+    run_cron_recorded(
+        launch_agents_dir,
+        wave,
+        flow,
+        current_home,
+        placed_home,
+        source,
+        &mut |_| Ok(()),
+    )
+}
+
+pub(crate) fn run_cron_recorded(
+    launch_agents_dir: &Path,
+    wave: &str,
+    flow: &str,
+    current_home: &HomeId,
+    placed_home: &HomeId,
+    source: CronSource,
+    record: &mut dyn FnMut(&CronReceipt) -> OpsResult<()>,
+) -> OpsResult<CronReceipt> {
     let path = plist_path(launch_agents_dir, wave, flow);
     let spec = read_cron_spec(&path)?;
     validate_installed_spec(&spec, wave, flow)?;
     let root = receipt_root(&spec.host.lf_home);
     let mut receipt = new_receipt(&spec, current_home, source);
+    if source == CronSource::Scheduled && accounting::consume_trigger(&spec, &receipt)? {
+        receipt.source = CronSource::Triggered;
+    }
     write_receipt(&root, &receipt)?;
+    if let Err(error) = record(&receipt) {
+        receipt.finished_at = Some(Utc::now().timestamp());
+        receipt.outcome = CronOutcome::Failed;
+        receipt.error = Some(format!(
+            "prerequisite reservation failed before launch: {error}"
+        ));
+        write_receipt(&root, &receipt)?;
+        return Err(error);
+    }
+
+    let obligation = if matches!(flow, "release-run" | "telemetry-daily") {
+        let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
+        let obligation = read_cron_obligation(&path)?;
+        Some(accounting::observe(
+            &spec,
+            obligation.activated_at,
+            receipt.started_at,
+            &zone,
+        )?)
+    } else {
+        None
+    };
+    let release_obligation = obligation.filter(|_| flow == "release-run");
 
     let placement_error = if spec.host.home_id != *placed_home {
         Some(format!(
@@ -466,53 +575,98 @@ pub fn run_cron(
         receipt.finished_at = Some(Utc::now().timestamp());
         receipt.outcome = CronOutcome::Failed;
         receipt.error = Some(error.clone());
+        if let Some(id) = &release_obligation {
+            accounting::preflight_failure(&spec.host.lf_home, id, &receipt)?;
+        }
         write_receipt(&root, &receipt)?;
         return Err(OpsError::Message(format!(
             "refusing cron {wave}/{flow}: {error}"
         )));
     }
 
-    let result = spawn_cron_target(&spec);
-    receipt.finished_at = Some(Utc::now().timestamp());
-    let result = result.inspect(|_| {
-        if spec.schedule.every_minute {
-            // Coverage needs the latest outcomes, not one file per minute forever.
-            let _ = prune_minute_receipts(&root, &spec, &receipt.id);
-        }
-    });
-    match result {
-        Ok(status) if status.success() => {
-            receipt.outcome = CronOutcome::Succeeded;
-            receipt.exit_code = status.code();
-            write_receipt(&root, &receipt)?;
-            Ok(receipt)
-        }
-        Ok(status) => {
+    let _execution = if release_obligation.is_some() || flow == "telemetry-daily" {
+        let lease = accounting::claim_execution(&spec)?;
+        if lease.is_none() {
+            receipt.finished_at = Some(Utc::now().timestamp());
             receipt.outcome = CronOutcome::Failed;
-            receipt.exit_code = status.code();
-            receipt.error = Some(format!(
-                "target exited {}; see {}",
-                status_label(&status),
-                receipt.log_path.display()
-            ));
+            receipt.error = Some("cron execution already active".into());
             write_receipt(&root, &receipt)?;
-            Err(OpsError::CommandFailed {
-                command: format!("cron {wave}/{flow}"),
-                stderr: receipt.error.clone().unwrap_or_default(),
-            })
+            if let Some(id) = &release_obligation {
+                let continuation = accounting::record_overlap(&spec.host.lf_home, id, &receipt)?;
+                receipt.error = Some(format!("cron execution already active; {continuation}"));
+                write_receipt(&root, &receipt)?;
+            }
+            if source == CronSource::Recovery {
+                return Err(OpsError::ReleaseDeferred {
+                    reason: receipt.error.clone().expect("overlap cause set"),
+                    continuation: format!(
+                        "observe the active prerequisite at {}",
+                        receipt.log_path.display()
+                    ),
+                });
+            }
+            return Err(OpsError::Message(
+                receipt.error.clone().expect("overlap cause set"),
+            ));
         }
+        if let Some(id) = &release_obligation {
+            if source == CronSource::Scheduled
+                && accounting::begin(&spec.host.lf_home, id, &receipt)?.is_none()
+            {
+                receipt.finished_at = Some(Utc::now().timestamp());
+                receipt.outcome = CronOutcome::Succeeded;
+                receipt.exit_code = Some(0);
+                write_receipt(&root, &receipt)?;
+                return Ok(receipt);
+            }
+        }
+        lease
+    } else {
+        None
+    };
+    let mut child = match spawn_cron_target(&spec, _execution.as_ref(), &receipt) {
+        Ok(child) => child,
         Err(error) => {
+            receipt.finished_at = Some(Utc::now().timestamp());
             receipt.outcome = CronOutcome::Failed;
             receipt.error = Some(format!(
                 "could not start target: {error}; see {}",
                 receipt.log_path.display()
             ));
             write_receipt(&root, &receipt)?;
-            Err(OpsError::CommandFailed {
+            return Err(OpsError::CommandFailed {
                 command: format!("cron {wave}/{flow}"),
                 stderr: receipt.error.clone().unwrap_or_default(),
-            })
+            });
         }
+    };
+    // A deadline or observation error is not a child exit. Keep the reserved
+    // Running receipt intact and its inherited lock effective.
+    let timeout = (source == CronSource::Recovery).then_some(Duration::from_secs(60 * 60));
+    let status = wait_for_cron_target(&mut child, &receipt, timeout)?;
+    receipt.finished_at = Some(Utc::now().timestamp());
+    receipt.exit_code = status.code();
+    if status.success() {
+        receipt.outcome = CronOutcome::Succeeded;
+    } else {
+        receipt.outcome = CronOutcome::Failed;
+        receipt.error = Some(format!(
+            "target exited {}; see {}",
+            status_label(&status),
+            receipt.log_path.display()
+        ));
+    }
+    write_receipt(&root, &receipt)?;
+    if spec.schedule.every_minute {
+        let _ = prune_minute_receipts(&root, &spec, &receipt.id);
+    }
+    if status.success() {
+        Ok(receipt)
+    } else {
+        Err(OpsError::CommandFailed {
+            command: format!("cron {wave}/{flow}"),
+            stderr: receipt.error.clone().unwrap_or_default(),
+        })
     }
 }
 
@@ -534,6 +688,14 @@ pub fn record_cron_preflight_failure(
     receipt.finished_at = Some(Utc::now().timestamp());
     receipt.outcome = CronOutcome::Failed;
     receipt.error = Some(format!("Home placement preflight failed: {error}"));
+    if matches!(flow, "release-run" | "telemetry-daily") {
+        let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
+        let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, flow))?;
+        let id = accounting::observe(&spec, prior.activated_at, receipt.started_at, &zone)?;
+        if flow == "release-run" {
+            accounting::preflight_failure(&spec.host.lf_home, &id, &receipt)?;
+        }
+    }
     write_receipt(&root, &receipt)?;
     Ok(receipt)
 }
@@ -585,6 +747,22 @@ pub fn receipt_is_stale(receipt: &CronReceipt, now: i64) -> bool {
             || !process_alive(receipt.runner_pid))
 }
 
+pub fn record_cron_trigger(launch_agents_dir: &Path, wave: &str, flow: &str) -> OpsResult<String> {
+    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
+    accounting::record_trigger(&spec, Utc::now().timestamp())
+}
+
+pub fn record_cron_trigger_failure(
+    launch_agents_dir: &Path,
+    wave: &str,
+    flow: &str,
+    id: &str,
+    cause: &str,
+) -> OpsResult<()> {
+    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
+    accounting::trigger_failed(&spec, id, cause)
+}
+
 pub fn trigger_cron(launchctl: &dyn Launchctl, wave: &str, flow: &str) -> OpsResult<()> {
     launchctl.trigger(&label(wave, flow))
 }
@@ -602,7 +780,7 @@ pub fn wait_for_cron_receipt(
         let now = Utc::now().timestamp();
         let mut receipts = read_receipts(root, wave, Some(flow))?;
         receipts.retain(|receipt| {
-            receipt.source == CronSource::Scheduled
+            receipt.source != CronSource::Manual
                 && !prior_receipts.contains(&receipt.id)
                 && receipt.started_at >= started_after
                 && (receipt.outcome != CronOutcome::Running || receipt_is_stale(receipt, now))
@@ -754,7 +932,6 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
                 receipt.source == CronSource::Scheduled
                     && receipt.wave == spec.wave
                     && receipt.flow == spec.flow
-                    && receipt.target_kind == spec.target_kind
                     && receipt.home_id == spec.host.home_id
                     && receipt.schedule == spec.schedule.expression()
             })
@@ -771,12 +948,12 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
     };
     let log_path = spec.log_path();
     Ok(CronObligation {
+        target_kind: spec.target_kind,
         repo: spec.working_directory,
         lf_path: spec.lf_path,
         log_path,
         wave: spec.wave,
         flow: spec.flow,
-        target_kind: spec.target_kind,
         schedule: spec.schedule,
         home_id: spec.host.home_id,
         activated_at,
@@ -787,7 +964,6 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
 fn same_obligation(prior: &CronObligation, spec: &CronSpec) -> bool {
     prior.wave == spec.wave
         && prior.flow == spec.flow
-        && prior.target_kind == spec.target_kind
         && prior.schedule == spec.schedule
         && prior.home_id == spec.host.home_id
 }
@@ -804,7 +980,11 @@ fn file_timestamp(path: &Path) -> Option<i64> {
     .ok()
 }
 
-fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatus> {
+fn spawn_cron_target(
+    spec: &CronSpec,
+    execution: Option<&std::fs::File>,
+    receipt: &CronReceipt,
+) -> std::io::Result<Child> {
     if let Some(parent) = spec.log_path().parent() {
         fs::create_dir_all(parent)?;
     }
@@ -817,6 +997,17 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
     }
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
+    if let Some(file) =
+        execution.filter(|_| receipt.flow == "release-run" && receipt.source != CronSource::Manual)
+    {
+        use std::os::fd::AsRawFd;
+        command.args([
+            "--__cron-receipt",
+            receipt.id.as_str(),
+            "--__cron-lock-fd",
+            &file.as_raw_fd().to_string(),
+        ]);
+    }
     if spec.target_kind == CronTargetKind::Repository {
         command.args(["task", "reconcile", "--json"]);
     } else {
@@ -845,7 +1036,62 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
             command.env(key, value);
         }
     }
-    command.status()
+    #[cfg(unix)]
+    if let Some(file) = execution {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let fd = file.as_raw_fd();
+        // SAFETY: the parent keeps the file alive until spawn returns. The child
+        // only changes an fd flag with an async-signal-safe syscall before exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    command.spawn()
+}
+
+fn wait_for_cron_target(
+    child: &mut Child,
+    receipt: &CronReceipt,
+    timeout: Option<Duration>,
+) -> OpsResult<ExitStatus> {
+    let continuation = || {
+        format!(
+            "inspect receipt {} at {}; retry at the next configured firing after the existing job lock is free",
+            receipt.id,
+            receipt.log_path.display()
+        )
+    };
+    let observation_error = |error| OpsError::CommandFailed {
+        command: format!("observe cron target {}", receipt.id),
+        stderr: format!("exit result is unknown: {error}; {}", continuation()),
+    };
+    let Some(timeout) = timeout else {
+        return child.wait().map_err(observation_error);
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().map_err(observation_error)? {
+            return Ok(status);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(OpsError::ReleaseDeferred {
+                reason: format!(
+                    "telemetry recovery {} has no terminal result after {}s; the check has not been stopped",
+                    receipt.id,
+                    timeout.as_secs()
+                ),
+                continuation: continuation(),
+            });
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(250)));
+    }
 }
 
 fn validate_installed_spec(spec: &CronSpec, wave: &str, flow: &str) -> OpsResult<()> {
@@ -863,6 +1109,9 @@ fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronRec
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: std::process::id(),
+        runner_started_at: crate::journal::process_started_at(std::process::id())
+            .ok()
+            .flatten(),
         home_id: home_id.clone(),
         wave: spec.wave.clone(),
         flow: spec.flow.clone(),
@@ -880,7 +1129,11 @@ fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronRec
     }
 }
 
-fn read_receipts(root: &Path, wave: &str, flow: Option<&str>) -> OpsResult<Vec<CronReceipt>> {
+pub(crate) fn read_receipts(
+    root: &Path,
+    wave: &str,
+    flow: Option<&str>,
+) -> OpsResult<Vec<CronReceipt>> {
     let wave_root = root.join(safe_component(wave));
     if !wave_root.is_dir() {
         return Ok(Vec::new());
@@ -972,6 +1225,11 @@ fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     write_private_file(&temporary, &bytes)?;
     fs::rename(&temporary, path)?;
     sync_directory(&dir)?;
+    if receipt.flow == "release-run" && receipt.finished_at.is_some() {
+        if let Some(home) = root.parent().and_then(Path::parent) {
+            accounting::finish_process(home, receipt)?;
+        }
+    }
     Ok(())
 }
 
@@ -1286,6 +1544,214 @@ mod tests {
     }
 
     #[test]
+    fn cron_runner_identity_preserves_unknown_history_and_rejects_reused_pid() {
+        use crate::journal::ProcessIdentityEvidence;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        let receipt = new_receipt(&cron, &cron.host.home_id, CronSource::Scheduled);
+        assert_eq!(receipt.runner_evidence(), ProcessIdentityEvidence::Live);
+
+        let mut reused = receipt.clone();
+        reused.runner_started_at = Some(receipt.runner_started_at.unwrap() - 86_400);
+        assert_eq!(reused.runner_evidence(), ProcessIdentityEvidence::Dead);
+
+        // Historical schema-1 receipts have no start identity. Neither an old
+        // timestamp nor a missing PID can turn that absence into ownership proof.
+        let mut historical = serde_json::to_value(&receipt).unwrap();
+        historical
+            .as_object_mut()
+            .unwrap()
+            .remove("runner_started_at");
+        historical["runner_pid"] = u32::MAX.into();
+        historical["started_at"] = 1.into();
+        let historical: CronReceipt = serde_json::from_value(historical).unwrap();
+        assert_eq!(historical.runner_started_at, None);
+        assert_eq!(
+            historical.runner_evidence(),
+            ProcessIdentityEvidence::Unknown
+        );
+        assert_eq!(historical.outcome, CronOutcome::Running);
+        assert_eq!(historical.finished_at, None);
+    }
+
+    #[test]
+    fn telemetry_recovery_defers_while_the_existing_executor_owns_the_job() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let launcher = temp.path().join("telemetry");
+        let effect = temp.path().join("launched");
+        fs::write(
+            &launcher,
+            format!("#!/bin/sh\ntouch '{}'\n", effect.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = named_spec(
+            temp.path(),
+            &launcher,
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
+        let owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        let error = run_cron(
+            temp.path(),
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Recovery,
+        )
+        .unwrap_err();
+        assert!(matches!(error, OpsError::ReleaseDeferred { .. }));
+        assert!(!effect.exists());
+        drop(owner);
+        let receipt = run_cron(
+            temp.path(),
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Recovery,
+        )
+        .unwrap();
+        assert_eq!(receipt.outcome, CronOutcome::Succeeded);
+        assert!(effect.exists());
+    }
+
+    #[test]
+    fn telemetry_deadline_preserves_unknown_receipt_and_surviving_child_exclusion() {
+        struct Target {
+            child: Child,
+            allow: PathBuf,
+        }
+        impl Drop for Target {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.allow, "finish");
+                let _ = self.child.wait();
+            }
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let launcher = temp.path().join("telemetry");
+        let started = temp.path().join("started");
+        let allow = temp.path().join("allow");
+        let completed = temp.path().join("completed");
+        fs::write(
+            &launcher,
+            format!(
+                "#!/bin/sh\necho start >> '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\necho complete >> '{}'\n",
+                started.display(), allow.display(), completed.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = named_spec(
+            temp.path(),
+            &launcher,
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
+        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let root = receipt_root(&spec.host.lf_home);
+        write_receipt(&root, &receipt).unwrap();
+        let owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        let mut target = Target {
+            child: spawn_cron_target(&spec, Some(&owner), &receipt).unwrap(),
+            allow,
+        };
+
+        // Exercise the production wait with a short deadline, without adding a
+        // runtime override for the release operation's one-hour policy.
+        let before = Instant::now();
+        let error =
+            wait_for_cron_target(&mut target.child, &receipt, Some(Duration::from_millis(50)))
+                .unwrap_err();
+        assert!(before.elapsed() < Duration::from_secs(5));
+        match error {
+            OpsError::ReleaseDeferred {
+                reason,
+                continuation,
+            } => {
+                assert!(reason.contains(receipt.id.as_str()));
+                assert!(reason.contains("has not been stopped"));
+                assert!(continuation.contains(&receipt.log_path.display().to_string()));
+            }
+            other => panic!("expected deferred observation, got {other:?}"),
+        }
+        assert!(target.child.try_wait().unwrap().is_none());
+        assert!(!completed.exists());
+        drop(owner);
+        assert!(accounting::claim_execution(&spec).unwrap().is_none());
+        let contender = || {
+            run_cron(
+                temp.path(),
+                &spec.wave,
+                &spec.flow,
+                &spec.host.home_id,
+                &spec.host.home_id,
+                CronSource::Recovery,
+            )
+        };
+        assert!(matches!(contender(), Err(OpsError::ReleaseDeferred { .. })));
+        assert_eq!(
+            read_receipts(&root, &spec.wave, Some(&spec.flow))
+                .unwrap()
+                .into_iter()
+                .find(|r| r.id == receipt.id)
+                .unwrap(),
+            receipt
+        );
+
+        fs::write(&target.allow, "finish").unwrap();
+        assert!(target.child.wait().unwrap().success());
+        assert_eq!(fs::read_to_string(&started).unwrap(), "start\n");
+        assert_eq!(fs::read_to_string(&completed).unwrap(), "complete\n");
+        let recovered = contender().unwrap();
+        assert_eq!(recovered.outcome, CronOutcome::Succeeded);
+        assert_ne!(recovered.id, receipt.id);
+        let receipts = read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap();
+        assert_eq!(receipts.iter().find(|r| r.id == receipt.id), Some(&receipt));
+        assert_eq!(
+            fs::read_to_string(&completed).unwrap(),
+            "complete\ncomplete\n"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn telemetry_exit_observation_error_is_failure_without_a_fabricated_exit() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let spec = spec(temp.path(), Path::new("/usr/bin/true"));
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let root = receipt_root(&spec.host.lf_home);
+        write_receipt(&root, &receipt).unwrap();
+        let mut child = spawn_cron_target(&spec, None, &receipt).unwrap();
+        let mut status = 0;
+        // SAFETY: this is our own child PID and status points to a valid integer.
+        // Reap outside Child to reproduce an unavailable exit observation.
+        assert_eq!(
+            unsafe { libc::waitpid(child.id() as libc::pid_t, &mut status, 0) },
+            child.id() as libc::pid_t
+        );
+        let error = wait_for_cron_target(&mut child, &receipt, Some(Duration::from_millis(50)))
+            .unwrap_err();
+        assert!(matches!(error, OpsError::CommandFailed { .. }));
+        assert_eq!(
+            read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap(),
+            vec![receipt]
+        );
+    }
+
+    #[test]
     fn add_list_remove_round_trips_loaded_launchd_spec() {
         let temp = tempfile::TempDir::new().unwrap();
         let launchctl = FakeLaunchctl::default();
@@ -1393,7 +1859,12 @@ mod tests {
         assert_eq!(plist.matches("<key>Minute</key>").count(), 60);
         assert!(!plist.contains("<key>Hour</key>"));
         assert!(!plist.contains("KeepAlive"));
-        assert!(super::spawn_cron_target(&cron).unwrap().success());
+        let receipt = super::new_receipt(&cron, &cron.host.home_id, CronSource::Scheduled);
+        assert!(super::spawn_cron_target(&cron, None, &receipt)
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success());
         assert_eq!(
             fs::read_to_string(cron.log_path()).unwrap(),
             "task\nreconcile\n--json\n"
@@ -1476,6 +1947,53 @@ mod tests {
         assert!(daily_time_of("0 0 9 * * MON-FRI *").is_err());
         assert!(daily_time_of("0 0 9 1 * * *").is_err());
         assert!(daily_time_of("not a schedule").is_err());
+    }
+
+    #[test]
+    fn telemetry_installation_retains_legacy_replacement_move_and_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents = temp.path().join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        let launchctl = FakeLaunchctl::default();
+        let mut telemetry = named_spec(
+            temp.path(),
+            Path::new("/usr/bin/true"),
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        // A pre-cutover plist has no retained segment yet.
+        let path = plist_path(&agents, &telemetry.wave, &telemetry.flow);
+        fs::write(&path, render_plist(&telemetry, 0)).unwrap();
+        telemetry.schedule = parse_schedule("0 0 8 * * *").unwrap();
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        let rows = accounting::read(&telemetry.host.lf_home).unwrap();
+        assert_eq!(rows.len(), 2);
+        let old = rows.iter().find(|r| r.schedule == "0 0 9 * * *").unwrap();
+        assert_eq!(old.activated_at, 0);
+        assert!(old.observed_at > old.activated_at);
+        assert!(old.closed_at.is_some());
+        let current = rows.iter().find(|r| r.closed_at.is_none()).unwrap();
+        assert_eq!(current.replaces.as_ref(), Some(&old.id));
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        assert_eq!(accounting::read(&telemetry.host.lf_home).unwrap(), rows);
+
+        let old_home = telemetry.host.lf_home.clone();
+        telemetry.host.lf_home = temp.path().join("other-home");
+        telemetry.host.home_id = HomeId::new();
+        add_cron(&agents, &telemetry, &launchctl).unwrap();
+        assert!(accounting::read(&old_home)
+            .unwrap()
+            .iter()
+            .all(|s| s.closed_at.is_some()));
+        remove_cron(&agents, &telemetry.wave, &telemetry.flow, &launchctl).unwrap();
+        let moved = accounting::read(&telemetry.host.lf_home).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].home_id, telemetry.host.home_id);
+        assert!(moved[0].closed_at.is_some());
+        assert!(moved[0].opportunities.is_empty());
+        assert!(!path.exists());
     }
 
     #[test]
@@ -1780,6 +2298,7 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: u32::MAX,
+            runner_started_at: None,
             home_id: HomeId::new(),
             wave: "infra".to_string(),
             flow: "telemetry".to_string(),
@@ -1827,5 +2346,93 @@ mod tests {
         assert!(parse_wait_duration("0s").is_err());
         assert!(parse_wait_duration("25h").is_err());
         assert!(parse_wait_duration("later").is_err());
+    }
+    #[test]
+    fn release_wake_links_one_execution_to_all_misses_without_promoting_zero_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("lf");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut spec = named_spec(
+            temp.path(),
+            &executable,
+            "infrastructure",
+            "release-run",
+            "0 0 0 * * *",
+            CronTargetKind::Flow,
+        );
+        spec.working_directory = temp.path().to_path_buf();
+        let agents = temp.path().join("agents");
+        fs::create_dir(&agents).unwrap();
+        let now = Utc::now().timestamp();
+        fs::write(
+            plist_path(&agents, &spec.wave, &spec.flow),
+            render_plist(&spec, now - 3 * 86400),
+        )
+        .unwrap();
+        let receipt = run_cron(
+            &agents,
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Scheduled,
+        )
+        .unwrap();
+        assert_eq!(receipt.outcome, CronOutcome::Succeeded);
+        let records =
+            accounting::history(&spec.host.lf_home, temp.path(), &spec.wave, now).unwrap();
+        assert!(records[0].opportunities.len() >= 3);
+        let attempts: Vec<_> = records[0]
+            .opportunities
+            .iter()
+            .flat_map(|o| &o.attempts)
+            .collect();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].receipt_id, receipt.id);
+        assert_eq!(attempts[0].covered.len(), records[0].opportunities.len());
+        assert!(matches!(
+            attempts[0].outcome,
+            accounting::ScheduledReleaseOutcome::Unverified { .. }
+        ));
+
+        // A competing physical wake cannot add an attempt to this frozen owner.
+        let _owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        for _ in 0..2 {
+            let error = run_cron(
+                &agents,
+                &spec.wave,
+                &spec.flow,
+                &spec.host.home_id,
+                &spec.host.home_id,
+                CronSource::Scheduled,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("next configured release due"));
+        }
+        let report =
+            history::release_history(&spec.host.lf_home, temp.path(), &spec.wave, 0, now + 86400)
+                .unwrap();
+        assert_eq!(report.receipts.len(), 3);
+        assert!(report.receipts.iter().any(|r| r.id == receipt.id));
+        for physical in report.receipts.iter().filter(|r| r.id != receipt.id) {
+            assert_eq!(physical.outcome, CronOutcome::Failed);
+            assert!(physical
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("next configured release due"));
+        }
+        assert_eq!(
+            report.obligations[0]
+                .opportunities
+                .iter()
+                .map(|o| o.attempts.len())
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(report.summary.published + report.summary.no_change, 0);
+        assert!(report.summary.qualifying_pairs.is_empty());
     }
 }

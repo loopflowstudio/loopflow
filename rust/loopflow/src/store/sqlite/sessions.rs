@@ -298,6 +298,21 @@ impl SqliteStore {
         }
     }
 
+    /// Sessions that recorded `thread` as their provider's own conversation id.
+    pub(crate) fn sessions_for_provider_thread(&self, thread: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id FROM agent_sessions WHERE provider_thread=?1
+             UNION SELECT session_id FROM session_events WHERE kind='observed'
+                AND json_extract(payload,'$.evidence.provider_session_id')=?1
+             ORDER BY 1",
+        )?;
+        let ids = query
+            .query_map([thread], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
     /// Project retained input history, with its own attribution and chronology.
     /// A continuation never moves earlier usage to the conversation's new binding.
     pub(crate) fn conversation_history(

@@ -565,6 +565,7 @@ fn execute_target(
                             &repo_root,
                             &options,
                             &loopflow::ops::NullProgress,
+                            &|_| {},
                         )?;
                     }
                     Ok(())
@@ -1308,7 +1309,7 @@ fn run() -> anyhow::Result<()> {
         })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
-    let cli = match Cli::try_parse_from(args.clone()) {
+    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1464,6 +1465,12 @@ fn run() -> anyhow::Result<()> {
             preferred_accounts.extend(origin_account.iter().cloned());
             restricted_accounts.extend(origin_only_account.iter().cloned());
         }
+        let _account_isolation = cli
+            .isolate
+            .then_some(true)
+            .or(cli.shared.then_some(false))
+            .map(loopflow::provider_account::activation::isolation_env)
+            .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
             &preferred_accounts,
             &restricted_accounts,
@@ -1776,7 +1783,7 @@ fn execute_command(
             all,
         }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::flow::execute_step(id, *version)
+            loopflow::lf::commands::flow::execute_step(id, *version, cli)
         }),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),

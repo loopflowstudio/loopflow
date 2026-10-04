@@ -2773,6 +2773,7 @@ case "$*" in *app-server*) ;; *)
         repo.path(),
         home.path(),
         &[
+            "--isolate",
             "--account",
             "claude=claude-chosen@",
             "--account",
@@ -2801,6 +2802,7 @@ case "$*" in *app-server*) ;; *)
         repo.path(),
         home.path(),
         &[
+            "--isolate",
             "--account",
             "claude=claude-other@",
             "--account",

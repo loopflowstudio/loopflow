@@ -1543,6 +1543,15 @@ raise SystemExit(1 if failed else 0)
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Credential readiness may inspect the native home even for an isolated
+    // route. Keep that lookup headless and outside the real Keychain.
+    let security = fixture.home.path().join("bin/security");
+    std::fs::write(
+        &security,
+        "#!/bin/sh\necho 'The specified item could not be found' >&2\nexit 44\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
     let account_home = fixture.home.path().join("accounts/claude/fixture");
     std::fs::create_dir_all(&account_home).unwrap();
     let credential =
@@ -1589,7 +1598,10 @@ raise SystemExit(1 if failed else 0)
         })
         .unwrap();
     std::fs::write(fixture.home.path().join("fail-once"), "").unwrap();
+    // Keep the synthetic login in its file-backed account home; this test does
+    // not exercise the native macOS Keychain. The Flow captures the mode for retry.
     let blocked = fixture.run(&[
+        "--isolate",
         "--task",
         "INF-123",
         "--model",
@@ -1619,7 +1631,8 @@ raise SystemExit(1 if failed else 0)
     assert_eq!(failed.len(), 1, "{failed:?}");
     assert_eq!(
         (failed[0].2, failed[0].3.as_deref(), failed[0].4.as_deref()),
-        (1, Some("failed"), Some(task_id.as_str()))
+        (1, Some("failed"), Some(task_id.as_str())),
+        "{failure}; {stderr}"
     );
     let headless = fixture.json(&[
         "session",

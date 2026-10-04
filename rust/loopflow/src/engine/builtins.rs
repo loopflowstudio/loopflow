@@ -513,6 +513,20 @@ mod tests {
     }
 
     #[test]
+    fn capture_tasks_is_discoverable_without_aliases() {
+        assert!(get_builtin_skill("capture-tasks").is_some());
+        assert!(!builtin_skill_description("capture-tasks").is_empty());
+        assert_eq!(
+            resolve_builtin_skill("capture-tasks"),
+            Some("capture-tasks")
+        );
+        assert!(get_builtin_skill("design").is_some());
+        for name in ["capture-task", "create-task"] {
+            assert!(get_builtin_skill(name).is_none());
+        }
+    }
+
+    #[test]
     fn chapter_skills_are_registered() {
         for name in [
             "start-chapter",

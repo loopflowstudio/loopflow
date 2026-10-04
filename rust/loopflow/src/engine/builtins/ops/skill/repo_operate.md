@@ -335,17 +335,15 @@ Keep accepted decisions in the repository guide or the documentation that owns t
 Keep working plans in `scratch/`. The scope's persistent checkout survives conversation
 replacement; publication needs no synthetic Task or separate export checkout.
 
-At a deliberate maintenance or publication boundary, coordinate with active writers,
-inspect `git status --short` and `lf sync --plan`, then run `lf sync`. Do not sync on
-every message. Fetch failure leaves local work usable. Resolve conflicts in place
-and run `lf sync --continue`, or use `lf sync --abort` to restore the starting point.
-Commit changes that block integration deliberately, preserving unrelated work.
+Run `lf sync` to bring in upstream changes; `lf sync --plan` previews it. Fetch
+failure leaves local work usable. Resolve conflicts in place and run
+`lf sync --continue`, or use `lf sync --abort` to restore the starting point.
 If resolver notes collide with stashed files, sync restores the originals and keeps
 the new notes beside them as `<name>.lf-sync-N`. Reconcile both locally. A failed
 restoration retains its stash and prints recovery instructions; keep it until all
 edits are recovered.
 
-When publication is authorized:
+To publish a document:
 
 ```bash
 git diff -- <document-path>
@@ -354,9 +352,9 @@ git diff origin/main...HEAD --stat
 lf pr publish
 ```
 
-Selected-path commits preserve unrelated staged and unstaged edits. Inspect the
-entire committed range before publishing: that is what the PR contains. Persistent
-commit and publication untrack scratch without deleting local files. Scratch,
+Selected-path commits preserve unrelated staged and unstaged edits. The PR
+contains the whole committed range. Persistent commit and publication untrack
+scratch without deleting local files. Scratch,
 including PR copy, and edits made after the selected commit survive delivery.
 
 After merge, the next `lf commit` or `lf pr publish` restarts the branch from

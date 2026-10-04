@@ -3962,6 +3962,10 @@ mod tests {
             .unwrap(),
             "{\"state\":\"current\"}"
         );
+        // The store below opens with this build's schema, drafts included.
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql).unwrap();
+        }
         drop(conn);
 
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();

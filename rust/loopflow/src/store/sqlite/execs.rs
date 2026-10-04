@@ -601,12 +601,14 @@ impl SqliteStore {
         Ok(current)
     }
 
-    /// Record the exact driver's exit without settling a Flow review.
+    /// Close the exact driver's runtime and record its exit under the same
+    /// transaction as ownership transfer, without settling a Flow review.
     pub(crate) fn finish_session_driver(
         &self,
         session: &str,
         expected: &SessionDriver,
         outcome: &str,
+        close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
         let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -616,6 +618,7 @@ impl SqliteStore {
                 "Session driver changed".into(),
             ));
         }
+        let closed = close_provider()?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let payload = serde_json::json!({
             "type": "driver_exit", "outcome": outcome, "generation": expected.generation
@@ -640,8 +643,9 @@ impl SqliteStore {
             params![session, now, outcome],
         )?;
         tx.execute(
-            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1 WHERE id=?1",
-            [session],
+            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1,
+                provider_endpoint=CASE WHEN ?2 THEN NULL ELSE provider_endpoint END WHERE id=?1",
+            params![session, closed],
         )?;
         tx.commit()?;
         Ok(())

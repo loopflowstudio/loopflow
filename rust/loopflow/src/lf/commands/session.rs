@@ -35,10 +35,10 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             limit,
         } => {
             let store = open_shared_store().await?;
-            if store.session(id).await?.is_none() {
+            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
                 bail!("Session {id} was not found");
-            }
-            let events = store.sqlite.session_history(id, *after, *limit)?;
+            };
+            let events = store.sqlite.session_history(&session.id, *after, *limit)?;
             if *json {
                 println!("{}", serde_json::to_string(&events)?);
             } else {

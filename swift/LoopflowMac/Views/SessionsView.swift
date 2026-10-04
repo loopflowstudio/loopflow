@@ -475,11 +475,6 @@ struct SessionsContentView: View {
     var body: some View {
         let _ = layoutRevision
         VStack(spacing: 0) {
-            if let error = model.sessions.errorMessage {
-                Text("Sessions unavailable — \(error)")
-                    .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-                    .padding(Spacing.sm)
-            }
             HStack(spacing: 0) {
                 WorkspaceNavigator(model: model, onOpenSession: openSession, onConversation: { work in
                     model.select(work)

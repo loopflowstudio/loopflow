@@ -232,12 +232,30 @@ Configured checks passed on the installed release:
   and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
   issue, checkout, PR ids and saved Flow invocation match the pre-install read.
 
-Final `lsof` inspection still found 15 processes holding the four retained
-development stores. `lf monitor prune --dry-run --json` reported no registered
-orphan providers; its dead receipt cleanup cannot retire these live stores.
-No legacy process was signaled. The seven archived snapshots remain preserved
-at the retirement path above. Installed routing acceptance is now demonstrated;
-retirement of the four live stores remains the reason LOO-342 is open.
+### Legacy retirement completed (2026-10-04)
+
+Jack Heart explicitly authorized clearing all legacy stores and their process
+owners. Fresh `lsof` identified 15 owners of the four retained installed stores.
+Current `lf monitor prune` had no registered orphan targets; the old `ask cancel`
+command failed reading the current installation manifest (`work_dispositions`
+missing). Exact executable/start-time checks and process ancestry bounded the
+shutdown to those owners, their matching legacy wrappers and descendants.
+All 37 processes exited after SIGTERM; no SIGKILL was required. The current
+Session and main-Home processes were outside that set.
+
+The four stores moved intact to `~/.lf-retired/20261004T161815Z/installed/`.
+The unused root database and two demo databases moved with the remaining legacy
+root to `remaining-home/` in the same archive. Its `retirement.json` records
+process identities, signals and source/destination paths. The seven earlier
+snapshots remain at `~/.lf-retired/20261002T191224Z/worktrees/`. Archives preserve
+history and consume disk space; retirement does not mean erasure.
+
+Verification: all 37 recorded process identities exited, legacy handles reached
+zero, `~/.lf-dev` no longer exists, and installed `lf home id` still returns
+`home_39860354aaca640c2ccb50bf6ca609d8`; prune inspection reports zero errors.
+LOO-342 was already marked done in the October 4 status read. This retirement
+supersedes the pending-store findings above and closes the remaining acceptance
+gap after the October 2 installed routing checks.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

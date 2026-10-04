@@ -231,7 +231,17 @@ killed. Two separate causes, both measured on this branch; neither is shipped.
   the fence up to 10 s on its own client; that is bounded, not a cycle.
 - **Receipts still serialize a command behind SQLite contention.** A 3 s foreign
   write lock added 3 s to a listing; a permanent one cost two 15 s waits and a
-  warned, unrecorded Exec. Unchanged in this slice.
+  warned, unrecorded Exec. Unchanged in this slice. Timing read from Exec rows
+  would therefore lose exactly the slowest samples.
+- **Jack Heart's delivery contract:** land after autonomous checks and honest
+  benchmarks; on-machine experience is post-merge validation. Completion needs
+  production timing of real invocations and a report command (count, median/p95,
+  failures, version). Not built; every number so far came from a staged run on
+  a host at load 30–90.
+- **A closed Session with a confirmed-dead provider no longer blocks Task
+  admission or completion** when its turn lacks a completion receipt (Jack
+  authorized this in the same PR). Closure alone is not enough: live or unknown
+  providers still block.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

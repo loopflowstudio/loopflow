@@ -1,7 +1,17 @@
 # LOO-375: make `lf wt list` fast under real worktree load
 
-Draft plan, written during implementation. Jack Heart requested autonomous
-delivery (Linear steers, 2026-10-04); no design review happened.
+Draft plan; no design review happened. Decisions by Jack Heart (Linear steers,
+2026-10-04):
+
+- Autonomous delivery, no interactive Sessions or demo; several slices are
+  expected and a partial slice is progress, not completion.
+- Landing is allowed after autonomous correctness, regression, build/static
+  checks and honest benchmark evidence. On-machine experience and a quiet-host
+  benchmark are post-merge validation, not a gate. Test failures, data loss,
+  broken authority and known regressions still need repair.
+- The Task is not complete without production timing of real `lf wt list`
+  invocations and a documented report command. If a slice lands without it,
+  it stays as remaining work on this Task.
 
 Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
@@ -13,7 +23,28 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 - Deadlock: fenced dispatch timed on its own thread; history recording leaves
   the runtime worker (`harness/dispatch.rs`).
 
-## Remaining, by measured cost
+## Remaining
+
+### Production timing (required for completion; nothing built yet)
+
+No code on this branch times real invocations. The benchmark script needs a
+staged run and trace2, so it does not satisfy this.
+
+- Record per invocation: total duration, local Git, remote enrichment and
+  database (receipt) phases, outcome including remote timeout, and `lf` version.
+- One documented command reports sample count, median/p95, failures/timeouts
+  and version for this machine, without reading raw traces.
+- Bounded retention; no secrets, paths beyond the repository, or conversation
+  contents.
+- Lead, unverified: every invocation already has an `execs` row with `command`,
+  `started_at`, `completed_at` and `outcome`, which may supply totals and
+  failures. It has no phases or version, its time resolution is unchecked, and
+  under SQLite contention the row is the thing that goes missing (item 1 below),
+  so the slowest samples would be the ones lost.
+- Unchosen: where phase timings live (Exec row, a small bounded local file, or
+  the existing `studio.loopflow`/`perf` signposts, which are Desktop-side).
+
+### By measured cost
 
 1. **Receipts serialize the command behind SQLite contention.** 3 s foreign lock
    → 4.65 s listing; permanent lock → two 15 s waits. Options not yet chosen:
@@ -48,10 +79,27 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
 - After main sync: `cargo test -p loopflow --test worktree_tests` — 26 passed.
 
-## Completed Session recovery
+## Completed Session recovery (done on this branch)
 
-Jack Heart authorized fixing the delivery blocker in this PR and repairing the live database. Task admission and completion now allow a closed Session with a confirmed-dead provider even if its native turn has no completion receipt; live, unknown and unfinished Sessions still block. Native history remains untouched by the code fix. Review finding: Session closure alone cannot exempt a live provider, so both gates reuse the existing process-identity evidence.
+Jack Heart authorized fixing the delivery blocker in this PR and repairing the
+live database. Task admission and completion allow a closed Session whose
+provider is confirmed dead even when its native turn has no completion receipt;
+live, unknown and unfinished Sessions still block, using the existing
+process-identity evidence. Native history is untouched. The live repair kept
+the original start and recorded an administrative interruption, not
+provider-reported success, with a private backup of the original rows; the
+regression does not depend on it.
 
-Live recovery retained the original start and recorded an explicitly administrative interruption (not provider-reported success), with a private backup of the original rows. The code regression does not depend on this repair.
+Check: `cargo test -p loopflow --lib completed_session_with_exited_provider_does_not_block_task_work`
+— 4 passed; `cargo fmt --check` and clippy `-D warnings` clean.
 
-Checks: `cargo test -p loopflow --lib completed_session_with_exited_provider_does_not_block_task_work` passed (four cases); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+## Acceptance against the Task brief
+
+- Profile text and JSON with counts and phase split: done (report).
+- ≤1 s warm p95: met offline JSON only (0.80 s); online 1.93 s JSON / 2.36 s
+  text at load >30. Bottleneck reported: one GitHub round trip.
+- Bounded while another worker uses SQLite: not met — item 1 under "By measured cost".
+- Deadlock regression: done.
+- Read-only default, text/JSON contracts, `--sync`: output byte-identical on
+  the live repository; remote calls end within 10 s.
+- Production timing and report command: not started.

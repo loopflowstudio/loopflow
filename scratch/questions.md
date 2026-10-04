@@ -23,3 +23,7 @@
 - The Flow's final step lands with `-c`. Completion still needs ordinary-use
   timing read after an installed release; landing this PR should keep the Task
   open.
+- `.lf/flows/pursue-auto.yaml` entered this branch through the restart
+  checkpoint and nothing in the repository references it. Left in place: the
+  running Flow was started from it, and removing a Flow definition mid-run is
+  not this Task's call. Whether it should land on main is unresolved.

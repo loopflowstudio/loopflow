@@ -239,7 +239,8 @@ killed. Two separate causes, both measured on this branch; neither is shipped.
   reports count, median/p95, failures and version from real invocations. It has
   no ordinary-use samples until a release carrying it is installed; staged
   numbers came from a host at load 30–90. Reading it after install is what
-  remains before completion.
+  remains before completion, so landing this PR must leave the Task open: a
+  Flow ending in `land -c` contradicts a contract with post-merge evidence.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
   admission or completion** when its turn lacks a completion receipt (Jack
   authorized this in the same PR). Closure alone is not enough: live or unknown

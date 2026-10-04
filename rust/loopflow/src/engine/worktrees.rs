@@ -1023,13 +1023,12 @@ fn apply_network_enrichment(
     }
 }
 
-/// Local listing plus remote enrichment, read at the same time.
+/// Local listing plus remote enrichment, read at the same time, with its
+/// phase timings.
 ///
-/// The final value is false when GitHub was applicable but unavailable;
-/// callers use that to retain stale branches whose open-PR state could not be
-/// checked. A remote that fails or does not answer leaves `remote_gone` false
-/// and `pull_request` unknown; it never fails or stalls the local listing.
-fn list_worktrees_enriched(repo: &Path) -> Result<(Listing, bool), GitError> {
+/// A remote that fails or does not answer leaves `remote_gone` false and
+/// `pull_request` unknown; it never fails or stalls the local listing.
+pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     let started = Instant::now();
     let default_branch = get_default_branch(repo)?;
     let items = list_porcelain(repo)?;
@@ -1053,16 +1052,14 @@ fn list_worktrees_enriched(repo: &Path) -> Result<(Listing, bool), GitError> {
         &remote.pull_requests.unwrap_or_default(),
         &remote.branches,
     );
-    Ok((
-        Listing {
-            default_branch,
-            worktrees,
-            local_git,
-            remote: remote_time,
-            remote_outcome: remote.outcome,
-        },
+    Ok(Listing {
+        default_branch,
+        worktrees,
         pull_requests_known,
-    ))
+        local_git,
+        remote: remote_time,
+        remote_outcome: remote.outcome,
+    })
 }
 
 /// Every worktree's state, and what reading it cost.
@@ -1071,6 +1068,9 @@ pub struct Listing {
     /// The branch every worktree was compared against.
     pub default_branch: String,
     pub worktrees: Vec<WorktreeState>,
+    /// False when GitHub was applicable but unavailable: an absent
+    /// `pull_request` then proves nothing about an open PR.
+    pub pull_requests_known: bool,
     /// Wall time of the local Git reads, which run beside the remote.
     pub local_git: Duration,
     /// Wall time until the remote answered, failed, or was stopped.
@@ -1081,11 +1081,6 @@ pub struct Listing {
 /// Full worktree listing with all checks (local + network).
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     list_worktrees_timed(repo).map(|listing| listing.worktrees)
-}
-
-/// Full worktree listing with its phase timings.
-pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
-    list_worktrees_enriched(repo).map(|(listing, _)| listing)
 }
 
 fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
@@ -1230,14 +1225,12 @@ pub fn prune_worktrees(
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
-    let (
-        Listing {
-            default_branch,
-            worktrees: states,
-            ..
-        },
+    let Listing {
+        default_branch,
+        worktrees: states,
         pull_requests_known,
-    ) = list_worktrees_enriched(repo)?;
+        ..
+    } = list_worktrees_timed(repo)?;
     let mut report = WorktreePruneReport::default();
     let now = SystemTime::now();
 

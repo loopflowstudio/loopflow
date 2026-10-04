@@ -47,6 +47,11 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
   the only ones are four runs in a disposable Home. This needs a release
   carrying the branch installed on Jack Heart's machine, then enough listings
   to report a p95. Until then the Task is not complete.
+- **The captured Flow ends with `task pr land -c`**, which completes the Task
+  at landing. That contradicts the line above; landing without `-c` (or
+  reopening afterwards) is the outcome Jack Heart's contract describes. The
+  running Flow's definition is captured, so editing
+  `.lf/flows/pursue-auto.yaml` would not change it. Unresolved.
 
 ### By measured cost
 
@@ -69,22 +74,20 @@ Measurements and method: `scripts/benchmarks/wt-list/README.md`.
 
 - `engine::git::is_squash_merged` stays: `work/wave/relocate.rs` uses it.
 - Removed: `worktrees::upstream_branch`, `enrich_worktrees_network`,
-  `list_worktrees_local`, `list_worktrees_with_default` (replaced by
-  `list_worktrees_timed`), `ops::wt_diff_stat`.
+  `list_worktrees_local`, `list_worktrees_with_default`,
+  `list_worktrees_enriched` (all replaced by `list_worktrees_timed`, whose
+  `Listing` carries `pull_requests_known` for prune), `ops::wt_diff_stat`, and
+  the report's unprinted `first_at`/`last_at`.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- journal:: ops::wt_timing engine::worktrees harness::dispatch ops::wt`
-  — 55 passed; `--test worktree_tests` — 26 passed; `--bin lf` — 27 passed;
-  `cargo fmt --check` and clippy `-p loopflow --all-targets -D warnings` clean.
-- `--lib -- lf::`: 245 passed, 2 failed inside this Task Session from inherited
-  `LF_RUN_ID`/`LF_FLOW_STEP`; both pass with `LF_*` unset. Not caused by this
-  branch; gate should run with that environment cleared.
-- Real binary, disposable Home, 53 worktrees: three listings recorded and
-  reported; with a 40 s foreign write lock the listing took 17.4 s, warned once,
-  and its sample was recorded with `receipts.unrecorded: 2`.
-- Session recovery (earlier pass):
-  `completed_session_with_exited_provider_does_not_block_task_work` — 4 passed.
+- 2026-10-04, after folding `list_worktrees_enriched` into `list_worktrees_timed`
+  and dropping `first_at`/`last_at`: `cargo test -p loopflow --lib -- ops::wt_timing engine::worktrees ops::wt`
+  with `LF_*` Run variables unset — 34 passed. Earlier passes on this branch
+  (journal, dispatch, `--test worktree_tests`, `--bin lf`, fmt, clippy, the
+  held-write-lock listing at 17.4 s with `receipts.unrecorded: 2`) were not
+  rerun; gate owns the affected suites, with inherited `LF_RUN_ID`/`LF_FLOW_STEP`
+  cleared (two `lf::` tests fail only under them).
 
 ## Acceptance against the Task brief
 

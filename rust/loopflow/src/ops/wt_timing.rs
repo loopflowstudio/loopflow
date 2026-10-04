@@ -212,8 +212,6 @@ pub struct Group {
     pub json: bool,
     pub sync: bool,
     pub samples: usize,
-    pub first_at: i64,
-    pub last_at: i64,
     pub total_ms: Spread,
     pub startup_ms: Spread,
     /// Over the samples that reached the listing; `None` when none did.
@@ -287,8 +285,6 @@ pub fn report(home: &Path) -> std::io::Result<Report> {
                 json,
                 sync,
                 samples: samples.len(),
-                first_at: samples.iter().map(|s| s.at).min().unwrap_or_default(),
-                last_at: samples.iter().map(|s| s.at).max().unwrap_or_default(),
                 total_ms: total(|sample| sample.total_ms),
                 startup_ms: total(|sample| sample.startup_ms),
                 local_git_ms: spread(listings().map(|l| l.local_git_ms).collect()),

@@ -15,14 +15,14 @@ use crate::provider_auth::Provider;
 use crate::session::{AgentSession, SessionKind, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
 
-pub(super) async fn human_input_times(
+pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
-    candidates: &[(AgentSession, Option<i64>)],
+    sessions: impl IntoIterator<Item = &'a AgentSession>,
 ) -> Result<BTreeMap<String, i64>> {
     let mut codex = BTreeMap::<PathBuf, Vec<(String, String)>>::new();
     let mut claude = BTreeMap::new();
     let mut times = BTreeMap::new();
-    for (session, _) in candidates {
+    for session in sessions {
         let provider = match session.provider.as_deref() {
             Some("codex") => Provider::Codex,
             Some("claude") => Provider::Claude,
@@ -33,11 +33,11 @@ pub(super) async fn human_input_times(
         };
         let id = reference.provider_session_id;
         let isolated = store.provider_session_isolated(provider, &id).await?;
-        let account = match reference.account_id {
-            Some(account) => Some(account),
-            None => store.provider_session_account(provider, &id).await?,
-        };
         let home = if isolated == Some(true) {
+            let account = match reference.account_id {
+                Some(account) => Some(account),
+                None => store.provider_session_account(provider, &id).await?,
+            };
             let Some(account) = account else {
                 continue;
             };
@@ -407,9 +407,7 @@ mod tests {
                 "schema_version":1, "provider_session_id":ID, "account_id":account.account_id,
             }}),
         }).unwrap();
-        let times = super::human_input_times(&store, &[(session.clone(), Some(99_000))])
-            .await
-            .unwrap();
+        let times = super::human_input_times(&store, [&session]).await.unwrap();
         assert_eq!(times.get(&session.id), Some(&42_000));
         let retained = store
             .get_provider_account("codex", &account.account_id)

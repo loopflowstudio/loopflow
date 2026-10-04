@@ -65,10 +65,12 @@ Forbidden: sibling selection, background Sessions winning, duplicate launch/reso
 
 Implementation covers the command/shorthand, recorded and native IDs, physical checkout selection, human-input readers, opening receipts, completed conversations and README guidance. No schema or DTO change. The simulated code review found the shared completed-Session rejection; opening now admits completed conversations while mutation/review checks remain intact. The existing launch fixture also needed its native observation keyed to its input so it exercises native resume.
 
+Compression keeps candidate eligibility and opening recency in one SQL statement, removing the intermediate collection and per-candidate application queries. Provider input readers accept Sessions without opening timestamps and resolve account details only for isolated homes. The launch-boundary fixture exposed an undrained stdout pipe: a process sample showed metadata inspection blocked in JSON output, not Session locking. Capture its JSON to a temporary file while polling exit; the regression now passes without changing timeouts or production behavior.
+
 Continue the authored pursue Flow through compress, refresh, decision and publication preparation, then stop at Jack Heart's human demo. Demo the A/B/current-worktree scenario above and native Claude/Codex IDs in real terminals. Jack's demo has not occurred. No publication or review completion has been performed by implementation.
 
 Limits: missing/unsupported native input evidence falls back per Session to opening time, then creation time for older Sessions without opening receipts. Completed conversations need saved native history. IDE dispatch and provider UI readiness have not been exercised in this headless environment; the opening boundary remains successful process/IDE handoff.
 
 Gate owns the broader acceptance commands: `cargo test -p loopflow --test session_cli_tests --test documented_commands`; `cargo test -p loopflow --lib`. Reuse unchanged formatting/Clippy results.
 
-Check result: focused resume CLI (4) and provider-conversation tests (6) pass; opening-projection (1) and existing review-boundary regressions (2) pass; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` pass. Broader suites remain with gate/publication preparation.
+Check result: `cargo test -p loopflow --test session_cli_tests resume` (4), `cargo test -p loopflow --lib provider_conversation` (6), `cargo test -p loopflow --lib resume_candidates_keep_completed_conversations_and_original_opening_times` (1), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` pass; unchanged review-boundary regressions (2) retain their implementation pass. Broader suites remain with gate/publication preparation.

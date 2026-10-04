@@ -324,11 +324,13 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             );
         }
         let selector = id;
+        // Polling exit must not block the child on an undrained JSON pipe.
+        let metadata = home.path().join("metadata.json");
         let mut second = command(
             home.path(),
             &["session", "connect", selector, "--try", "--json"],
         )
-        .stdout(Stdio::piped())
+        .stdout(std::fs::File::create(&metadata).unwrap())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -352,7 +354,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             "Session metadata open waited for the resumed provider to exit"
         );
         assert!(reopened.status.success(), "{:?}", reopened);
-        let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
+        let reopened: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(metadata).unwrap()).unwrap();
         assert!(reopened.get("run_id").is_none());
         let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
             .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();

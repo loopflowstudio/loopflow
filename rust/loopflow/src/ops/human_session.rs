@@ -50,7 +50,11 @@ pub async fn latest_interactive_session(
                 == Some(&current)
         })
         .collect::<Vec<_>>();
-    let human = provider_conversation::human_input_times(store, &candidates).await?;
+    let human = provider_conversation::human_input_times(
+        store,
+        candidates.iter().map(|(session, _)| session),
+    )
+    .await?;
     Ok(candidates
         .into_iter()
         .max_by_key(|(session, opened)| {

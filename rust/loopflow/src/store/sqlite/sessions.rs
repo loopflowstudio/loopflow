@@ -252,29 +252,23 @@ impl SqliteStore {
     pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "{SESSION_SELECT}
+            "SELECT candidates.*, (
+                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+                FROM session_events WHERE session_id=candidates.id AND kind='observed'
+                AND json_extract(payload,'$.type')='interactive_opened'
+            ) AS opened_at FROM ({SESSION_SELECT}
             WHERE s.interactive=1 AND (s.kind!='flow_review' OR
                 (s.completed_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions f
                  WHERE f.pending_session_id=s.id AND f.state='current'
                  AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id
-                    AND t.work_state IN ('done','abandoned')))))"
+                    AND t.work_state IN ('done','abandoned')))))) AS candidates"
         ))?;
-        let sessions = query
-            .query_map([], read_session)?
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut openings = conn.prepare(
-            "SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-            FROM session_events WHERE session_id=?1 AND kind='observed'
-            AND json_extract(payload,'$.type')='interactive_opened'",
-        )?;
-        sessions
-            .into_iter()
-            .map(|session| {
-                let session = session?;
-                let opened = openings.query_row([&session.id], |row| row.get(0))?;
-                Ok((session, opened))
-            })
-            .collect()
+        let rows = query.query_map([], |row| Ok((read_session(row)?, row.get("opened_at")?)))?;
+        rows.map(|row| {
+            let (session, opened) = row?;
+            Ok((session?, opened))
+        })
+        .collect()
     }
 
     pub(crate) fn session_summaries(

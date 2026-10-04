@@ -925,6 +925,27 @@ setup remains unselected. No receipt redesign was selected: switch phase alone
 cannot substitute for durable advancement evidence. Current mechanics and proof
 commands belong in docs/lf.md and TESTING.md.
 
+## Installation and checkout evidence (LOO-292, 2026-10-02)
+
+The accepted September 24 Task brief separates published machine installation
+from preserving checkout updates: install performs no main, Homebrew or uv
+refresh; rebase fetches current upstream and integrates the caller. Scheduling
+is opt-in login plus weekly (Monday 09:00 local), with positional daily/hourly/5min
+alternatives. These decisions supersede the older combined-refresh descriptions.
+
+Preservation is compositional: rebase followed by sibling creation must retain
+unpublished main commits and staged/working/untracked bytes. Equality with origin
+is not the invariant. Version equality alone likewise cannot prove installation
+completeness: inspect the selected receipt, CLI/app/helper hashes and signature.
+The separate daemon was retired; do not restore it from obsolete acceptance notes.
+
+The October 2 operator evidence establishes weekly activation, idempotence and
+initial launchd success. Current 0.12.31 preflight and artifact integrity checks
+pass. Jack Heart reports successful published upgrade and main-Home migration;
+this Task's readback does not establish a before/after preservation audit.
+A single RunAtLoad success proves neither a later login/calendar/wake execution
+nor interactive app acceptance. Preserve those distinctions at the demo review.
+
 ## Shipped
 
 - **Install syncs skills** — installation runs `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. The former combined repo-refresh path is superseded by the installation contract above.

@@ -24,6 +24,7 @@ struct LoopflowApp: App {
         NSWindow.allowsAutomaticWindowTabbing = false
         Perf.begin(Perf.coldStart, "launch", id: "launch",
                    detail: "pre_main_ms=\(Int(Perf.millisecondsSinceProcessStart() ?? -1))")
+        Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in

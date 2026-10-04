@@ -681,12 +681,6 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   establishes a forward boundary; retain later wording changes as dated evidence.
   Append-only PM revisions or provider KR identities remain an instrumentation
   option when a real review needs lineage the archive cannot supply.
-- **LOO-278 delivery is consolidated, Task placement is not** (observed
-  2026-09-23). The combined code and sealed archive are in
-  `loopflow.review-chapter`; the Task still records `loopflow.chapter-planning`
-  and its original serial PR branch. Preserve that checkout and history until
-  supported reassignment exists. Do not infer a binding from copied files,
-  rewrite the registry, or start a second writer. No publication is established.
 
 ## Work and continuity (reconciled 2026-09-23)
 

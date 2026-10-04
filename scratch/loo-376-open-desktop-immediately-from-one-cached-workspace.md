@@ -89,6 +89,4 @@ Before this Task every launch waited on all of these: the window body waited on
 
 ## Checks
 
-- `scripts/test_desktop.sh -Xswiftc -gnone --filter "<16 workspace, navigation, Session-store and roadmap suites>"`: 124 tests passed (2026-10-04), including 14 `WorkspaceCacheTests`. Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
-- `startup.py run --samples 20` on a fresh capture of Jack's Home: passed; receipt replaced in `20261004-startup-inprocess/`. In-process timing only.
-- Compress: `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|RoadmapViewTests|SessionsStoreTests"`: 76 tests in 7 suites passed.
+- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests"`: 14 passed after merging main at `4bff3b7f7` (2026-10-04); the 124-test pre-merge run over 16 workspace suites and `startup.py run --samples 20` (in-process timing only) still apply to unchanged code. Full suite and Xcode app build: gate. Rendered startup runner: item 1, a host with an Aqua session.

@@ -71,7 +71,7 @@ Neither pass requires Discord or a schedule. VSM makes five sequential skill
 invocations, without requiring five reports or five actions. `wave/operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
-Each pass reads dated evidence, aims for one or two useful authorized moves,
+Each pass reads dated evidence, aims for one or two useful moves,
 and replies in the invoking conversation. Evidence determines how much is
 worthwhile; the number is guidance. A no-action result is useful when
 the evidence supports it. Failed reads and stale provider data remain explicit
@@ -128,7 +128,7 @@ the command never selects an arbitrary historical plan.
 There is no transaction across Linear mutations or across Homes. A second Home
 observes the same statuses on `lf refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
-A successful preview does not authorize ignoring later external reassignments.
+Recheck external reassignments after previewing.
 
 Set the Project's default Flow in its content:
 
@@ -152,7 +152,7 @@ If no receipt identifies the old current Project, adoption requires a single
 unambiguous candidate. Resolve competing plans in Linear; names and dates never
 break the tie. A missing default stays missing: set `flow:` before rotation.
 Unobserved backlog on another Home is unresolved, so a missing local Task row
-never authorizes cancellation.
+never establishes that work should be canceled.
 
 ## The Goal
 

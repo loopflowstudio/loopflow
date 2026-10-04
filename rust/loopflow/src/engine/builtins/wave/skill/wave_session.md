@@ -32,8 +32,8 @@ become a second driver.
 - Before acting on a Task, check for a live worker, a pending review, or a
   recovery already under way. If one exists, leave it alone and say so.
 - A failed read, a stale plan or unknown liveness never proves an empty backlog,
-  a finished Task, or permission to close or restart work. Name the gap.
-- Read failed work's existing status and logs. Resolve authorized impediments and
+  a finished Task, or a reason to close or restart work. Name the gap.
+- Read failed work's existing status and logs. Resolve impediments and
   discuss missing decisions here in the Wave context. Retry through existing Task
   controls only after new evidence or direction warrants it.
 - Authored Task reviews stay in their own Sessions. Tell the user which review
@@ -44,14 +44,7 @@ become a second driver.
 ## Develop direction
 
 When the user brings an idea, read `lf skill show capture-tasks` and follow it
-in this conversation. Existing operational authority is unchanged; keep
-operating this Wave's Tasks within that authority.
-
-## Limits
-
-This conversation grants no authority beyond the user's existing authorization.
-Inspection is read-only. Ask before pushing, merging, external messages or
-destructive operations unless already authorized.
+in this conversation. Keep operating this Wave's Tasks while capturing new work.
 
 ## Persistent workspace and document publication
 

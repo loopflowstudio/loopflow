@@ -13,7 +13,8 @@ Started unfinished Tasks move with identity, Started timestamp, worktree, PR
 and captured execution intact. Proven untouched backlog becomes abandoned
 locally and canceled in Linear; its issues and history remain. Terminal Tasks
 stay historical unless current execution evidence conflicts. Unresolved
-dispositions require reconciliation; missing evidence never authorizes retirement.
+dispositions require reconciliation; missing evidence never establishes
+that work should be retired.
 
 ## Brief, then accept direction
 
@@ -62,7 +63,7 @@ not negotiable per-Task prompt choices; changed evidence is reconciled by the AP
 
 Apply accepted Wave charter edits in this Task worktree and connect accepted
 new Waves. Preserve existing Linear Projects. For an authored successor plan,
-create or edit its Planned Project in Linear through an available authorized
+create or edit its Planned Project in Linear through an available
 provider interface, retaining its Wave Initiative and repository Team. There is
 no `lf` command to write a future Project plan; report that exact limitation if
 no provider writer is available. Never use `wave update-plan` to write a future
@@ -117,9 +118,8 @@ alone does not prove separately accepted plan edits or Task creation succeeded.
 Curate durable lessons into Wave memory and retain useful decisions and evidence
 in existing durable records before scratch cleanup. Linear retains Project
 plans and history; do not create a second local chapter owner. Checkpoint
-coherent repository edits with `lf commit`. Obtain push authority unless already
-given, then use the selected PR workflow; default to `lf pr submit` for a manual
-merge. Until merged, explicitly report that operational application is complete
+coherent repository edits with `lf commit`. Use the selected PR workflow; default
+to `lf pr submit` for a manual merge. Until merged, explicitly report that operational application is complete
 but repository publication is pending. Corrections append dated observations;
 never rewrite earlier evidence.
 
@@ -139,9 +139,8 @@ Mark possible solutions as tentative. Keep architecture, implementation steps,
 and detailed proof in the design, linked and available to the worker.
 
 Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments when posting
-is authorized. A comment should say what changed and what it means; link detailed
-receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
+changes, launch attempts, and verification updates in Task comments.
+A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
 dated application evidence in existing records. Proposals draft comments without posting.
 Do not use a description update or worker steering as a substitute log channel.
 
@@ -168,5 +167,5 @@ In operational lists, put the ID first: `[Task ID or PR number · Title](known U
 
 Apply these rules within the chapter’s existing proposal and acceptance boundaries.
 Preserve the accepted brief when applying it; retain dated application evidence;
-summarize relevant changes in authorized Task comments, never
+summarize relevant changes in Task comments, never
 prepend or append allocation logs to the description.

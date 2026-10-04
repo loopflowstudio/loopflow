@@ -1,5 +1,5 @@
 ---
-requires: a reviewable change and publication authority
+requires: a reviewable change
 produces: published or updated PR
 ---
 Publish the current change when the caller's publication boundary is satisfied.

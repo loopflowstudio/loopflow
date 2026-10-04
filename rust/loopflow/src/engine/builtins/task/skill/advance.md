@@ -3,7 +3,7 @@ description: Move the current Loopflow work forward from a review, an existing T
 action_style: procedural
 ---
 Advance the work the User is discussing. Resolve the context, carry out the next
-authorized action, and report what actually started or what is waiting.
+action, and report what actually started or what is waiting.
 
 Read the current conversation and scratch design, then run `lf session list --json`. Use explicit Task identity or the current checkout's tracked Task;
 never select a different Task merely because it is the only waiting session.
@@ -54,10 +54,10 @@ Ask only when intent or placement cannot be resolved from available evidence.
 
 Check installed CLI help before mutation when command availability is uncertain.
 If Advance is unavailable, report that limitation and use existing Task/Session
-commands only when they express the same authorized action. Do not claim an old
+commands only when they express the same action. Do not claim an old
 finite Flow will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
 After completing a Session, refresh `lf session list --json` and the Task status.
 Report the Task link, actual running step or wait, and the next human boundary.
-Respect the selected delivery policy; advancing design is not permission to merge.
+Follow the selected delivery policy through its review and merge steps.

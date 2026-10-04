@@ -74,8 +74,8 @@ GitHub and complete the Task only after an authoritative merge.
 
 ## Guardrails
 
-- Invoking this skill authorizes sync, commit, push, and auto-merge for the
-  recorded PR. Route mutations through `lf`.
+- Sync, commit, push, and enable auto-merge for the recorded PR.
+  Route mutations through `lf`.
 - Stay scoped to the CI failures and their prevention; prefer targeted fixes.
 - Do not call `lf land`, spawn another watcher, or wait for merge. Return
   after the repaired head is published and armed; a later check observes delivery.

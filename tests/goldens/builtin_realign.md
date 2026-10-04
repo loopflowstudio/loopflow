@@ -39,9 +39,7 @@ It preserves an existing PR's readiness. Publish/submit/arm/land make drafts rea
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
-Do not ask permission for reversible edits or local tests. Ask before pushing,
-PR mutations, external messages or other external side effects, and destructive
-operations unless already authorized by the user or selected workflow.
+Do not ask permission for reversible edits or local tests.
 
 ## Checks and Flow boundaries
 
@@ -51,8 +49,8 @@ checks to a capable later step and human judgment to demo/review; neither blocks
 earlier work. Record a one-line result in scratch, not a verification ledger.
 Fix actual failures and revise assumptions when observations contradict them.
 
-Delegate only when authorized and when an independent subset makes the problem
-smaller. Keep the main blocker inline. A supplied Flow is an instruction;
+Delegate when an independent subset makes the problem smaller. Keep the main
+blocker inline. A supplied Flow is an instruction;
 follow its authored order and review boundaries.
 
 ## Speak and inspect
@@ -70,10 +68,10 @@ ask when possible or leave the attribution explicitly unresolved. Do not write
 approval without evidence.
 
 Answer the user in this conversation. Never open another
-session merely to reach them. Headless work that lacks required input or
-authorization explains its failure in ordinary output and stops. The Wave
+session merely to reach them. Headless work that lacks required input explains
+its failure in ordinary output and stops. The Wave
 operator reads existing logs and discusses unresolved judgment in its ongoing
-Wave chat. Taskless callers receive the failure. Respect existing authorization.
+Wave chat. Taskless callers receive the failure.
 A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
@@ -123,11 +121,11 @@ conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary contribution explicitly with
-`lf --task <task> : "<prompt>"`. When required input or authorization is missing,
+`lf --task <task> : "<prompt>"`. When required input is missing,
 explain the failure in ordinary output and stop. Existing logs and outcomes are
 sufficient; no extra report, conversation, or notification is required.
 
-For reversible ambiguity within existing authorization, record a material
+For reversible ambiguity, record a material
 assumption in `scratch/questions.md` and proceed with the simpler safe choice.
 
 No rendering environment. Output is logged, not displayed.
@@ -193,9 +191,8 @@ Bring the plan and the implementation into agreement with what the work has taug
    existing memory. Attribute decisions by name and preserve contrary evidence
    and limits of the observations. Keep the live implementation plan in its own artifact;
    memory carries what future Wave work should know, not a copy of the pass.
-   Follow the repository's memory workflow. If identified memory is unavailable
-   or cannot be updated within the supplied authority, state that exact gap
-   and continue the independent local corrections.
+   Follow the repository's memory workflow. If identified memory is unavailable,
+   state that exact gap and continue the independent local corrections.
 
 4. Check the resulting agreement. The plan must distinguish what exists from
    what remains, and the code must support claims of completed behavior. Verify

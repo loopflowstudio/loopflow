@@ -313,6 +313,7 @@ Loopflow has never seen is kept as a new explicit-only account.
 |---|---|---|
 | Where the home's login lives | `auth.json` | macOS Keychain item; `.credentials.json` elsewhere |
 | A process already running | keeps the login it started with until it restarts | follows the switch |
+| A turn in flight during a switch | may fail once; a headless run resumes it under the new account | continues |
 | Whose login the home holds | read from the login | asked of Claude once after Claude refreshes it |
 
 A Claude login names no person. After Claude refreshes the home's login,

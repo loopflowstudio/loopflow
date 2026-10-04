@@ -864,6 +864,10 @@ pub enum AgentFailure {
     /// The provider process reported a retryable connection failure.
     #[error("provider transport")]
     Transport,
+    /// The provider home's account changed under a running Codex, which
+    /// fails one turn and then works again.
+    #[error("provider account switched")]
+    AccountSwitched,
     /// The selected managed account exhausted a subscription window.
     #[error("account subscription limit")]
     AccountSubscriptionLimit { resets_at: Option<i64> },
@@ -1457,7 +1461,11 @@ fn _classify_provider_error_value<T>(
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
     let text = text.to_ascii_lowercase();
-    if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
+    if text.contains("application network permission was revoked")
+        || text.contains("application network policy is unavailable")
+    {
+        Some(AgentFailure::AccountSwitched)
+    } else if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
         Some(AgentFailure::Capacity)
     } else if text.contains("rate limit")
         || text.contains("rate_limit")
@@ -3450,6 +3458,40 @@ trust_level = "trusted"
             result.failure,
             Some(AgentFailure::AccountSubscriptionLimit { .. })
         ));
+    }
+
+    #[test]
+    fn a_turn_cut_off_by_an_account_switch_is_retried() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let mut attempts = 0;
+
+        let result = _exec_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                Ok(managed_attempt(if attempts == 1 {
+                    let mut failed = AgentExecResult {
+                        exit_code: 1,
+                        ..Default::default()
+                    };
+                    failed.stderr = "codex_error: Fatal error: application network permission \
+                                     was revoked\n"
+                        .into();
+                    failed
+                } else {
+                    AgentExecResult::default()
+                }))
+            },
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!((result.exit_code, result.failure, attempts), (0, None, 2));
     }
 
     #[test]

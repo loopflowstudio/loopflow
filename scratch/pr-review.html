@@ -68,13 +68,14 @@ enum AccountLogin {
         profile: PathBuf,
     },
     /// The origin of an `lf ssh` session owns the login and lends one access
-    /// token, which lives only in the provider&#x27;s environment.
+    /// token, which is never written here. Claude takes it from its
+    /// environment; a Codex engine is handed it over its protocol.
     Lent {
         client: lease::AccountLeaseClient,
         access_token: String,
-    },
-}</code></pre></figure>
-<figure><figcaption><b>ProviderAccountRoute::apply, launch_as</b> <span>rust/loopflow/src/provider_account.rs:436–483</span> · working tree, unpublished</figcaption><pre><code>fn apply(&amp;self, command: &amp;mut Command) {
+    },</code></pre></figure>
+<figure><figcaption><b>ProviderAccountRoute::apply, launch_as</b> <span>rust/loopflow/src/provider_account.rs:436–483</span> · working tree, unpublished</figcaption><pre><code>
+fn apply(&amp;self, command: &amp;mut Command) {
     for name in PROVIDER_CREDENTIAL_ENV_VARS {
         // A shared launch keeps the home its caller chose. A home inherited
         // from an isolated parent is cleared, so the provider falls back to
@@ -91,39 +92,38 @@ enum AccountLogin {
     {
         command.env(name, self.account_home());
     }
-    if let AccountLogin::Lent { access_token, .. } = &amp;self.login {
-        match self.provider {
-            Provider::Claude =&gt; command.env(&quot;CLAUDE_CODE_OAUTH_TOKEN&quot;, access_token),
-            _ =&gt; command.env(&quot;CODEX_ACCESS_TOKEN&quot;, access_token),
-        };
+    // Codex has no variable for a ChatGPT login; see `engine_login`.
+    if let (Provider::Claude, AccountLogin::Lent { access_token, .. }) =
+        (self.provider, &amp;self.login)
+    {
+        command.env(&quot;CLAUDE_CODE_OAUTH_TOKEN&quot;, access_token);
     }
 }
 
-/// The one place a launch takes on an account. Every route configures
-/// `command`; a shared route on a stored login first signs the native home
-/// in as its account, doing nothing when that account is already active.
-/// Hold the returned lock until the child has spawned.
-pub(crate) async fn launch_as(
-    &amp;self,
-    command: &amp;mut Command,
-) -&gt; Result&lt;Option&lt;fs::File&gt;, ProviderAccountError&gt; {
-    self.apply(command);
-    if let (RouteHome::Isolated, AccountLogin::Lent { .. }) = (&amp;self.home, &amp;self.login) {
-        let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from(&quot;.&quot;));
-        ensure_account_home_at(&amp;operator_home, &amp;self.account_home(), self.provider)?;
+/// The `account/login/start` request that signs a Codex engine in with a
+/// lent token, held in the engine&#x27;s memory. `None` for every other route,
+/// whose login the engine reads from its home.
+pub(crate) fn engine_login(&amp;self) -&gt; Result&lt;Option&lt;serde_json::Value&gt;, ProviderAccountError&gt; {
+    match (self.provider, &amp;self.login) {
+        (Provider::Codex, AccountLogin::Lent { access_token, .. }) =&gt; {
+            let mut login = self.engine_tokens(access_token)?;
+            login[&quot;type&quot;] = &quot;chatgptAuthTokens&quot;.into();
+            Ok(Some(login))
+        }
+        _ =&gt; Ok(None),
     }
-    let (RouteHome::Shared { cause, .. }, AccountLogin::Stored { store, .. }) =
-        (&amp;self.home, &amp;self.login)
-    else {
-        return Ok(None);
-    };
-    let launch_home =
-        activation::home_env(self.provider).and_then(|name| launch_env(command, name));
-    let native = activation::native_home(self.provider, launch_home.as_deref());
-    activation::activate(store, self.provider, &amp;self.account_id, &amp;native, *cause).await
-}</code></pre></figure>
+}
+
+/// A fresh lent token for an engine whose own was refused. Only the
+/// origin can renew it.
+pub(crate) fn renew_engine_login(&amp;self) -&gt; Result&lt;serde_json::Value, ProviderAccountError&gt; {
+    let AccountLogin::Lent { client, .. } = &amp;self.login else {
+        return Err(ProviderAccountError::Runtime(
+            &quot;this account&#x27;s login is renewed in its own home&quot;.into(),
+        ));
+    };</code></pre></figure>
 <p class="note">All five launch sites call <code>launch_as</code>. The returned lock is held until the child has spawned, so a concurrent switch cannot swap the login mid-launch. Nothing records the launch as a running shared agent; that record is what “everyone now” still needs.</p>
-<p class="note">A lent account runs shared or isolated like a stored one, and its token exists only in the provider’s environment: nothing is written to the SSH target. For Codex that variable is <code>CODEX_ACCESS_TOKEN</code>, which the code elsewhere records as the wrong credential type for a ChatGPT login. That is unchanged from the base and has never been exercised over a real SSH session.</p>
+<p class="note">A lent account runs shared or isolated like a stored one, and its token is never written to the SSH target. Claude takes it from its environment. Codex has no variable for a ChatGPT login, so Loopflow signs its Codex engine in over the app-server protocol and the token stays in that process’s memory.</p>
 <p class="note">No terminal transcript here: a real launch spends a real account. The Codex fixture ran it against a synthetic provider and observed that the engine received neither <code>CODEX_HOME</code> nor a credential variable, and that plain Codex listed and resumed the conversation. See <a href="#evidence">Evidence</a>.</p>
 
 <h2 id="switch"><small>2</small>Switching saves the old login before installing the new one</h2>
@@ -282,27 +282,27 @@ Error: managed codex login &#x27;nobody@example.com&#x27; does not exist
 
 <h2 id="resume"><small>3</small>Reopening follows how the conversation was started</h2>
 <p><code>recorded</code> is <code>Some(false)</code> for a shared conversation, <code>Some(true)</code> for an isolated one, and <code>None</code> for a new one, which takes the launch’s mode. Rows from before this change default to isolated, so old conversations open where they were captured.</p>
-<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:882–902</span> · working tree, unpublished</figcaption><pre><code>pub(crate) async fn resolve_provider_account_exact(
-    provider: Provider,
-    provider_session_id: Option&lt;&amp;str&gt;,
-    exact_account_id: Option&lt;&amp;ProviderAccountId&gt;,
-) -&gt; Result&lt;Option&lt;ProviderAccountRoute&gt;, ProviderAccountError&gt; {
-    ensure_supported(provider)?;
-    let store = route_store().await?;
-    // A conversation resumes in the home it started in; a new one follows the
-    // launch&#x27;s mode.
-    let recorded = match (&amp;store, provider_session_id) {
-        (Some(store), Some(session_id)) =&gt; {
-            store
-                .provider_session_isolated(provider, session_id)
-                .await?
-        }
-        _ =&gt; None,
-    };
-    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
-    // A shared conversation resumes under whichever account is active; the
-    // account it began under is history, not a pin.
-    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));</code></pre></figure>
+<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:882–902</span> · working tree, unpublished</figcaption><pre><code>    provider: Provider,
+    account: &amp;ProviderAccount,
+    accounts: &amp;[ProviderAccount],
+) -&gt; Result&lt;String, ProviderAccountError&gt; {
+    let home =
+        account
+            .home
+            .as_deref()
+            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                provider,
+                account_id: account.account_id.clone(),
+                reason: &quot;managed account has no native credential home&quot;.to_string(),
+            })?;
+    identity::check_current_identity(account, accounts)
+        .await
+        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    let home = activation::credential_home(provider, home);
+    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, &amp;home)
+        .await
+        .map_err(|error| ProviderAccountError::ForwardingCredential {
+            provider,</code></pre></figure>
 <figure><figcaption><b>provider_conversation::recorded</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/ops/human_session/provider_conversation.rs#L18-L29">rust/loopflow/src/ops/human_session/provider_conversation.rs:18–29</a> · a79921045</figcaption><pre><code>pub(crate) async fn recorded(store: &amp;SharedStore, id: &amp;str) -&gt; Result&lt;Option&lt;AgentSession&gt;&gt; {
     let sessions = store.sqlite.sessions_for_provider_thread(id)?;
     match sessions.as_slice() {
@@ -510,8 +510,9 @@ let connected = async {
 <table><thead><tr><th>Question</th><th>Where it stands</th></tr></thead><tbody>
 <tr><td data-label="Question">Moving running agents to the new account (“everyone now”)</td><td data-label="Where it stands">Not built; the switch log already allows <code>everyone_now</code>. Interrupting a turn moves sooner but risks a tool running twice; waiting for the turn to end delays the move. The research on what an interrupted session feels like has not been done.</td></tr>
 <tr><td data-label="Question">Should the other account verbs also put the provider first?</td><td data-label="Where it stands">Jack named <code>lf account codex use …</code>. The other four verbs were left as they are, so the namespace is currently mixed.</td></tr>
-<tr><td data-label="Question">A switch while a Codex turn is in flight</td><td data-label="Where it stands">New finding. In 3 of 4 fixture runs today, a running Codex turn died with “application network permission was revoked” in the same second the switch rewrote <code>auth.json</code>. Three runs earlier in the day passed. So “a running Codex process keeps the login it started with” is not safe to rely on mid-request. One failing run was traced.</td></tr>
-<tr><td data-label="Question">A lent Codex account</td><td data-label="Where it stands">Gets an environment variable Codex probably does not accept for a ChatGPT login. The environment-only fix would be supplying the token to the Codex app-server over its protocol; not built. Writing a login file works but puts the token on the target’s disk, which Jack rejected.</td></tr>
+<tr><td data-label="Question">A switch while a Codex turn is in flight</td><td data-label="Where it stands">Reproduced without Loopflow. Changing which account <code>auth.json</code> holds makes Codex fail one turn with “application network permission was revoked”: the in-flight turn in 6 of 12 runs when released half a second later, otherwise usually the next turn. A rotated token for the same account never does (36 of 36 clean), and an idle engine left two seconds is fine. So “a running Codex process keeps the login it started with” holds, but a turn in flight across a switch is not safe. Undecided: retry that one turn, or only switch between turns.</td></tr>
+<tr><td data-label="Question">Lent Codex relies on an interface OpenAI marks internal</td><td data-label="Where it stands">A lent Codex account now signs its engine in over the app-server protocol, in memory, with nothing on disk. Codex’s schema labels that login “[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE”. Probed with a synthetic token only; never run against OpenAI or over a real SSH session.</td></tr>
+
 <tr><td data-label="Question">Resuming a lent isolated conversation</td><td data-label="Where it stands">The origin’s record of the conversation does not say whether it was shared or isolated, so a resume follows the launch’s mode and can look in the wrong home.</td></tr>
 <tr><td data-label="Question">A login Loopflow has never seen</td><td data-label="Where it stands">Kept as a new account marked <code>explicit_only</code>, as the transcript shows. An implementation choice awaiting confirmation.</td></tr>
 <tr><td data-label="Question">A Wave-level isolation default</td><td data-label="Where it stands">Repository and Home <code>isolate: true</code> work, with <code>--shared</code> to override. Whether a Wave needs its own is open.</td></tr>
@@ -521,7 +522,7 @@ let connected = async {
 <h2 id="evidence">Evidence</h2>
 <table><thead><tr><th>Check</th><th>What it supports</th></tr></thead><tbody>
 <tr><td data-label="Check">Provider-account unit tests (50), <code>agent_tests</code>, <code>auth_tests</code>, rerun after the route collapse</td><td data-label="What it supports">All pass. The lease test asserts that a lent account runs shared with only a token in its environment, and isolated with a home that holds no login.</td></tr>
-<tr><td data-label="Check">Codex shared-home fixture, rerun on this working tree: intermittent</td><td data-label="What it supports">Passed 3 of 3 before the route split and 1 of 4 after. Every failure is the same step: the agent held mid-turn across a switch exits 1. The traced failure is Codex aborting the turn, described under open decisions. When it passes it shows, with synthetic logins and a local provider: a Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
+<tr><td data-label="Check">Codex shared-home fixture, rerun on this working tree: intermittent</td><td data-label="What it supports">Intermittent: 1 pass in 4 recent runs. Every failure is the step that holds an agent mid-turn across a switch, which the reproduction under open decisions shows Codex itself breaks about half the time. When it passes it shows, with synthetic logins and a local provider: a Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
 <tr><td data-label="Check">Transcripts above</td><td data-label="What it supports">Captured in this session from the working-tree binary. They exercise the switch command only, not a provider.</td></tr>
 <tr><td data-label="Check">Parse test for the new command spelling; <code>cargo clippy --all-targets -- -D warnings</code></td><td data-label="What it supports">Run in this session on the working tree; both pass.</td></tr>
 <tr><td data-label="Check">Public-connect fixture; Session, Exec and lifecycle tests; Claude fixture</td><td data-label="What it supports">Recorded as passing at <code>a79921045</code> or earlier. Not rerun here.</td></tr>

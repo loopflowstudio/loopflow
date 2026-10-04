@@ -81,7 +81,16 @@ distinct from Loopflow's refusal to connect some completed Sessions.
 
 **Codex holds its login for the life of the process; a fresh process takes the native one.** Probe, synthetic credentials in a temporary home, Codex 0.160.0: an app-server started under A still reported A's token after the native `auth.json` was replaced with B's, including after a refresh request; a second process started afterward reported B; the native file still belonged to B. The binary also carries “Skipping auth reload due to account id mismatch” and “…you have since logged out or signed in to another account.” Consequences: activation cannot be clobbered by a running Codex agent; a running shared Codex agent does not move by itself and must be resumed to move.
 
-**A switch can kill a running Codex turn.** Observed 2026-10-04 with Codex 0.160.0 in the shared-home fixture: in 3 of 4 runs the held agent's turn failed with “Fatal error: application network permission was revoked” in the same second `lf account codex use` rewrote the native `auth.json` (switch log 07:28:59, error 07:28:59.690); the engine process survived, the turn did not. The three runs earlier that day passed. Not caused by the route change as far as the trace shows, but only one failing run was traced. This contradicts “from now on leaves a running shared agent alone” for an agent mid-request, and bears on the slice 3 research.
+**Changing the account in `auth.json` breaks one turn of a running Codex.** Reproduced 2026-10-04 without Loopflow, Codex 0.160.0, synthetic logins and a local provider (`scratch/codex_auth_switch_repro.py <fixture> <runs> <variants>`): an app-server holds a turn at the provider while its home's `auth.json` changes, six runs per case.
+
+| Change while a turn is in flight | Turn outcome |
+|---|---|
+| none; same bytes rewritten; same account with a rotated refresh token | completed, 36 of 36 |
+| a different account, by atomic rename or in place, released at once | completed, 12 of 12 |
+| a different account, released 0.5 s later | failed 6 of 12: “Fatal error: application network permission was revoked” |
+| file deleted | failed 5 of 12, same error or “application network policy is unavailable” |
+
+The damage is one turn, not the engine: when the in-flight turn survives, the next turn on that thread usually fails instead (8 of 12), and when it fails, the next completes. An idle engine switched and left for two seconds ran two turns cleanly, 12 of 12. So Codex notices the identity change within about a second and drops something network-related that the next request then trips over. This is why the shared-home fixture's “from now on leaves a running shared agent alone” step now fails intermittently, and it corrects the finding above: a running Codex keeps its login, but a turn in flight across the switch is not safe. Not yet decided: retry that one failed turn, or only switch between turns. Bears on slice 3.
 
 **Codex's native store is a file here.** `~/.codex/config.toml` sets no `cli_auth_credentials_store` and `~/.codex/auth.json` exists. Activation writes that file. A native config that selects the keyring is an error state below, not a second writer.
 

@@ -39,7 +39,11 @@ lf --task EXP-12 flow start incident # choose a template for new work
 it cannot override a Task's owning Wave. A named direct Flow creates an
 independent FlowSession. `flow start` preserves the Task's selected Flow and
 saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
-explicitly replaces the Task's workflow.
+explicitly replaces the Task's workflow. A waiting review is retired with its
+history intact; its exact service, driver and provider execution must exit before
+the replacement starts. Retirement does not approve the review. If interruption
+leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
+unresolved process ownership still block admission.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files

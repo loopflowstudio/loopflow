@@ -10,6 +10,7 @@ use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::store::Store;
 use loopflow::work::task::Task;
 use loopflow_test_support::TestRepo;
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 fn flow(store: &Store, task: &Task, review: bool) -> String {
@@ -48,6 +49,11 @@ fn flow(store: &Store, task: &Task, review: bool) -> String {
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in
+        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+    {
+        command.env_remove(name);
+    }
     command
         .args(args)
         .current_dir(repo)
@@ -193,5 +199,396 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
                 .id,
             registered.pr.id
         );
+    }
+}
+
+struct ReviewProcess {
+    pid: u32,
+    exited: std::sync::mpsc::Receiver<std::process::ExitStatus>,
+    stop: std::sync::mpsc::Sender<()>,
+    waiter: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ReviewProcess {
+    fn start() -> Self {
+        let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+        let pid = child.id();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let (done, exited) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                let _ = done.send(status);
+                break;
+            }
+            if stopped.try_recv().is_ok() {
+                let _ = child.kill();
+                let _ = done.send(child.wait().unwrap());
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        });
+        Self {
+            pid,
+            exited,
+            stop,
+            waiter: Some(waiter),
+        }
+    }
+
+    fn record_exec(&self, home: &Path, conn: &rusqlite::Connection) -> loopflow::id::ExecId {
+        let id = loopflow::id::ExecId::new();
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?1,?2)",
+            rusqlite::params![id, now],
+        )
+        .unwrap();
+        let root = home.join("runtime/exec-processes");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(format!("{}.json", self.pid)),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version":1, "trace_id":id, "exec_id":id, "pid":self.pid,"started_at":now
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        id
+    }
+}
+
+impl Drop for ReviewProcess {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        self.waiter.take().unwrap().join().unwrap();
+    }
+}
+
+#[test]
+fn waiting_review_restart_retires_exact_execution_and_retries_interrupted_stop() {
+    for boundary in ["complete", "interrupted", "unknown", "independent"] {
+        let _env = support::EnvGuard::new(&[
+            ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\n[ -z \"$LF_TEST_LAUNCH_FAIL\" ] || exit 1\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >\"$LF_TEST_WORKER_LOG\" 2>&1 &\nfi\nexit 0\n"),
+            ("open", "#!/bin/sh\nexit 0\n"),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+            ("kill", "#!/bin/sh\nif [ -n \"$LF_TEST_RESTART_PAUSE\" ]; then touch \"$LF_TEST_RESTART_PAUSE\"; sleep 2; exit 1; fi\nexec /bin/kill \"$@\"\n"),
+        ]);
+        let repo = TestRepo::new();
+        support::bind_task_planning(&repo);
+        repo.create_branch("restart-review");
+        let home = tempfile::tempdir().unwrap();
+        let registered = support::register_task(
+            home.path(),
+            &repo.path().canonicalize().unwrap(),
+            "restart-review",
+            &repo.head_sha(),
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let old_id = flow(&registered.store, &registered.task, true);
+        let old = runtime
+            .block_on(registered.store.task_flow(&registered.task.id))
+            .unwrap()
+            .unwrap();
+        let waiting = runtime
+            .block_on(registered.store.reserve_task_review(old.id(), old.version))
+            .unwrap();
+        let id = waiting.pending_session_id.as_ref().unwrap();
+        let sqlite =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let session = sqlite.session(id).unwrap().unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let service = ReviewProcess::start();
+        let driver = ReviewProcess::start();
+        let provider = ReviewProcess::start();
+        let unrelated = ReviewProcess::start();
+        let service_exec = service.record_exec(home.path(), &conn);
+        let driver_exec = driver.record_exec(home.path(), &conn);
+        let owner = sqlite
+            .claim_session_driver(id, None, &driver_exec, true)
+            .unwrap();
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+            VALUES(?1,'observed',?2,?3,1,'{\"type\":\"review_service\"}',?4)",
+            rusqlite::params![id, format!("review_service:{service_exec}"),service_exec,session.captured]).unwrap();
+        // The service has its own exact receipt; neither capture nor driver names it.
+        conn.execute("UPDATE agent_sessions SET input_published=1,provider='sleep',provider_thread='retained-native-thread' WHERE id=?1", [id]).unwrap();
+        let prefix = &session
+            .artifact_key
+            .strip_prefix("run_")
+            .unwrap_or(&session.artifact_key)[..2];
+        let dir = home
+            .path()
+            .join("runs")
+            .join(prefix)
+            .join(&session.artifact_key);
+        fs::create_dir_all(dir.join("provider-clients")).unwrap();
+        fs::write(dir.join("manifest.json"), serde_json::to_vec(&serde_json::json!({
+            "schema_version":1, "artifact_key":session.artifact_key,
+            "created_at":OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
+            "harness":"sleep", "surface":"tui", "cwd":repo.path(), "subjects":[],"host":"fixture"
+        })).unwrap()).unwrap();
+        fs::write(dir.join("provider-clients").join(format!("{}.json",provider.pid)), serde_json::to_vec(&serde_json::json!({
+            "schema_version":1,"pid":provider.pid,"terminal_id":null,
+            "started_at":OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap()
+        })).unwrap()).unwrap();
+        fs::write(dir.join("native-history"), "retained provider history").unwrap();
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload,captured_event)
+            VALUES(?1,'started','original-turn','retained-native-thread','turn',1,'{}',?2)",rusqlite::params![id,session.captured]).unwrap();
+        fs::write(
+            repo.path().join(".lf/flows/proof.yaml"),
+            "- cmd: task sync --plan\n- step:\n    name: demo\n    id: review\n    human: true\n",
+        )
+        .unwrap();
+        if boundary == "unknown" {
+            fs::remove_file(
+                home.path()
+                    .join("runtime/exec-processes")
+                    .join(format!("{}.json", service.pid)),
+            )
+            .unwrap();
+        }
+        if boundary == "independent" {
+            let mut independent = session.clone();
+            independent.id = "independent-review".into();
+            independent.captured = None;
+            independent.artifact_key = "run_00000000000000000000000000001234".into();
+            independent.flow_session_id = None;
+            independent.input_published = true;
+            runtime
+                .block_on(registered.store.create_session(independent, None))
+                .unwrap();
+        }
+        let restart = || {
+            let mut command = command(
+                repo.path(),
+                home.path(),
+                &["task", "restart", "INF-123", "--flow", "proof", "--json"],
+            );
+            command
+                .env("HTTPS_PROXY", "http://127.0.0.1:1")
+                .env("HTTP_PROXY", "http://127.0.0.1:1");
+            command
+        };
+        if boundary == "interrupted" {
+            let paused = home.path().join("stopping-driver");
+            let log = fs::File::create(home.path().join("interrupted.log")).unwrap();
+            let mut child = restart()
+                .env("LF_TEST_RESTART_PAUSE", &paused)
+                .stdout(log.try_clone().unwrap())
+                .stderr(log)
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !paused.exists() {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "{}",
+                    fs::read_to_string(home.path().join("interrupted.log")).unwrap()
+                );
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            child.kill().unwrap();
+            child.wait().unwrap();
+            assert_eq!(
+                runtime
+                    .block_on(registered.store.task_flow(&registered.task.id))
+                    .unwrap()
+                    .unwrap()
+                    .id(),
+                old_id
+            );
+            assert!(sqlite.session(id).unwrap().unwrap().completed_at.is_some());
+            assert!(sqlite
+                .record_session_connection(id, &owner, "stale", "stale")
+                .is_err());
+            assert!(sqlite
+                .claim_session_driver(
+                    id,
+                    sqlite.session_driver(id).unwrap().as_ref(),
+                    &driver_exec,
+                    false
+                )
+                .is_err());
+            assert!(fs::read_dir(dir.join("provider-clients"))
+                .unwrap()
+                .next()
+                .is_none());
+            assert_eq!(conn.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:stopped'",[id],|row| row.get::<_, i64>(0)).unwrap(),0);
+        }
+        let output = if boundary == "launching" {
+            let root = home.path().join("human-sessions");
+            fs::create_dir_all(&root).unwrap();
+            let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
+            let lock = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(root.join(format!(".{name}.launch.lock")))
+                .unwrap();
+            fs2::FileExt::lock_exclusive(&lock).unwrap();
+            let child = restart()
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(250));
+            assert!(sqlite.session(id).unwrap().unwrap().completed_at.is_none());
+            // Finish an in-flight launch while holding its real lock. The new
+            // exact child must be included after restart acquires that lock.
+            let late = ReviewProcess::start();
+            let exec = late.record_exec(home.path(), &conn);
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+                VALUES(?1,'observed',?2,?3,1,'{\"type\":\"review_service\"}',?4)",
+                rusqlite::params![id,format!("review_service:{exec}"),exec,session.captured]).unwrap();
+            conn.execute(
+                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
+                [&old_id],
+            )
+            .unwrap();
+            drop(lock);
+            let output = child.wait_with_output().unwrap();
+            assert!(!late
+                .exited
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap()
+                .success());
+            output
+        } else if boundary == "launch" {
+            let failed = restart().env("LF_TEST_LAUNCH_FAIL", "1").output().unwrap();
+            assert!(!failed.status.success());
+            let saved = runtime
+                .block_on(registered.store.task_flow(&registered.task.id))
+                .unwrap()
+                .unwrap();
+            assert_ne!(saved.id(), old_id);
+            assert!(saved.claim.is_none());
+            let resumed = command(
+                repo.path(),
+                home.path(),
+                &["--task", "INF-123", "flow", "start", "--json"],
+            )
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .output()
+            .unwrap();
+            assert_eq!(
+                runtime
+                    .block_on(registered.store.task_flow(&registered.task.id))
+                    .unwrap()
+                    .unwrap()
+                    .id(),
+                saved.id()
+            );
+            resumed
+        } else {
+            restart().output().unwrap()
+        };
+        if boundary == "unknown" {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("unresolved process identity"));
+            assert_eq!(
+                runtime
+                    .block_on(registered.store.task_flow(&registered.task.id))
+                    .unwrap()
+                    .unwrap()
+                    .id(),
+                old_id
+            );
+            assert!(service.exited.try_recv().is_err());
+            assert!(driver.exited.try_recv().is_err());
+            assert!(provider.exited.try_recv().is_err());
+            continue;
+        }
+        if boundary == "independent" {
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("independent-review"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(sqlite
+                .session("independent-review")
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_none());
+        } else {
+            assert!(
+                output.status.success(),
+                "{boundary}: {} worker: {}",
+                String::from_utf8_lossy(&output.stderr),
+                fs::read_to_string(home.path().join("worker.log")).unwrap_or_default()
+            );
+        }
+        for process in [&service, &driver, &provider] {
+            assert!(!process
+                .exited
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap()
+                .success());
+        }
+        assert!(unrelated.exited.try_recv().is_err());
+        let retired = sqlite.session(id).unwrap().unwrap();
+        assert_eq!(retired.captured, session.captured);
+        assert_eq!(retired.artifact_key, session.artifact_key);
+        assert!(retired.completed_at.is_some());
+        assert!(retired.ready_summary.is_none());
+        assert_eq!(
+            fs::read_to_string(dir.join("native-history")).unwrap(),
+            "retained provider history"
+        );
+        let completed: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='completed'",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(completed, 0, "retirement never manufactures review success");
+        assert!(sqlite
+            .record_session_connection(id, &owner, "stale", "stale")
+            .is_err());
+        assert_eq!(
+            runtime
+                .block_on(registered.store.active_task_pr(&registered.task.id))
+                .unwrap()
+                .unwrap()
+                .id,
+            registered.pr.id
+        );
+        let task = runtime
+            .block_on(registered.store.get_task(&registered.task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.worktree, registered.task.worktree);
+        assert_eq!(task.project_id, registered.task.project_id);
+        let replacement = runtime
+            .block_on(registered.store.task_flow(&task.id))
+            .unwrap()
+            .unwrap();
+        if boundary == "independent" {
+            assert_eq!(replacement.id(), old_id);
+            continue;
+        }
+        assert_ne!(replacement.id(), old_id);
+        {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                let current = runtime
+                    .block_on(registered.store.task_flow(&task.id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(current.id(), replacement.id());
+                if current.is_human() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "replacement failed to advance: {current:?}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
     }
 }

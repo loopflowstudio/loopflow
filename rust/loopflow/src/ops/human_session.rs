@@ -979,6 +979,9 @@ async fn serve_flow_locked(
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("review service has no Exec identity"))?;
+    store.sqlite.record_review_service(position, &exec)?;
     if let Some(failure) = &position.failure {
         bail!("review session cannot start: {}", failure.reason);
     }
@@ -1708,7 +1711,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
     }))
 }
 
-fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
+pub(crate) fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
     crate::session_record::record_dir(&crate::store::lf_home_dir(), run_id)
 }
 
@@ -2182,7 +2185,19 @@ pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
         .truncate(false)
         .open(path)
         .context("open Session launch lock")?;
-    FileExt::lock_exclusive(&file).context("lock Session launch")?;
+    let deadline = std::time::Instant::now() + SESSION_START_TIMEOUT;
+    loop {
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    bail!("Session launch is still busy; retry after its current launch settles");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error).context("lock Session launch"),
+        }
+    }
     Ok(file)
 }
 

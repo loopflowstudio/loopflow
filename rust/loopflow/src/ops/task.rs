@@ -1,5 +1,6 @@
 mod directory;
 mod lifecycle;
+mod restart;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
@@ -2444,6 +2445,7 @@ async fn stop_task_worker(store: &SharedStore, task: &Task) -> OpsResult<Option<
     let Some(position) = position else {
         return Ok(None);
     };
+    let position = restart::stop_review(store, &position).await?;
     let claim = position.claim.as_ref();
     if flow_worker_live(store, &position)? {
         store
@@ -5201,6 +5203,10 @@ async fn restart_task_async(
             })?;
     }
     let stopped = stop_task_worker(&store, &task).await?;
+    let blockers = lifecycle::recovery_execution_blockers(&store, &task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     select_task_agent(&store, &mut task, agent.as_deref()).await?;
     store
         .restart_task_flow(&task, stopped.as_ref(), &head)
@@ -5835,6 +5841,86 @@ mod tests {
             crate::journal::ProcessIdentityEvidence::Live,
             "fixture receipt must describe the spawned process",
         );
+    }
+
+    #[tokio::test]
+    async fn restart_waits_for_review_launch_before_retiring_or_reading_owners() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("RESTART-LAUNCH").await;
+        let flow = fixture
+            .store
+            .start_task_flow(
+                &fixture.task.id,
+                crate::durable::FlowSession {
+                    invocation: crate::durable::test_flow_invocation(
+                        "review",
+                        0,
+                        "demo",
+                        Some("review"),
+                        true,
+                    ),
+                    task_id: Some(fixture.task.id.clone()),
+                    wave_id: Some(fixture.task.wave_id.clone()),
+                    cwd: fixture.task.worktree.clone(),
+                    cursor: Default::default(),
+                    version: 0,
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    finished: false,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let flow = fixture
+            .store
+            .reserve_task_review(flow.id(), flow.version)
+            .await
+            .unwrap();
+        let id = flow.pending_session_id.as_ref().unwrap();
+        let launch = crate::ops::human_session::lock_session_exec(id).unwrap();
+        let stop = super::restart::stop_review(&fixture.store, &flow);
+        tokio::pin!(stop);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut stop)
+                .await
+                .is_err()
+        );
+        assert!(fixture
+            .store
+            .session(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        // The launching service may finish its reservation while restart waits.
+        // Re-entry must read that version under the lock, not retire a stale copy.
+        rusqlite::Connection::open(&fixture.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
+                [flow.id()],
+            )
+            .unwrap();
+        drop(launch);
+        let stopped = stop.await.unwrap();
+        assert_eq!(stopped.id(), flow.id());
+        assert_eq!(stopped.version, flow.version + 1);
+        assert!(fixture
+            .store
+            .session(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     #[tokio::test]

@@ -564,7 +564,14 @@ are retained; failed turns cannot donate navigation to a successful retry.
 
 Recovery uses saved Skills, Xor branches and review policy after source changes
 or disappears. Missing process evidence stays uncertain. Explicit restart retains
-the previous FlowSession as history and captures another. Completion clears the
+the previous FlowSession as history and captures another. Waiting-review restart
+closes and fences the exact pending Session under its dispatch lock, retaining
+capture, native history and process ownership. Its service records an explicit
+Session observation before launching the review child. Restart saves exact process
+identities before signaling, so interruption after native receipt cleanup remains
+retryable. Replacement requires observed exit of those owners; administrative
+retirement records no successful turn or review feedback. Independent reviews
+remain admission blockers. Completion clears the
 managed selection without completing Task Work or choosing a successor.
 
 Independent helpers may carry the same Task and separately authorized Git/PR

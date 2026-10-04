@@ -1585,21 +1585,14 @@ impl SqliteStore {
         &self,
         provider: Provider,
         account_id: &ProviderAccountId,
-        strength: &str,
         cause: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_account_switches (
-                provider, account_id, switched_at, strength, cause
-             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                provider.as_str(),
-                account_id.as_str(),
-                now_unix(),
-                strength,
-                cause
-            ],
+                provider, account_id, switched_at, cause
+             ) VALUES (?1, ?2, ?3, ?4)",
+            params![provider.as_str(), account_id.as_str(), now_unix(), cause],
         )?;
         Ok(())
     }

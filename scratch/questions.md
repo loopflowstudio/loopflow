@@ -4,17 +4,11 @@
 
 - Isolation default: `isolate: true` works in the repository and Home `config.yaml`; is a Wave-level default also wanted?
 - A native login Loopflow has never seen is stored as an explicit-only account, so automatic routing does not start spending it. Confirm.
-- Launch-driven switches (the active account is strained, or a launch names another account) are “from now on” until slice 3 builds “everyone now”.
 - “Pinned binary”: only the account's own home, or also a pinned provider or `lf` executable.
-- Automatic switch on exhaustion uses “everyone now”; confirm.
 - Placement remains unresolved; no Wave supplied.
 - Runtime ownership: Jack settled ordinary interactive exit as close-by-default, except when Desktop or `lf session` takes ownership (2026-10-03; design in `stop-bundling.md`). Implemented through the current driver transaction. Still open: shared-engine thread release, abrupt-crash policy and tool-effect recovery when closing during a turn. Native protocol fixtures cover ordinary close and transfer; rendered Desktop/TUI remain unproven.
 - Only `lf session connect` brings in a conversation plain Codex started; `history`, `rename`, `bind` and `complete` report it as not found until then. Confirm.
 - A shared conversation now resumes under the active account rather than switching the home back to the account it began under. Confirm.
-
-## To research
-
-- No longer gating: Jack chose not to interrupt a turn in flight (2026-10-04, LOO-374). Remaining detail on what most affects how seamless a moved session feels: terminal versus headless, unsent input and scrollback, in-flight tool calls running twice, gap length, whether the agent notices, and what history shows.
 
 ## To prove while building
 

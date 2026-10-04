@@ -904,12 +904,11 @@ impl Store {
         &self,
         provider: Provider,
         account_id: &ProviderAccountId,
-        strength: &'static str,
         cause: &'static str,
     ) -> StoreResult<()> {
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.record_provider_account_switch(provider, &account_id, strength, cause)
+            store.record_provider_account_switch(provider, &account_id, cause)
         })
         .await
     }

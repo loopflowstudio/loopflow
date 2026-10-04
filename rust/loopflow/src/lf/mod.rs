@@ -1459,7 +1459,7 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Sign the provider's ordinary home in as a stored login, from now on:
+    /// Sign the provider's ordinary home in as a stored login:
     /// `lf account <provider> use <email>`
     #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
     Use { email: String },

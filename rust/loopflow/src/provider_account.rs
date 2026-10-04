@@ -3349,7 +3349,7 @@ mod account_first_tests {
 
         for provider in [Provider::Codex, Provider::Claude] {
             store
-                .record_provider_account_switch(provider, &second, "from_now_on", "person")
+                .record_provider_account_switch(provider, &second, "person")
                 .await
                 .unwrap();
         }

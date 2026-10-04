@@ -10,7 +10,6 @@ CREATE TABLE provider_account_switches (
     provider TEXT NOT NULL,
     account_id TEXT NOT NULL,
     switched_at INTEGER NOT NULL,
-    strength TEXT NOT NULL CHECK (strength IN ('from_now_on', 'everyone_now')),
     cause TEXT NOT NULL CHECK (cause IN ('person', 'exhaustion'))
 );
 

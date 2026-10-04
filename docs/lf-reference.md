@@ -433,7 +433,7 @@ Spend one banked Codex reset for this named login
 
 ## lf account <provider> use
 
-Sign the provider's ordinary home in as a stored login, from now on
+Sign the provider's ordinary home in as a stored login:
 
 | Argument | What it does |
 |---|---|

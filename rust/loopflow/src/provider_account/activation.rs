@@ -214,7 +214,7 @@ pub(crate) async fn activate(
     })?;
     write_login(provider, native, &credential)?;
     store
-        .record_provider_account_switch(provider, account_id, "from_now_on", cause.as_str())
+        .record_provider_account_switch(provider, account_id, cause.as_str())
         .await?;
     Ok(Some(lock))
 }

@@ -997,8 +997,9 @@ def _shared_provider_home_contract(
     assert (native / "auth.json").read_text() == rotated
     results["rotated_login_survived"] = True
 
-    # "From now on" leaves a running shared agent alone: its engine keeps
-    # running, and Codex holds a login for the life of the process.
+    # A switch leaves a running shared agent's engine alone, and Codex holds a
+    # login for the life of the process. Codex may still fail the turn in
+    # flight; the headless run resumes it.
     server.held.clear()
     server.release.clear()
     known, before = conversations(), len(launches())
@@ -1048,7 +1049,7 @@ def _shared_provider_home_contract(
             running.communicate()
         log.close()
     assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
-    results["running_agent_survived_from_now_on"] = True
+    results["running_agent_survived_switch"] = True
 
     # An isolated conversation runs in its account's own home and stays
     # there across a switch, whether isolation came from the flag or config.

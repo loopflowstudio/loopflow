@@ -488,6 +488,8 @@ confirmed that an unpublished PR blocks completion until delivery settles. A sta
 controller test still expected Task completion to end its Flow; it is replaced by
 separate preservation/new-launch-refusal and final-step-completion proofs.
 
-Check: `git diff --check` passed for this prose-only realignment; reused `25d339fb1` results: `cargo test -p loopflow --lib task_without_delivery` (9), `cargo test -p loopflow --lib ops::run::tests` (8), `cargo test -p loopflow --test dto_fixtures independent_flow_detail` (1), `swift test --package-path swift --filter DTOFixtureTests` (23), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; prior focused evidence remains at `f656edf5f:scratch/jack-heart/start-and-finish-tasks-without.md`; gate owns provider/review/retry and Desktop interaction acceptance.
+Earlier focused passes remain at `25d339fb1` and `f656edf5f`; gate retains provider/review/retry and Desktop acceptance.
+
+Sync check (October 4, main `a1d2f8a591`): `cargo test -p loopflow --lib task_without_delivery` passed (9); `cargo test -p loopflow --test task_restart_tests restart_uses_old_valid_planning_and_preserves_invalid_work` passed (1); `cargo test -p loopflow --lib steer_failure_preserves_confirmed_or_uncertain_publication` passed (1); formatting and diff checks passed; broader checks remain with gate/CI.
 
 Check (October 4): source/LOO-353 brief inspection only; `git diff --check` passed; no production change or new runtime proof. Safe Session handoff remains unresolved before dependent implementation.

@@ -14,20 +14,21 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 fn flow(store: &Store, task: &Task, review: bool) -> String {
-    fs::create_dir_all(task.worktree.join(".lf/flows")).unwrap();
+    let worktree = &task.workspace.as_ref().unwrap().worktree;
+    fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
     let steps = if review {
         "- step:\n    name: demo\n    id: review\n    human: true\n"
     } else {
         "- cmd: task sync --plan\n- step:\n    name: demo\n    id: review\n    human: true\n"
     };
-    fs::write(task.worktree.join(".lf/flows/proof.yaml"), steps).unwrap();
+    fs::write(worktree.join(".lf/flows/proof.yaml"), steps).unwrap();
     let flow = FlowSession {
-        invocation: QueuedInvocation::load(&task.worktree, "proof").unwrap(),
+        invocation: QueuedInvocation::load(worktree, "proof").unwrap(),
         cursor: Default::default(),
         version: 0,
         task_id: Some(task.id.clone()),
         wave_id: Some(task.wave_id.clone()),
-        cwd: task.worktree.clone(),
+        cwd: worktree.clone(),
         message: None,
         model: None,
         current_attempt: None,
@@ -177,7 +178,7 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             assert_eq!(task.id, registered.task.id);
             assert_eq!(task.project_id, registered.task.project_id);
             assert_eq!(task.wave_id, registered.task.wave_id);
-            assert_eq!(task.worktree, registered.task.worktree);
+            assert_eq!(task.workspace, registered.task.workspace);
             assert_eq!(task.plan.pm_snapshot_synced_at, 1);
         } else {
             assert!(!output.status.success(), "{condition} admitted restart");
@@ -561,7 +562,7 @@ fn waiting_review_restart_retires_exact_execution_and_retries_interrupted_stop()
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
             .unwrap();
-        assert_eq!(task.worktree, registered.task.worktree);
+        assert_eq!(task.workspace, registered.task.workspace);
         assert_eq!(task.project_id, registered.task.project_id);
         let replacement = runtime
             .block_on(registered.store.task_flow(&task.id))

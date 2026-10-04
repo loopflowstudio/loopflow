@@ -366,8 +366,15 @@ pub(crate) mod tests {
                 })
                 .await
                 .unwrap();
-            let mut task = task();
-            task.worktree = home.path().to_path_buf();
+            let task = task();
+            store
+                .create_wave(&crate::work::wave::Wave::new(
+                    task.wave_id.clone(),
+                    "fixture".into(),
+                    home.path().display().to_string(),
+                ))
+                .await
+                .unwrap();
             std::fs::create_dir_all(home.path().join(".lf")).unwrap();
             std::fs::write(
                 home.path().join(".lf/config.yaml"),

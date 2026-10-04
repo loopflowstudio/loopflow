@@ -2165,14 +2165,18 @@ mod durable_store_tests {
             .is_err());
         // Retirement is durable, but cannot authorize replacement until its exact
         // processes are observed stopped. Re-entry uses the same Session/capture.
-        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
+        assert!(store
+            .restart_task_flow(&task, Some(&flow), Some("head"))
+            .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
         store.record_review_stop_processes(id, &[]).unwrap();
         store.review_execution_stopped(id).unwrap();
         store.conn.lock().unwrap().execute_batch(
             "CREATE TRIGGER interrupt_restart BEFORE UPDATE ON flow_sessions WHEN NEW.state='replaced' BEGIN SELECT RAISE(FAIL,'interrupted replacement'); END;"
         ).unwrap();
-        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
+        assert!(store
+            .restart_task_flow(&task, Some(&flow), Some("head"))
+            .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
         store
             .conn
@@ -2180,7 +2184,9 @@ mod durable_store_tests {
             .unwrap()
             .execute_batch("DROP TRIGGER interrupt_restart")
             .unwrap();
-        store.restart_task_flow(&task, Some(&flow), "head").unwrap();
+        store
+            .restart_task_flow(&task, Some(&flow), Some("head"))
+            .unwrap();
         let replacement = store
             .start_task_flow(&task_id, &autonomous_position(&task_id))
             .unwrap();

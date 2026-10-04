@@ -1298,10 +1298,15 @@ pub(crate) async fn pm_update_async(
         let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        super::chapter::sync_projects(&store, &registered, &PmSnapshot {
-            projects: vec![record.project.clone()],
-            items: vec![item.clone()],
-        }).await?;
+        super::chapter::sync_projects(
+            &store,
+            &registered,
+            &PmSnapshot {
+                projects: vec![confirmed.project.clone()],
+                items: vec![item.clone()],
+            },
+        )
+        .await?;
         if let Some(task) = store
             .get_task_by_issue(&item.id)
             .await

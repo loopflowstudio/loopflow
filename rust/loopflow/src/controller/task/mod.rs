@@ -1683,13 +1683,9 @@ mod planning_tests {
         let (store, task, position) = human_task_fixture().await;
         let position = store.start_task_flow(&task.id, position).await.unwrap();
         store.complete_task(&task, None).await.unwrap();
-        let error = crate::ops::task::resolve_managed_task_planning(
-            &store,
-            &task,
-            crate::ops::pm::PmRefresh::Auto,
-        )
-        .await
-        .unwrap_err();
+        let error = crate::ops::task::resolve_managed_task_planning(&store, &task)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("terminal"), "{error}");
         assert_eq!(store.task_flow(&task.id).await.unwrap(), Some(position));
         assert!(task.workspace.as_ref().unwrap().worktree.exists());
@@ -1796,7 +1792,12 @@ mod planning_tests {
             flows.join("review-loop.yaml"),
             "- flow: pursue\n- step:\n    id: review_delivery\n    name: demo\n    human: true\n- step:\n    id: decide_delivery\n    name: loop-decide\n    repeat:\n      from: implement\n",
         ).unwrap();
-        let mut flow = super::start_task_flow(&task, "review-loop", &task.workspace.as_ref().unwrap().worktree).unwrap();
+        let mut flow = super::start_task_flow(
+            &task,
+            "review-loop",
+            &task.workspace.as_ref().unwrap().worktree,
+        )
+        .unwrap();
         let body = flow.invocation.steps.clone();
         let suffix = body[0].clone();
         flow.invocation.steps = vec![

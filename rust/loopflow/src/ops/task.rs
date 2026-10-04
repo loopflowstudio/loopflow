@@ -5449,8 +5449,7 @@ pub(crate) async fn continue_task_async(
                 |workspace| workspace.worktree.clone(),
             )
         });
-    let resolved =
-        resolve_managed_task_planning(&store, &task).await?;
+    let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow = match saved.as_ref() {
         Some(position) => {
             if let Some(flow) = requested_flow
@@ -5537,7 +5536,14 @@ pub(crate) async fn continue_task_async(
         }
         {
             let _mutation = lock_task_pr_mutation(&task.require_workspace()?.worktree)?;
-            clear_task_pr_merge(&store, &task, &task.require_workspace()?.worktree, true, &|_| {}).await?;
+            clear_task_pr_merge(
+                &store,
+                &task,
+                &task.require_workspace()?.worktree,
+                true,
+                &|_| {},
+            )
+            .await?;
         }
         // Reconcile may settle an active PR that merged out of band, moving the
         // worktree into a between-PR state; refuse a dirty between-PR before the

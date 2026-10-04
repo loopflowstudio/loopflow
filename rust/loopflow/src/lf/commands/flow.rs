@@ -674,8 +674,7 @@ impl CliFlowExecutor<'_> {
             .get_task(task_id)
             .await?
             .context("Task disappeared")?;
-        crate::ops::task::resolve_managed_task_planning(&self.store, &task)
-        .await?;
+        crate::ops::task::resolve_managed_task_planning(&self.store, &task).await?;
         Ok(Some(task))
     }
 

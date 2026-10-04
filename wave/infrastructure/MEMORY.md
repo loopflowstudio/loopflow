@@ -1,5 +1,29 @@
 # infrastructure wave memory
 
+## Operator acceptance and account direction (2026-10-04)
+
+Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine
+usage rather than another staged acceptance exercise. Both now read `done`
+through `lf task status`. LOO-367's retained feature invocation completed design
+review, traversed four loop returns and reached demo; LOO-285 independently
+reached demo after four returns. Together with LOO-295's reconciled merged
+PR #1283, this closes its remaining continuation proof. Its unrelated viewer and
+earlier assessment survive at `~/.lf-retired/20261004-loo295/scratch`.
+
+LOO-342's installed routing checks and ongoing main-Home usage establish its
+outcome. Jack explicitly declined more work on retired Ask tooling. Four old
+stores still had legacy process handles; they remain untouched, not retired.
+Their cleanup no longer blocks this Task's completion.
+
+LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
+cross-binary history means discovering native Session records across folders,
+not duplicating transcripts or reconstructing new conversations from replayed
+context. Reuse native history and retain Loopflow Session identity. A usage
+threshold such as 90% redirects future launches only; actual exhaustion triggers
+automatic shared failover. Isolated agents retain their own account/fallback.
+The updated Linear brief owns the current scope; stop-bundling's branch evidence
+does not yet establish shipment.
+
 Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
 
 Release-specific findings live in [release memory](release/MEMORY.md).

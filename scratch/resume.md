@@ -1,7 +1,0 @@
-# Resume gate — 2026-10-04
-
-Reviewed `origin/main...7d9f481d1` against the accepted design retained at `2cb3e944d:scratch/resume.md`. No code or documentation repair needed: selection uses physical checkout identity and human-input recency with per-Session opening fallback; explicit native IDs reuse admission; completed conversations reopen without weakening closed review checks. README matches the command contract.
-
-Check result: `cargo fmt --all -- --check`; `cargo clippy --all-targets -- -D warnings`; `uv run python scripts/check_architecture.py`; network-isolated `cargo nextest run -p loopflow --lib --test session_cli_tests --test session_lifecycle_tests --test pr_tests --test documented_commands -E 'binary(session_cli_tests) | binary(session_lifecycle_tests) | binary(pr_tests) | binary(documented_commands) | test(ops::human_session::) | test(store::sqlite::sessions::) | test(lf::commands::util::) | test(lf::navigation::) | test(engine::flow_graph::tests)' --no-fail-fast --test-threads 4` — all pass, 139 tests; inherited LF/LOOPFLOW authority cleared, source LF_BIN pinned, disposable provider homes. Unaffected tests excluded; full materialized matrix remains CI-owned.
-
-Prior notes record Jack Heart's successful Codex terminal demo. This gate adds simulated-provider headless evidence; Claude/IDE interactive behavior and the full live A/B scenario remain outside that evidence. No publication or delivery action performed.

@@ -71,6 +71,11 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
+After Linear accepts a Task creation or update, Loopflow confirms that issue
+directly without another Wave-wide snapshot. If Linear commits but issue
+confirmation fails, the error names the retained issue. Retry the same command
+with the original creation options to reuse it without filing a duplicate.
+
 ## Inspect and continue
 
 ```bash

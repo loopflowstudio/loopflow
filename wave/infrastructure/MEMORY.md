@@ -153,46 +153,46 @@ copies its first client's environment into every later session. Fixtures open
 their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
 `LF_RUN_ID` presence still decides three behaviours without validating the Run.
 
-## Task purpose and completion (LOO-367, reconciled 2026-10-02)
+## Task purpose and completion (LOO-367, reconciled 2026-10-04)
 
-Jack Heart accepted Task admission/completion independent of optional Flow and
-delivery operations. On 2026-10-02 Jack confirmed that the working conversation
-can complete its Task before its own Session or provider turn ends, then report
-the result. Completion preserves that conversation and its history; cleanup
-retains a checkout while it is in use. Other unfinished work, review boundaries
-and unresolved delivery remain blockers. Membership alone grants no exemption,
-Flow settlement or process control. This refines the LOO-358 completion rule below;
-it does not weaken cleanup or abandonment protections.
+Jack Heart accepted admission/completion independent of optional Flow and delivery.
+On October 2 Jack confirmed that the working conversation can complete its Task
+before its own turn ends, then report the result. Completion preserves identity
+and history; membership grants no process control or Flow settlement. Other
+unfinished work, reviews and unresolved delivery still block. This refines the
+LOO-358 completion rule below without weakening abandonment protections.
 
-Issue-specific confirmation replaces post-mutation whole-Wave refresh; filing
-and marker recovery still require their current-Project routing. Failed confirmation
-stays explicit, and registered completion retains pending writeback.
+On October 4 Jack authorized revising the normal conversation-to-Task transition
+to default to a checkout ready for edits, without creating a PR or Flow obligation.
+Research/no-change completion must reclaim that disposable checkout without a
+merge while retaining the conversation and visible outcome. Indefinite retention
+is not success. Preserve actual unfinished work and explain real blockers.
+Planning-only filing/inspection/completion still need no allocation. This
+supersedes the October 3 no-checkout primary experience, not its supported case.
 
-October 3 branch implementation admits Tasks with optional placement through public
-Session binding and CLI execution; binding preview and generic readers stay
-observational. A path/slug pair distinguishes absent delivery from lost placement.
-Public bind → first checkout allocation preserves identity/history. After simulated
-PR settlement, the requesting conversation completes its Task while retaining the
-checkout; a later settled retry cleans it up. Unknown and live independent Execs
-still block. Provider-turn and merge evidence are fixtures, not native acceptance.
+Branch evidence at `8094b45516ed6ce40305d7bdbefb0c7e87673c88` retains optional
+placement, observational readers, public bind/admission, issue-specific provider
+confirmation and one shared Flow driver. Failed confirmation stays explicit;
+registered completion retains pending writeback. Fixtures prove requesting-turn
+completion and later cleanup after simulated merge/settlement, not the accepted
+no-landing handoff. That commit retains prior details; installed/native acceptance remains unproven.
 
-Managed startup/replacement now avoid implicit allocation. Capture owns execution
-cwd; the owning repository supplies managed planning. Continuation and replacement
-retain that cwd, while checkpoint and PR recovery apply only to retained placement.
-Attributed/taskless Flows share the driver and leave Tasks open. Desktop exposes
-independent Flow progress/resume alongside the managed selection. The October 3
-follow-up supersedes earlier feedback that these two cuts were unimplemented.
-Failed-launch fixtures retain identity and both captures without delivery objects;
-they do not prove successful worker launch or Desktop interaction. Those remain
-with gate, along with CLI lifecycle and provider/review/retry acceptance.
+October 4 implementation inspection found a missing safe directory handoff.
+Binding changes attribution only. The native conversation launcher fixes cwd
+at launch and waits for exit; Move here stops clients and explicitly warns of
+lost unsent input. Updating a Session row cannot establish that a live provider
+left a checkout, and completion's requesting-conversation allowance must not
+become cleanup authority. Allocation/restoration still derive branch/base facts
+from a first PR. Removing that PR requires retaining those placement facts and
+proving cleanup through its existing owner. No production code changed.
 
-Completion never ends a Flow or grants process control. The requesting allowance
-matches current provider generation and exact driver parent, solely for completion;
-cleanup, abandonment, pending reviews and stale callers keep their protections.
-Migration freezes retained Flow paths without inventing unknown history. Upstream
-#1415 recovery remains separate from completion's unknown-execution refusal.
-PR observation locks before reading mutable PR state; absent placement needs no
-PR lock. LOO-364 owns broader switching; LOO-366 owns Project availability/resets.
+The October 4 LOO-353 brief readback (revision `2026-10-04T17:58:39.566Z`) still
+requires kickoff followed by design review. Its worker/managed-Flow deletion and
+ongoing-conversation handoff direction is not implemented evidence. Reconcile the
+safe handoff interface with that owner rather than invent another driver; LOO-367
+retains Task completion. LOO-366 retains Project availability/resets. LOO-379,
+filed separately on October 4, owns issue-specific cancellation/deletion
+confirmation; its scope remains separate.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

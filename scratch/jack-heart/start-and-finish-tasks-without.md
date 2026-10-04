@@ -1,6 +1,59 @@
 # Start and finish Tasks without unrelated workflow prerequisites
 
-Implementation plan · LOO-367 · drafted 2026-10-02, reconciled 2026-10-03
+Implementation plan · LOO-367 · drafted 2026-10-02, reconciled 2026-10-04
+
+## Implementation counterexample · 2026-10-04
+
+Inspection at `8094b45516ed6ce40305d7bdbefb0c7e87673c88` found that the
+authorized revision's assumption about an existing safe Session handoff is not
+supported by this branch. Production code was left unchanged. Jack Heart's
+accepted experience below remains required; the previous implementation is not
+ready for gate or demo of that experience.
+
+- `ops/human_session.rs::bind` and `store/sqlite/sessions.rs::bind_session`
+  change attribution only. They do not move a provider or change its cwd.
+- `serve_locked` launches the conversation with `session.cwd`, then waits for
+  the child to exit. `conversation_launch_args` selects native TUI mode. There
+  is no directory-change acknowledgement in this path.
+- `resume_native_session` stops the current native clients before resuming.
+  The public Move here action explicitly warns that unsent text is lost.
+  Reusing it automatically for binding or completion would weaken preservation.
+  Calling it from the requesting provider also risks stopping the caller before
+  the completion result returns. That risk is a source-derived counterexample,
+  not a freshly reproduced provider failure.
+- `cleanup_completed_task` correctly keeps live/unknown execution. Updating a
+  Session row cannot prove that execution left the directory; extending the
+  requesting-conversation exemption to cleanup would permit unsafe removal.
+
+October 4 `lf task status LOO-353 --json` returned brief revision
+`2026-10-04T17:58:39.566Z`: that Task remains kickoff-only pending design review,
+and owns the replacement ongoing-conversation/interactive-handoff machinery.
+Its accepted removal direction is not an available implementation to integrate.
+Unpublished code in other checkouts was not inspected.
+
+The missing interface is a Session-owned safe directory handoff: preserve native
+identity/history and draft input, acknowledge the actual provider execution cwd,
+and let a self-issued operation return before any driver replacement. On Task
+completion it must leave the disposable checkout and trigger the existing cleanup
+retry without ending the conversation. Failed handoff retains the checkout and
+original outcome. LOO-367 must consume that interface rather than create a second
+driver or extend worker/review machinery slated for deletion by LOO-353. Its
+ownership and concrete mechanism need reconciliation with LOO-353 before the
+dependent implementation continues; no new product preference is inferred.
+
+Independent placement work remains in this PR's scope, but is not a substitute
+for the handoff. Allocation must retain branch/base recovery facts without a PR:
+today `create_prepared_task`, `insert_task_with_worktree`, `WorktreeInitializing`
+and `restore_task_checkout` all use the first PR as that owner. Remove that
+coupling together, create the first PR only at an explicit delivery operation,
+and prove PR-free restoration and cleanup against retained allocation evidence.
+Do not merely waive the empty-first-PR refusal. Preserve dirty original-directory
+files in place; no automatic transfer of pre-existing edits is selected.
+
+Required proofs: same-conversation bind/edit in the new checkout, self-completion
+and response after safe departure, draft/history preservation, interrupted handoff
+recovery, and independent live/unknown execution refusal. PR-free restoration and
+no-landing cleanup also remain unproven. LOO-379 stays separate.
 
 ## Authorized revision · 2026-10-04
 
@@ -136,34 +189,17 @@ feedback confirms the corrected decision returned to implementation. The failed
 request supplied no verdict. Original diagnostics remain at
 `7c1d84b1e:scratch/flow-decision-schema-blocker.md`; no further recovery is required.
 
-## Outcome and demo
+## Earlier demo and evidence
 
-Jack can file a research Task, associate an existing conversation, record its
-finding and complete it without creating a checkout, PR or Flow. Later choosing
-a Flow or software delivery preserves that same Task and all its work.
-
-The demo starts with `lf task create --wave infrastructure --title "Investigate a slow command"`,
-then `lf task status <issue> --json` and
-`lf task complete <issue> --summary "Measured startup; retained findings in the issue"`.
-The Task is complete, the original summary is readable, and there are zero new
-worktrees, PRs and FlowSessions. Repeat with an existing Session bound before
-completion: its history remains associated without allocating delivery placement.
-Issue completion from that same running conversation and let it report the result
-afterward. With an allocated checkout, keep the checkout available while the
-conversation still uses it; completion and safe cleanup have separate conditions.
-
-Then run the same explicit template through `lf flow start <flow>` and
-`lf --task <issue> flow start <flow>` on an unfinished Task. Both use the same
-capture, driver, review and retry semantics. The attributed version adds Task
-context/history. Flow completion leaves the Task open. A managed delivery Task
-with an open PR refuses completion with a concrete reason; after authorized
-settlement it completes once, even after a lost provider response.
-Explicit startup now has an operation-only CLI proof; provider, review and retry
-acceptance remains below. Bare taskless startup still requires a template.
-
-This serves Infrastructure's dependable self-hosting and architecture reduction
-objectives and the chapter KR about advancing a Task from an ordinary Session
-without plumbing blockers. No quantitative chapter targets were supplied.
+The October 3 demo proposed no-checkout binding as the primary path, and retained
+an allocated checkout until the conversation settled. October 4 supersedes both
+as success criteria. The full earlier scenario remains at
+`8094b45516ed6ce40305d7bdbefb0c7e87673c88:scratch/jack-heart/start-and-finish-tasks-without.md`.
+Planning-only create/inspect/complete without allocation remains required;
+ordinary focused conversations now need the default checkout and safe handoff.
+Explicit attributed/taskless Flow parity, Flow completion leaving the Task open,
+and real delivery refusal/retry remain acceptance requirements. Existing operation
+fixtures do not establish provider handoff or Desktop interaction.
 
 ## Current implementation · reconciled 2026-10-03
 
@@ -230,10 +266,14 @@ so the current Exec evidence is explicitly seeded in the PM fixture; it cannot b
 presented as a real provider turn. Older detailed source findings remain at
 `528625dc17ba4dd6440d7365c1a3073e1c71d205:scratch/jack-heart/start-and-finish-tasks-without.md`.
 
-## Chosen architecture
+## Earlier architecture — revision required
 
 Keep one Task, one shared Flow engine and the existing planning completion writer.
-Remove placement assumptions at their current owners.
+The following describes the earlier cut, preserved to explain its implementation.
+Items 3, 5 and 6 are not the October 4 target: allocation must lose PR coupling,
+LOO-353 retires managed selection, and safe handoff must permit eventual checkout
+removal while preserving the conversation. The counterexample above identifies
+the missing mechanism rather than treating retained placement as success.
 
 1. Make Task placement explicitly optional. Represent the path and workspace slug
    together as `Option<TaskWorkspace>` in Rust so a half-present placement cannot
@@ -317,6 +357,15 @@ admission remains an explicit error. Existing retained local association and
 inspection do not reacquire unrelated coordination.
 
 ## Delete — do not maintain
+
+October 4 revision inventory: remove the implicit first-PR creation from checkout
+allocation, PR-dependent placement initialization/restoration, and PR-only checkout
+cleanup. Move their branch/base preservation obligations to placement's existing
+owner. Remove the first-allocation test's synthetic merge as proof of research
+completion; retain it only as delivery regression coverage. Do not extend
+`serve_locked`, native Move here or managed review APIs into a second handoff
+driver. LOO-353 owns their replacement/removal boundary. These deletions remain
+unimplemented, as does the revised default binding path.
 
 Delete unconditional workspace/PR requirements from registration, context,
 non-delivery completion and Task action derivation. Replace the Task-only
@@ -440,3 +489,5 @@ controller test still expected Task completion to end its Flow; it is replaced b
 separate preservation/new-launch-refusal and final-step-completion proofs.
 
 Check: `git diff --check` passed for this prose-only realignment; reused `25d339fb1` results: `cargo test -p loopflow --lib task_without_delivery` (9), `cargo test -p loopflow --lib ops::run::tests` (8), `cargo test -p loopflow --test dto_fixtures independent_flow_detail` (1), `swift test --package-path swift --filter DTOFixtureTests` (23), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; prior focused evidence remains at `f656edf5f:scratch/jack-heart/start-and-finish-tasks-without.md`; gate owns provider/review/retry and Desktop interaction acceptance.
+
+Check (October 4): source/LOO-353 brief inspection only; `git diff --check` passed; no production change or new runtime proof. Safe Session handoff remains unresolved before dependent implementation.

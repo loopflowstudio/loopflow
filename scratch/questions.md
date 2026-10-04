@@ -23,7 +23,15 @@ this records their status without claiming separate product approval.
   unrelated delivery prerequisites from shared admission and control operations,
   without adding another execution lifecycle.
 
-## Product review remains open — October 4
+## Implementation finding — October 4
+
+Native Move here is not a preservation-safe directory handoff. It stops the
+client and explicitly loses unsent input; a stored cwd change is not execution
+movement. The design records the exact paths and missing Session interface.
+LOO-353's returned brief is still kickoff-only pending review. The shared execution mechanism remains unresolved; production code and accepted
+outcomes are unchanged. Prior-directory edits remain in place.
+
+## Earlier product review — October 4
 
 Jack Heart said the product is quite hard and that this is why the review has
 not been reached yet. The earlier decision allowing a working conversation to

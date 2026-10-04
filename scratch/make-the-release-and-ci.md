@@ -231,7 +231,7 @@ worker admission has its own refresh. The acceptance scenario therefore reaches
 the authored review boundary and inspects retained history. A recovered release
 must also preserve artifact identity and exact-head evidence, not merely exit 0.
 
-Check (2026-10-04): read retry (3), partial-artifact release (1), public restart (6 scenarios), PR checks (37) passed; isolated Python repaired 5 of 6 failures and corrected the final command-plan assertion; full gate twice stopped before tests (resource probe timeout, then 29.7 GiB below 32 GiB reserve), so final Rust/Swift/Python matrix and Clippy defer to hosted CI.
+Check (2026-10-04): read retry (3), partial-artifact release (1), public restart (6 scenarios), PR checks (37) passed; isolated Python repair suite passed 54 checks and all three final command-plan assertions passed; full gate twice stopped before tests (resource probe timeout, then 29.7 GiB below 32 GiB reserve), so final Rust/Swift/Python matrix and Clippy defer to hosted CI.
 
 Review findings fixed: the read deadline includes pipe EOF and child reaping;
 restart admission now has one cached-policy owner; failed advice names preservation

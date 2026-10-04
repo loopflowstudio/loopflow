@@ -319,51 +319,20 @@ continuity acceptance, Task completion or Flow navigation.
 
 ## Session launch continuity (branch evidence, 2026-09-28)
 
-Jack assigned `jack-heart/session-launch-hardening` an independent main-based
-checkout after a review child rejected `--tui` and a later installation selection
-made existing Tasks unreachable. Infrastructure owns this execution-continuity
-repair. The [incident analysis and working design](https://github.com/loopflowstudio/loopflow/blob/a5d76c576609f6efc80a8ca2198480081066c63c/scratch/jack-heart/session-launch-hardening.md)
-preserves observations, unresolved causes and acceptance criteria in local
-history; remote availability was not checked. No new Task was filed. Scheduled
-delivery (LOO-332), recursive Wave operation (LOO-333), and the Session/Run/Exec
-model (LOO-298) retain their separate scope; this prevention does not require
-LOO-298's unintegrated model changes.
+Jack assigned `jack-heart/session-launch-hardening` an independent checkout after
+a review child rejected --tui and an installation switch hid existing Tasks.
+Exact incident/design evidence remains at `a5d76c576:scratch/` and in the historical
+memory. LOO-332, LOO-333 and LOO-298 retain their distinct scope.
 
-- **Selected-store absence does not establish deletion.** The switch receipt
-  and retained records locate the missing Tasks and failed Run in the prior
-  development store. Preserve installation isolation while resolving an existing
-  review's executable and data together. Reuse installation receipts and Session
-  identity; do not merge private stores or choose between divergent copies by
-  timestamp. A restoration preview does not establish applied recovery.
-- **Preparation carries context; it does not prove conversation access.** The
-  branch's saved `open_argv` carries the executable, Home and database, and its
-  startup resolver recognizes matching retained artifacts in settled receipts.
-  This addresses a saved handoff after selection changes. It does not establish
-  ordinary discovery of an existing Session from another selected store. Current
-  preparation semantics belong in [CLI docs](../../docs/lf.md).
-- **Failure provenance must survive before provider startup and after retry.**
-  Record the attempted executable/digest, owning data, cwd and sanitized outcome
-  through existing Run evidence, excluding prompts and credentials. A later
-  provider record or successful help check cannot identify an earlier rejected
-  child. The original offending binary and the switch's initiator remain unknown;
-  parser rejection, provider conversation lookup failure and selected-store absence
-  are distinct observations, with no established single causal chain.
-
-At local checkpoint `a5d76c576`, diagnostics name the child and store, but the
-recorded Session suite passed only 6/7 tests: the focused retry proof still fails
-with “successful retry lost the failed launch evidence.” Source inspection shows
-`session open` bypasses the journal wrapper; richer wrapper error formatting alone
-does not persist that failure. Recorded installation unit tests passed 23 tests,
-and Clippy, formatting and diff checks passed. This curation reruns no behavioral
-checks and claims neither shipment nor recovery. The scratch note's uncommitted
-status is historical; those edits are now in the checkpoint.
-
-The disposable prepare-under-A → select-B → open-same-review proof and real
-Ghostty open/resume remain outstanding. Saved JSON, a window or provider ID alone
-cannot satisfy them. Retry must preserve the failed evidence, both stores and
-the pending decision without starting a competing Task Flow. Scratch remains the
-working design until these obligations are resolved; no Task completion or
-chapter change follows from this curation.
+Selected-store absence did not prove deletion. Saved executable/store references
+must be verified together; preparation alone does not prove conversation access.
+The offending binary and switch initiator remained unknown. The focused retry
+proof failed because successful retry lost failed-launch evidence; session open
+bypassed journaling. Six of seven Session tests passed, plus installation/static
+checks; none established recovery. The disposable A→B→same-review and configured
+Ghostty resume proofs remained outstanding. Current one-Home routing supersedes
+cross-private-store selection, but failures still need sanitized executable,
+source, cwd and outcome evidence before provider startup and after retry.
 
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
@@ -617,95 +586,34 @@ the manually transferred Tasks, without importing old turns or driver authority.
   Synthetic second-Home proofs exercise retries and missing evidence; they do
   not imply a second deployed client or a distributed transaction.
 
-**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
-are checkpointed locally; publication/merge is not established by this entry.
-The release-materialized full Rust run recorded 2,004 passes, seven failures and
-17 skips. Focused repair runs cover all seven failures; the original receipt
-remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
-291-case run had one obsolete import fixture; its eight-case observation repair,
-app/runner builds, boundary check and eight distinct fixture captures passed.
-Formatting, final all-target Clippy, architecture and immutable migration checks
-passed. Required hosted CI still owns the final landing candidate.
+**Historical LOO-298 evidence.** Detailed integrated gate, compression and
+performance receipts remain at `8aacfc462:wave/infrastructure/MEMORY.md`, with
+original proofs at `5dee46ca8:scratch/` and `38d4e6d8a`. The first full Rust run
+had seven failures; focused repairs did not rewrite that failed receipt. Python,
+website, Swift repairs, app builds and static checks passed separately. Those
+results did not prove configured-provider acceptance or installed conversion.
+The production estimate was +6,202 lines, not a net reduction.
 
-The runtime finding was cursor order: stable-ID Session pages must retain ID
-order through projection, or renamed titles can repeat/skip records. Stacking
-fixtures must use the dedicated transaction and establish a published parent;
-generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
-launched a real conflict agent in its disposable repository before that repair;
-output reports no push, but native credential effects were not audited. Provider
-stubs now contain that failure path. This does not establish configured acceptance.
+Retain the findings: stable-ID pagination must preserve ID ordering; parent PR
+changes use the dedicated transaction; skill checkpointing uses the same Work
+binding as execution. A conflict fixture launched a real agent before it was
+isolated; credential effects were not audited. The pinned 0.12.23 classifier
+mistook a quoted denial for an actual failure. Worker claims originally named
+the launcher instead of the worker (fixed in `5bd311697`). Missing retry/account
+failover motivated convergence on the direct path. These are dated findings,
+not permission to revive removed Run owners or intermediate migration import.
 
-At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
-is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
-it is not a net reduction or a parsed statement count. The retained density
-measurement still names its earlier candidate. Installed conversion remains
-subject to the frozen-snapshot/quiescence obligations above; this gate neither
-migrates nor promotes.
-
-Lessons from implementing it (2026-09-29–30):
-
-- Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
-  unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
-  use focused proofs plus hosted CI between items; run the full local Rust
-  matrix without fail-fast before the final gate.
-- Typed CLI discovery must preserve saved execution: inventory flags reach the
-  SQL reader, selected boundaries resolve captured Skills before the mutable
-  catalog, and Ask escapes reserved Skill names. The main integration has 13
-  focused passes for these paths; it is not configured-provider acceptance.
-- Automatic skill checkpointing must use the same Work binding reader as
-  execution: explicit command `--as`, then checkout, then inherited `LF_AS`.
-  Checking explicit flags alone can commit another contributor's edits in a
-  Task checkout. The repair retains the managed Flow and HEAD; its fixture must
-  establish shared skill content before changing branches, without relying on
-  an incidental checkpoint from another launch.
-- The pinned 0.12.23 worker's output classifier read a quoted sentence in a
-  scratch note as a capability denial. The source fix is on the branch; resume
-  with the actual cause until workers run a release carrying it.
-- Task workers had no transient retry or account failover, so one hitting a
-  provider limit stopped instead of switching accounts. Converging on the direct
-  path fixes it.
-- A worker's claim named the process that launched it, not the worker, so stop
-  and liveness targeted the wrong pid (fixed in `5bd311697`).
-
-Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
-logs record 44/46 affected passes, then both failed Session cases passing focused
-repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
-success. The direct SIGINT proof observes owned-child exit and Exec interruption;
-the retained Task-cancellation settlement case remains distinct. These observations
-are not a full final-tree gate, configured-provider acceptance or installed
-conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
-and final documentation/gate reconciliation remain with the working plan.
-
-Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
-intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
-Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
-`scripts/benchmarks/desktop-performance/record_live.py` records local usage
-without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
-measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
-was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
-zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
-installed build's six-second probe measured 51 ms/s hitches; these different
-windows/builds do not prove a causal improvement. Republishing identical readings
-was found in source and removed; remaining hang causes need profiling.
-
-LOO-300 owns Session streaming, projection caching and the density harness after
-the data-model work. The handoff records passes only for cold-start-to-outline
-and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
-that can skip when SwiftUI exposes no NSTextField; six other tests were removed
-after mounted paint hooks failed to fire. Missing results remain proof gaps.
-Key-to-next-draw and PTY echo are proxies, not glyph presentation. Click ≤100 ms,
-`lf` read ≤300 ms off the main actor and idle ≤5 ms/s hitches remain proposed
-targets until comparable measurements support published budgets.
-
-The earlier S5 active-PR resolver left landed branches unbound. That is historical
-failure evidence, not binding policy: current Session rows own attribution and
-write-once bind permits done/landed Tasks. Preserve current ownership through the
-one-machine conversion; discarded historical attribution needs no importer.
-
-Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
-store gate keys on the registered installation path, not the bytes, so a demo
-app must route through the installed `lf` (`LoopflowDevControl.json` →
-`lf_path`) or be promoted.
+LOO-300 retains Session streaming, projection caching and density measurements.
+The recorded 90-second sample measured Session list p50 809 ms, roadmap 3.49 s,
+and ps 274 ms, with zero hitches but one 1.85 s potential hang. It is not comparable
+to the earlier build's 51 ms/s hitch sample. Only cold-start-to-outline and
+terminal-key-to-echo had handoff passes; six mounted paint tests were removed
+and a filter proof could skip. Click ≤100 ms, lf read ≤300 ms and idle ≤5 ms/s
+remain proposed budgets; PTY echo/key-to-draw are not glyph presentation.
+Configured continuity and dense cold/warm acceptance were unproven. Installation
+staging must route the app through the selected CLI; skip-cargo can bundle stale
+bytes. Current one-Home acceptance evidence above supersedes old Home selection
+assumptions without making these performance measurements current.
 
 ## Continuation and recovery lessons (curated 2026-09-25)
 
@@ -1118,8 +1026,6 @@ the pre-curation history linked above.
 - **Replicate intentionally** — apply the skeleton to Manabot/Hootro only when they need it.
 
 - **Deferred: "up/down 5ths"** (Jack, 2026-07-06) — referent unresolved. `lf wt` shipped up/down stack navigation this branch; candidates for the phrase are stack level-jumps ("fifth" = a level), circle-of-fifths name generation instead of random word pairs, or a chord-model transpose. Jack said "keep going" — deferred, not dropped.
-
-The rebase-efficiency follow-ups are resolved by PR #818: config/naming-schema redesign shipped as `WaveId`; `lf wt create` is sibling-only; Task and Project Work own higher-level worktree placement; land rotation and `next`/`advance` are removed.
 
 ### How to judge rebase efficiency (dogfood metrics from `.lf/tmp/metrics/ops.jsonl`)
 

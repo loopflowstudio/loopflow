@@ -68,7 +68,7 @@ def test(args: argparse.Namespace) -> None:
     # Install playwright browsers if needed
     run(["uv", "run", "playwright", "install", "chromium"], cwd=ROOT)
 
-    cmd = ["uv", "run", "pytest", "tests/", "-v"]
+    cmd = ["uv", "run", "--no-sync", "pytest", "tests/", "-v"]
 
     if args.a11y:
         cmd.extend(["-k", "accessibility or Accessibility or aria or focus or contrast"])

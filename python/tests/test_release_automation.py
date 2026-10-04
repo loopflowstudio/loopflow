@@ -332,5 +332,5 @@ def test_changed_aware_runner_includes_ci_static_checks():
         text=True,
         capture_output=True,
     )
-    assert "scripts/test_network.py uv run pytest python/tests/" in full.stdout
+    assert "scripts/test_network.py uv run --no-sync pytest python/tests/" in full.stdout
     assert "python/tests/test_release_automation.py" not in full.stdout.split("Plan:", 1)[1]

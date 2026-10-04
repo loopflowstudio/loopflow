@@ -625,7 +625,7 @@ def test_deleted_python_test_falls_back_to_the_full_suite():
         c for c in gate._python_commands(["python/tests/test_removed.py"]) if c.label == "python"
     )
 
-    assert command.argv[-4:] == ["uv", "run", "pytest", "python/tests/"]
+    assert command.argv[-5:] == ["uv", "run", "--no-sync", "pytest", "python/tests/"]
 
 
 def test_python_verifier_change_runs_the_full_python_suite():
@@ -638,9 +638,10 @@ def test_python_verifier_change_runs_the_full_python_suite():
     )
 
     assert plan.run is True
-    assert next(c for c in plan.commands if c.label == "python").argv[-4:] == [
+    assert next(c for c in plan.commands if c.label == "python").argv[-5:] == [
         "uv",
         "run",
+        "--no-sync",
         "pytest",
         "python/tests/",
     ]

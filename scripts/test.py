@@ -296,9 +296,9 @@ def _python_commands(changed: list[str]) -> list[Command]:
         or _touches_exact(changed, "pyproject.toml", "uv.lock")
     )
     if test_files and not touches_source:
-        argv = ["uv", "run", "pytest", *test_files]
+        argv = ["uv", "run", "--no-sync", "pytest", *test_files]
     else:
-        argv = ["uv", "run", "pytest", "python/tests/"]
+        argv = ["uv", "run", "--no-sync", "pytest", "python/tests/"]
     return [
         Command(["uv", "sync"], REPO_ROOT, "python-dependencies"),
         Command(

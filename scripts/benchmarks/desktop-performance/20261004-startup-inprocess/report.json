@@ -1,0 +1,156 @@
+{
+  "endpoint": "model holds outline content (in-process); not a rendered frame",
+  "not_measured": [
+    "first frame",
+    "process launch and pre-main",
+    "CPU",
+    "memory",
+    "main-thread stalls after init"
+  ],
+  "budget_usable_ms": 1000,
+  "capture": {
+    "lf": "lf 0.12.32",
+    "reads": [
+      {
+        "verb": "home",
+        "file": "home.json",
+        "ms": 1057.7,
+        "bytes": 136
+      },
+      {
+        "verb": "wave",
+        "file": "waves.json",
+        "ms": 1981.2,
+        "bytes": 24580
+      },
+      {
+        "verb": "roadmap",
+        "file": "roadmap.json",
+        "ms": 16361.4,
+        "bytes": 606626
+      },
+      {
+        "verb": "activity",
+        "file": "activity.json",
+        "ms": 2956.3,
+        "bytes": 40166
+      },
+      {
+        "verb": "session",
+        "file": "sessions-0.json",
+        "ms": 8135.5,
+        "bytes": 60062
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario": "uncached",
+      "attempted": 5,
+      "usable_from": [
+        "read"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 5,
+        "median_ms": 0.1,
+        "p95_ms": null,
+        "max_ms": 172.0
+      },
+      "usable": {
+        "samples": 5,
+        "median_ms": 16371.1,
+        "p95_ms": null,
+        "max_ms": 16555.0
+      },
+      "settled": {
+        "samples": 5,
+        "median_ms": 16371.1,
+        "p95_ms": null,
+        "max_ms": 16555.0
+      },
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "usable_within_budget": false
+    },
+    {
+      "scenario": "saved",
+      "attempted": 5,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 5,
+        "median_ms": 11.7,
+        "p95_ms": null,
+        "max_ms": 13.7
+      },
+      "usable": {
+        "samples": 5,
+        "median_ms": 11.7,
+        "p95_ms": null,
+        "max_ms": 13.7
+      },
+      "settled": {
+        "samples": 5,
+        "median_ms": 16380.6,
+        "p95_ms": null,
+        "max_ms": 16389.2
+      },
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    },
+    {
+      "scenario": "saved_offline",
+      "attempted": 5,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "failed"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 5,
+        "median_ms": 10.1,
+        "p95_ms": null,
+        "max_ms": 11.8
+      },
+      "usable": {
+        "samples": 5,
+        "median_ms": 10.1,
+        "p95_ms": null,
+        "max_ms": 11.8
+      },
+      "settled": {
+        "samples": 5,
+        "median_ms": 63.2,
+        "p95_ms": null,
+        "max_ms": 64.3
+      },
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 1,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    }
+  ]
+}

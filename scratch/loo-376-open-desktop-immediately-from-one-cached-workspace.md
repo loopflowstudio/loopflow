@@ -53,15 +53,16 @@ Before this Task every launch waited on all of these: the window body waited on
 
 ## Remaining work
 
-1. **Unattended startup runner** (acceptance, not started): launch the built app
-   against an isolated copy of Jack's Home (SQLite backup, copied receipts made
-   inert so nothing launches or mutates live work), for uncached, process-cold
-   with warm cache, warm reopen, slow/offline `lf`, refresh failure, and refresh
-   after selection/repository change. Report samples, median/p95 first frame and
-   usable saved/current workspace, main-thread stalls, CPU/RSS, `lf` subprocess
-   counts; keep baseline (parent commit) and candidate receipts under
-   `scripts/benchmarks/desktop-performance/`. LOO-371's snapshot runner is not on
-   main; reuse it when it lands instead of writing a second.
+1. **Rendered startup runner** (acceptance, blocked in headless runs): agent
+   runs have no Aqua session (`launchctl managername` = Background), so a window
+   cannot be launched. Still owed on a capable host: launch the built app with a
+   replaying `lf` beside its executable (allow-listing read verbs so nothing
+   launches or mutates live work), 20+ samples for p95, first frame, main-thread
+   stalls, CPU/RSS, subprocess counts, warm reopen, and refresh arriving after a
+   selection or repository change. Headless equivalent delivered:
+   `startup.py` + `20261004-startup-inprocess/` (usable from saved text in
+   12 ms median vs 16.4 s uncached; offline keeps content). LOO-371's snapshot
+   runner is not on main; reuse it when it lands.
 2. **Critical-path costs still on the main thread before first frame:**
    `WaveOrigin.resolve` (two `git` execs) and `PortfolioDiscovery.resolveLaunchRepo`
    in `PodiumView.init`. Measure with the runner first, then move or cache.
@@ -76,3 +77,4 @@ Before this Task every launch waited on all of these: the window body waited on
 
 - `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|DesktopHeadlessTests"`: 61 tests in 5 suites passed (2026-10-04). Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
 - Saved-roadmap cost on Jack's real 607 KB payload, debug build, in-process: quieting 28 ms (cache queue), decode 9 ms (main thread). Lower-level timing only.
+- `startup.py run --samples 5` on a capture of Jack's Home: passed, receipt in `scripts/benchmarks/desktop-performance/20261004-startup-inprocess/`.

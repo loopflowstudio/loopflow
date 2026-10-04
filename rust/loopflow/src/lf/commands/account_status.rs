@@ -229,6 +229,20 @@ async fn managed_rows(
     provider: Option<Provider>,
     verify: bool,
 ) -> Result<Vec<AccountRow>> {
+    if verify && provider.is_none_or(|provider| provider == Provider::Claude) {
+        // A login Claude refreshed in its own home is placed first, so the
+        // active account is polled there and not on its stale stored copy.
+        let native = crate::provider_account::activation::native_home(Provider::Claude, None);
+        let placed = crate::provider_account::activation::observe_active_account(
+            store,
+            Provider::Claude,
+            &native,
+        )
+        .await;
+        if let Err(error) = placed {
+            tracing::warn!("could not place the native Claude login: {error}");
+        }
+    }
     let accounts = store
         .list_provider_accounts(provider.map(Provider::as_str))
         .await?;

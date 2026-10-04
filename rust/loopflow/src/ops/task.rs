@@ -2692,7 +2692,7 @@ pub(crate) async fn exec_task_process(
             return Err(task_error(reason));
         }
     }
-    let environment = vec![
+    let mut environment = vec![
         (
             crate::durable::TASK_WORKER_CLAIM_ENV.to_string(),
             serde_json::to_string(&claim).map_err(task_error)?,
@@ -2702,6 +2702,12 @@ pub(crate) async fn exec_task_process(
             accounts.env_value().map_err(task_error)?,
         ),
     ];
+    environment.extend(
+        position
+            .invocation
+            .isolation_env()
+            .map(|(name, value)| (name.to_string(), value.to_string())),
+    );
     if let Err(error) = crate::ops::exec_task_worker(crate::ops::TaskWorkerExec {
         task_id: task.id.clone(),
         wave_id: task.wave_id.clone(),

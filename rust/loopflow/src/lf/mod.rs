@@ -78,6 +78,15 @@ pub struct Cli {
     )]
     pub only_account: Vec<String>,
 
+    /// Run in the selected account's own provider home, unmoved by account
+    /// switches. Applies to this invocation and its children.
+    #[arg(long, conflicts_with = "shared")]
+    pub isolate: bool,
+
+    /// Run in the provider's ordinary home despite an `isolate: true` default
+    #[arg(long, conflicts_with = "isolate")]
+    pub shared: bool,
+
     /// Internal SSH compatibility and broker-connectivity probe.
     #[arg(long = "__account-lease-probe", hide = true)]
     pub account_lease_probe: bool,
@@ -135,6 +144,29 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Reject argument combinations the derive cannot express, as the usage
+    /// errors they are, before anything runs.
+    pub fn checked(self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Account {
+            cmd,
+            provider,
+            cached,
+            details,
+            json,
+        }) = &self.command
+        {
+            if let Some(misuse) =
+                AccountCommand::misuse(cmd.as_ref(), *provider, *cached || *details || *json)
+            {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    format!("{misuse}\n"),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
     /// Forward prompt and provider options to a captured step. Work and the
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
@@ -144,6 +176,8 @@ impl Cli {
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
+            ("--isolate", self.isolate),
+            ("--shared", self.shared),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -191,6 +225,8 @@ impl Cli {
             model: self.model.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
+            isolate: self.isolate,
+            shared: self.shared,
             account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
             mode: self.mode,
@@ -280,7 +316,6 @@ pub enum Commands {
         cmd: SessionCommand,
     },
     /// Refresh account access and capacity, or manage logins and routing
-    #[command(args_conflicts_with_subcommands = true)]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
@@ -478,6 +513,7 @@ impl SessionMode {
 pub enum SessionCommand {
     /// Read this conversation's native start, usage and completion receipts
     History {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -525,6 +561,7 @@ pub enum SessionCommand {
     /// Connect to the live conversation, or resume its saved history
     #[command(name = "connect")]
     Open {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -550,9 +587,13 @@ pub enum SessionCommand {
         json: bool,
     },
     /// Complete a review or interactive session
-    Complete { id: String },
+    Complete {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        id: String,
+    },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         #[arg(value_name = "NAME", required = true, num_args = 1..)]
         name: Vec<String>,
@@ -564,6 +605,7 @@ pub enum SessionCommand {
     },
     /// Assign a Task to a Session that has none; the Task never changes after
     Bind {
+        /// Session ID, one of its Run IDs, or the provider's own conversation ID
         id: String,
         /// The Task, by its issue identifier (e.g. INF-123) or stable Task ID
         #[arg(long)]
@@ -1459,6 +1501,10 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Sign the provider's ordinary home in as a stored login:
+    /// `lf account <provider> use <email>`
+    #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
+    Use { email: String },
     /// Explain configured and automatic account selection, or replace a route
     #[command(args_conflicts_with_subcommands = true)]
     Route {
@@ -1471,6 +1517,27 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl AccountCommand {
+    /// `use` is the one verb that takes its provider first; a provider or an
+    /// overview flag before any other verb belongs to bare `lf account`.
+    pub fn misuse(
+        cmd: Option<&Self>,
+        provider: Option<crate::provider_auth::Provider>,
+        overview_flags: bool,
+    ) -> Option<&'static str> {
+        match (cmd, provider) {
+            (Some(Self::Use { .. }), None) => {
+                Some("name the provider: lf account <provider> use <email>")
+            }
+            (Some(Self::Use { .. }), Some(_)) | (None, _) => None,
+            (Some(_), None) if !overview_flags => None,
+            (Some(_), _) => Some(
+                "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone",
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1961,6 +2028,17 @@ mod tests {
             Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { lf_args, .. } })
                 if lf_args == vec!["--account", "reserve", "task", "pursue"]
         ));
+    }
+
+    #[test]
+    fn account_use_takes_its_provider_before_the_verb() {
+        let cli =
+            Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Account {
+            cmd: Some(AccountCommand::Use { email }),
+            provider: Some(crate::provider_auth::Provider::Codex),
+            ..
+        }) if email == "jack@loopflow.studio"));
     }
 
     #[test]

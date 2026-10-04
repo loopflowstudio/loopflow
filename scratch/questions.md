@@ -14,7 +14,7 @@
 
 ## To research
 
-- What most affects how seamless an interrupted session feels (Jack's question): terminal versus headless, unsent input and scrollback, in-flight tool calls running twice, gap length, whether the agent notices, and what history shows. Gates “everyone now” for Codex.
+- No longer gating: Jack chose not to interrupt a turn in flight (2026-10-04, LOO-374). Remaining detail on what most affects how seamless a moved session feels: terminal versus headless, unsent input and scrollback, in-flight tool calls running twice, gap length, whether the agent notices, and what history shows.
 
 ## To prove while building
 

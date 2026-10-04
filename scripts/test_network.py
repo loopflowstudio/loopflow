@@ -47,7 +47,7 @@ def main() -> int:
         if platform.system() == "Linux":
             subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
             if os.environ.get("SUDO_UID"):
-                os.setgroups([])
+                os.setgroups(os.getgrouplist(os.environ["SUDO_USER"], int(os.environ["SUDO_GID"])))
                 os.setgid(int(os.environ["SUDO_GID"]))
                 os.setuid(int(os.environ["SUDO_UID"]))
         _probe()
@@ -63,7 +63,17 @@ def main() -> int:
     if platform.system() == "Darwin":
         command = ["sandbox-exec", "-p", PROFILE, *child]
     elif platform.system() == "Linux" and shutil.which("unshare") and shutil.which("ip"):
-        command = ["sudo", "-n", "-E", "unshare", "--net", *child]
+        command = [
+            "sudo",
+            "-n",
+            "-E",
+            "env",
+            f"PATH={os.environ['PATH']}",
+            f"HOME={os.environ['HOME']}",
+            "unshare",
+            "--net",
+            *child,
+        ]
     else:
         raise SystemExit(
             "test network isolation unavailable: requires macOS sandbox-exec "

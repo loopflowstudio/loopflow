@@ -108,7 +108,7 @@ struct WorkspaceCacheTests {
             #expect(!FileManager.default.fileExists(atPath: file.path))
         }
 
-        try Data(#"{"version":1,"snapshot":{"roadmap":{"text":"{}","savedAt":0},"repositories":{}}}"#.utf8).write(to: file)
+        try Data(#"{"version":1,"snapshot":{"roadmap":"{}","repositories":{}}}"#.utf8).write(to: file)
         let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("unused") },
                                 repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
         #expect(model.workspaceStatus == .loading)

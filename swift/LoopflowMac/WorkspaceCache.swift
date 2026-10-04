@@ -12,11 +12,6 @@ import Foundation
 import Loopflow
 
 struct WorkspaceSnapshot: Codable, Equatable, Sendable {
-    struct Saved: Codable, Equatable, Sendable {
-        var text: String
-        var savedAt: Date
-    }
-
     struct Repository: Codable, Equatable, Sendable {
         /// The default interactive Session listing, one wire page each.
         var sessionPages: [String]?
@@ -26,8 +21,9 @@ struct WorkspaceSnapshot: Codable, Equatable, Sendable {
 
     /// The Home these reads came from. A different Home invalidates everything.
     var homeId: String?
-    var roadmap: Saved?
-    var waves: Saved?
+    /// Wire text of the last successful planning reads.
+    var roadmap: String?
+    var waves: String?
     /// Keyed by the repository path the window was scoped to.
     var repositories: [String: Repository] = [:]
 }
@@ -78,12 +74,12 @@ final class WorkspaceCache: @unchecked Sendable {
         }
     }
 
-    func saveRoadmap(_ text: String, at date: Date = Date()) {
-        update("roadmap", input: text) { $0.roadmap = Self.quietRoadmap(text).map { .init(text: $0, savedAt: date) } }
+    func saveRoadmap(_ text: String) {
+        update("roadmap", input: text) { $0.roadmap = Self.quietRoadmap(text) }
     }
 
-    func saveWaves(_ text: String, at date: Date = Date()) {
-        update("waves", input: text) { $0.waves = Self.bounded(text).map { .init(text: $0, savedAt: date) } }
+    func saveWaves(_ text: String) {
+        update("waves", input: text) { $0.waves = Self.bounded(text) }
     }
 
     func saveSessions(_ pages: [String], repo: String, at date: Date = Date()) {
@@ -206,7 +202,7 @@ final class WireCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var pages: [String] = []
 
-    func record(_ args: [String], _ stdout: String) {
+    func record(_ stdout: String) {
         lock.lock(); defer { lock.unlock() }
         pages.append(stdout)
     }

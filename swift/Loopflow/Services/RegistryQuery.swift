@@ -46,10 +46,10 @@ public struct RegistryQuery: Sendable {
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
-    public func recording(_ record: @escaping @Sendable (_ lfArgs: [String], _ stdout: String) -> Void) -> RegistryQuery {
+    public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
         RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
             let stdout = try await run(args, cwd)
-            record(args, stdout)
+            record(stdout)
             return stdout
         }
     }

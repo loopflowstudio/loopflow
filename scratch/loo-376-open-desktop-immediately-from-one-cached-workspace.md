@@ -76,6 +76,6 @@ Before this Task every launch waited on all of these: the window body waited on
 
 ## Checks
 
-- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|DesktopHeadlessTests"`: 65 tests in 7 suites passed (2026-10-04). Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
+- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|DesktopHeadlessTests"`: 61 tests in 5 suites passed after compression (2026-10-04). Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
 - Saved-roadmap cost on Jack's real 607 KB payload, debug build, in-process: quieting 28 ms (cache queue), decode 9 ms (main thread). Lower-level timing only.
 - `startup.py run --samples 5` on a capture of Jack's Home: passed, receipt in `scripts/benchmarks/desktop-performance/20261004-startup-inprocess/`.

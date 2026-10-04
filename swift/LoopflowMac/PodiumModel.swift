@@ -340,11 +340,11 @@ final class PodiumModel {
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
     private func restore(_ saved: WorkspaceSnapshot) {
         savedHomeId = saved.homeId
-        if let text = saved.roadmap?.text, let value = try? RegistryQuery.decode(RoadmapSnapshot.self, from: text) {
+        if let text = saved.roadmap, let value = try? RegistryQuery.decode(RoadmapSnapshot.self, from: text) {
             roadmap = .available(value)
             showsSavedPlanning = true
         }
-        if let text = saved.waves?.text, let value = try? RegistryQuery.decode([WaveSnapshot].self, from: text) {
+        if let text = saved.waves, let value = try? RegistryQuery.decode([WaveSnapshot].self, from: text) {
             waves = .available(value.map { $0.toWave() })
         }
         for (repo, entry) in saved.repositories {

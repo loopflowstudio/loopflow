@@ -15,3 +15,7 @@
   `lf session list` (12.4 s) on Jack's Home have no owning Task. Candidate
   measure: p95 wall time of those two reads against the real store; cheapest
   producer is the startup runner's `lf` interval table.
+- **Task condition text is saved as read.** Flow execution, Flow controls and
+  Session state are quieted; a Task's `condition` reason is not, and may still
+  say what a worker was doing. Choice for Jack: blank it to `unknown` in saved
+  text, or keep the last reading under `Updating…`.

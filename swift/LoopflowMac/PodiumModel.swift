@@ -378,6 +378,12 @@ final class PodiumModel {
                 roadmap = .loading
                 waves = .loading
                 showsSavedPlanning = false
+                // Work chosen from the other Home's rows names nothing here.
+                for navigation in navigationByRepo.values {
+                    navigation.selection = nil
+                    navigation.selectedTaskEvidence = nil
+                    navigation.content = .overview
+                }
             }
             for repo in savedSessionRepos { sessionReadings[repo] = nil }
             savedSessionRepos = []

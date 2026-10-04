@@ -799,22 +799,25 @@ substitute for another merely because identifiers coincide.
   `ok`, `waiting`, `failed`, `pending`), not the lfd int enum. No invented
   `cancelled`. An unknown status must be **loud** (surface it), never a silent
   `?? .pending`. When `lf` and lfd disagree, `lf` wins.
-## Performance — reads never block on lfd
+## Performance — launch renders before any read (2026-10-04)
 
-- **Governing invariant: the repo/wave list paints from `lf` (daemon-less); a
-  listener or Home process must never gate a read.** First instance
-  (diagnosed, fix implemented this branch): `WavesView.syncRepoStates`
-  early-returned while `SharedDaemon.currentConnection == nil` and
-  `prepareConnectionIfNeeded` awaited `SharedDaemon.manager.start()` — the wave
-  list waited on lfd booting even though `RegistryQuery`/`lf ls` is daemon-less.
-- Cheap wins landed this branch: one machine-wide `RegistryQuery.allWaves()`
-  (`lf ls --json`) per poll distributed to each `PortfolioRepoState` (was one
-  spawn per repo); memoized `lf` binary resolution (was `lf help wave` probe per
-  query); first paint boots lfd concurrently, not as a barrier; `WavePlanParser`
-  moved off render/`body` onto a per-refresh cache; one `tmux list-sessions`
-  snapshot + Set lookup (was `tmux has-session` per wave). These are historical
-  reductions, not measurements of the current canvas. Use the two experience
-  runners above to establish current budgets.
+Jack Heart requested Desktop open on a usable workspace with one loading
+vocabulary and one refresh path (LOO-376). On Jack's Home, installed `lf`
+0.12.32, single samples: `roadmap --all` 14.5 s, `session list` 12.4 s,
+`wave list` 2.4 s, `home id` and `ps` 1.2 s each. No read fits the 1000 ms
+budget, so a returning launch shows saved wire text first; that CLI latency has
+no owning Task (LOO-375 owns `wt list` only).
+
+- Save the reads' wire text, restore through the live decoder, and strip
+  liveness and legal actions before saving. Display evidence, never authority.
+  Keep it inside the Home; a different `lf home id` drops content and selection.
+- One model owns refresh; views that each start a loop supersede each other's
+  reads. A view that builds its own model reopens the blocking path.
+- The in-process replay (12 ms saved vs 16.4 s uncached, five samples) is
+  lower-level timing. Agent runs have no Aqua session, so first frame, p95,
+  stalls and CPU remain unmeasured; the 400/1000 ms targets are not established.
+- Still true from June: a listener or Home process never gates a read. The
+  per-poll reductions of that branch are in `06e3fc455:wave/product/MEMORY.md`.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
@@ -1067,17 +1070,6 @@ Wispr Flow owns dictation; configured UI execution requires a capable host.
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
 - Kickoff line numbers drift fast — re-verify before citing in a design.
-- **Migration numbers collide across branches — shared `lfd.db` is the blast
-  radius.** Product and intelligence both minted `061` (`061_pm_snapshots` vs
-  `061_trace_capture`); distinct version strings apply but inter-order is
-  undefined. Worse, editing a historical migration CREATE in place (product added
-  `run_events.context` to `057`) means DBs created before the edit never get the
-  column, and `057` won't re-run — so `validate_run_events_schema` selecting
-  `context` takes down *every* command sharing `lfd.db` (that was the `pm show`
-  break; worked around by hand-adding the column). Fix is intelligence's, one
-  line: `061_trace_capture`'s unguarded `ALTER TABLE run_events DROP COLUMN
-  context` fails `no such column` on pre-context DBs and isn't in the convergence
-  path — tolerate it (or rebuild). Product must NOT add a forward `ADD COLUMN
-  context`; it would fight the drop. Wants a real convention: per-wave migration
-  ranges, or Jack's idea — a separate dev lfdb via `LF_HOME=~/.lf-dev` (honored at
-  `lfd/mod.rs:66`) so in-flight schema can't corrupt the real ledger.
+- Migration ordinals collide across branches and an in-place edit of a released
+  migration never reaches existing stores; AGENTS.md now owns the one-draft rule.
+  The June `061`/`057` incident is in `06e3fc455:wave/product/MEMORY.md`.

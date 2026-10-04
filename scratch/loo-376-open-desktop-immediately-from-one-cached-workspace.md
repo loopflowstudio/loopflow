@@ -25,13 +25,16 @@ Before this Task every launch waited on all of these: the window body waited on
 
 - **One owner, `WorkspaceCache`**, stored at `<Home>/desktop-cache/workspace.json`
   (`LF_HOME`, else `~/.lf`). Living inside the Home scopes it structurally; the
-  saved `homeId` is checked against `lf home id` and a mismatch drops everything.
+  saved `homeId` is checked against `lf home id` and a mismatch drops everything,
+  including a selection restored or made from the other Home's rows.
 - **It keeps wire text, not models.** Restore runs the decoder live reads use,
   so an incompatible file fails to decode and is skipped. Versioned envelope;
   absent/corrupt/other-version files load as nothing and are removed.
 - **Saved text is quiet.** On save, every pinned Flow becomes `unknown`, every
   Flow control unavailable, every Session `unknown` with only its `open` action
   (`lf session connect` re-validates). No credentials are read or stored.
+  Not quieted: each Task's `condition` state and reason and the Wave rows are
+  shown as last read under `Updating…`; no test bounds what a stale reason says.
 - **Bounded:** 8 most recent repositories, 8 MB per read. Only the default
   interactive Session listing is saved; explicit history is read on request.
 - **One refresh owner:** `PodiumModel.keepWorkspaceCurrent()` replaces the two
@@ -49,8 +52,11 @@ Before this Task every launch waited on all of these: the window body waited on
   `Reading workspace Home` and their per-part error lines; the two
   `.task(id: repoPath)` refresh loops in `PodiumView`.
 - Done: the Portfolio Task sheet's own 15 s loop (now `keepWorkspaceCurrent`).
-- Remaining: `RoadmapView`/`WavesView` each build a private `PodiumModel`;
-  fold them onto the window's model or delete with their window.
+- Remaining: the Portfolio window still builds private `PodiumModel`s without
+  the cache: `RoadmapView.init`, whose own `ProgressView("Loading workspace…")`
+  waits on a full roadmap read, and `WavesView`'s Task sheet (one model per
+  opened Task). Both use the one vocabulary and refresh owner but neither opens
+  from saved text. Fold them onto the window's model or delete with their window.
 
 ## Remaining work
 
@@ -73,9 +79,14 @@ Before this Task every launch waited on all of these: the window body waited on
    latency (LOO-375 owns `wt list`; no owner yet for these two).
 5. Selection saved per repository is the Work selection only; the open Session
    is not restored (see `scratch/questions.md`).
+6. **Acceptance scenarios with no evidence yet:** warm reopen, a slow (not
+   failed) provider, and p95 for any scenario (five samples). Refresh arriving
+   after a repository change is covered for Sessions by a headless test; after
+   a selection change it relies on the existing roadmap generation check, with
+   no startup-specific test.
 
 ## Checks
 
-- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests|PodiumModelTests|WorkspaceNavigationTests|DesktopHeadlessTests"`: 61 tests in 5 suites passed after compression (2026-10-04). Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
+- `scripts/test_desktop.sh -Xswiftc -gnone --filter "WorkspaceCacheTests"`: 10 tests passed after realign's Home-mismatch selection repair (2026-10-04); the wider 61-test focused run predates it. Full suite, Xcode app build and the rendered startup runner are owed to gate and item 1.
 - Saved-roadmap cost on Jack's real 607 KB payload, debug build, in-process: quieting 28 ms (cache queue), decode 9 ms (main thread). Lower-level timing only.
 - `startup.py run --samples 5` on a capture of Jack's Home: passed, receipt in `scripts/benchmarks/desktop-performance/20261004-startup-inprocess/`.

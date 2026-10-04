@@ -121,6 +121,7 @@ struct WorkspaceCacheTests {
         let saving = WorkspaceCache(directory: directory)
         let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
+        first.select(.task(id: "issue-now"))
         first.confirmHome("home-a")
         saving.flush()
 
@@ -132,6 +133,8 @@ struct WorkspaceCacheTests {
 
         #expect(returning.workspaceStatus == .loading)
         #expect(returning.sessions.value == nil)
+        #expect(returning.selection == nil)
+        #expect(returning.task(id: "issue-now") == nil)
         let saved = try #require(WorkspaceCache(directory: directory).load())
         #expect(saved == WorkspaceSnapshot(homeId: "home-b"))
     }

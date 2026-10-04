@@ -3,8 +3,43 @@
 Draft for feature Flow design review, 2026-10-02. Jack Heart requested cleanup
 while preserving conversations, history and work. This plan is not approval of an
 installed-Home migration. Base: `a278d6bc1bd4373f78f27027b8ae249100ef14d3`.
-The authored `feature → task-design` Flow puts `review-design` with `human: true`
-after kickoff and before implementation. Production implementation remains pending.
+Design acceptance and production implementation remain pending.
+
+## Current direction — October 4
+
+Jack Heart authorized fully autonomous development and landing in the repository
+conversation, without further interactive design/demo approvals. Jack suggested
+`sessions/` as a possible replacement for `runs/`; this is a naming preference,
+not approval of a particular layout or conflation of capture keys with Session IDs.
+Resolve the layout against the actual owner, preserving retained identity and history.
+
+The earlier design-review hold below is superseded for source implementation.
+Choose and prove the recoverable conversion strategy autonomously in isolated
+released-Home fixtures. A maintenance boundary may be part of the designed deployment;
+no interruption of live conversations, installed-Home conversion, installation,
+schedule mutation or production release is authorized by this source-delivery request.
+Retain remaining configured acceptance honestly after landing. The prior feature
+Flow's human review gates are replaced by the autonomous implementation path at
+Jack's request; preserve Task, branch, checkout and history.
+
+## Earlier maintenance proposal
+
+The proposed user experience is one scheduled pause: let existing conversations
+finish writing, close launch sources, preserve the frozen Home and executable,
+convert, then reopen the same conversations. Session IDs, pending feedback and
+Task membership remain unchanged. No duration is promised before measuring the
+populated backup and validation. Jack Heart has not yet accepted this interruption.
+
+Review inspection on 2026-10-02 confirmed that
+`machine_install.rs::startup_selection_during_switch` selects the prior binary
+before activation and `promotion_lock.rs` locks only promotion. Consequently,
+post-move recovery must prevent ordinary startup from choosing that prior binary;
+merely recording an unfinished switch is insufficient. Direct retained-binary
+launches still require the external maintenance boundary described below.
+
+If an offline window is unacceptable, the deployment design needs revision before
+implementation; a naming-only delivery does not satisfy the requested cleanup.
+Accepting this design would not authorize a configured installation or migration.
 
 ## Problem and observable outcome
 

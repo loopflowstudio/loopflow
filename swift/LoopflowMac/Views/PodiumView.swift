@@ -35,7 +35,7 @@ struct PodiumView: View {
             ?? restoredRepoPath
         // Fixture and proof runs render only what they read; nothing saved is restored.
         let model = PodiumModel(query: query, repoPath: startingRepoPath,
-                                cache: AppTestMode.current() == nil ? .forHome() : nil)
+                                cache: AppTestMode.current() == nil ? .home : nil)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
         _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))

@@ -38,7 +38,7 @@ final class WorkspaceCache: @unchecked Sendable {
     static let maxRepositories = 8
     /// One read larger than this is not kept; the launch reads it instead.
     static let maxTextBytes = 8 * 1024 * 1024
-    static let savedReason = "Saved from the last launch; updating…"
+    static let savedReason = "Shown from the last launch; waiting for a fresh read."
 
     private struct Envelope: Codable {
         var version: Int
@@ -55,12 +55,13 @@ final class WorkspaceCache: @unchecked Sendable {
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }
 
-    /// The cache of the Home this process's `lf` reads resolve to.
-    static func forHome(environment: [String: String] = ProcessInfo.processInfo.environment) -> WorkspaceCache {
-        let home = environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+    /// The cache of the Home this process's `lf` reads resolve to. Every window
+    /// shares it, so one window's save never drops another's repository.
+    static let home: WorkspaceCache = {
+        let home = ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".lf", isDirectory: true)
         return WorkspaceCache(directory: home.appendingPathComponent("desktop-cache", isDirectory: true))
-    }
+    }()
 
     /// The saved workspace, or `nil` when absent, corrupt or from another version.
     /// An unusable file is removed so the next save starts clean.

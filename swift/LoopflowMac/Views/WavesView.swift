@@ -126,12 +126,7 @@ struct WavesView: View {
                     SessionsView(model: model, repoPath: repo, workspaces: sessionWorkspaces)
                 }
                 .frame(minWidth: 1100, minHeight: 700)
-                .task {
-                    while !Task.isCancelled {
-                        await model.refresh()
-                        try? await Task.sleep(for: .seconds(15))
-                    }
-                }
+                .task { await model.keepWorkspaceCurrent() }
             }
         }
         .sheet(isPresented: $isShowingCreate) {

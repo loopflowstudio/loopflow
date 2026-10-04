@@ -120,3 +120,23 @@ acceptance, source proof and verified merge remain separate claims.
 
 Check: `lf task status LOO-370 --json` — replacement implement running; retained
 old review Execs interrupted; no additional data/process mutation.
+
+## Launch decision and execution
+
+Selected prevention is [LOO-377](https://linear.app/loopflow/issue/LOO-377/restart-tasks-without-stranding-the-previous-review),
+prepared at `/Users/jack/src/loopflow.restart-tasks-without-stranding-the`.
+The incident was copied byte-for-byte before launch. Linear creation succeeded
+while the refresh timed out; `lf repo refresh infrastructure` recovered the same
+issue, without duplication. No separate prevention project was created.
+
+Two `flow start code` calls left saved invocation
+`a69b3a18-c0ee-4405-ae06-e50ee95c4aac` idle at implement, with no step Exec or
+Session, after the detached worker failed to report running within ten seconds.
+No surviving matching tmux pane was observed; the exited child's stderr was not
+available. This does not prove its cause is LOO-373's deleted-cwd defect.
+An ordinary independent `lf --task LOO-377 : ...` contribution was launched
+instead. Its first call rejected the inherited parent LF_FLOW_STEP as belonging
+to another Flow. Omitting only that Flow-step token allowed the independent
+contribution to reach Codex; caller Session/Exec attribution remained intact.
+The contribution owns implementation and authorized delivery; the idle Flow's
+position must not be fabricated or treated as completed work.

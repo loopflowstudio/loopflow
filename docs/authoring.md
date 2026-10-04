@@ -182,24 +182,18 @@ deciding step stable ids:
     repeat:
       from: implement
 - pr-publish
-- step:
-    id: review_delivery
-    name: demo
-    human: true
-- step:
-    id: decide_delivery
-    name: loop-decide
-    repeat:
-      from: implement
 ```
 
 One pass runs implement, compress, refresh (sync → realign), and loop-decide.
 The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
 [decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
-with direction; Advance publishes, then reaches the human demo. Complete returns the demo's
-feedback and revised design to the second loop-decide. Its own explicit edge
-also targets implement: the outer loop repeats implementation, refresh,
-the inner decision loop, and demo. Review completion itself chooses no edge.
+with direction; Advance leaves the loop and publishes. This is `pursue`: one
+implementation loop with no human review or outer return edge.
+
+`code` composes `pursue` followed by a human `pr-review` walkthrough. `feature`
+adds design review before `pursue`, then a human demo, the final gate and landing.
+Completing either delivery review does not restart the pursuit. Existing saved
+Flows retain their captured steps; these definitions govern new invocations.
 
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or

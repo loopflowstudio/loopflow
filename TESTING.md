@@ -65,6 +65,11 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
+Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
+Run the affected controller progression and CLI behavior tests as well as graph
+checks; use authored fixture Flows when a test needs a fixed sequence independent
+of product defaults.
+
 ## Quick Reference
 
 ```bash

@@ -140,3 +140,25 @@ to another Flow. Omitting only that Flow-step token allowed the independent
 contribution to reach Codex; caller Session/Exec attribution remained intact.
 The contribution owns implementation and authorized delivery; the idle Flow's
 position must not be fabricated or treated as completed work.
+
+## Implementation review and verification
+
+LOO-377 implemented the repair in PR #1429. Review identified two additional
+boundaries inside the accepted scope: preserve process identities before native
+client receipt cleanup so interruption remains retryable, and share the review
+launch lock so retirement cannot miss a child between reservation and spawn.
+The repair records the separate service Exec, fences the Session, retains exact
+PID/start-time evidence, waits for exit and reuses admission's independent-work
+checks. No successful review result is synthesized.
+
+Focused public-command and store tests passed. The local broader gate stopped at
+13.3 GiB free versus the 32 GiB reserve; no active work was deleted. Hosted CI's
+first Rust run had 2,210 passes and two fixture failures: a stale-decision fixture
+bypassed retirement, and a direct launch-lock fixture tried to claim a review.
+Commit cd3e0a0f3 repairs those setups; the public waiting-review regression passed
+in the first hosted run. Final hosted verification and merge remain pending here.
+
+Publication/auto-merge succeeded, then installed landing reconciliation reported
+`invalid stored landing placement: home`. LOO-373 already owns that defect. It is
+separate from GitHub's merge evidence and does not authorize another emergency
+DB edit or source-binary promotion.

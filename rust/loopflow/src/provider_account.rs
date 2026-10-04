@@ -509,7 +509,10 @@ impl ProviderAccountRoute {
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
-        if self.engine_login()?.is_some() {
+        if matches!(
+            (self.provider, &self.login),
+            (Provider::Codex, AccountLogin::Lent { .. })
+        ) {
             return Err(ProviderAccountError::ForwardingCredential {
                 provider: self.provider,
                 account_id: self.account_id.clone(),
@@ -547,19 +550,8 @@ impl ProviderAccountRoute {
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
-                        .block_on(self.launch_as(command))
-                })
-                .join()
-                .map_err(|_| {
-                    ProviderAccountError::Runtime("account activate worker panicked".into())
-                })?
+        _run_blocking_account(self.provider, "activate", |runtime| {
+            runtime.block_on(self.launch_as(command))
         })
     }
 
@@ -612,14 +604,13 @@ impl ProviderAccountRoute {
         if provider_session_id.is_none() && signal.is_none() {
             return Ok(());
         }
-        let route = self.clone();
         _run_blocking_account(self.provider, "record", move |runtime| {
             runtime.block_on(async {
                 if let Some(signal) = signal {
-                    route.record_rate_limit(&signal).await?;
+                    self.record_rate_limit(&signal).await?;
                 }
                 if let Some(provider_session_id) = provider_session_id {
-                    if let Err(error) = route.pin_session(&provider_session_id).await {
+                    if let Err(error) = self.pin_session(&provider_session_id).await {
                         tracing::warn!(%error, "failed to pin provider session account");
                     }
                 }
@@ -632,24 +623,22 @@ impl ProviderAccountRoute {
         &self,
         reason: &str,
     ) -> Result<(), ProviderAccountError> {
-        let route = self.clone();
-        let reason = reason.to_string();
         _run_blocking_account(self.provider, "invalidate", move |runtime| {
             runtime.block_on(async {
-                match &route.login {
+                match &self.login {
                     AccountLogin::Stored { store, .. } => {
                         store
                             .record_provider_account_credential_invalidated(
-                                route.provider.as_str(),
-                                &route.used_account().await?,
-                                &reason,
+                                self.provider.as_str(),
+                                &self.used_account().await?,
+                                reason,
                             )
                             .await?
                     }
                     AccountLogin::Lent { client, .. } => client.record_credential_invalidated(
-                        route.provider,
-                        &route.account_id,
-                        &reason,
+                        self.provider,
+                        &self.account_id,
+                        reason,
                     )?,
                     AccountLogin::Replayed { .. } => {}
                 }
@@ -1754,23 +1743,27 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
     })
 }
 
-fn _run_blocking_account<T: Send + 'static>(
+fn _run_blocking_account<T: Send>(
     provider: Provider,
     action: &'static str,
-    operation: impl FnOnce(&tokio::runtime::Runtime) -> Result<T, ProviderAccountError> + Send + 'static,
+    operation: impl FnOnce(&tokio::runtime::Runtime) -> Result<T, ProviderAccountError> + Send,
 ) -> Result<T, ProviderAccountError> {
-    std::thread::Builder::new()
-        .name(format!("lf-{}-account-{action}", provider.as_str()))
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-            operation(&runtime)
-        })
-        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
-        .join()
-        .map_err(|_| ProviderAccountError::Runtime(format!("account {action} worker panicked")))?
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name(format!("lf-{}-account-{action}", provider.as_str()))
+            .spawn_scoped(scope, move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+                operation(&runtime)
+            })
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
+            .join()
+            .map_err(|_| {
+                ProviderAccountError::Runtime(format!("account {action} worker panicked"))
+            })?
+    })
 }
 
 async fn route_store() -> Result<Option<SharedStore>, ProviderAccountError> {

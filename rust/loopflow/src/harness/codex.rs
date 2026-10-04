@@ -1087,7 +1087,7 @@ impl CodexHarness {
         }
         // Held until the engine has spawned, so a concurrent switch cannot
         // replace the native login between activation and startup.
-        let _activation = match &self.account_route {
+        let activation = match &self.account_route {
             Some(route) => route.launch_engine_as(command.as_std_mut()).await?,
             None => None,
         };
@@ -1128,6 +1128,7 @@ impl CodexHarness {
         } else {
             None
         };
+        drop(activation);
 
         // Publish the group pid for the interrupt hook: the signal handler
         // (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the process before

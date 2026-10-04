@@ -123,7 +123,7 @@ The damage is one turn, not the engine: when the in-flight turn survives, the ne
 - **Native home:** the provider default, or the caller's explicit `CODEX_HOME` / `CLAUDE_CONFIG_DIR`. Resolved once at admission from the launch's own environment so a nested launch never mistakes an inherited isolated home for the native one.
 - **Active account:** whichever stored account the native credential identifies. Source of truth is the native credential; nothing remembers it separately.
 - **Activation** (`provider_account/activation.rs`): under the provider credential lock, save the native credential back to the stored profile with the same identity; if it matches none, store it as a new profile; install the selected profile's credential by atomic rename (Codex `auth.json`; Claude Keychain item on macOS, `.credentials.json` elsewhere). Already active: no-op.
-- **Launch wrapper** (`ProviderAccountRoute::launch_as`, chosen name): no account named, or the named account already active → spawn. Otherwise lock, activate, spawn, unlock, return the child without waiting. Isolated → today's `apply` path unchanged. All five sites call it and nothing else touches account environment.
+- **Launch wrapper** (`ProviderAccountRoute::launch_as`): prepares the account environment and returns any activation lock; each caller spawns and immediately drops the lock. Codex's engine uses `launch_engine_as` so it can accept a lent login over its protocol. The four conversation launch sites use this path; Claude's binary version check needs no account activation. Isolated launches retain home redirection.
 - **Selection:** in shared mode routing returns the active account while it is eligible. When it is strained or unavailable, routing switches to the next eligible account, logged with cause `exhaustion`. In isolated mode selection is unchanged from today.
 - **Switch command** (`lf account <provider> use <account>`, named by Jack Heart 2026-10-03: “it should be lf account codex use jack@loopflow.studio”): the only writer of a shared account change.
 - **Two independent choices per launch** (Jack Heart, 2026-10-03/04: “why do we need so many ways, not just 2?”; “I prefer it as only an environment variable”; remote is “orthogonal to shared vs isoalted. I could want to do remote with either”). `RouteHome` is where the conversation runs: `Shared` or `Isolated`. `AccountLogin` is who holds the login: `Stored` (this Home's profile), `Replayed` (a recorded Run's catalog, read-only, records nothing) or `Lent` (an `lf ssh` origin's access token, environment only, never written on the target). A lent account runs shared in the target's ordinary home or isolated in `accounts/<provider>/forwarded-<account>`.
@@ -159,11 +159,13 @@ As built: only `connect` admits; the other subcommands report an unconnected pro
 
 Migrating old per-account history. Side-by-side accounts in one home. A pinned provider or `lf` executable (what “pinned binary” covers beyond the account's own home is open). opencode account selection; when added it enters through activation. Changing SSH lease forwarding. Wider `lf auth` CLI redesign.
 
-## Demote, and what goes
+## Delete — do not maintain
 
 Kept, reached only by isolated launches: `ProviderAccountRoute::apply`'s home redirection, the `cli_auth_credentials_store="file"` override, `ensure_account_home_at` mirroring, and their tests, which become isolated-mode coverage (`native_routes_select_independent_provider_homes`, the `CODEX_HOME` cases in `agent_tests.rs` and `flow_tests.rs`).
 
-Gone: the unconditional call to that path at the five sites; `uses_native_home` as a launch-site question; per-launch account choice in shared mode.
+Removed: unconditional isolated-home routing, `ProviderAccountRoute::uses_native_home`, and the switch log's abandoned `strength` column. Keep their surviving shared/isolated tests; no exclusive fixture remains to delete.
+
+Compression removes account activation from `ClaudeHarness::start`'s `--version` probe and the duplicate thread/runtime implementation in `ProviderAccountRoute::launch_as_blocking`. `_run_blocking_account` now borrows through a scoped thread, so recording health and session ownership needs no route or reason copies. Claude token matching compares borrowed JSON strings directly. Both harnesses release activation at spawn rather than holding it through startup. No remaining deletion targets were identified.
 
 Must survive: stored profiles and `acquire_managed_login_lock`, identity checks, quota observation and strain ordering, session account records, SSH leases, clearing ambient provider credentials on isolated launches.
 
@@ -175,7 +177,7 @@ Session-store symlinks or a history synchronizer between homes. A second place t
 
 One Task, complete end state above. Each slice leaves the tree working.
 
-1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), `launch_as` at all five sites, shared-mode selection, `lf account <provider> use`, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
+1. **Codex shared by default — built.** Activation (`provider_account/activation.rs`), the account launch wrapper at every conversation launch, shared-mode selection, `lf account <provider> use`, `--isolate` / `--shared` / `isolate:`, the session mode record, the migration draft, provider session IDs in `lf session`, and the gate fixture. Also:
    - Quota probes, reset redemption, launch readiness and lease credentials read the native home for the active account (`activation::credential_home`).
    - A shared conversation resumes under whichever account is active; the account it began under is not a pin. Before this, reconnecting one switched the native home back.
    - A launch naming several accounts stays on the active one it includes; naming only another account moves to it.
@@ -217,9 +219,7 @@ Check, owner exit: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` c
 
 Review repair: direct Flow retry now forwards captured isolation. Its fixture simulates an empty Keychain and uses an isolated profile, avoiding a macOS prompt; the first retry exposed the missing propagation.
 
-Check, realign at `5ccba23fb`: named functions, tests, the five `launch_as` sites, both fixtures and the docs read against the tree — all present; nothing rerun, the tree is unchanged since the compress check below.
-
-Check, compress: `cargo test -p loopflow --lib -- provider_account` — 49 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` — clean. No behavior change; both fixtures and the integration suites stay owed to gate.
+Check, compress: `cargo test -p loopflow --lib -- provider_account harness::claude::tests harness::codex::tests` — 69 passed, 2 live-login tests ignored; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — clean; native acceptance fixtures and integration suites remain with gate.
 
 Check, slice 2: `cargo clippy -p loopflow --all-targets -- -D warnings` — clean; `cargo test -p loopflow --lib -- provider_account subscription identity account_status profile session_launch provider_auth` — 208 passed; `uv run --script tests/e2e/claude_shared_home.py …` against Claude Code 2.1.288 on macOS (Keychain store) — exits 0. `agent_tests` and `auth_tests` passed before the last Claude edits; `flow_tests` and the Codex fixture were not rerun; owed to gate. A full `--lib` run inside a Task Session fails two `lf::commands::run` tests on the ambient Flow environment; they pass with it removed.
 

@@ -25,21 +25,22 @@ details{margin:22px 0}summary{cursor:pointer;color:#5a5a54;font-size:15px}
 </style></head><body><a class="skip" href="#map">Skip to review</a><main>
 <h1>One provider home, several stored logins</h1>
 <p>Loopflow conversations now live in Codex’s and Claude’s ordinary home, so the provider’s own CLI sees them. One command changes which stored account that home is signed in as. A Codex engine closes when the interface that owns it exits, unless another interface took the conversation over first.</p>
-<p class="meta">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1416">#1416</a> · base <code>a278d6bc1</code> · published head <code>a79921045</code>. The switch command’s new spelling, <code>lf account &lt;provider&gt; use &lt;email&gt;</code>, and the split of account routes into home and login are unpublished working-tree changes and are marked where shown. Not built: moving running agents (“everyone now”).</p>
-<nav aria-label="Sections"><a href="#map">Map</a><a href="#launch">1 Launch</a><a href="#switch">2 Switch</a><a href="#resume">3 Resume</a><a href="#exit">4 Exit</a><a href="#takeover">5 Takeover</a><a href="#open">Open decisions</a><a href="#evidence">Evidence</a></nav>
+<p class="meta">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1416">#1416</a> · base <code>a278d6bc1</code> · published head <code>a79921045</code> · local head <code>bfcebcc6e</code>, eight commits ahead of the PR. Each excerpt says which of the two it comes from. A compress run (<code>lf queue -b</code>) started editing this checkout while the page was built; its changes are not shown. The unpublished commits are the <code>lf account &lt;provider&gt; use &lt;email&gt;</code> spelling, the split of account routes into home and login, lent Codex logins, and the retry of a turn cut off by a switch.</p>
+<nav aria-label="Sections"><a href="#map">Map</a><a href="#launch">1 Launch</a><a href="#switch">2 Switch</a><a href="#midturn">3 Switch mid-turn</a><a href="#resume">4 Resume</a><a href="#exit">5 Exit</a><a href="#takeover">6 Takeover</a><a href="#open">Open decisions</a><a href="#evidence">Evidence</a></nav>
 
 <h2 id="map">What you do, and what happens</h2>
 <table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
 <tr><td data-label="When you…">Start a conversation through Loopflow</td><td data-label="What happens">It runs in <code>~/.codex</code> or <code>~/.claude</code>, the same place plain <code>codex</code> and <code>claude</code> keep theirs, so either tool can list and resume it. With <code>--isolate</code> it runs in a private home belonging to one account instead.</td><td data-label="Where the code controls this"><code>launch_as</code> is the one function that gives a provider process its account. For a shared launch it sets no home and no credential. <a href="#launch">Section 1</a></td></tr>
-<tr><td data-label="When you…">Run <code>lf account codex use jack@loopflow.studio</code></td><td data-label="What happens">Loopflow first copies the login currently in <code>~/.codex</code> back to the stored account it belongs to, then puts the chosen account’s login there. New Loopflow launches and plain <code>codex</code> both use it. A Codex process that is already running keeps the login it started with.</td><td data-label="Where the code controls this"><code>activate</code> does the save and the install under one lock, and writes one row to a switch log. <a href="#switch">Section 2</a></td></tr>
-<tr><td data-label="When you…">Reopen an earlier conversation</td><td data-label="What happens">A shared conversation continues under whichever account is signed in now. An isolated one goes back to the private home it started in. The provider’s own conversation ID works wherever a Loopflow Session ID does.</td><td data-label="Where the code controls this">Each conversation’s record says whether it was isolated; account selection reads that before choosing. <a href="#resume">Section 3</a></td></tr>
-<tr><td data-label="When you…">Quit the interface driving a Codex conversation, or a batch run finishes</td><td data-label="What happens">The Codex process behind it is shut down. The saved history stays, so plain <code>codex resume</code> or Loopflow can pick it up later.</td><td data-label="Where the code controls this"><code>finish_session_driver</code> closes the process only if the exiting interface is still the one in control. <a href="#exit">Section 4</a></td></tr>
-<tr><td data-label="When you…">Take the conversation over from Desktop or <code>lf session connect</code>, then quit the old interface</td><td data-label="What happens">The same Codex process keeps running, including a turn in progress. The old interface’s exit no longer closes anything.</td><td data-label="Where the code controls this"><code>claim_session_driver</code> hands control to the new interface before the old one is told to stop. <a href="#takeover">Section 5</a></td></tr>
+<tr><td data-label="When you…">Run <code>lf account codex use jack@loopflow.studio</code></td><td data-label="What happens">Loopflow first copies the login currently in <code>~/.codex</code> back to the stored account it belongs to, then puts the chosen account’s login there. New Loopflow launches and plain <code>codex</code> both use it. A Codex process that is already running keeps the login it started with; an open conversation moves when you close and reopen it.</td><td data-label="Where the code controls this"><code>activate</code> does the save and the install under one lock, and writes one row to a switch log. <a href="#switch">Section 2</a></td></tr>
+<tr><td data-label="When you…">Switch while a headless Codex run is in the middle of a turn</td><td data-label="What happens">Codex itself fails that turn about half the time. Loopflow waits two seconds and continues the same conversation on a fresh Codex process, which reads the new login. An interactive conversation is not covered: its turn fails where you can see it and you resend.</td><td data-label="Where the code controls this"><code>classify_retryable_agent_failure</code> recognizes Codex’s error; the existing retry loop resumes the conversation. <a href="#midturn">Section 3</a></td></tr>
+<tr><td data-label="When you…">Reopen an earlier conversation</td><td data-label="What happens">A shared conversation continues under whichever account is signed in now. An isolated one goes back to the private home it started in. The provider’s own conversation ID works wherever a Loopflow Session ID does.</td><td data-label="Where the code controls this">Each conversation’s record says whether it was isolated; account selection reads that before choosing. <a href="#resume">Section 4</a></td></tr>
+<tr><td data-label="When you…">Quit the interface driving a Codex conversation, or a batch run finishes</td><td data-label="What happens">The Codex process behind it is shut down. The saved history stays, so plain <code>codex resume</code> or Loopflow can pick it up later.</td><td data-label="Where the code controls this"><code>finish_session_driver</code> closes the process only if the exiting interface is still the one in control. <a href="#exit">Section 5</a></td></tr>
+<tr><td data-label="When you…">Take the conversation over from Desktop or <code>lf session connect</code>, then quit the old interface</td><td data-label="What happens">The same Codex process keeps running, including a turn in progress. The old interface’s exit no longer closes anything.</td><td data-label="Where the code controls this"><code>claim_session_driver</code> hands control to the new interface before the old one is told to stop. <a href="#takeover">Section 6</a></td></tr>
 </tbody></table>
 
 <h2 id="launch"><small>1</small>A launch names no home and no credential</h2>
-<p>A route answers two independent questions about one launch. Where does the conversation run: <code>Shared</code>, new and the default, or <code>Isolated</code>, the previous behavior. And who holds the login: this machine, a recorded run being replayed, or the origin of an <code>lf ssh</code> session. The published head has one four-way enum; splitting it is an unpublished working-tree change.</p>
-<figure><figcaption><b>enum RouteHome, enum AccountLogin</b> <span>rust/loopflow/src/provider_account.rs:153–187</span> · working tree, unpublished</figcaption><pre><code>/// Where a conversation runs.
+<p>A route answers two independent questions about one launch. Where does the conversation run: <code>Shared</code>, new and the default, or <code>Isolated</code>, the previous behavior. And who holds the login: this machine, a recorded run being replayed, or the origin of an <code>lf ssh</code> session. The published head has one four-way enum; the split is not yet on the PR.</p>
+<figure><figcaption><b>enum RouteHome, enum AccountLogin</b> <span>rust/loopflow/src/provider_account.rs:153–188</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>/// Where a conversation runs.
 #[derive(Clone)]
 enum RouteHome {
     /// In a home of the account&#x27;s own.
@@ -73,9 +74,9 @@ enum AccountLogin {
     Lent {
         client: lease::AccountLeaseClient,
         access_token: String,
-    },</code></pre></figure>
-<figure><figcaption><b>ProviderAccountRoute::apply, launch_as</b> <span>rust/loopflow/src/provider_account.rs:436–483</span> · working tree, unpublished</figcaption><pre><code>
-fn apply(&amp;self, command: &amp;mut Command) {
+    },
+}</code></pre></figure>
+<figure><figcaption><b>ProviderAccountRoute::apply</b> <span>rust/loopflow/src/provider_account.rs:437–460</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>fn apply(&amp;self, command: &amp;mut Command) {
     for name in PROVIDER_CREDENTIAL_ENV_VARS {
         // A shared launch keeps the home its caller chose. A home inherited
         // from an isolated parent is cleared, so the provider falls back to
@@ -98,37 +99,54 @@ fn apply(&amp;self, command: &amp;mut Command) {
     {
         command.env(&quot;CLAUDE_CODE_OAUTH_TOKEN&quot;, access_token);
     }
-}
-
-/// The `account/login/start` request that signs a Codex engine in with a
-/// lent token, held in the engine&#x27;s memory. `None` for every other route,
-/// whose login the engine reads from its home.
-pub(crate) fn engine_login(&amp;self) -&gt; Result&lt;Option&lt;serde_json::Value&gt;, ProviderAccountError&gt; {
-    match (self.provider, &amp;self.login) {
-        (Provider::Codex, AccountLogin::Lent { access_token, .. }) =&gt; {
-            let mut login = self.engine_tokens(access_token)?;
-            login[&quot;type&quot;] = &quot;chatgptAuthTokens&quot;.into();
-            Ok(Some(login))
-        }
-        _ =&gt; Ok(None),
+}</code></pre></figure>
+<figure><figcaption><b>ProviderAccountRoute::launch_as, launch_engine_as</b> <span>rust/loopflow/src/provider_account.rs:504–543</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>/// The one place a launch takes on an account. Every route configures
+/// `command`; a shared route on a stored login first signs the native home
+/// in as its account, doing nothing when that account is already active.
+/// Hold the returned lock until the child has spawned.
+pub(crate) async fn launch_as(
+    &amp;self,
+    command: &amp;mut Command,
+) -&gt; Result&lt;Option&lt;fs::File&gt;, ProviderAccountError&gt; {
+    if self.engine_login()?.is_some() {
+        return Err(ProviderAccountError::ForwardingCredential {
+            provider: self.provider,
+            account_id: self.account_id.clone(),
+            reason: &quot;a lent Codex account signs in through Loopflow&#x27;s Codex engine, \
+                     and this launch starts Codex directly&quot;
+                .into(),
+        });
     }
+    self.launch_engine_as(command).await
 }
 
-/// A fresh lent token for an engine whose own was refused. Only the
-/// origin can renew it.
-pub(crate) fn renew_engine_login(&amp;self) -&gt; Result&lt;serde_json::Value, ProviderAccountError&gt; {
-    let AccountLogin::Lent { client, .. } = &amp;self.login else {
-        return Err(ProviderAccountError::Runtime(
-            &quot;this account&#x27;s login is renewed in its own home&quot;.into(),
-        ));
-    };</code></pre></figure>
-<p class="note">All five launch sites call <code>launch_as</code>. The returned lock is held until the child has spawned, so a concurrent switch cannot swap the login mid-launch. Nothing records the launch as a running shared agent; that record is what “everyone now” still needs.</p>
-<p class="note">A lent account runs shared or isolated like a stored one, and its token is never written to the SSH target. Claude takes it from its environment. Codex has no variable for a ChatGPT login, so Loopflow signs its Codex engine in over the app-server protocol and the token stays in that process’s memory.</p>
+/// [`Self::launch_as`] for a Codex engine, which the caller then signs in
+/// with [`Self::engine_login`].
+pub(crate) async fn launch_engine_as(
+    &amp;self,
+    command: &amp;mut Command,
+) -&gt; Result&lt;Option&lt;fs::File&gt;, ProviderAccountError&gt; {
+    self.apply(command);
+    if let (RouteHome::Isolated, AccountLogin::Lent { .. }) = (&amp;self.home, &amp;self.login) {
+        let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from(&quot;.&quot;));
+        ensure_account_home_at(&amp;operator_home, &amp;self.account_home(), self.provider)?;
+    }
+    let (RouteHome::Shared { cause, .. }, AccountLogin::Stored { store, .. }) =
+        (&amp;self.home, &amp;self.login)
+    else {
+        return Ok(None);
+    };
+    let launch_home =
+        activation::home_env(self.provider).and_then(|name| launch_env(command, name));
+    let native = activation::native_home(self.provider, launch_home.as_deref());
+    activation::activate(store, self.provider, &amp;self.account_id, &amp;native, *cause).await</code></pre></figure>
+<p class="note">All five launch sites call <code>launch_as</code>. The returned lock is held until the child has spawned, so a concurrent switch cannot swap the login mid-launch. Nothing records the launch as a running shared agent.</p>
+<p class="note">A lent account runs shared or isolated like a stored one, and its token is never written to the SSH target. Claude takes it from its environment. Codex has no variable for a ChatGPT login, so Loopflow signs its Codex engine in over the app-server protocol and the token stays in that process’s memory. A launch that starts Codex directly, without Loopflow’s engine, refuses a lent Codex account: the first branch of <code>launch_as</code>.</p>
 <p class="note">No terminal transcript here: a real launch spends a real account. The Codex fixture ran it against a synthetic provider and observed that the engine received neither <code>CODEX_HOME</code> nor a credential variable, and that plain Codex listed and resumed the conversation. See <a href="#evidence">Evidence</a>.</p>
 
 <h2 id="switch"><small>2</small>Switching saves the old login before installing the new one</h2>
 <p>Two stored accounts, and a login in <code>~/.codex</code> that Loopflow has never seen. The middle of the run rewrites <code>work@</code>’s login the way Codex does when it refreshes a token, then switches away and back.</p>
-<figure class="term"><figcaption>Captured from this working tree’s <code>target/debug/lf</code> in a throwaway Home with synthetic logins. <code>#</code> lines are the capture script reading files, not <code>lf</code> output.</figcaption><pre><code><span class="rem"># ~/.codex/auth.json → stranger@example.com · refresh_token issued-stranger </span>
+<figure class="term"><figcaption>Captured from <code>target/debug/lf</code> built at <code>bfcebcc6e</code>, in a throwaway Home with synthetic logins. <code>#</code> lines are the capture script reading files, not <code>lf</code> output.</figcaption><pre><code><span class="rem"># ~/.codex/auth.json → stranger@example.com · refresh_token issued-stranger </span>
 
 <span class="cmd">$ lf account codex use work@example.com</span>
 Codex is now signed in as work@example.com in ~/.codex
@@ -157,16 +175,16 @@ Codex is now signed in as work@example.com in ~/.codex
 
 <span class="rem"># ~/.codex/auth.json → work@example.com · refresh_token rotated-work </span></code></pre></figure>
 <p>The rotated token survived the round trip, and the unknown login was kept as a third account that automatic routing will not spend:</p>
-<figure class="term"><figcaption>Same run: the switch log and the stored accounts afterwards. The second “use work@” wrote no row.</figcaption><pre><code><span class="cmd">sqlite&gt; SELECT provider,account_id,strength,cause FROM provider_account_switches;</span>
-1|codex|work|1791095773|from_now_on|person
-2|codex|personal|1791095773|from_now_on|person
-3|codex|work|1791095774|from_now_on|person
+<figure class="term"><figcaption>Same run: the switch log and the stored accounts afterwards. The second “use work@” wrote no row.</figcaption><pre><code><span class="cmd">sqlite&gt; SELECT id,provider,account_id,switched_at,cause FROM provider_account_switches;</span>
+1|codex|work|1791102923|person
+2|codex|personal|1791102923|person
+3|codex|work|1791102925|person
 
 <span class="cmd">sqlite&gt; SELECT account_id,login_email,routing_state FROM provider_accounts;</span>
 work|work@example.com|automatic
 personal|personal@example.com|automatic
 stranger-4a1380b66f7c|stranger@example.com|explicit_only</code></pre></figure>
-<figure><figcaption><b>activation::activate</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/provider_account/activation.rs#L162-L220">rust/loopflow/src/provider_account/activation.rs:162–220</a> · a79921045</figcaption><pre><code>/// Sign `native` in as `account_id`. Returns the provider credential lock
+<figure><figcaption><b>activation::activate</b> <span>rust/loopflow/src/provider_account/activation.rs:162–220</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>/// Sign `native` in as `account_id`. Returns the provider credential lock
 /// when the native credential changed, to be held until the launch that asked
 /// for it has spawned; `None` when that account was already active.
 pub(crate) async fn activate(
@@ -221,11 +239,11 @@ pub(crate) async fn activate(
     })?;
     write_login(provider, native, &amp;credential)?;
     store
-        .record_provider_account_switch(provider, account_id, &quot;from_now_on&quot;, cause.as_str())
+        .record_provider_account_switch(provider, account_id, cause.as_str())
         .await?;
     Ok(Some(lock))
 }</code></pre></figure>
-<figure><figcaption><b>draft migration shared_provider_homes</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/store/migrations/drafts/shared_provider_homes.sql#L1-L18">rust/loopflow/src/store/migrations/drafts/shared_provider_homes.sql:1–18</a> · a79921045</figcaption><pre><code>-- Conversations pinned before shared provider homes live in their account&#x27;s
+<figure><figcaption><b>draft migration shared_provider_homes</b> <span>rust/loopflow/src/store/migrations/drafts/shared_provider_homes.sql:1–17</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>-- Conversations pinned before shared provider homes live in their account&#x27;s
 -- own home, so existing rows are isolated. Every new pin states its mode.
 ALTER TABLE provider_session_accounts ADD COLUMN isolated INTEGER NOT NULL DEFAULT 1
     CHECK (isolated IN (0, 1));
@@ -237,7 +255,6 @@ CREATE TABLE provider_account_switches (
     provider TEXT NOT NULL,
     account_id TEXT NOT NULL,
     switched_at INTEGER NOT NULL,
-    strength TEXT NOT NULL CHECK (strength IN (&#x27;from_now_on&#x27;, &#x27;everyone_now&#x27;)),
     cause TEXT NOT NULL CHECK (cause IN (&#x27;person&#x27;, &#x27;exhaustion&#x27;))
 );
 
@@ -256,7 +273,7 @@ For more information, try &#x27;--help&#x27;.
 <span class="cmd">$ lf account codex use nobody@example.com</span>
 Error: managed codex login &#x27;nobody@example.com&#x27; does not exist
 <span class="rem">[exit 1]</span></code></pre></figure>
-<figure><figcaption><b>account::run</b> <span>rust/loopflow/src/lf/commands/account.rs:63–84</span> · working tree, unpublished</figcaption><pre><code>pub fn run(
+<figure><figcaption><b>account::run</b> <span>rust/loopflow/src/lf/commands/account.rs:63–84</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>pub fn run(
     cmd: Option&lt;&amp;AccountCommand&gt;,
     provider: Option&lt;Provider&gt;,
     cached: bool,
@@ -280,29 +297,59 @@ Error: managed codex login &#x27;nobody@example.com&#x27; does not exist
 }</code></pre></figure>
 <p class="note">The provider comes before the verb only for <code>use</code>. <code>connect</code>, <code>set</code>, <code>disconnect</code> and <code>redeem-reset</code> still take it after. To allow this, the blanket parser rule that forbade arguments before any subcommand became the hand-written check above.</p>
 
-<h2 id="resume"><small>3</small>Reopening follows how the conversation was started</h2>
+<h2 id="midturn"><small>3</small>A turn cut off by a switch is resumed</h2>
+<p>Reproduced without Loopflow on Codex 0.160.0: changing which account <code>auth.json</code> holds makes a running Codex fail one turn. A rotated token for the same account never does.</p>
+<table><thead><tr><th>Change to <code>auth.json</code> while a turn is in flight</th><th>Turn outcome</th></tr></thead><tbody>
+<tr><td data-label="Change">None, the same bytes rewritten, or the same account with a rotated refresh token</td><td data-label="Turn outcome">Completed, 36 of 36</td></tr>
+<tr><td data-label="Change">A different account, turn released at once</td><td data-label="Turn outcome">Completed, 12 of 12; the next turn on that conversation then failed in 8 of 12</td></tr>
+<tr><td data-label="Change">A different account, turn released half a second later</td><td data-label="Turn outcome">Failed 6 of 12: “Fatal error: application network permission was revoked”</td></tr>
+<tr><td data-label="Change">File deleted</td><td data-label="Turn outcome">Failed 5 of 12, same error or “application network policy is unavailable”</td></tr>
+</tbody></table>
+<figure><figcaption><b>classify_retryable_agent_failure: the new first branch; the chain continues</b> <span>rust/loopflow/src/engine/agent.rs:1462–1469</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>pub(crate) fn classify_retryable_agent_failure(text: &amp;str) -&gt; Option&lt;AgentFailure&gt; {
+    let text = text.to_ascii_lowercase();
+    if text.contains(&quot;application network permission was revoked&quot;)
+        || text.contains(&quot;application network policy is unavailable&quot;)
+    {
+        Some(AgentFailure::AccountSwitched)
+    } else if text.contains(&quot;at capacity&quot;) || text.contains(&quot;capacity temporarily unavailable&quot;) {
+        Some(AgentFailure::Capacity)</code></pre></figure>
+<figure><figcaption><b>run loop: what a transient failure does next (unchanged from base)</b> <span>rust/loopflow/src/engine/agent.rs:1352–1362</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>_ =&gt; {
+    account_failure = None;
+    let resume_token = _provider_resume_token(&amp;result).or(launch.resume_token.clone());
+    if matches!(harness.as_str(), &quot;claude&quot; | &quot;codex&quot; | &quot;opencode&quot;) {
+        if let Some(resume_token) = resume_token {
+            attempt_config.resume_token = Some(resume_token);
+            attempt_config.task_prompt = RETRY_PROMPT.to_string();
+        }
+    }
+    (transient_delay, false)
+}</code></pre></figure>
+<p class="note">Naming the error is the whole change. The loop already waited, two seconds on the first retry, and resumed the provider conversation with a fixed “continue the original task” prompt; a headless run is one Codex process closed on exit, so the retry starts a new one that reads the new login. A tool call the failed turn had already made is not rolled back.</p>
+<p class="note">Jack’s preference was to avoid the failure rather than retry it, if that was clean. Holding the switch until turns end was not built: every agent shares one login file and a Codex turn can run for an hour, so a held switch would block the switch and every agent’s next turn behind the longest one.</p>
+
+<h2 id="resume"><small>4</small>Reopening follows how the conversation was started</h2>
 <p><code>recorded</code> is <code>Some(false)</code> for a shared conversation, <code>Some(true)</code> for an isolated one, and <code>None</code> for a new one, which takes the launch’s mode. Rows from before this change default to isolated, so old conversations open where they were captured.</p>
-<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:882–902</span> · working tree, unpublished</figcaption><pre><code>    provider: Provider,
-    account: &amp;ProviderAccount,
-    accounts: &amp;[ProviderAccount],
-) -&gt; Result&lt;String, ProviderAccountError&gt; {
-    let home =
-        account
-            .home
-            .as_deref()
-            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                provider,
-                account_id: account.account_id.clone(),
-                reason: &quot;managed account has no native credential home&quot;.to_string(),
-            })?;
-    identity::check_current_identity(account, accounts)
-        .await
-        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    let home = activation::credential_home(provider, home);
-    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, &amp;home)
-        .await
-        .map_err(|error| ProviderAccountError::ForwardingCredential {
-            provider,</code></pre></figure>
+<figure><figcaption><b>resolve_provider_account_exact</b> <span>rust/loopflow/src/provider_account.rs:943–963</span> · local bfcebcc6e, not yet on the PR</figcaption><pre><code>pub(crate) async fn resolve_provider_account_exact(
+    provider: Provider,
+    provider_session_id: Option&lt;&amp;str&gt;,
+    exact_account_id: Option&lt;&amp;ProviderAccountId&gt;,
+) -&gt; Result&lt;Option&lt;ProviderAccountRoute&gt;, ProviderAccountError&gt; {
+    ensure_supported(provider)?;
+    let store = route_store().await?;
+    // A conversation resumes in the home it started in; a new one follows the
+    // launch&#x27;s mode.
+    let recorded = match (&amp;store, provider_session_id) {
+        (Some(store), Some(session_id)) =&gt; {
+            store
+                .provider_session_isolated(provider, session_id)
+                .await?
+        }
+        _ =&gt; None,
+    };
+    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
+    // A shared conversation resumes under whichever account is active; the
+    // account it began under is history, not a pin.
+    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));</code></pre></figure>
 <figure><figcaption><b>provider_conversation::recorded</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/ops/human_session/provider_conversation.rs#L18-L29">rust/loopflow/src/ops/human_session/provider_conversation.rs:18–29</a> · a79921045</figcaption><pre><code>pub(crate) async fn recorded(store: &amp;SharedStore, id: &amp;str) -&gt; Result&lt;Option&lt;AgentSession&gt;&gt; {
     let sessions = store.sqlite.sessions_for_provider_thread(id)?;
     match sessions.as_slice() {
@@ -317,7 +364,7 @@ Error: managed codex login &#x27;nobody@example.com&#x27; does not exist
 </code></pre></figure>
 <p class="note"><code>connect</code>, <code>history</code>, <code>rename</code>, <code>bind</code> and <code>complete</code> accept a provider ID through this lookup. Only <code>connect</code> will create a Session for a conversation plain Codex or Claude started; the others report it as not found until then. A shared conversation started under one account and continued under another is assumed to work within one workspace and is unverified across workspaces or plans.</p>
 
-<h2 id="exit"><small>4</small>Quitting closes the Codex process; history stays</h2>
+<h2 id="exit"><small>5</small>Quitting closes the Codex process; history stays</h2>
 <p>Jack Heart chose this on 2026-10-03: close by default on ordinary exit. Three things have separate lifetimes: the saved conversation, the <code>lf</code> process currently driving it (the driver), and the Codex <code>app-server</code> process holding it in memory. <code>SessionDriver</code> already existed on the base and names the second and third.</p>
 <figure><figcaption><b>struct SessionDriver</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/exec.rs#L91-L98">rust/loopflow/src/exec.rs:91–98</a> · a79921045</figcaption><pre><code>/// Separate fences: reconnecting a driver does not replace its live provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,7 +474,7 @@ pub(crate) fn finish_session_driver(
 }</code></pre></figure>
 </details>
 
-<h2 id="takeover"><small>5</small>Taking over moves control first</h2>
+<h2 id="takeover"><small>6</small>Taking over moves control first</h2>
 <p><code>claim_session_driver</code> is called with <code>replace_provider = false</code>: the driver generation advances, the provider generation and process do not. The former driver’s later call to <code>finish_session_driver</code> then fails its first check.</p>
 <figure><figcaption><b>SqliteStore::claim_session_driver</b> <a href="https://github.com/loopflowstudio/loopflow/blob/a799210456ecd3bb3adfe2d3258fbbfce8784780/rust/loopflow/src/store/sqlite/execs.rs#L483-L527">rust/loopflow/src/store/sqlite/execs.rs:483–527</a> · a79921045</figcaption><pre><code>pub fn claim_session_driver(
     &amp;self,
@@ -508,9 +555,8 @@ let connected = async {
 
 <h2 id="open">Open decisions</h2>
 <table><thead><tr><th>Question</th><th>Where it stands</th></tr></thead><tbody>
-<tr><td data-label="Question">Moving running agents to the new account (“everyone now”)</td><td data-label="Where it stands">Not built; the switch log already allows <code>everyone_now</code>. Jack chose to move a mid-turn agent when its turn ends rather than interrupt it. It needs a record of running shared agents, which is also what LOO-374 needs.</td></tr>
+<tr><td data-label="Question">An interactive Codex conversation left open across a switch</td><td data-label="Where it stands">It stays on the old account until closed and reopened, and a turn in flight at the switch can fail visibly. Jack dropped the stronger switch that would also move running agents on 2026-10-04 and accepted close-and-reopen for now. The switch log no longer has a column for it.</td></tr>
 <tr><td data-label="Question">Should the other account verbs also put the provider first?</td><td data-label="Where it stands">Jack named <code>lf account codex use …</code>. The other four verbs were left as they are, so the namespace is currently mixed.</td></tr>
-<tr><td data-label="Question">A switch while a Codex turn is in flight</td><td data-label="Where it stands">Reproduced without Loopflow. Changing which account <code>auth.json</code> holds makes Codex fail one turn with “application network permission was revoked”: the in-flight turn in 6 of 12 runs when released half a second later, otherwise usually the next turn. A rotated token for the same account never does (36 of 36 clean), and an idle engine left two seconds is fine. So “a running Codex process keeps the login it started with” holds, but a turn in flight across a switch is not safe. Jack’s decision, tracked as LOO-374: don’t interrupt a turn in flight, and avoid the failure rather than retry it if the same mechanism makes that clean. Not built.</td></tr>
 <tr><td data-label="Question">Lent Codex relies on an interface OpenAI marks internal</td><td data-label="Where it stands">A lent Codex account now signs its engine in over the app-server protocol, in memory, with nothing on disk. Codex’s schema labels that login “[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE”. Probed with a synthetic token only; never run against OpenAI or over a real SSH session.</td></tr>
 
 <tr><td data-label="Question">Resuming a lent isolated conversation</td><td data-label="Where it stands">The origin’s record of the conversation does not say whether it was shared or isolated, so a resume follows the launch’s mode and can look in the wrong home.</td></tr>
@@ -521,12 +567,13 @@ let connected = async {
 
 <h2 id="evidence">Evidence</h2>
 <table><thead><tr><th>Check</th><th>What it supports</th></tr></thead><tbody>
-<tr><td data-label="Check">Provider-account unit tests (50), <code>agent_tests</code>, <code>auth_tests</code>, rerun after the route collapse</td><td data-label="What it supports">All pass. The lease test asserts that a lent account runs shared with only a token in its environment, and isolated with a home that holds no login.</td></tr>
-<tr><td data-label="Check">Codex shared-home fixture, rerun on this working tree: intermittent</td><td data-label="What it supports">Intermittent: 1 pass in 4 recent runs. Every failure is the step that holds an agent mid-turn across a switch, which the reproduction under open decisions shows Codex itself breaks about half the time. When it passes it shows, with synthetic logins and a local provider: a Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
-<tr><td data-label="Check">Transcripts above</td><td data-label="What it supports">Captured in this session from the working-tree binary. They exercise the switch command only, not a provider.</td></tr>
-<tr><td data-label="Check">Parse test for the new command spelling; <code>cargo clippy --all-targets -- -D warnings</code></td><td data-label="What it supports">Run in this session on the working tree; both pass.</td></tr>
-<tr><td data-label="Check">Public-connect fixture; Session, Exec and lifecycle tests; Claude fixture</td><td data-label="What it supports">Recorded as passing at <code>a79921045</code> or earlier. Not rerun here.</td></tr>
-<tr><td data-label="Check">Not verified</td><td data-label="What it supports">A real <code>lf ssh</code> session with a lent account; rendered Desktop and terminal takeover; plain <code>claude --resume</code> of a Loopflow conversation and Claude IDs in <code>lf session</code>; the Claude fixture with the renamed command; closing during a tool with side effects.</td></tr>
+<tr><td data-label="Check">Provider-account unit tests (49), rerun at <code>bfcebcc6e</code></td><td data-label="What it supports">All pass. They include the lease test asserting that a lent account runs shared with only a token in its environment, and isolated with a home that holds no login.</td></tr>
+<tr><td data-label="Check">Codex shared-home fixture</td><td data-label="What it supports">Passed once for this page on the binary built at <code>bfcebcc6e</code>, and 6 of 6 at <code>9f0c599f1</code>, against 1 of 4 before the retry. With synthetic logins and a local provider it shows: a Loopflow conversation listed and resumed by plain Codex right after batch exit; work → personal → work with a rotated token intact; unknown login kept; shared launches given no home or credential; a run held mid-turn across a switch finishing; isolated launches staying in their account’s home; provider IDs reaching the same Session.</td></tr>
+<tr><td data-label="Check">Switch-failure reproduction, <code>scratch/codex_auth_switch_repro.py</code></td><td data-label="What it supports">The table in section 3. Run on 2026-10-04 with synthetic logins; not rerun for this page.</td></tr>
+<tr><td data-label="Check">Transcripts above</td><td data-label="What it supports">Captured for this page from the binary built at <code>bfcebcc6e</code>. They exercise the switch command only, not a provider.</td></tr>
+<tr><td data-label="Check"><code>cargo clippy --all-targets -- -D warnings</code></td><td data-label="What it supports">Clean at <code>9f0c599f1</code>. Not rerun at <code>bfcebcc6e</code>: a compress run began editing this checkout during the review, so a lint now would describe its working tree.</td></tr>
+<tr><td data-label="Check"><code>agent_tests</code>, <code>auth_tests</code>; public-connect fixture; Session, Exec and lifecycle tests; Claude fixture</td><td data-label="What it supports">Recorded as passing at earlier revisions: the first two after the route split, the rest at <code>a79921045</code> or before. Not rerun here.</td></tr>
+<tr><td data-label="Check">Not verified</td><td data-label="What it supports">A real <code>lf ssh</code> session with a lent account; rendered Desktop and terminal takeover; plain <code>claude --resume</code> of a Loopflow conversation and Claude IDs in <code>lf session</code>; the Claude fixture with the renamed command; a lent Codex login against OpenAI’s real service; closing during a tool with side effects.</td></tr>
 </tbody></table>
 <details><summary><code>lf account route --json</code> after the run above</summary><figure class="term"><figcaption>Same run. <code>active_account</code> is derived from the login in the provider’s home.</figcaption><pre><code><span class="cmd">$ lf account route --json</span>
 [

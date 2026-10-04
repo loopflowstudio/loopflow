@@ -182,3 +182,10 @@ Final LOO-370 readback reports its same code Flow finished with no further steps
 scheduled. Its Task remains ready; this does not establish its separate cleanup
 scope landed. LOO-377 readback records the exact merge while remaining ready with
 its idle saved code Flow. Neither Task's completion was manufactured.
+
+Re-entry confirmed the same recovery and merge facts through installed Task
+status and GitHub PR readback. Review of the published diff confirms the waiting
+review, interruption/retry, launch serialization and independent-work regressions.
+No further prevention Task or duplicate implementation is warranted for this
+incident. The next distinct proof is installed acceptance after ordinary release;
+LOO-373 retains landing reconciliation. No emergency mutation was repeated.

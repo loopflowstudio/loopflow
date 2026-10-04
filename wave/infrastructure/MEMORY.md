@@ -5,7 +5,8 @@
 Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
 with hosted CI passing. Restart serializes review launch, fences writers and
 retains exact stop evidence for retry. Independent reviews remain protected.
-LOO-370 resumed after emergency recovery. Installed acceptance remains unproved;
+LOO-370's replacement Flow finished after recovery; its Task remains open.
+Installed acceptance remains unproved;
 LOO-373 owns the retained landing-placement reconciliation error.
 
 ## Operator acceptance and account direction (2026-10-04)

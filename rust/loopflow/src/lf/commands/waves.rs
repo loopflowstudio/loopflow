@@ -2,7 +2,7 @@
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
 //! Home placement. `lf wave status [wave]` adds current Projects, Task conditions,
-//! metric readings and Session history; it never reads resident health or a live
+//! metric readings and Session history; it never reads process health or a live
 //! loop. With no argument it resolves the ambient Wave. Reads preserve missing
 //! evidence; `--json` is the dashboard contract.
 //!

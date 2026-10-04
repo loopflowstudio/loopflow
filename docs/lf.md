@@ -232,14 +232,14 @@ lf session ensure                    # persistent repository conversation
 lf session ensure --wave product     # separate persistent Wave conversation
 ```
 
-Inside the conversation's resident checkout:
+Inside the conversation's persistent checkout:
 
 ```bash
 lf commit -m "Record accepted decisions" wave/product/MEMORY.md
 lf pr publish
 ```
 
-`lf wt create planning --resident` also creates or reuses an independent document
+`lf wt create planning --persistent` also creates or reuses an independent document
 workspace; enter its printed path before editing.
 
 Primary conversations reuse their respective worktrees, including after replacement.
@@ -247,10 +247,10 @@ They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
 keep their placement until an idle driver boundary.
 
-Resident workspaces retain scratch locally through commit, sync, publication and
+Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes
 the committed range, leaving later local edits alone. Inspect the complete range
-before publishing. PR landing clears scratch in non-resident workspaces, whether
+before publishing. PR landing clears scratch in non-persistent workspaces, whether
 or not the work belongs to a Task.
 
 If a sync resolver creates a file where an untracked file was stashed, sync restores
@@ -260,5 +260,5 @@ retain the recovery stash and report its identity; resolve them before restoring
 
 Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and after a
 merged document PR. Network failures leave local work usable; conflicts stay visible
-and use `lf sync --continue` or `lf sync --abort`. Resident branches remain reusable
+and use `lf sync --continue` or `lf sync --abort`. Persistent branches remain reusable
 and survive automatic pruning. Memory updates do not require PRs or a schedule.

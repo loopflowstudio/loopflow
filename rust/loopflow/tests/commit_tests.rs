@@ -96,14 +96,14 @@ fn commit_generates_message_when_none() {
 }
 
 #[test]
-fn resident_selection_preserves_scratch_and_unrelated_index() {
+fn persistent_selection_preserves_scratch_and_unrelated_index() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("scratch/design.md", "private design\n");
     repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("existing scratch");
-    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
@@ -111,7 +111,7 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
     // Use local HEAD as the fixture base rather than the older remote.
     let git = |args: &[&str]| {
         let output = Command::new("git")
-            .current_dir(&resident.path)
+            .current_dir(&persistent.path)
             .args(args)
             .output()
             .unwrap();
@@ -123,17 +123,17 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
         String::from_utf8(output.stdout).unwrap()
     };
     git(&["merge", "main"]);
-    std::fs::write(resident.path.join("memory.md"), "durable\n").unwrap();
-    std::fs::write(resident.path.join("other.md"), "staged\n").unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "durable\n").unwrap();
+    std::fs::write(persistent.path.join("other.md"), "staged\n").unwrap();
     git(&["add", "other.md"]);
-    std::fs::write(resident.path.join("other.md"), "later edit\n").unwrap();
+    std::fs::write(persistent.path.join("other.md"), "later edit\n").unwrap();
     std::fs::write(
-        resident.path.join("scratch/design.md"),
+        persistent.path.join("scratch/design.md"),
         "latest private plan\n",
     )
     .unwrap();
 
-    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Save memory"))
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory"))
         .unwrap();
 
     assert_eq!(git(&["show", "HEAD:memory.md"]), "durable\n");
@@ -151,15 +151,15 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
     );
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     assert_eq!(
-        std::fs::read_to_string(resident.path.join("other.md")).unwrap(),
+        std::fs::read_to_string(persistent.path.join("other.md")).unwrap(),
         "later edit\n"
     );
     assert_eq!(
-        std::fs::read_to_string(resident.path.join("scratch/design.md")).unwrap(),
+        std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
         "latest private plan\n"
     );
     commit_workflow(
-        &resident.path,
+        &persistent.path,
         &commit_options("Checkpoint durable changes"),
         &NullProgress,
     )
@@ -168,5 +168,5 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
         git(&["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"]),
         "scratch/.gitkeep\n"
     );
-    assert!(resident.path.join("scratch/design.md").exists());
+    assert!(persistent.path.join("scratch/design.md").exists());
 }

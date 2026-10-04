@@ -96,7 +96,7 @@ worktrees, placement and execution history.
 
 Distinguish completed effects, proposals, failed writes and unresolved readback;
 reconcile uncertain effects before retry. Keep planning at its existing owners
-without introducing a resident or another execution cursor.
+without introducing a long-running process or another execution cursor.
 
 A chapter boundary previews the whole repository with
 `lf repo new-chapter <name> --dry-run --json`. Apply with
@@ -179,10 +179,10 @@ Link related work where you explain its relationship: builds on, supersedes,
 or verified by. Use the link forms above for Tasks and PRs, and preserve cited
 decisions and evidence somewhere that survives shipping.
 
-## Resident workspace and document publication
+## Persistent workspace and document publication
 
 Keep accepted decisions in `wave/<wave>/MEMORY.md`, with names and dates.
-Keep working plans in `scratch/`. The scope's resident checkout survives conversation
+Keep working plans in `scratch/`. The scope's persistent checkout survives conversation
 replacement; publication needs no synthetic Task or separate export checkout.
 
 At a deliberate maintenance or publication boundary, coordinate with active writers,
@@ -205,7 +205,7 @@ lf pr publish
 ```
 
 Selected-path commits preserve unrelated staged and unstaged edits. Inspect the
-entire committed range before publishing: that is what the PR contains. Resident
+entire committed range before publishing: that is what the PR contains. Persistent
 commit and publication untrack scratch without deleting local files. Scratch,
 including PR copy, and edits made after the selected commit survive delivery.
 
@@ -216,8 +216,8 @@ stops with the saved stash and recovery instructions. Run `lf sync` to bring in
 other upstream changes. Reuse the same branch;
 automatic pruning retains it. Moved worktrees are reused at their actual path.
 Missing checkouts recover committed state only. Live conversations retain their
-placement until an idle driver boundary permits adoption of the resident workspace.
+placement until an idle driver boundary permits adoption of the persistent workspace.
 
-`lf wt create <name> --resident` creates or reuses an independent document workspace.
-PR landing clears scratch in non-resident workspaces, whether or not a Task is
+`lf wt create <name> --persistent` creates or reuses an independent document workspace.
+PR landing clears scratch in non-persistent workspaces, whether or not a Task is
 associated. Memory updates need no PR or distribution schedule.

@@ -72,7 +72,7 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
-    crate::ops::commit::prepare_resident_publication(&repo_root)?;
+    crate::ops::commit::prepare_persistent_publication(&repo_root)?;
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
             // Rotation left one unpublished branch at its recorded base after
@@ -397,7 +397,7 @@ fn prepare_land(
         ));
     }
 
-    if !options.strict && !crate::engine::worktrees::is_resident_worktree(repo_root)? {
+    if !options.strict && !crate::engine::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
             .clone()
@@ -582,7 +582,7 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if crate::engine::worktrees::is_resident_worktree(repo)? {
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     let scratch = repo.join("scratch");

@@ -197,7 +197,7 @@ Create a low-level sibling worktree
 |---|---|
 | `<name>` | Worktree name |
 | `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--resident` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wt switch

@@ -336,7 +336,7 @@ still fence direct callers. A pass budgets 45 seconds and each Task or external
 operation 10 seconds; deferred work stays visible in check output. launchd's
 calendar entries run each minute and coalesce sleep into a wake-time check.
 The detached tmux launch starts a separate process group, including when it must
-start the tmux server. No resident or provider turn runs inside the tick.
+start the tmux server. No provider turn runs inside the tick.
 
 Desktop consumes the Rust automation projection: installed/enabled state,
 last successful and failed receipts, selection and blockers. A missing receipt

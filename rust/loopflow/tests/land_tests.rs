@@ -2195,22 +2195,23 @@ fi"#;
 }
 
 #[test]
-fn resident_submit_keeps_scratch_and_post_commit_edits() {
+fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
-    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
-    fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
-    fs::create_dir_all(resident.path.join("scratch/nested")).unwrap();
-    fs::write(resident.path.join("scratch/nested/plan.md"), "private\n").unwrap();
-    fs::write(resident.path.join("memory.md"), "next decision\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+        .unwrap();
+    fs::create_dir_all(persistent.path.join("scratch/nested")).unwrap();
+    fs::write(persistent.path.join("scratch/nested/plan.md"), "private\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
     submit(
-        &resident.path,
+        &persistent.path,
         &LandOptions {
             strict: false,
             local: false,
@@ -2226,17 +2227,17 @@ fn resident_submit_keeps_scratch_and_post_commit_edits() {
         &NullProgress,
     )
     .unwrap();
-    assert!(resident.path.is_dir());
+    assert!(persistent.path.is_dir());
     assert_eq!(
-        fs::read_to_string(resident.path.join("scratch/nested/plan.md")).unwrap(),
+        fs::read_to_string(persistent.path.join("scratch/nested/plan.md")).unwrap(),
         "private\n"
     );
     assert_eq!(
-        fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+        fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
         "next decision\n"
     );
     let committed = Command::new("git")
-        .current_dir(&resident.path)
+        .current_dir(&persistent.path)
         .args(["show", "HEAD:memory.md"])
         .output()
         .unwrap();

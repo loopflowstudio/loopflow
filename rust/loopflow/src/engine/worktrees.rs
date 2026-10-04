@@ -830,7 +830,7 @@ pub fn prune_worktrees(
         if state.path == current_path
             || state.branch.as_deref() == Some(&default_branch)
             || path_is_protected(&state.path, protected_paths)
-            || is_resident_worktree(&state.path)?
+            || is_persistent_worktree(&state.path)?
         {
             continue;
         }
@@ -887,7 +887,7 @@ fn targeted_prune(
     if path == current_path
         || branch.as_deref() == Some(&default_branch)
         || path_is_protected(path, protected_paths)
-        || is_resident_worktree(path)?
+        || is_persistent_worktree(path)?
     {
         return Ok(TargetedPruneOutcome::Protected);
     }
@@ -1174,7 +1174,7 @@ fn apply_placement_plan(
     })
 }
 
-/// Resolve or create a resident worktree for an agent scope.
+/// Resolve or create a persistent worktree for an agent scope.
 ///
 /// New branches use the fetched default branch, falling back to cached or local
 /// state offline. Existing placements are reused at their current path.
@@ -1183,7 +1183,8 @@ pub fn ensure_agent_worktree(
     segment: WorktreeSegment,
 ) -> Result<AgentWorktree, GitError> {
     let main_repo = main_repo_root(main_repo)?;
-    let lock_path = git_common_dir(&main_repo)?.join(format!("resident-{}.lock", segment.as_str()));
+    let lock_path =
+        git_common_dir(&main_repo)?.join(format!("persistent-{}.lock", segment.as_str()));
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -1204,21 +1205,21 @@ pub fn ensure_agent_worktree(
         .arg(&main_repo)
         .args([
             "config",
-            &format!("branch.{}.loopflow-resident", worktree.branch),
+            &format!("branch.{}.loopflow-persistent", worktree.branch),
             "true",
         ])
         .output()?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: "mark resident worktree".into(),
+            command: "mark persistent worktree".into(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
     Ok(worktree)
 }
 
-/// Resident branches keep their checkout and local plans after delivery.
-pub fn is_resident_worktree(repo: &Path) -> Result<bool, GitError> {
+/// Persistent branches keep their checkout and local plans after delivery.
+pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
     let Some(branch) = current_branch(repo)? else {
         return Ok(false);
     };
@@ -1229,14 +1230,14 @@ pub fn is_resident_worktree(repo: &Path) -> Result<bool, GitError> {
             "config",
             "--bool",
             "--get",
-            &format!("branch.{branch}.loopflow-resident"),
+            &format!("branch.{branch}.loopflow-persistent"),
         ])
         .output()?;
     match output.status.code() {
         Some(0) => Ok(output.stdout == b"true\n"),
         Some(1) => Ok(false),
         _ => Err(GitError::CommandFailed {
-            command: "read resident worktree configuration".into(),
+            command: "read persistent worktree configuration".into(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         }),
     }
@@ -1823,14 +1824,14 @@ mod tests {
     fn wave_agent_worktree_reuses_a_moved_branch() {
         let (root, repo) = repo_with_origin();
         let segment = wave_agent_segment("ship").unwrap();
-        let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        let persistent = ensure_agent_worktree(&repo, segment.clone()).unwrap();
         let displaced = root.path().join("displaced");
         git(
             &repo,
             &[
                 "worktree",
                 "move",
-                resident.path.to_str().unwrap(),
+                persistent.path.to_str().unwrap(),
                 displaced.to_str().unwrap(),
             ],
         );
@@ -1840,19 +1841,19 @@ mod tests {
             recovered.path.canonicalize().unwrap(),
             displaced.canonicalize().unwrap()
         );
-        assert_eq!(recovered.branch, resident.branch);
+        assert_eq!(recovered.branch, persistent.branch);
         assert!(super::is_clean(&repo).unwrap());
     }
 
     #[test]
-    fn missing_resident_checkout_recovers_commits_and_pruning_retains_it() {
+    fn missing_persistent_checkout_recovers_commits_and_pruning_retains_it() {
         let (_root, repo) = repo_with_origin();
         let segment = wave_agent_segment("ship").unwrap();
-        let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
-        fs::write(resident.path.join("memory.md"), "unpublished").unwrap();
-        git(&resident.path, &["add", "memory.md"]);
-        git(&resident.path, &["commit", "-m", "memory"]);
-        fs::remove_dir_all(&resident.path).unwrap();
+        let persistent = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        fs::write(persistent.path.join("memory.md"), "unpublished").unwrap();
+        git(&persistent.path, &["add", "memory.md"]);
+        git(&persistent.path, &["commit", "-m", "memory"]);
+        fs::remove_dir_all(&persistent.path).unwrap();
         let recovered = ensure_agent_worktree(&repo, segment).unwrap();
         assert_eq!(
             fs::read_to_string(recovered.path.join("memory.md")).unwrap(),

@@ -475,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_primary_adopts_resident_workspace_without_losing_identity() {
+    fn idle_primary_adopts_persistent_workspace_without_losing_identity() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {

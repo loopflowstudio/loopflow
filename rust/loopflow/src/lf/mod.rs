@@ -1540,7 +1540,7 @@ pub enum WtCommand {
         plan: bool,
         /// Keep this workspace after delivery and keep scratch local
         #[arg(long)]
-        resident: bool,
+        persistent: bool,
     },
     /// Switch to a worktree by name, identity leaf, or full branch
     Switch {
@@ -1623,15 +1623,7 @@ mod tests {
         for verb in ["enable", "disable", "serve"] {
             assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
         }
-        for removed in [
-            "start",
-            "stop",
-            "pause",
-            "resume",
-            "chat",
-            "reply",
-            "__resident",
-        ] {
+        for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
         assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());

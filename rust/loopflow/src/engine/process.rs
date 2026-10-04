@@ -128,7 +128,7 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 /// Pin one process generation to immutable executable bytes.
 ///
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
-/// may repoint it while a resident body is running, so the body carries the
+/// may repoint it while a body is running, so the body carries the
 /// canonical target in `LF_BIN`. A later body launch deliberately
 /// resolves the current Home again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {

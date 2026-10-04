@@ -1933,47 +1933,47 @@ Body:
 }
 
 #[test]
-fn resident_publication_pushes_committed_docs_and_preserves_local_files() {
+fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     let home = tempfile::tempdir().unwrap();
     let state = home.path().join("pr-state");
     let gh = draft_pr_script(&state);
     let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
     let repo = TestRepo::new();
-    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
-    fs::create_dir_all(resident.path.join("scratch")).unwrap();
-    fs::write(resident.path.join("scratch/design.md"), "private\n").unwrap();
-    fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Save memory"))
+    fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    fs::write(persistent.path.join("scratch/design.md"), "private\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory"))
         .unwrap();
-    fs::write(resident.path.join("memory.md"), "next decision\n").unwrap();
-    fs::write(resident.path.join("unrelated.md"), "unpublished\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
+    fs::write(persistent.path.join("unrelated.md"), "unpublished\n").unwrap();
     let options = PrOptions {
         draft: false,
         title: Some("Document accepted decisions".into()),
         body: Some("Durable repository memory.".into()),
         agent: None,
     };
-    let first = create_or_update_pr(&resident.path, &options, &NullProgress).unwrap();
-    let second = create_or_update_pr(&resident.path, &options, &NullProgress).unwrap();
+    let first = create_or_update_pr(&persistent.path, &options, &NullProgress).unwrap();
+    let second = create_or_update_pr(&persistent.path, &options, &NullProgress).unwrap();
     assert_eq!(first.url, second.url);
     let published = Command::new("git")
-        .current_dir(&resident.path)
-        .args(["show", &format!("origin/{}:memory.md", resident.branch)])
+        .current_dir(&persistent.path)
+        .args(["show", &format!("origin/{}:memory.md", persistent.branch)])
         .output()
         .unwrap();
     assert!(published.status.success());
     assert_eq!(published.stdout, b"accepted\n");
     let scratch = Command::new("git")
-        .current_dir(&resident.path)
+        .current_dir(&persistent.path)
         .args([
             "ls-tree",
             "-r",
             "--name-only",
-            &format!("origin/{}", resident.branch),
+            &format!("origin/{}", persistent.branch),
             "--",
             "scratch",
             "unrelated.md",
@@ -1982,9 +1982,9 @@ fn resident_publication_pushes_committed_docs_and_preserves_local_files() {
         .unwrap();
     assert!(scratch.stdout.is_empty());
     assert_eq!(
-        fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+        fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
         "next decision\n"
     );
-    assert!(resident.path.join("scratch/design.md").exists());
-    assert!(resident.path.join("unrelated.md").exists());
+    assert!(persistent.path.join("scratch/design.md").exists());
+    assert!(persistent.path.join("unrelated.md").exists());
 }

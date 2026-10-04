@@ -120,7 +120,7 @@ lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
 Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
-for another planning pass; it has no resident Project process to resume.
+for another planning pass; there is no long-running Project process to resume.
 
 Other options:
 

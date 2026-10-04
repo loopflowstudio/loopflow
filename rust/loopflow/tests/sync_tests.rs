@@ -1275,24 +1275,25 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
 }
 
 #[test]
-fn resident_refresh_preserves_local_plans_and_followup_after_merge() {
+fn persistent_refresh_preserves_local_plans_and_followup_after_merge() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
-    std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
-    git(repo.path(), &["merge", "--squash", &resident.branch]);
+    std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+        .unwrap();
+    git(repo.path(), &["merge", "--squash", &persistent.branch]);
     repo.commit("Merged document PR");
     repo.push();
-    std::fs::create_dir_all(resident.path.join("scratch")).unwrap();
-    std::fs::write(resident.path.join("scratch/plan.md"), "private\n").unwrap();
-    std::fs::write(resident.path.join("memory.md"), "followup\n").unwrap();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(persistent.path.join("scratch/plan.md"), "private\n").unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "followup\n").unwrap();
     sync_with_recovery(
-        &resident.path,
+        &persistent.path,
         &SyncOptions {
             onto: "origin/main".into(),
             push: false,
@@ -1302,29 +1303,29 @@ fn resident_refresh_preserves_local_plans_and_followup_after_merge() {
     )
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+        std::fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
         "followup\n"
     );
     assert_eq!(
-        std::fs::read_to_string(resident.path.join("scratch/plan.md")).unwrap(),
+        std::fs::read_to_string(persistent.path.join("scratch/plan.md")).unwrap(),
         "private\n"
     );
     // Everything committed had landed, so the branch restarts from main
     // instead of carrying its squash-merged commit into the next PR.
     assert_eq!(
-        git(&resident.path, &["rev-parse", "HEAD"]),
-        git(&resident.path, &["rev-parse", "origin/main"])
+        git(&persistent.path, &["rev-parse", "HEAD"]),
+        git(&persistent.path, &["rev-parse", "origin/main"])
     );
-    loopflow::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Followup"))
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Followup"))
         .unwrap();
     assert!(git(
-        &resident.path,
+        &persistent.path,
         &["diff", "origin/main...HEAD", "--", "memory.md"]
     )
     .contains("+followup"));
     assert_eq!(
         git(
-            &resident.path,
+            &persistent.path,
             &["rev-list", "--count", "origin/main..HEAD"]
         )
         .trim(),
@@ -1333,33 +1334,33 @@ fn resident_refresh_preserves_local_plans_and_followup_after_merge() {
 }
 
 #[test]
-fn resident_memory_conflict_keeps_private_scratch_and_recovery() {
+fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("memory.md", "base\n");
     repo.stage_all();
     repo.commit("base memory");
     repo.push();
-    let resident = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
         repo.path(),
         loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
-    std::fs::write(resident.path.join("memory.md"), "resident\n").unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "persistent\n").unwrap();
     loopflow::ops::commit_selected(
-        &resident.path,
+        &persistent.path,
         &["memory.md".into()],
         Some("Local decision"),
     )
     .unwrap();
-    std::fs::create_dir_all(resident.path.join("scratch")).unwrap();
-    std::fs::write(resident.path.join("scratch/private.md"), "private\n").unwrap();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(persistent.path.join("scratch/private.md"), "private\n").unwrap();
     repo.create_file("memory.md", "upstream\n");
     repo.stage_all();
     repo.commit("competing decision");
     repo.push();
     let error = sync_with_recovery(
-        &resident.path,
+        &persistent.path,
         &SyncOptions {
             onto: "origin/main".into(),
             push: false,
@@ -1375,11 +1376,11 @@ fn resident_memory_conflict_keeps_private_scratch_and_recovery() {
             ..
         }
     ));
-    assert!(std::fs::read_to_string(resident.path.join("memory.md"))
+    assert!(std::fs::read_to_string(persistent.path.join("memory.md"))
         .unwrap()
         .contains("<<<<<<<"));
     assert_eq!(
-        std::fs::read_to_string(resident.path.join("scratch/private.md")).unwrap(),
+        std::fs::read_to_string(persistent.path.join("scratch/private.md")).unwrap(),
         "private\n"
     );
 }

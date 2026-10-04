@@ -95,7 +95,7 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
-    crate::ops::commit::prepare_resident_publication(repo)?;
+    crate::ops::commit::prepare_persistent_publication(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -133,7 +133,7 @@ pub fn create_or_update_pr(
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
-    if !crate::engine::worktrees::is_resident_worktree(repo)? {
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
         commit_workflow(repo, &commit_options, progress)?;
     }
     crate::ops::task::require_task_pr_range_nonempty(repo)?;
@@ -371,7 +371,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let branch = current_branch(repo)?;
     if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the default branch cannot open a PR; use `lf wt create <name>` or publish from the resident conversation checkout"
+            "the default branch cannot open a PR; use `lf wt create <name>` or publish from the persistent conversation checkout"
                 .to_string(),
         ));
     }
@@ -411,7 +411,7 @@ fn resolve_pr_copy(
 
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
-    if crate::engine::worktrees::is_resident_worktree(repo)? {
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
         return Ok(cached);
     }
     let scratch = repo.join("scratch");

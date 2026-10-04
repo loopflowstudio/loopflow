@@ -121,8 +121,8 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     let message =
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
-    restart_landed_resident(repo)?;
-    let resident = crate::engine::worktrees::is_resident_worktree(repo)?;
+    restart_landed_persistent(repo)?;
+    let persistent = crate::engine::worktrees::is_persistent_worktree(repo)?;
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let run = |args: &[&str]| -> OpsResult<()> {
@@ -149,13 +149,13 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
         args.push(":(top,exclude)scratch");
         run(&args)?;
     }
-    if resident {
+    if persistent {
         run(UNTRACK_SCRATCH)?;
     }
     run(&["commit", "-m", message])?;
     let mut reset = vec!["reset", "-q", "HEAD", "--"];
     reset.extend(selected.iter().map(String::as_str));
-    if resident {
+    if persistent {
         reset.push(":(top)scratch");
     }
     git_stdout(repo, &reset).map_err(|error| {
@@ -164,34 +164,34 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     Ok(())
 }
 
-/// Whenever a resident checkout is about to commit or publish, drop history
+/// Whenever a persistent checkout is about to commit or publish, drop history
 /// its merged PRs already delivered. Nothing has to observe the merge itself.
-fn restart_landed_resident(repo: &Path) -> OpsResult<()> {
-    if crate::engine::worktrees::is_resident_worktree(repo)?
-        && crate::ops::sync::restart_landed_resident(repo)?
+fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
+    if crate::engine::worktrees::is_persistent_worktree(repo)?
+        && crate::ops::sync::restart_landed_persistent(repo)?
     {
         eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
     }
     Ok(())
 }
 
-pub(crate) fn prepare_resident_publication(repo: &Path) -> OpsResult<()> {
-    if !crate::engine::worktrees::is_resident_worktree(repo)? {
+pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
-    restart_landed_resident(repo)?;
+    restart_landed_persistent(repo)?;
     let tracked = git_stdout(
         repo,
         &["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"],
     )?;
     if tracked.lines().any(|path| path != "scratch/.gitkeep") {
-        commit_selected(repo, &[], Some("Keep resident scratch local"))?;
+        commit_selected(repo, &[], Some("Keep persistent scratch local"))?;
     }
     Ok(())
 }
 
-pub(crate) fn untrack_resident_scratch(repo: &Path) -> OpsResult<()> {
-    if !crate::engine::worktrees::is_resident_worktree(repo)? {
+pub(crate) fn untrack_persistent_scratch(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     git_stdout(repo, UNTRACK_SCRATCH)?;
@@ -203,8 +203,8 @@ pub fn commit_workflow(
     options: &CommitOptions,
     progress: &impl Progress,
 ) -> OpsResult<bool> {
-    restart_landed_resident(repo)?;
-    untrack_resident_scratch(repo)?;
+    restart_landed_persistent(repo)?;
+    untrack_persistent_scratch(repo)?;
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
@@ -218,7 +218,7 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        if crate::engine::worktrees::is_resident_worktree(repo)? {
+        if crate::engine::worktrees::is_persistent_worktree(repo)? {
             git_stdout(repo, &["add", "-A", "--", ".", ":(top,exclude)scratch"])?;
         } else {
             stage_all(repo)?;

@@ -35,7 +35,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 not whether a process exists. `lf wave place` sets the Home used by Wave schedules
 and inherited once by new Projects; new Tasks inherit their Project's Home. It
 does not move existing child work or launch a process. `lf wave status` reads
-planning, Task conditions, metrics and Session history without a resident.
+planning, Task conditions, metrics and Session history; no process needs to be running.
 
 ## Process topology
 

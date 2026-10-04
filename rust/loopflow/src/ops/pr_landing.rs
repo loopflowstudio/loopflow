@@ -1265,14 +1265,14 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         eprintln!("PR merged; retained its checkout for the saved Flow.");
         return Ok(());
     }
-    if crate::engine::worktrees::is_resident_worktree(&landing.worktree)? {
-        match crate::ops::sync::restart_landed_resident(&landing.worktree) {
-            Ok(true) => eprintln!("PR merged; restarted resident branch from the default branch."),
+    if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {
+        match crate::ops::sync::restart_landed_persistent(&landing.worktree) {
+            Ok(true) => eprintln!("PR merged; restarted persistent branch from the default branch."),
             Ok(false) => eprintln!(
-                "PR merged; retained resident checkout with unmerged commits. Run lf sync before the next publication."
+                "PR merged; retained persistent checkout with unmerged commits. Run lf sync before the next publication."
             ),
             Err(error) => eprintln!(
-                "PR merged; retained resident checkout. Run lf sync before the next publication: {error}"
+                "PR merged; retained persistent checkout. Run lf sync before the next publication: {error}"
             ),
         }
         return Ok(());

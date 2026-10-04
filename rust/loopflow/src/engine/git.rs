@@ -1058,7 +1058,7 @@ pub fn merge(
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
         let preserve_scratch =
-            fork_base.is_some() || crate::engine::worktrees::is_resident_worktree(worktree)?;
+            fork_base.is_some() || crate::engine::worktrees::is_persistent_worktree(worktree)?;
         if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves

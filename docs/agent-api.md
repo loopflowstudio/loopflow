@@ -120,7 +120,7 @@ eligible because their authorship cannot be inferred safely.
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
-tmux name. Project operations are ordinary finite conversations; they have no resident
+tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. `lf --task INF-123 flow start` continues the saved

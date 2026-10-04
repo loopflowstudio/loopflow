@@ -1627,15 +1627,15 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create {
             name,
             plan,
-            resident,
+            persistent,
         } => {
-            if *resident && !*plan {
+            if *persistent && !*plan {
                 let repo = find_repo_root()?;
                 let workspace = crate::engine::worktrees::ensure_agent_worktree(
                     &repo,
                     WorktreeSegment::parse(name)?,
                 )?;
-                println!("Resident workspace: {}", workspace.path.display());
+                println!("Persistent workspace: {}", workspace.path.display());
                 Ok(())
             } else {
                 wt_create(name, *plan)

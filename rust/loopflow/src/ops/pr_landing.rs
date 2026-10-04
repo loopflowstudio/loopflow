@@ -1266,9 +1266,15 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         return Ok(());
     }
     if crate::engine::worktrees::is_resident_worktree(&landing.worktree)? {
-        eprintln!(
-            "PR merged; retained resident checkout. Run lf sync before the next publication."
-        );
+        match crate::ops::sync::restart_landed_resident(&landing.worktree) {
+            Ok(true) => eprintln!("PR merged; restarted resident branch from the default branch."),
+            Ok(false) => eprintln!(
+                "PR merged; retained resident checkout with unmerged commits. Run lf sync before the next publication."
+            ),
+            Err(error) => eprintln!(
+                "PR merged; retained resident checkout. Run lf sync before the next publication: {error}"
+            ),
+        }
         return Ok(());
     }
     let _admission = store

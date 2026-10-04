@@ -562,6 +562,21 @@ fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
             == rev_parse(repo, &format!("{base_ref}^{{tree}}"))?)
 }
 
+/// After a resident branch's PR merges, restart the branch from the default
+/// branch. Returns false and leaves the checkout alone when the branch still
+/// holds unmerged commits or Git is mid-operation.
+pub(crate) fn restart_landed_resident(repo: &Path) -> OpsResult<bool> {
+    let base = format!("origin/{}", get_default_branch(repo)?);
+    fetch_target(repo, &base)?;
+    if intervention_state(repo)?.is_some() || !landed(repo, &base)? {
+        return Ok(false);
+    }
+    // --keep leaves uncommitted edits in place and refuses rather than
+    // overwriting one the base also changed, so a live conversation is safe.
+    git(repo, &["reset", "--keep", &base])?;
+    Ok(true)
+}
+
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
     if !plan.scratch_stashed && crate::engine::worktrees::is_resident_worktree(repo)? {
         progress.status(&format!(
@@ -739,8 +754,57 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::scratch_stash_path;
+    use super::{restart_landed_resident, scratch_stash_path};
     use std::path::Path;
+    use std::process::Command;
+
+    #[test]
+    fn merged_resident_branch_restarts_from_main_and_keeps_local_files() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let resident = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
+        std::fs::create_dir_all(resident.path.join("scratch")).unwrap();
+        std::fs::write(resident.path.join("scratch/plan.md"), "private\n").unwrap();
+
+        // Unmerged commits: the checkout is left alone.
+        let before = git(&resident.path, &["rev-parse", "HEAD"]);
+        assert!(!restart_landed_resident(&resident.path).unwrap());
+        assert_eq!(git(&resident.path, &["rev-parse", "HEAD"]), before);
+
+        git(repo.path(), &["merge", "--squash", &resident.branch]);
+        repo.commit("Merged document PR");
+        repo.push();
+        std::fs::write(resident.path.join("memory.md"), "followup\n").unwrap();
+
+        assert!(restart_landed_resident(&resident.path).unwrap());
+        assert_eq!(
+            git(&resident.path, &["rev-parse", "HEAD"]),
+            git(&resident.path, &["rev-parse", "origin/main"])
+        );
+        assert_eq!(
+            std::fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+            "followup\n"
+        );
+        assert!(resident.path.join("scratch/plan.md").exists());
+    }
 
     #[test]
     fn scratch_stash_lands_under_the_ignored_tmp_prefix() {

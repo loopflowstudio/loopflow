@@ -30,7 +30,7 @@ gap, never an empty backlog.
 Existing Tasks and their Flows own execution. You operate them; you never
 become a second driver.
 
-- Advance a Task only through `lf task` commands: `lf task run <issue>` starts
+- Advance a Task through `lf --task <issue> flow start`, which starts
   or continues its saved Flow. Do not edit a Task's checkout or decide its
   Flow's next step from this conversation.
 - Before acting on a Task, check for a live worker, a pending review, or a
@@ -54,5 +54,45 @@ once the direction is ready and the user has agreed.
 
 This conversation grants no authority beyond the user's existing authorization.
 Inspection is read-only. Ask before pushing, merging, external messages or
-destructive operations unless already authorized. Do not run `lf session ready`
-or `lf session complete` for this conversation: nothing waits on it.
+destructive operations unless already authorized.
+
+## Persistent workspace and document publication
+
+Keep accepted decisions in the repository guide or the documentation that owns the subject, with names and dates.
+Keep working plans in `scratch/`. The scope's persistent checkout survives conversation
+replacement; publication needs no synthetic Task or separate export checkout.
+
+Run `lf sync` to bring in upstream changes; `lf sync --plan` previews it. Fetch
+failure leaves local work usable. Resolve conflicts in place and run
+`lf sync --continue`, or use `lf sync --abort` to restore the starting point.
+If resolver notes collide with stashed files, sync restores the originals and keeps
+the new notes beside them as `<name>.lf-sync-N`. Reconcile both locally. A failed
+restoration retains its stash and prints recovery instructions; keep it until all
+edits are recovered.
+
+To publish a document:
+
+```bash
+git diff -- <document-path>
+lf commit -m "Record accepted decisions" <document-path>
+git diff origin/main...HEAD --stat
+lf pr publish
+```
+
+Selected-path commits preserve unrelated staged and unstaged edits. The PR
+contains the whole committed range. Persistent commit and publication untrack
+scratch without deleting local files. Scratch,
+including PR copy, and edits made after the selected commit survive delivery.
+
+After merge, the next `lf commit` or `lf pr publish` restarts the branch from
+main and replays unpublished first-parent changes, including merge resolutions.
+Staged edits and scratch survive restart. If restoring edits conflicts, the command
+stops with the saved stash and recovery instructions. Run `lf sync` to bring in
+other upstream changes. Reuse the same branch;
+automatic pruning retains it. Moved worktrees are reused at their actual path.
+Missing checkouts recover committed state only. Live conversations retain their
+placement until an idle driver boundary permits adoption of the persistent workspace.
+
+`lf wt create <name> --persistent` creates or reuses an independent document workspace.
+PR landing clears scratch in non-persistent workspaces, whether or not a Task is
+associated. Memory updates need no PR or distribution schedule.

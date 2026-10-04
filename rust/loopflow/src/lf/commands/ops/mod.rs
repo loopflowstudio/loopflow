@@ -132,7 +132,7 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
         pr.branch,
         &pr.base_commit[..pr.base_commit.len().min(12)]
     );
-    println!("Push your follow-up edits, then `lf task pr open` when ready.");
+    println!("Push your follow-up edits, then `lf pr open` when ready.");
     Ok(())
 }
 
@@ -330,7 +330,7 @@ pub fn run_sync(
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
     run_sync_in(
         &repo_root,
         onto,
@@ -359,7 +359,7 @@ pub(crate) fn run_sync_in(
     }
     if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf task sync --continue` or `lf task sync --abort`"
+            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
         ));
     }
     if continue_sync {
@@ -743,8 +743,16 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&str>) -> Result<()> {
+pub fn run_commit(
+    message: Option<&str>,
+    no_add: bool,
+    paths: &[String],
+    agent_override: Option<&str>,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
+    if !paths.is_empty() {
+        return Ok(crate::ops::commit_selected(&repo_root, paths, message)?);
+    }
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
@@ -1479,7 +1487,7 @@ fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
             anyhow!("Home registry path cannot be resolved: {error}")
         }
         RegistryUnavailable::Incompatible { path, error } => anyhow!(
-            "Home registry at {} is incompatible: {error}; run `lf doctor`",
+            "Home registry at {} is incompatible: {error}; run `lf home doctor`",
             path.display()
         ),
     }
@@ -1490,7 +1498,7 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Home {}, not local Home {}; run `lf ssh {} cron sync --wave {wave}`",
+        "Wave {wave} is placed on Home {}, not local Home {}; run `lf home ssh {} cron sync --wave {wave}`",
         authority.placed_home,
         authority.local_home,
         authority.placed_home,
@@ -1616,7 +1624,7 @@ fn require_release_cron_binary() -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "lf cron installation requires an installed release binary; promote this build before configuring launchd"
+        "lf wave cron installation requires an installed release binary; promote this build before configuring launchd"
     ))
 }
 
@@ -1820,7 +1828,23 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
 pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
-        WtCommand::Create { name, plan } => wt_create(name, *plan),
+        WtCommand::Create {
+            name,
+            plan,
+            persistent,
+        } => {
+            if *persistent && !*plan {
+                let repo = find_repo_root()?;
+                let workspace = crate::engine::worktrees::ensure_agent_worktree(
+                    &repo,
+                    WorktreeSegment::parse(name)?,
+                )?;
+                println!("Persistent workspace: {}", workspace.path.display());
+                Ok(())
+            } else {
+                wt_create(name, *plan)
+            }
+        }
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
@@ -2239,7 +2263,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
 
     // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

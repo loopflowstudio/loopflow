@@ -96,7 +96,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```yaml
 - implement
 - gate
-- cmd: task pr land
+- cmd: pr land
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows

@@ -15,7 +15,7 @@ GitHub and complete the Task only after an authoritative merge.
 ## Workflow
 
 1. **Sync first**
-   - Preserve existing work with `lf commit` when needed, then run `lf task sync`.
+   - Preserve existing work with `lf commit` when needed, then run `lf sync`.
    - Resolve conflicts and continue the sync before investigating CI. Keep
      the recorded failed SHA as evidence even when the local head changes.
 

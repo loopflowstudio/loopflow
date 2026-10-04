@@ -73,7 +73,7 @@ accepted changes. A standalone invocation returns the same scoped proposal; it
 does not rotate, cancel Tasks, create Projects or edit the parent mandate.
 
 Future plan authoring needs an available authorized Linear writer; there is no
-`lf` writer for a Planned Project. `lf wave update-plan --wave <wave> --plan
+`lf` writer for a Planned Project. `lf update-plan --wave <wave> --plan
 <plan.json>` replaces only the current Project's complete content. Never apply
 next-chapter JSON to the predecessor as a shortcut. If the writer is unavailable,
 return the exact pending operation without inventing a command or local owner.

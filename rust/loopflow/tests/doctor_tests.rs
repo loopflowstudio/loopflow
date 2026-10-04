@@ -139,10 +139,10 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
     SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let fetch_head = home.path().join(".git/FETCH_HEAD");
     let before = fs::read(&fetch_head).ok();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(
         output.status.success(),
-        "lf doctor failed: {}",
+        "lf home doctor failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -245,7 +245,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         doctor.status.success(),
-        "lf doctor failed: {}{}",
+        "lf home doctor failed: {}{}",
         String::from_utf8_lossy(&doctor.stdout),
         String::from_utf8_lossy(&doctor.stderr)
     );
@@ -289,7 +289,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
     event.command = Some("lf help".to_string());
     store.record_exec(&event).unwrap();
 
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(
         output.status.success(),
         "{}{}",
@@ -313,7 +313,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
 #[test]
 fn doctor_does_not_initialize_a_missing_database() {
     let home = TestRepo::new();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(!output.status.success());
     assert!(!home.path().join("loopflow.db").exists());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -336,7 +336,7 @@ fn doctor_reports_execs_and_scheduler_despite_an_unknown_migration() {
     insert_exec(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(report["store"]["migration_error"]
@@ -365,7 +365,7 @@ fn doctor_keeps_reporting_when_the_database_is_corrupt() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     fs::write(&path, b"not a sqlite database").unwrap();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(report["store"]["migration_error"].is_string());

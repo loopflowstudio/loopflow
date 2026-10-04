@@ -1,4 +1,4 @@
-//! `lf ssh <HomeId|host> <lf-args...>` — run `lf` on a remote machine.
+//! `lf home ssh <HomeId|host> <lf-args...>` — run `lf` on a remote machine.
 //!
 //! Foreground commands bring narrowly resolved local credentials. Managed
 //! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
@@ -14,7 +14,7 @@
 //! store rather than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf repo refresh` works.
 //!
-//! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
+//! Secrets policy: `lf home ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
 //! master key to the whole secret estate and never leaves this machine. When a
 //! remote command needs a Doppler-backed secret, name it with `--secret NAME`:
@@ -160,7 +160,7 @@ pub fn run(
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
-            "the remote `lf` is implicit; use `lf ssh <target> <args...>` without `-- lf`"
+            "the remote `lf` is implicit; use `lf home ssh <target> <args...>` without `-- lf`"
         ));
     }
     let args = std::iter::once("lf".to_string())
@@ -176,7 +176,7 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
         })
     ) {
         return Err(anyhow!(
-            "nested `lf ssh` is not supported; connect directly from the origin machine"
+            "nested `lf home ssh` is not supported; connect directly from the origin machine"
         ));
     }
     Ok(())
@@ -213,7 +213,7 @@ fn resolve_target(target: &str) -> anyhow::Result<SshTarget> {
     Ok(SshTarget {
         dest: route
             .ssh_destination()
-            .ok_or_else(|| anyhow!("Home {home_id} is local; lf ssh needs a remote Home"))?,
+            .ok_or_else(|| anyhow!("Home {home_id} is local; lf home ssh needs a remote Home"))?,
         port: route.ssh_port(),
         home_id: Some(home_id),
     })
@@ -280,7 +280,7 @@ fn run_with_env(
 ) -> anyhow::Result<()> {
     if lease::account_lease_active() {
         return Err(anyhow!(
-            "an inherited account lease cannot be re-forwarded over SSH; put `lf ssh` on the outer account-selected invocation"
+            "an inherited account lease cannot be re-forwarded over SSH; put `lf home ssh` on the outer account-selected invocation"
         ));
     }
     let repo = repo.unwrap_or(DEFAULT_REPO);
@@ -738,7 +738,7 @@ fn classify_exit(code: Option<i32>) -> SshOutcome {
 /// credential value; ssh's own reason is already on the inherited stderr.
 fn connection_error(host: &str) -> anyhow::Error {
     anyhow!(
-        "lf ssh could not reach '{host}': ssh failed during connection/transport \
+        "lf home ssh could not reach '{host}': ssh failed during connection/transport \
          (bounded by BatchMode + ConnectTimeout={}s). See the ssh error above; check \
          the host is reachable, its key is known, and key auth works.",
         crate::engine::wave_home::SSH_CONNECT_TIMEOUT_SECS
@@ -884,12 +884,12 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("nested `lf ssh` is not supported"));
+            .contains("nested `lf home ssh` is not supported"));
     }
 
     #[test]
     fn preamble_exports_every_credential_and_execs_command() {
-        let cmd = vec!["lf".to_string(), "task".to_string(), "pr".to_string()];
+        let cmd = vec!["lf".to_string(), "pr".to_string()];
         let handle = lease_handle();
         let preamble = build_preamble(
             &full_credentials(),
@@ -925,7 +925,7 @@ mod tests {
         assert!(preamble.contains("password=$GH_TOKEN"));
         // cd into the repo and run under the cleanup trap.
         assert!(preamble.contains("cd \"$HOME\"/'src/loopflow'"));
-        assert!(preamble.trim_end().ends_with("'lf' 'task' 'pr'"));
+        assert!(preamble.trim_end().ends_with("'lf' 'pr'"));
     }
 
     #[test]

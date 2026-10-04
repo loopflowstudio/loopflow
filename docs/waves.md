@@ -126,7 +126,7 @@ newer. A Wave without a current Project requires an unambiguous predecessor;
 the command never selects an arbitrary historical plan.
 
 There is no transaction across Linear mutations or across Homes. A second Home
-observes the same statuses on `lf repo refresh <wave>` or its next normal
+observes the same statuses on `lf refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
 A successful preview does not authorize ignoring later external reassignments.
 
@@ -142,7 +142,7 @@ flow: feature
 
 `lf --task <task> flow start` uses that Flow unless a template argument selects another. Existing
 Projects observed before the status-model upgrade retain their identity and
-custom default Flow. The first explicit `lf repo refresh` or chapter rotation
+custom default Flow. The first explicit `lf refresh` or chapter rotation
 converts their old `recommended:` line to `flow:` and marks the recorded current
 Project In Progress. Until then, planning reads project that same conversion
 without changing Linear. Deliberately Planned successors stay Planned; archived
@@ -218,7 +218,7 @@ Set targets in the chapter plan, not the instrument contract:
 ```
 
 Apply this complete Wave plan with
-`lf wave update-plan --wave <wave> --plan plan.json`. For the next chapter,
+`lf update-plan --wave <wave> --plan plan.json`. For the next chapter,
 edit the Planned Project in Linear.
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
@@ -292,8 +292,8 @@ to bring relevant findings into the parent's memory.
 ### Home
 
 ```bash
-lf home id
-lf home observe <home-id> ssh://jack@mini.local
+lf id
+lf observe <home-id> ssh://jack@mini.local
 lf wave place <wave-id> <home-id>
 lf ssh <home-id> --wave shipper wave/operate
 lf ssh <home-id> wave status shipper --json
@@ -347,7 +347,7 @@ namespace. Don't paste ids by hand.
 ```bash
 lf repo connect infra --team-key LOO # first Wave establishes the repo Team
 lf repo connect --all                  # all nested Waves reuse it
-lf repo refresh infra              # refresh the local SQLite snapshot
+lf refresh infra              # refresh the local SQLite snapshot
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"

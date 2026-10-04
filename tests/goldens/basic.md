@@ -20,8 +20,8 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf task sync --plan                  # inspect integration strategy
-lf task sync                         # apply it
+lf sync --plan                  # inspect integration strategy
+lf sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf submit                         # prepare for the user's merge click
 lf arm                            # prepare and request auto-merge; return
@@ -91,7 +91,7 @@ terminal output, logs, and chat; follow the repository's secret-management polic
 
 Keep agent progress in local working notes and the final Run response. Do not
 post routine progress to Linear: Task comments are for new direction from people.
-Agent comments published through `lf task comment` carry a progress marker and
+Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Preserve `<!-- loopflow-progress:... -->` provenance
 when writing progress through another integration.

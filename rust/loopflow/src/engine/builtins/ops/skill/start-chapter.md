@@ -92,7 +92,7 @@ delete predecessor Projects, or count canceled backlog as completed work.
 To apply an accepted plan after its Project becomes current, use:
 
 ```bash
-lf wave update-plan --wave <wave> --plan <plan.json>
+lf update-plan --wave <wave> --plan <plan.json>
 ```
 
 The file replaces the complete current Project content:

@@ -37,7 +37,6 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([staleWorktree]),
-
             workActivity: .available(fixture.workActivity),
             repos: [PortfolioRepo(path: "/src/loopflow", lastOpened: .distantPast)]
         )
@@ -182,7 +181,6 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
-
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -217,7 +215,6 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([]),
-
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -260,14 +257,12 @@ struct PodiumModelTests {
             id: "product",
             name: "product",
             repo: origin.path,
-            status: .ready,
-
+            status: .ready
         )
         let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([registered]),
-
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -342,7 +337,6 @@ struct PodiumModelTests {
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
-
             workActivity: .available(fixture.workActivity),
             repos: []
         )
@@ -520,8 +514,6 @@ private struct PodiumTestFixture {
         let data = try JSONSerialization.data(withJSONObject: object)
         return try #require(String(data: data, encoding: .utf8))
     }
-
-
 }
 
 private actor ActivityArguments {
@@ -556,5 +548,4 @@ private actor DeferredActivityResponse {
         responseContinuation = nil
     }
 }
-
 #endif

@@ -469,22 +469,6 @@ struct RegistryQueryTests {
         #expect(opened == session)
     }
 
-    @Test("lf ps decodes the shared live activity snapshot")
-    func activityDecodes() async throws {
-        let fixture = try String(contentsOf: activityFixtureURL(), encoding: .utf8)
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["ps", "--json"])
-            #expect(cwd == nil)
-            return fixture
-        }
-
-        let snapshot = try await query.processActivity()
-
-        #expect(snapshot.nodes.count == 3)
-        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.count == 2)
-        #expect(snapshot.providerProcesses[0].claim == .orphaned)
-    }
-
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
     func invocationActivityIsNotSessionHistory() async throws {
         let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#
@@ -602,14 +586,6 @@ struct RegistryQueryTests {
             _ = try await query.waves(repoPath: "/tmp/repo-a")
         }
     }
-}
-
-private func activityFixtureURL(sourceFile: String = #filePath) -> URL {
-    URL(fileURLWithPath: sourceFile)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("tests/fixtures/dto/activity_snapshot.json")
 }
 
 private func workActivityFixtureURL(sourceFile: String = #filePath) -> URL {

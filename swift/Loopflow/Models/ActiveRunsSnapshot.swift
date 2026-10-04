@@ -28,6 +28,12 @@ public struct LiveProviderProcess: Codable, Sendable, Hashable {
     public let state: ActivityState
 }
 
+public enum ActivityState: String, Codable, Sendable, Hashable {
+    case working
+    case waiting
+    case stalled
+}
+
 public enum ActiveSessionDiscovery: String, Codable, Sendable, Hashable {
     case scanning, ready, unavailable
 }

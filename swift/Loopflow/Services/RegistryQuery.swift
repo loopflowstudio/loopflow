@@ -87,12 +87,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
 
-    /// Exact OS-live Loopflow process trees and unattributed provider processes.
-    public func processActivity() async throws -> ActivitySnapshot {
-        let stdout = try await run(["ps", "--json"], nil)
-        return try Self.decode(ActivitySnapshot.self, from: stdout)
-    }
-
     public func localHomeId() async throws -> String {
         struct HomeIdentity: Decodable { let id: String }
         return try Self.decode(HomeIdentity.self, from: await run(["home", "id", "--json"], nil)).id

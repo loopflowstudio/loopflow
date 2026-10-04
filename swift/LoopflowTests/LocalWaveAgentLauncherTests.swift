@@ -139,19 +139,15 @@ struct LocalWaveAgentLauncherTests {
     }
 
     #if !SWIFT_PACKAGE
-    @Test("the hosted app executes and decodes its bundled process activity")
-    func hostedBundleProcessActivityDecodes() async throws {
+    @Test("the hosted app executes its bundled lf and decodes the reply")
+    func hostedBundleExecutes() async throws {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         #expect(FileManager.default.isExecutableFile(atPath: helper))
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["ps", "--json"])
-            #expect(cwd == nil)
-            return try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
+            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
 
-        let snapshot = try await query.processActivity()
-        #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.observedAt > 0)
+        #expect(try await !query.localHomeId().isEmpty)
     }
     #endif
 

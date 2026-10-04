@@ -135,25 +135,6 @@ struct DTOFixtureTests {
         #expect(plan.currentProject?.krs.count == 1)
     }
 
-    @Test("Activity fixture preserves exact OS-live process state")
-    func activityFixtureRoundTrips() throws {
-        let data = try loadFixtureData("activity_snapshot.json")
-        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: data)
-
-        #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.state)
-            == [.working, .stalled])
-        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.wave)
-            == ["product", "product"])
-        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.worktree)
-            == ["/src/loopflow.task", "/src/loopflow.task"])
-        #expect(snapshot.providerProcesses[0].claim == .orphaned)
-
-        let encoded = try JSONEncoder().encode(snapshot)
-        let decoded = try JSONDecoder().decode(ActivitySnapshot.self, from: encoded)
-        #expect(decoded == snapshot)
-    }
-
     @Test("Work Activity fixture preserves proof links and typed facts")
     func workActivityFixturePreservesProof() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")

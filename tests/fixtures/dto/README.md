@@ -35,8 +35,8 @@ reconstruct the condition from process flags.
 
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Rust and Swift both round-trip it; The
-Podium derives no process state of its own.
+stays separate from the call tree. Rust round-trips it; Desktop no longer
+reads it.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape shared by `lf runs --json` and `lf usage --json`. Captured event sequences

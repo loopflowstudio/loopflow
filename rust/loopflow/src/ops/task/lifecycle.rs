@@ -516,12 +516,17 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// Completion cannot implicitly settle another Flow's work.
-pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let work = store
+/// These checks never consult a finished Exec, so they skip retained history.
+fn unfinished_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    store
         .sqlite
         .task_work_with_unfinished_execs(&task.id)
-        .map_err(task_error)?;
+        .map_err(task_error)
+}
+
+/// Completion cannot implicitly settle another Flow's work.
+pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    let work = unfinished_work(store, task)?;
     let mut blockers = execution_blockers(store, &work, ExecutionCheck::RetainWork)?;
     for flow in work.flows.iter().filter(|flow| !flow.managed) {
         if flow.summary.state == crate::session::FlowSummaryState::Current {
@@ -541,10 +546,7 @@ pub(super) fn associated_execution_blockers(
 ) -> OpsResult<Vec<String>> {
     execution_blockers(
         store,
-        &store
-            .sqlite
-            .task_work_with_unfinished_execs(&task.id)
-            .map_err(task_error)?,
+        &unfinished_work(store, task)?,
         ExecutionCheck::RetainWork,
     )
 }
@@ -556,10 +558,7 @@ pub(super) fn recovery_execution_blockers(
 ) -> OpsResult<Vec<String>> {
     execution_blockers(
         store,
-        &store
-            .sqlite
-            .task_work_with_unfinished_execs(&task.id)
-            .map_err(task_error)?,
+        &unfinished_work(store, task)?,
         ExecutionCheck::ResumeFlow,
     )
 }

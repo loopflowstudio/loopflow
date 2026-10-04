@@ -12,7 +12,7 @@ struct PodiumView: View {
     @State private var model: PodiumModel
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
-    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
+    @State private var sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkspaceLinkRouter?
     private let query: RegistryQuery
 
@@ -33,9 +33,12 @@ struct PodiumView: View {
         let startingRepoPath = initialRepoPath
             .flatMap(PortfolioDiscovery.resolveLaunchRepo)
             ?? restoredRepoPath
-        let model = PodiumModel(query: query, repoPath: startingRepoPath)
+        // Fixture and proof runs render only what they read; nothing saved is restored.
+        let model = PodiumModel(query: query, repoPath: startingRepoPath,
+                                cache: AppTestMode.current() == nil ? .forHome() : nil)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
+        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
     }
 
     var body: some View {
@@ -99,17 +102,7 @@ struct PodiumView: View {
                 }
             }
         }
-        .task(id: model.repoPath) {
-            await model.refresh()
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(15))
-                } catch {
-                    return
-                }
-                await model.refresh()
-            }
-        }
+        .task(id: model.repoPath) { await model.keepWorkspaceCurrent() }
         .task(id: model.repoPath) {
             // Fixture and UI-test runs render without background helpers.
             guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
@@ -125,13 +118,6 @@ struct PodiumView: View {
                     initialRepoPath: initialRepoPath,
                     persistedRepos: portfolioService.repos
                 )
-            }
-        }
-        .task(id: model.repoPath) {
-            while !Task.isCancelled {
-                await model.refreshSessions()
-                do { try await Task.sleep(for: .seconds(2)) }
-                catch { return }
             }
         }
     }

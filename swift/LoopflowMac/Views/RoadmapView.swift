@@ -251,7 +251,7 @@ struct RoadmapView: View {
     @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
-            ProgressView("Reading roadmap…")
+            ProgressView("Loading workspace…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("podium-work-loading")
         } else if snapshot == nil {

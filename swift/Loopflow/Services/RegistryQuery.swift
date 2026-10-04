@@ -44,6 +44,16 @@ public struct RegistryQuery: Sendable {
         self.observe = watchActiveSessions
     }
 
+    /// A copy that also reports each successful read's wire text, so a caller
+    /// can retain exactly what it decoded.
+    public func recording(_ record: @escaping @Sendable (_ lfArgs: [String], _ stdout: String) -> Void) -> RegistryQuery {
+        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
+            let stdout = try await run(args, cwd)
+            record(args, stdout)
+            return stdout
+        }
+    }
+
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
@@ -354,7 +364,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(DoctorReport.self, from: stdout)
     }
 
-    private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
+    /// Decode retained wire text through the decoder live reads use.
+    public static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
         // `lf` prints one JSON line; trim any surrounding whitespace/newline.
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = trimmed.data(using: .utf8) else {

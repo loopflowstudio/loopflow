@@ -14,6 +14,12 @@ retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
+A returning launch opens on the workspace saved at `<Home>/desktop-cache/workspace.json`
+and shows **Updating…** until this launch's reads replace it. Saved rows open
+and navigate; Flow state, Session state and every action except opening a
+Session wait for the fresh read. A failed refresh keeps what is shown under one
+**Couldn't update** line. Delete the file to start from **Loading workspace…**.
+
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Home. Disabling stops scheduled

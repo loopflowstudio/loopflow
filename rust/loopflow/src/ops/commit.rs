@@ -112,6 +112,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     let message =
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    restart_landed_resident(repo);
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let run = |args: &[String]| -> OpsResult<()> {
@@ -169,10 +170,21 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     Ok(())
 }
 
+/// Whenever a resident checkout is about to commit or publish, drop history
+/// its merged PRs already delivered. Nothing has to observe the merge itself.
+fn restart_landed_resident(repo: &Path) {
+    if crate::engine::worktrees::is_resident_worktree(repo).unwrap_or(false)
+        && crate::ops::sync::restart_landed_resident(repo).unwrap_or(false)
+    {
+        eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
+    }
+}
+
 pub(crate) fn prepare_resident_publication(repo: &Path) -> OpsResult<()> {
     if !crate::engine::worktrees::is_resident_worktree(repo)? {
         return Ok(());
     }
+    restart_landed_resident(repo);
     let output = std::process::Command::new("git")
         .current_dir(repo)
         .args(["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"])

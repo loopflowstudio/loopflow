@@ -550,11 +550,11 @@ fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
         .unwrap_or_else(|| "manual resolution required".to_string())
 }
 
-/// True when merging the base into HEAD would add nothing the base lacks.
-fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
-    let output = std::process::Command::new("git")
+/// True when merging the base into `rev` would add nothing the base lacks.
+fn landed_at(repo: &Path, base_ref: &str, rev: &str) -> OpsResult<bool> {
+    let output = Command::new("git")
         .current_dir(repo)
-        .args(["merge-tree", "--write-tree", base_ref, "HEAD"])
+        .args(["merge-tree", "--write-tree", base_ref, rev])
         .output()?;
     // A conflicted merge exits 1: the branch still differs from the base.
     Ok(output.status.success()
@@ -562,18 +562,88 @@ fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
             == rev_parse(repo, &format!("{base_ref}^{{tree}}"))?)
 }
 
-/// After a resident branch's PR merges, restart the branch from the default
-/// branch. Returns false and leaves the checkout alone when the branch still
-/// holds unmerged commits or Git is mid-operation.
+fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
+    landed_at(repo, base_ref, "HEAD")
+}
+
+/// Recreate `commits` on top of `onto` without touching the working tree.
+/// Returns None when one of them conflicts with the new base.
+fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
+    let mut parent = rev_parse(repo, onto)?;
+    let range = git(repo, &["rev-list", "--reverse", "--no-merges", commits])?;
+    for commit in range.lines() {
+        let merged = Command::new("git")
+            .current_dir(repo)
+            .args(["merge-tree", "--write-tree", "--merge-base"])
+            .args([&format!("{commit}^"), &parent, commit])
+            .output()?;
+        if !merged.status.success() {
+            return Ok(None);
+        }
+        let tree = String::from_utf8_lossy(&merged.stdout).trim().to_string();
+        if tree == rev_parse(repo, &format!("{parent}^{{tree}}"))? {
+            continue;
+        }
+        let author = git(repo, &["log", "-1", "--format=%an%n%ae%n%aI", commit])?;
+        let mut author = author.lines();
+        let message = git(repo, &["log", "-1", "--format=%B", commit])?;
+        let created = Command::new("git")
+            .current_dir(repo)
+            .env("GIT_AUTHOR_NAME", author.next().unwrap_or_default())
+            .env("GIT_AUTHOR_EMAIL", author.next().unwrap_or_default())
+            .env("GIT_AUTHOR_DATE", author.next().unwrap_or_default())
+            .args([
+                "commit-tree",
+                &tree,
+                "-p",
+                &parent,
+                "-m",
+                message.trim_end(),
+            ])
+            .output()?;
+        if !created.status.success() {
+            return Err(OpsError::Message(
+                String::from_utf8_lossy(&created.stderr).into_owned(),
+            ));
+        }
+        parent = String::from_utf8_lossy(&created.stdout).trim().to_string();
+    }
+    Ok(Some(parent))
+}
+
+/// Restart a resident branch from the default branch once its PR has merged.
+/// Commits made after the last push are carried over. Returns false and
+/// leaves the checkout alone when nothing has landed or Git is mid-operation.
 pub(crate) fn restart_landed_resident(repo: &Path) -> OpsResult<bool> {
     let base = format!("origin/{}", get_default_branch(repo)?);
-    fetch_target(repo, &base)?;
-    if intervention_state(repo)?.is_some() || !landed(repo, &base)? {
+    // Offline, the last fetched base still answers for what it has seen.
+    let _ = fetch_target(repo, &base);
+    if intervention_state(repo)?.is_some() || crate::engine::git::is_ancestor(repo, "HEAD", &base)?
+    {
         return Ok(false);
     }
+    let target = if landed(repo, &base)? {
+        Some(base.clone())
+    } else {
+        // After a squash merge the pushed head is what landed; anything
+        // committed since then is still unpublished work.
+        let branch = current_branch(repo)?.unwrap_or_default();
+        match rev_parse(repo, &format!("refs/remotes/origin/{branch}")) {
+            Ok(pushed)
+                if crate::engine::git::is_ancestor(repo, &pushed, "HEAD")?
+                    && landed_at(repo, &base, &pushed)? =>
+            {
+                replay(repo, &base, &format!("{pushed}..HEAD"))?
+            }
+            _ => None,
+        }
+    };
+    let Some(target) = target else {
+        return Ok(false);
+    };
     // --keep leaves uncommitted edits in place and refuses rather than
     // overwriting one the base also changed, so a live conversation is safe.
-    git(repo, &["reset", "--keep", &base])?;
+    git(repo, &["reset", "--keep", &target])?;
     Ok(true)
 }
 
@@ -804,6 +874,100 @@ mod tests {
             "followup\n"
         );
         assert!(resident.path.join("scratch/plan.md").exists());
+    }
+
+    #[test]
+    fn commits_made_after_the_merged_push_move_onto_main() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let resident = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
+        git(&resident.path, &["push", "origin", &resident.branch]);
+        std::fs::write(resident.path.join("later.md"), "unpublished\n").unwrap();
+        crate::ops::commit_selected(&resident.path, &["later.md".into()], Some("Later")).unwrap();
+        git(
+            repo.path(),
+            &["merge", "--squash", &format!("{}~1", resident.branch)],
+        );
+        repo.commit("Merged document PR");
+        repo.push();
+        std::fs::write(resident.path.join("memory.md"), "local edit\n").unwrap();
+
+        assert!(restart_landed_resident(&resident.path).unwrap());
+        assert_eq!(
+            git(&resident.path, &["log", "--format=%s", "origin/main..HEAD"]),
+            "Later\n"
+        );
+        assert_eq!(
+            git(&resident.path, &["show", "HEAD:later.md"]),
+            "unpublished\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(resident.path.join("memory.md")).unwrap(),
+            "local edit\n"
+        );
+    }
+
+    #[test]
+    fn resident_commit_after_merge_starts_from_main() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let resident = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
+        git(repo.path(), &["merge", "--squash", &resident.branch]);
+        repo.commit("Merged document PR");
+        repo.push();
+
+        // No sync and no settled landing: the next commit notices by itself.
+        std::fs::write(resident.path.join("memory.md"), "followup\n").unwrap();
+        crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Followup"))
+            .unwrap();
+        assert_eq!(
+            git(
+                &resident.path,
+                &["rev-list", "--count", "origin/main..HEAD"]
+            )
+            .trim(),
+            "1"
+        );
+        assert_eq!(
+            git(&resident.path, &["show", "HEAD:memory.md"]),
+            "followup\n"
+        );
     }
 
     #[test]

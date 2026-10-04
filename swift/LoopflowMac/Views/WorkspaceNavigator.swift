@@ -180,7 +180,10 @@ struct WorkspaceNavigator: View {
                 }
                 Toggle("Show headless Sessions", isOn: Binding(
                     get: { navigation.showsHeadlessSessions },
-                    set: { navigation.showsHeadlessSessions = $0 }))
+                    set: {
+                        navigation.showsHeadlessSessions = $0
+                        Task { await model.refreshSessions() }
+                    }))
                     .accessibilityIdentifier("workspace-headless-sessions")
                 if let onShowTerminals {
                     Divider()

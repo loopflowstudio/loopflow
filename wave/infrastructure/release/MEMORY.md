@@ -1,5 +1,35 @@
 # Release memory
 
+## Retained landing incident and minor recovery (2026-10-04)
+
+Jack Heart authorized autonomous recovery and delivery under Infrastructure;
+[LOO-373](https://linear.app/loopflow/issue/LOO-373) owns the retained Home landing
+and deleted-tmux-cwd repairs. The original retry
+`ff94aac9-b59d-409b-9bce-45dc921f1f1a` has no terminal receipt. Its retained
+process receipt named absent PID 17052, and the exact minor/preparation leases
+were unheld before supported re-entry. Process-list absence alone was not used
+as publication authority.
+
+`lf release run minor` completed as Exec `a7dee370-c624-4ac5-b063-a981714d7e7d`
+with exit 0. [v0.13.0](https://github.com/loopflowstudio/loopflow/releases/tag/v0.13.0)
+published at 2026-10-04 07:20:30 UTC from `12016c6d6dd34a4c1a553c25b5cf2529ee93615b`
+and [candidate 37182312803](https://github.com/loopflowstudio/loopflow/actions/runs/37182312803).
+The saved pair remains v0.12.32/v0.13.0, with its original patch commit and
+prepared tree, now `completed: true`. No competing publisher, manual state
+rewrite, or draft-bearing binary promotion was used. This release predates the
+landing migration and startup prevention; installed recovery still requires
+their published patch.
+
+Prevention retires Home landing claims with their identity/PID/heartbeat/generation
+retained on the landing, rejects old executable reacquisition, and preserves
+delivery intent and failures. A released-frontier regression passes through
+domain reads, stale-write rejection, real reconciliation with controlled provider
+facts, and repeat reconciliation under both draft and canonicalized schemas.
+An isolated tmux 3.7c server with deleted cwd launched a child into a quoted path
+after explicit child `cd`; this proves the known defect, not the causes of every
+LOO-371/372 timeout. Their original exited-pane stderr was unavailable. The active
+LOO-371/372/326 Flows were preserved.
+
 Release is the nested Wave `infrastructure/release`. Jack Heart selected its
 objective and ownership of release-focused planning on 2026-09-28. Its GOAL.md
 owns the authored release schedule. Live Linear ownership and schedule cutover

@@ -19,6 +19,13 @@ still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
 
+Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
+auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
+from Doppler, with repository Contents and Pull requests write access. Renew
+the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
+the required merge queue. Successful PR CI explicitly enqueues the unchanged
+Dependabot head when it is not already queued; queue CI still gates merging.
+
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;

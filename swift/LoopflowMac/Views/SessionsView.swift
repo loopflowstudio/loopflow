@@ -206,8 +206,8 @@ final class SessionsStore: ObservableObject {
             metrics.recordSessionsLoaded(count: records.count)
             hasRecordedSessionsLoad = true
         }
-        let incoming = Set(records.map(\.id))
-        sessions.removeAll { !incoming.contains($0.id) }
+        // Working-set pages are filtered. Absence establishes neither deletion
+        // nor completion and must not discard prepared commands or native drafts.
 
         for record in records {
             let observedState: SessionItem.State = localTerminal(for: record) != nil
@@ -307,7 +307,7 @@ final class SessionsStore: ObservableObject {
     }
 
     /// Frees the retained terminal surface for a Session whose provider client
-    /// this window no longer owns (completed, decided, or gone from the list).
+    /// this window explicitly completed. Filtered absence never grants release.
     func releaseSurface(_ id: String) {
         surfaces.release(.session(id))
     }
@@ -433,7 +433,7 @@ struct SessionsContentView: View {
     private var taskPath: String? { taskIdentity?.worktree }
     private var selectedWorkspace: SessionWorkspace? {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
-        return model.sessions.value?.first { $0.id == navigation.selectedSessionId }?.workspace
+        return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
     private var fileTaskId: String? {
         fileTask?.task.runtime?.workId ?? selectedWorkspace?.taskId ?? fileTask?.task.task.identifier
@@ -636,11 +636,7 @@ struct SessionsContentView: View {
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                   let records else { return }
             let previousLocations = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0.record.workspace?.identity) })
-            let previous = Set(store.sessions.map(\.id))
             store.reconcile(records)
-            let ids = Set(store.sessions.map(\.id))
-            for id in previous.subtracting(ids) { store.releaseSurface(id) }
-            workspaces.removeSessions(previous.subtracting(ids))
             if model.sessions.errorMessage == nil {
                 workspaces.reconcileMembership(records)
                 if let work = model.selection, work.kind == .task {
@@ -717,6 +713,11 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("workspace-create")
     }
 
+    private var visibleSessionItems: [SessionItem] {
+        let ids = Set(model.visibleSessions.map(\.id))
+        return store.sessions.filter { ids.contains($0.id) }
+    }
+
     private var taskMaterials: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Sessions").font(Typography.meta.weight(.semibold))
@@ -724,7 +725,7 @@ struct SessionsContentView: View {
                 .padding(.horizontal, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(store.sessions.filter { $0.record.primaryScope == nil && $0.record.workspace?.identity == taskIdentity }) { item in
+                    ForEach(visibleSessionItems.filter { $0.record.primaryScope == nil && $0.record.workspace?.identity == taskIdentity }) { item in
                         HStack(alignment: .top, spacing: 6) {
                             Button {
                                 if NSEvent.modifierFlags.contains(.command) { toggleSessionVisibility(item.record) }
@@ -838,7 +839,7 @@ struct SessionsContentView: View {
             Task { await model.openPaletteTask(id) }
             return
         case .session(let id):
-            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
         case .chooseFlow(let id):
@@ -848,11 +849,11 @@ struct SessionsContentView: View {
             if case .pinned = found.task.flow.record { hasInvocation = true } else { hasInvocation = false }
             navigation.flowDrafts[id, default: TaskFlowDraft()].picker = hasInvocation ? .restart : .preview
         case .rename(let id):
-            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
             model.beginSessionRename(record)
         case .bind(let id):
-            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
         case .monitor(let id): showMonitor(id)
         }
@@ -901,8 +902,8 @@ struct SessionsContentView: View {
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
             if model.sessions.errorMessage == nil {
-                workspace.initializeMaterials(sessionCount: store.sessions.filter {
-                    $0.record.workspace?.identity == record.workspace?.identity
+                workspace.initializeMaterials(sessionCount: model.visibleSessions.filter {
+                    $0.primaryScope == nil && $0.workspace?.identity == record.workspace?.identity
                 }.count)
             }
             if alongside {
@@ -925,7 +926,7 @@ struct SessionsContentView: View {
         guard let identity = taskIdentity else { return }
         let taskWorkspace = workspaces.workspace(for: identity)
         let panes = taskWorkspace.multiplexer
-        let sessions = store.sessions.map(\.record).filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
+        let sessions = model.visibleSessions.filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
         if model.sessions.errorMessage == nil { taskWorkspace.initializeMaterials(sessionCount: sessions.count) }
         if let session = focusedPaneSessions.first {
             navigation.selectedSessionId = session.id

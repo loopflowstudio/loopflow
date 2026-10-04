@@ -220,10 +220,12 @@ struct WorkSurfaceView: View {
     private var taskDetail: some View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
-            let sessions = model.sessions.value.map { records in
-                records.filter { record in
-                    guard model.navigation.showsHeadlessSessions || record.interactive else { return false }
-                    return task.runtime.map { record.work == .task(id: $0.workId) } ?? false
+            let sessions = model.sessions.value.map { _ in
+                model.visibleSessions.filter { record in
+                    guard record.primaryScope == nil else { return false }
+                    return task.runtime.map {
+                        record.taskIds.contains($0.workId) || record.workspace?.taskId == $0.workId
+                    } ?? false
                 }
             }
             scrollingDetail(identifier: "podium-detail-task") {

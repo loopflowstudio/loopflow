@@ -32,6 +32,16 @@ unproven. Prototype approval supplies no native acceptance or sustained-use KR.
 The accepted design and dated demo evidence are retained at
 [the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
 
+## Session working set (2026-10-03)
+
+Jack Heart requested unfinished interactive participation in ordinary API and
+Desktop Session navigation (LOO-372). Task association still includes all work.
+`--needs-me` narrows the selected mode; explicit headless/history filters retain
+full inspection. Filtered absence cannot release native surfaces or clear drafts
+and selection. Explicit completion remains separate from turn completion.
+Local headless regressions cover visibility, counts and refresh/completion races;
+they establish no sustained-use KR or configured provider acceptance.
+
 ## Current Tasks and completion history (2026-10-02)
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
@@ -1050,16 +1060,13 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Historical Wave controls and retained lessons
+## Historical Wave controls
 
-The retired listener/Stop implementation and July 10 dogfood details are preserved
-at [the prior memory](https://github.com/loopflowstudio/loopflow/blob/25f183992969f59b42f9765d7594638cc91652dc/wave/product/MEMORY.md#historical-wave-controls--truthful-failures-wave-controls).
-Upstream `3dc89bc9a` removed those runtime/UI surfaces; they are not primary-Session
-dependencies. Retained lessons: ignore empty thoughts; follow output only while
-its reader stays at the bottom; distinguish a failed attempt and its recovery
-from terminal Work failure using exact occurrence evidence. Dictation remains
-Wispr Flow, not built-in. Signed build-for-testing does not prove native UI
-interaction; Automation can stop a runner before bootstrap.
+The retired listener controls, failed-turn presentation and dictation decisions
+are preserved in `12016c6d6dd34a4c1a553c25b5cf2529ee93615b:wave/product/MEMORY.md`
+under “Historical Wave controls & truthful failures”. They do not authorize
+restoring the listener. Attempt failure remains distinct from Work failure;
+Wispr Flow owns dictation; configured UI execution requires a capable host.
 
 ## Learnings
 

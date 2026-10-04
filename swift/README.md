@@ -104,7 +104,10 @@ continues; **Expand** returns to it. **Focus** gives one conversation the conten
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.
 
-Task rows show all Sessions in the Task checkout, including independent conversations.
+Task rows and their counts show unfinished interactive Sessions in the Task checkout,
+including independent conversations and authored Flow reviews. **Show headless Sessions**
+includes background conversations; `lf session list --interactive all --history`
+inspects the full history. Filtering preserves retained terminals and drafts.
 Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
 Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined; **Ready to complete** means

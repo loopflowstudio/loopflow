@@ -177,3 +177,8 @@ its steps were not fabricated as successful. Source implementation and delivery
 were performed by the independent Task contribution instead.
 
 Check: GitHub PR readback — MERGED at the exact commit above; hosted CI green.
+
+Final LOO-370 readback reports its same code Flow finished with no further steps
+scheduled. Its Task remains ready; this does not establish its separate cleanup
+scope landed. LOO-377 readback records the exact merge while remaining ready with
+its idle saved code Flow. Neither Task's completion was manufactured.

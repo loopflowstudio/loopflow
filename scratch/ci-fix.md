@@ -1,1 +1,0 @@
-Checks: controller planning 23 passed; CLI Flow tests 23 passed/3 existing ignored; cargo fmt --check, cargo clippy --all-targets -- -D warnings and git diff --check passed. PR #1431's failed head cfb9681a3c6a12effa28496074c15bf5a509fbb7 retained three assumptions about old builtin Flow boundaries; explicit fixture Flows preserve generic coverage.

@@ -5,15 +5,6 @@ dated observations. The [current plan](make-laptop-refresh-and-lf-installed-sche
 and [latest readback](demo-published-install-20261002.md) govern remaining proof.
 
 
-## Finish line
-
-Use the published, installed `lf` to refresh the laptop, activate and inspect
-the login/hourly job through `lf install schedule`, observe a real scheduled
-or wake-recovery catch-up, and observe explicit installed catch-up after a
-missed or failed automatic opportunity. Preserve caller edits, unpublished
-commits, and this Task's existing worktree. Candidate binaries, simulated
-plists, and fixture tests do not establish this proof.
-
 ## Live observations
 
 Checked at approximately 2026-09-23T20:10:56Z on the laptop (uid 501).
@@ -50,23 +41,10 @@ Checked at approximately 2026-09-23T20:10:56Z on the laptop (uid 501).
   `Could not find service "com.loopflow.refresh" in domain for user gui: 501`.
   This proves no configured job at inspection time, not a failed scheduled run.
 
-## Disposition and remaining proof
+## Historical disposition
 
-Blocked on a published installation containing PR #1273, specifically commit
-`c56340a142bcb6a854b98fed9b757cd9a6423f9a`. The latest release reported by the
-supported status command is v0.12.19 and cannot supply the new installed path.
-No release was started or retried; no binary was built or promoted and no job
-was installed to invoke the obsolete internal transaction command.
-
-Once a containing release is available, resume this same Task and worktree:
-install through the supported published upgrade path, verify the installed
-command surface, run the full refresh, and use `lf install schedule` to load
-the login/hourly job. Record its real launchd execution and checkout/package
-outcomes, then the explicit catch-up after an observed missed/failed
-opportunity, including before/after preservation evidence. A loaded plist or
-successful invocation alone is insufficient proof of catch-up.
-
-The installed refresh, scheduled/wake catch-up, and explicit recovery remain
-unproven. No implementation failure was exposed beyond the known release
-dependency; no implementation edits were made. Existing Task files, branch
-history, and canonical checkout bytes were preserved.
+The September 23 review stopped at the v0.12.19 release dependency without
+installation, activation or implementation changes. Task history and checkout
+bytes were preserved. Superseded hourly/full-refresh instructions remain in
+`8111e7f31ff235dfe35d56406a62bd585ab74e20:scratch/demo-installed-laptop-refresh.md`.
+The current plan owns remaining proof; the October 2 readback supersedes this blocker.

@@ -5,14 +5,6 @@ dated observations. The [current plan](make-laptop-refresh-and-lf-installed-sche
 and [latest readback](demo-published-install-20261002.md) govern remaining proof.
 
 
-## Finish line
-
-The human can refresh main, repeat the command, and create a sibling from current
-main through `lf`. A feature invocation refreshes main before integrating it.
-The laptop's installed `lf install` converges packages, environment and published
-binaries, and its configured job runs the same path. An unchanged/stale success,
-fixture-only package execution, or a generated but unloaded plist is insufficient.
-
 ## Observed facts
 
 - Reported failure: pinned target

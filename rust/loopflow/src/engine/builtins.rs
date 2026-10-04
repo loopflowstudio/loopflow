@@ -303,7 +303,7 @@ mod tests {
             "lf roadmap --wave <wave> --json",
             "lf --task <ISSUE-ID> flow start",
             "lf observe <home-id>",
-            "lf home ssh <home-id> --wave <wave> wave/operate",
+            "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }
@@ -314,13 +314,13 @@ mod tests {
         assert!(init.contains("wave/<name>/MEMORY.md"));
         assert!(!init.contains("lf memory"));
         assert!(!init.contains("git remote -v"));
-        assert!(!init.contains("lf home doctor --json"));
+        assert!(!init.contains("lf doctor --json"));
     }
 
     #[test]
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
-        assert!(LOOPFLOW_DOC.contains("lf home screenshot SOURCE -o OUTPUT"));
+        assert!(LOOPFLOW_DOC.contains("lf screenshot SOURCE -o OUTPUT"));
         assert!(LOOPFLOW_DOC.contains("never launch a GUI browser executable"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));

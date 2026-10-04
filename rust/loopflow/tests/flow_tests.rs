@@ -2297,8 +2297,8 @@ fn command_item_parses_and_expands() {
             target: loopflow::engine::target::Target::Command(item),
             ..
         } => {
-            assert_eq!(item.command, "task");
-            assert_eq!(item.args, vec!["pr", "land"]);
+            assert_eq!(item.command, "pr");
+            assert_eq!(item.args, vec!["land"]);
         }
         other => panic!("expected command item, got {other:?}"),
     }
@@ -2569,7 +2569,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             "decide-proof",
             "demo-proof",
             "decide-proof",
-            "task pr land -c"
+            "pr land -c"
         ]
     );
     assert_eq!(record["current"], 1);

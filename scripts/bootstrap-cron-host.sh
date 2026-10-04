@@ -42,7 +42,7 @@ minimal_env=(
 )
 
 step "installed binary + declared jobs"
-"${minimal_env[@]}" lf wave cron preflight --wave "$wave" >/dev/null
+"${minimal_env[@]}" lf cron preflight --wave "$wave" >/dev/null
 printf 'installed cron preflight passed for Wave %s\n' "$wave"
 
 step "unattended tool path"
@@ -73,10 +73,10 @@ step "configured publisher authority"
   uv run python scripts/publish_release.py check
 
 step "sync repo-owned schedules"
-"${minimal_env[@]}" lf wave cron sync --wave "$wave"
+"${minimal_env[@]}" lf cron sync --wave "$wave"
 
 step "prove GOAL.md matches loaded launchd jobs"
-cron_json="$("${minimal_env[@]}" lf wave cron list --wave "$wave" --json)"
+cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
 "${minimal_env[@]}" \
   "CRON_LIST_JSON=$cron_json" \
   "EXPECTED_HOME_ID=$local_home" \
@@ -111,19 +111,19 @@ PY
 
 step "configured-path telemetry receipt"
 result=0
-if ! "${minimal_env[@]}" lf wave cron trigger \
+if ! "${minimal_env[@]}" lf cron trigger \
   --wave "$wave" --flow telemetry-daily --wait --timeout 15m; then
   result=1
 fi
 
 step "configured-path release receipt"
-if ! "${minimal_env[@]}" lf wave cron trigger \
+if ! "${minimal_env[@]}" lf cron trigger \
   --wave "$wave" --flow release-run --wait --timeout 3h; then
   result=1
 fi
 
 step "35-day durable receipt window"
-"${minimal_env[@]}" lf wave cron history --wave "$wave" --days 35
+"${minimal_env[@]}" lf cron history --wave "$wave" --days 35
 
 if [ "$result" -ne 0 ]; then
   printf '\nbootstrap installed the jobs, but a configured-path run is red; inspect the receipt and log above\n' >&2

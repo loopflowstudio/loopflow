@@ -1608,8 +1608,8 @@ Design the feature.
                 target: Target::Command(item),
                 ..
             } => {
-                assert_eq!(item.command, "task");
-                assert_eq!(item.args, vec!["pr", "land"]);
+                assert_eq!(item.command, "pr");
+                assert_eq!(item.args, vec!["land"]);
             }
             other => panic!("expected command item, got {other:?}"),
         }

@@ -930,8 +930,8 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "task");
-        assert_eq!(active_op.item.args, ["sync", "--plan"]);
+        assert_eq!(active_op.item.command, "sync");
+        assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();
         let crate::engine::ConcreteStep::Skill(future_skill) = future.current_plan() else {

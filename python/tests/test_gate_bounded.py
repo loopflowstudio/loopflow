@@ -621,9 +621,11 @@ def test_full_and_host_gates_reject_reuse():
 
 
 def test_deleted_python_test_falls_back_to_the_full_suite():
-    command = gate._python_commands(["python/tests/test_removed.py"])[0]
+    command = next(
+        c for c in gate._python_commands(["python/tests/test_removed.py"]) if c.label == "python"
+    )
 
-    assert command.argv == ["uv", "run", "pytest", "python/tests/"]
+    assert command.argv[-5:] == ["uv", "run", "--no-sync", "pytest", "python/tests/"]
 
 
 def test_python_verifier_change_runs_the_full_python_suite():
@@ -636,7 +638,13 @@ def test_python_verifier_change_runs_the_full_python_suite():
     )
 
     assert plan.run is True
-    assert plan.commands[0].argv == ["uv", "run", "pytest", "python/tests/"]
+    assert next(c for c in plan.commands if c.label == "python").argv[-5:] == [
+        "uv",
+        "run",
+        "--no-sync",
+        "pytest",
+        "python/tests/",
+    ]
 
 
 def test_changed_gate_always_runs_architecture_check():

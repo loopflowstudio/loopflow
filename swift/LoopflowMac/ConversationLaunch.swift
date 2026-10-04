@@ -64,3 +64,28 @@ extension PodiumModel {
         }
     }
 }
+
+/// New Sessions stay in the repository checkout even when a Task is selected.
+struct SessionSkillLaunch: Equatable {
+    let repoPath: String
+    let wave: String?
+    let skill: String
+
+    func arguments(lf: String) -> [String] {
+        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
+    }
+}
+
+extension PodiumModel {
+    var sessionSkillLaunch: SessionSkillLaunch? {
+        sessionSkillLaunch(for: navigation.content == .overview ? nil : selection)
+    }
+
+    func sessionSkillLaunch(for work: WorkReference?) -> SessionSkillLaunch? {
+        guard let repoPath else { return nil }
+        let name = work.flatMap { waveId(for: $0) }.flatMap { id in
+            wave(id: id)?.wave.name ?? rosterWave(id: id)?.api.name
+        }
+        return SessionSkillLaunch(repoPath: repoPath, wave: name, skill: selectedSessionSkill)
+    }
+}

@@ -57,7 +57,7 @@ impl CiState {
     }
 }
 
-/// The required check `lf task pr land` greens itself, by clearing `scratch/`.
+/// The required check `lf pr land` greens itself, by clearing `scratch/`.
 ///
 /// See [`CiCheck::land_time_precondition`] for what this class means and the one
 /// rule for admitting a name to it. `crate::ops::land::clear_scratch` is the step
@@ -75,7 +75,7 @@ pub struct CiCheck {
 
 impl CiCheck {
     /// Whether this check asserts a *land-time precondition* — a condition
-    /// `lf task pr land` establishes itself, so no repair turn can green it.
+    /// `lf pr land` establishes itself, so no repair turn can green it.
     ///
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
@@ -84,7 +84,7 @@ impl CiCheck {
     /// body woken to "repair" it could only delete the Task's design artifact,
     /// to green a check land greens anyway.
     ///
-    /// A name belongs here only when an `lf task pr land` step is what resolves it.
+    /// A name belongs here only when an `lf pr land` step is what resolves it.
     /// This is not a catalogue of CI jobs, and it is not a mute button for checks
     /// that are merely hard to fix: a check anyone *could* fix by changing the
     /// tree does not belong here, however annoying it is.
@@ -148,7 +148,7 @@ impl CiObservation {
     /// [`CiCheck::land_time_precondition`] resolves at land.
     ///
     /// This is the dual of [`CiObservation::repair_legal`] within the failing
-    /// state: such a head holds nothing a Task body could repair (`lf task pr land`
+    /// state: such a head holds nothing a Task body could repair (`lf pr land`
     /// greens it by clearing `scratch/`), so it does not belong to CI repair.
     /// The action model and Waves supervision read it to stop recommending a
     /// doomed Resume or labelling settlement preparation as "fixing CI".
@@ -1117,7 +1117,7 @@ mod tests {
     }
 
     /// A head red *only* on a land-time precondition is not a repair a body can
-    /// perform: `lf task pr land` clears `scratch/`, and the only action a woken body
+    /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
     /// could take is deleting the Task's design doc.
     ///
     /// The direction that matters is the second half. Suppression fires only when

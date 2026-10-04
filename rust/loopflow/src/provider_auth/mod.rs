@@ -2326,13 +2326,115 @@ pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
 }
 
 fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
-    let cred_path = config_dir.join(".credentials.json");
-    if let Ok(content) = fs::read_to_string(cred_path) {
-        if let Some(token) = claude_token_from_credentials_json(&content) {
-            return Some(token);
+    let credential = read_claude_login(config_dir).ok().flatten()?;
+    claude_token_from_credentials_json(credential.expose_secret())
+}
+
+/// Claude's native homes keep their login in the Keychain on macOS; a stored
+/// account's own home keeps it in a file everywhere. Tests stay on files.
+#[cfg(all(target_os = "macos", not(test)))]
+fn claude_login_in_keychain(config_dir: &Path) -> bool {
+    !crate::provider_account::activation::is_account_home(config_dir)
+}
+
+/// The login a Claude started in `config_dir` would read: the Keychain item
+/// first where there is one, as Claude itself prefers it, then the file.
+///
+/// # Errors
+///
+/// Returns an error when a store exists but cannot be read.
+pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString>, AuthError> {
+    #[cfg(all(target_os = "macos", not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
+            return Ok(Some(credential.blob));
         }
     }
-    None
+    match fs::read_to_string(config_dir.join(".credentials.json")) {
+        Ok(content) => Ok(Some(SecretString::new(content))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AuthError::Filesystem(format!(
+            "read Claude credential file: {error}"
+        ))),
+    }
+}
+
+/// Install `credential` where a Claude started in `config_dir` reads it.
+///
+/// # Errors
+///
+/// Returns an error when the credential is not a Claude login or its store
+/// cannot be written.
+pub(crate) fn write_claude_login(
+    config_dir: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    #[cfg(all(target_os = "macos", not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        return write_claude_keychain_credential(config_dir, credential);
+    }
+    write_claude_profile_credentials(config_dir, credential)
+}
+
+/// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
+/// it: `security add-generic-password -U`, fed on stdin so the login never
+/// appears in a process listing.
+#[cfg(all(target_os = "macos", not(test)))]
+fn write_claude_keychain_credential(
+    config_dir: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
+        return Err(AuthError::Filesystem(
+            "Claude credential has an unknown format".to_string(),
+        ));
+    }
+    let scoped = claude_keychain_service(config_dir);
+    // The default home's item carries no suffix unless Claude already keeps a
+    // suffixed one for it.
+    let (service, existing) = match read_claude_keychain_account_with_security(&scoped)? {
+        Some(account) => (scoped, Some(account)),
+        None if config_dir == home_dir_or_cwd().join(".claude") => (
+            LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string(),
+            read_claude_keychain_account_with_security(LEGACY_CLAUDE_KEYCHAIN_SERVICE)?,
+        ),
+        None => (scoped, None),
+    };
+    let account = existing
+        .or_else(|| std::env::var("USER").ok())
+        .filter(|account| !account.is_empty() && !account.contains(['"', '\\', '\n']))
+        .ok_or_else(|| {
+            AuthError::Filesystem("no usable account name for the Claude Keychain item".to_string())
+        })?;
+    let failed = |error: std::io::Error| {
+        AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
+    };
+    let mut security = ProcessCommand::new("security")
+        .arg("-i")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(failed)?;
+    let script = format!(
+        "add-generic-password -U -a \"{account}\" -s \"{service}\" -X {}\n",
+        hex::encode(credential.expose_secret().as_bytes())
+    );
+    security
+        .stdin
+        .take()
+        .expect("security stdin is piped")
+        .write_all(script.as_bytes())
+        .map_err(failed)?;
+    let status = security.wait().map_err(failed)?;
+    // `security -i` reports a failed command only through what it stored.
+    let stored = read_claude_keychain_blob_with_security(&service).ok();
+    if !status.success() || stored.as_deref() != Some(credential.expose_secret().as_bytes()) {
+        return Err(AuthError::Filesystem(
+            "write Claude Keychain credential: the item did not take the login".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -2754,7 +2856,7 @@ fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?.trim_end_matches('=');
     let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
     serde_json::from_slice(&claims).ok()

@@ -22,6 +22,11 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    #[error("release deferred: {reason}; continuation: {continuation}")]
+    ReleaseDeferred {
+        reason: String,
+        continuation: String,
+    },
     #[error("Task {issue} is {state} and cannot be completed")]
     TaskCompletionConflict { issue: String, state: String },
     #[error("sync onto {onto} failed ({detail})")]

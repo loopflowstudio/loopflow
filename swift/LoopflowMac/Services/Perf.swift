@@ -15,6 +15,8 @@ enum Perf {
 
     /// Process launch → first outline rows committed.
     static let coldStart: StaticString = "cold_start"
+    /// Process launch → every part of the workspace read by this launch, not saved text.
+    static let workspaceCurrent: StaticString = "workspace_current"
     /// Outline input (fold, presentation, filter, repository) → new rows committed.
     static let hierarchyInteraction: StaticString = "hierarchy_interaction"
     /// Wave/Task selection → detail committed; Session selection → pane accepts input.

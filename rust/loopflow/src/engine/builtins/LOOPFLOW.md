@@ -19,8 +19,8 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf task sync --plan                  # inspect integration strategy
-lf task sync                         # apply it
+lf sync --plan                  # inspect integration strategy
+lf sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf submit                         # prepare for the user's merge click
 lf arm                            # prepare and request auto-merge; return
@@ -38,9 +38,7 @@ It preserves an existing PR's readiness. Publish/submit/arm/land make drafts rea
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
-Do not ask permission for reversible edits or local tests. Ask before pushing,
-PR mutations, external messages or other external side effects, and destructive
-operations unless already authorized by the user or selected workflow.
+Do not ask permission for reversible edits or local tests.
 
 ## Checks and Flow boundaries
 
@@ -50,8 +48,8 @@ checks to a capable later step and human judgment to demo/review; neither blocks
 earlier work. Record a one-line result in scratch, not a verification ledger.
 Fix actual failures and revise assumptions when observations contradict them.
 
-Delegate only when authorized and when an independent subset makes the problem
-smaller. Keep the main blocker inline. A supplied Flow is an instruction;
+Delegate when an independent subset makes the problem smaller. Keep the main
+blocker inline. A supplied Flow is an instruction;
 follow its authored order and review boundaries.
 
 ## Speak and inspect
@@ -69,10 +67,10 @@ ask when possible or leave the attribution explicitly unresolved. Do not write
 approval without evidence.
 
 Answer the user in this conversation. Never open another
-session merely to reach them. Headless work that lacks required input or
-authorization explains its failure in ordinary output and stops. The Wave
+session merely to reach them. Headless work that lacks required input explains
+its failure in ordinary output and stops. The Wave
 operator reads existing logs and discusses unresolved judgment in its ongoing
-Wave chat. Taskless callers receive the failure. Respect existing authorization.
+Wave chat. Taskless callers receive the failure.
 A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
@@ -90,7 +88,7 @@ terminal output, logs, and chat; follow the repository's secret-management polic
 
 Keep agent progress in local working notes and the final Run response. Do not
 post routine progress to Linear: Task comments are for new direction from people.
-Agent comments published through `lf task comment` carry a progress marker and
+Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Preserve `<!-- loopflow-progress:... -->` provenance
 when writing progress through another integration.

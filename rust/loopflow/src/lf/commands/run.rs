@@ -190,6 +190,28 @@ fn exec_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<FinalAnswer>> {
+    let mut scoped;
+    let binding = if skill == Some("wave/operate")
+        && cli.bound_cwd.is_none()
+        && cli.task.is_none()
+        && cli.wt.is_none()
+        && crate::repository::CanonicalRepo::discover(&binding.cwd)?.as_path()
+            == binding.cwd.canonicalize()?
+    {
+        if let crate::durable::WorkRef::Wave(id) = &binding.work {
+            scoped = binding.clone();
+            scoped.cwd = crate::ops::human_session::ensure_scope_worktree(
+                &binding.cwd,
+                &crate::session::PrimaryScope::Wave(id.clone()),
+            )?
+            .path;
+            &scoped
+        } else {
+            binding
+        }
+    } else {
+        binding
+    };
     let mut launch = cli.exec_options();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
@@ -278,6 +300,20 @@ struct PromptBuild {
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
+    let repo_root = if skill == Some("repo/operate")
+        && cli.bound_cwd.is_none()
+        && cli.task.is_none()
+        && cli.wt.is_none()
+        && crate::repository::CanonicalRepo::discover(&repo_root)?.as_path()
+            == repo_root.canonicalize()?
+    {
+        let scope = crate::session::PrimaryScope::Repository(
+            crate::repository::CanonicalRepo::discover(&repo_root)?,
+        );
+        crate::ops::human_session::ensure_scope_worktree(&repo_root, &scope)?.path
+    } else {
+        repo_root
+    };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     let saved = skill
         .map(crate::ops::human_session::active_flow_skill)
@@ -793,7 +829,7 @@ fn exec_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf task wt switch`).
+    // (e.g. `cd` after `lf wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {

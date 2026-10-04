@@ -87,7 +87,7 @@ Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
-`lf task checkout` belongs to tracked Work and delivery: it starts no execution.
+`lf checkout` belongs to tracked Work and delivery: it starts no execution.
 `lf flow start` and `restart` compose that substrate with a bounded
 Task worker. `lf --task ... <skill>` goes directly through execution with Task
 attribution and never advances the Task's Flow position.

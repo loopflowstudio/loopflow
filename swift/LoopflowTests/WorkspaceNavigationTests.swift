@@ -75,19 +75,32 @@ struct WorkspaceNavigationTests {
         }
     }
 
-    @Test("Task Sessions stay visible without attention or an interactive provider")
+    @Test("Task navigation and counts show unfinished interactive participation")
     func taskVisibilityDoesNotRequireAttention() async throws {
-        let original = try session("background", work: .task(id: "ts_review00000000000000000000000000"))
-        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        value["interactive"] = false
-        value["attention"] = NSNull()
+        let original = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
+        let value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        let rows = ["idle", "active", "review", "completed", "background"].map { id in
+            var row = value
+            row["id"] = id
+            row["interactive"] = id != "background"
+            row["attention"] = NSNull()
+            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : id == "review" ? "ready" : "waiting"
+            row["kind"] = id == "review" ? "flow" : "conversation"
+            return row
+        }
         let source = try ReadingSource(roadmap: roadmapJSON(),
-            sessions: String(decoding: JSONSerialization.data(withJSONObject: [value]), as: UTF8.self))
+            sessions: String(decoding: JSONSerialization.data(withJSONObject: rows), as: UTF8.self))
         let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.visibleWorkspace.waves.flatMap(\.tasks).flatMap(\.sessions).map(\.id) == ["background"])
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: (any Error).self) { try view.inspect().find(text: "Needs me") }
+        let visible = model.visibleWorkspace.waves.flatMap(\.tasks).flatMap(\.sessions)
+        #expect(visible.map(\.id) == ["idle", "active", "review"])
+        let outline = model.visibleWorkspace.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        let taskRow = try #require(outline.first { $0.workKey?.work.id == "issue-review" })
+        #expect(taskRow.inlineSessions.count == 3)
+        #expect(model.paletteRows.filter { if case .session = $0.id { true } else { false } }.count == 3)
+        model.navigation.showsHeadlessSessions = true
+        #expect(model.visibleSessions.map(\.id) == ["idle", "active", "review", "background"])
+        #expect(model.sessions.value?.count == 5)
     }
 
     @Test("Repository path spellings share one outline root")
@@ -441,7 +454,7 @@ struct WorkspaceNavigationTests {
         #expect(model.workspace.waves[0].tasks.map(\.id) == keys)
         #expect(model.workspace.subject(for: "human") == model.selection)
         let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: Never.self) { try view.inspect().find(text: "Sessions unavailable: offline") }
+        #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")

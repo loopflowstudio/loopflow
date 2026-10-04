@@ -1,5 +1,5 @@
 ---
-requires: a reviewable change and manual-merge handoff authority
+requires: a reviewable change
 produces: a ready PR assigned to its reviewer
 ---
 Prepare the current change for the reviewer's merge click.

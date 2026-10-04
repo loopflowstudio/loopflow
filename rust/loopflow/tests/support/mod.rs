@@ -142,6 +142,8 @@ pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
+    previous_codex_home: Option<OsString>,
+    previous_claude_home: Option<OsString>,
     _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
@@ -194,11 +196,19 @@ impl EnvGuard {
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
+        // A shared launch signs its provider's native home in as the routed
+        // account; that home must never be the developer's own.
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
+        let previous_claude_home = env::var_os("CLAUDE_CONFIG_DIR");
+        env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
             _lock: lock,
             previous_path,
             previous_home,
             previous_lf_home,
+            previous_codex_home,
+            previous_claude_home,
             _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
@@ -228,6 +238,14 @@ impl Drop for EnvGuard {
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
+        }
+        match &self.previous_codex_home {
+            Some(prev) => env::set_var("CODEX_HOME", prev),
+            None => env::remove_var("CODEX_HOME"),
+        }
+        match &self.previous_claude_home {
+            Some(prev) => env::set_var("CLAUDE_CONFIG_DIR", prev),
+            None => env::remove_var("CLAUDE_CONFIG_DIR"),
         }
     }
 }

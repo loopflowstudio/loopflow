@@ -95,7 +95,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) if evidence.latest_pr_presentation_current == Some(false) => action(
             TaskAction::Resume,
-            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf task pr land -c`",
+            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf pr land -c`",
         ),
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
@@ -103,7 +103,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
                 TaskAction::Resume,
-                "PR is published but settlement is not armed; run `lf task pr land -c`",
+                "PR is published but settlement is not armed; run `lf pr land -c`",
             ),
             Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
                 let request = evidence
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(model.recommended, Some(TaskAction::Resume));
         assert_eq!(
             model.reason,
-            "PR is published but settlement is not armed; run `lf task pr land -c`"
+            "PR is published but settlement is not armed; run `lf pr land -c`"
         );
     }
 

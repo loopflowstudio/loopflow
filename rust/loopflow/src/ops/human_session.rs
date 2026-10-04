@@ -21,6 +21,8 @@ use crate::work::task::{Task, TaskId};
 #[cfg(test)]
 pub(crate) mod action_test;
 pub(crate) mod primary;
+pub(crate) use primary::ensure_scope_worktree;
+pub(crate) mod provider_conversation;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
@@ -692,8 +694,9 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
 }
 
-/// Resolve a Session id, or the Run id linked to it. A conversation or Flow Run
-/// names its waiting boundary, so `$LF_RUN_ID` inside a review targets it.
+/// Resolve a Session id, the Run id linked to it, or the provider's own id for
+/// its conversation. A conversation or Flow Run names its waiting boundary, so
+/// `$LF_RUN_ID` inside a review targets it.
 async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
     // Membership outlives a pending boundary. Never reinterpret a retained
     // attempt's manifest as an independent conversation or current actor.
@@ -706,7 +709,13 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     }
     let selected = match store.sqlite.resolve_history_input(session_id) {
         Ok(selected) => selected,
-        Err(crate::store::StoreError::NotFound) => return Ok(None),
+        Err(crate::store::StoreError::NotFound) => {
+            let Some(session) = provider_conversation::recorded(store, session_id).await? else {
+                return Ok(None);
+            };
+            let id = session.id.clone();
+            return owned_target(store, &id, session).await.map(Some);
+        }
         Err(error) => return Err(error.into()),
     };
     let input = crate::session_record::parse_artifact_key(&selected)?;
@@ -970,6 +979,9 @@ async fn serve_flow_locked(
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("review service has no Exec identity"))?;
+    store.sqlite.record_review_service(position, &exec)?;
     if let Some(failure) = &position.failure {
         bail!("review session cannot start: {}", failure.reason);
     }
@@ -1005,7 +1017,8 @@ async fn serve_flow_locked(
         .env(
             crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
             accounts.env_value()?,
-        );
+        )
+        .envs(position.invocation.isolation_env());
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;
@@ -1169,13 +1182,30 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
-    let target = find_session(store, session_id)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
+    let target = match find_session(store, session_id).await? {
+        Some(target) => target,
+        // Connecting is what brings a provider-started conversation in.
+        None => SessionTarget::Row {
+            session: Box::new(
+                provider_conversation::admit(store, session_id)
+                    .await?
+                    .ok_or_else(|| session_not_found(session_id))?,
+            ),
+        },
+    };
     match &target {
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
         {
+            let admitted;
+            let session = if resume {
+                let id = session.id.clone();
+                let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+                admitted = primary::admit_workspace(store, session.as_ref().clone()).await?;
+                &admitted
+            } else {
+                session
+            };
             let native = NativeSession::of(session)?;
             let Some(provider_session) =
                 store.sqlite.input_provider_session(&session.artifact_key)?
@@ -1188,19 +1218,26 @@ pub(crate) async fn open(
             };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-                if mode == OpenMode::Replace {
-                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-                }
             }
             if resume
                 && native.provider == "codex"
-                && connect_live_codex(store, session, &native.dir, &provider_session).await?
+                && connect_live_codex(
+                    store,
+                    session,
+                    &native.dir,
+                    &provider_session,
+                    mode == OpenMode::Replace,
+                )
+                .await?
             {
                 let session = store
                     .sqlite
                     .session(&session.id)?
                     .ok_or_else(|| session_not_found(&session.id))?;
                 return surface(store, &session).await;
+            }
+            if resume && mode == OpenMode::Replace {
+                native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
             }
             if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
                 require_session_action(
@@ -1270,14 +1307,16 @@ pub(crate) async fn open(
 }
 
 /// Connect to one existing provider thread. Native UI traffic crosses the same
-/// driver fence as the headless writer; closing the UI releases only its claim.
+/// driver fence as the headless writer; closing the current UI closes the runtime.
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
     session: &AgentSession,
     dir: &Path,
     provider: &crate::session_record::ProviderSessionRef,
+    replace_clients: bool,
 ) -> Result<bool> {
+    let expected = store.sqlite.session_driver(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
@@ -1298,16 +1337,29 @@ async fn connect_live_codex(
     }
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
-    let expected = store.sqlite.session_driver(&session.id)?;
-    let driver = store
-        .sqlite
-        .claim_session_driver(&session.id, expected.as_ref(), &exec, false)?;
+    let driver =
+        match store
+            .sqlite
+            .claim_session_driver(&session.id, expected.as_ref(), &exec, false)
+        {
+            Ok(driver) => driver,
+            Err(crate::store::StoreError::InvalidAuthority(_))
+                if store.sqlite.session_connection(&session.id)?.is_none() =>
+            {
+                // Close won the race. The ordinary open path resumes saved history.
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
     crate::session_record::register_session_driver_interrupt(
         &store.sqlite,
         session.id.clone(),
         driver.clone(),
     );
     let connected = async {
+        if replace_clients {
+            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+        }
         store.sqlite.make_session_interactive(&session.id, &driver)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
@@ -1346,10 +1398,12 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match store
-        .sqlite
-        .finish_session_driver(&session.id, &driver, "detached")
-    {
+    match crate::session_record::finish_session_driver(
+        &store.sqlite,
+        &session.id,
+        &driver,
+        "completed",
+    ) {
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
     }
@@ -1400,6 +1454,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if session.completed_at.is_some() {
         bail!("session {id:?} is already complete");
     }
+    let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let token = session_token(&session);
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
@@ -1656,7 +1711,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
     }))
 }
 
-fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
+pub(crate) fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
     crate::session_record::record_dir(&crate::store::lf_home_dir(), run_id)
 }
 
@@ -1782,11 +1837,21 @@ pub(crate) async fn preview_binding(
 }
 
 async fn binding_session(store: &SharedStore, id: &str) -> Result<AgentSession> {
-    match crate::session_record::parse_artifact_key(id) {
-        Ok(run_id) => store.session_for_artifact(&run_id).await?,
-        Err(_) => store.session(id).await?,
+    session_by_id(store, id)
+        .await?
+        .ok_or_else(|| session_not_found(id))
+}
+
+/// The Session an id names whatever its state: its own id, any of its Runs',
+/// or the provider's id for its conversation.
+pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+    if let Some(session) = store.session(id).await? {
+        return Ok(Some(session));
     }
-    .ok_or_else(|| session_not_found(id))
+    if let Some(session) = store.session_for_artifact(id).await? {
+        return Ok(Some(session));
+    }
+    provider_conversation::recorded(store, id).await
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {
@@ -1949,7 +2014,7 @@ pub(crate) fn human_open_argv(
         context.lf_bin.display().to_string(),
     ];
     if let Some(home_id) = remote_home {
-        argv.push("ssh".to_string());
+        argv.extend(["home".to_string(), "ssh".to_string()]);
         if let Some(worktree) = worktree {
             let repo = crate::engine::wave_home::resolve_home_relative_repo(worktree)
                 .map_err(anyhow::Error::msg)?;
@@ -2133,7 +2198,19 @@ pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
         .truncate(false)
         .open(path)
         .context("open Session launch lock")?;
-    FileExt::lock_exclusive(&file).context("lock Session launch")?;
+    let deadline = std::time::Instant::now() + SESSION_START_TIMEOUT;
+    loop {
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    bail!("Session launch is still busy; retry after its current launch settles");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error).context("lock Session launch"),
+        }
+    }
     Ok(file)
 }
 

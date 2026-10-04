@@ -42,7 +42,7 @@ Use these checks where they help establish what can be cleared:
   60 days. Check each candidate with
   `gh pr list --head <branch> --state all --limit 1000 --json number,state,author,url,mergedAt,headRepository`.
   Match the head repository as well as the branch name. Check open PRs regardless
-  of author before deletion. Age selects candidates, not permission to delete.
+  of author before deletion. Age alone does not establish that work is obsolete.
 
 ### Clear what can be cleared
 
@@ -55,16 +55,15 @@ Do not create Waves for waveless branches.
 
 Decide whether work should ship, ship partially, be abandoned, or be pruned.
 Investigate uncertainties that can be answered from available evidence. Bring
-only consequential choices requiring the participant's judgment or missing
-authorization to the conversation, with a recommendation and its reason.
+only consequential choices requiring the participant's judgment to the
+conversation, with a recommendation and its reason.
 An unresolved item need not hold up the rest of the upkeep.
 
-Use the appropriate operation within existing authorization:
+Use the appropriate operation:
 
 - **Ship / ship-partial:** use the delivery skill appropriate to the requested
-  outcome in the owning checkout. Preserve useful unfinished scope in a Task
-  when authorized. Keep existing workers and review gates intact; a cleanup
-  scan does not authorize publication or merge.
+  outcome in the owning checkout. Preserve useful unfinished scope in a Task.
+  Keep existing workers and review gates intact.
 - **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
   together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
   and removes its checkout and branches. Use `lf task delete <issue>` only when
@@ -73,21 +72,18 @@ Use the appropriate operation within existing authorization:
   origin branch while retaining PR and Task outcomes. It also accepts a full
   branch name with no worktree, including remote-only branches; omit the
   `origin/` prefix. Use it for agreed stale branches and settled leftovers.
-  Do not prune a branch with an open PR unless explicitly authorized; use
-  abandon when the intended outcome includes closing that PR.
-- **Batch worktree cleanup:** apply `lf wt prune` only when the entire preview
-  is authorized; otherwise delete the agreed branches individually. Recheck
-  the preview before applying it. Worktree pruning does not replace the
+  Use abandon when the intended outcome includes closing an open PR.
+- **Batch worktree cleanup:** use `lf wt prune` to apply the entire preview,
+  or delete selected branches individually. Recheck the preview before applying it. Worktree pruning does not replace the
   remote-only branch scan.
 - **Database upkeep:** use supported reconciliation and cleanup commands;
   inspect installed help for their exact scope. Do not edit SQLite directly
   or discard durable history as a substitute for reconciliation. If a needed
-  cleanup operation is missing, capture it as a Task within existing filing
-  authorization, or leave the gap in the punch list.
+  cleanup operation is missing, capture it as a Task, or leave the gap in the
+  punch list.
 
-Present the exact destructive choices when authorization is missing. Preserve
-active work, dirty files, unpushed commits, and evidence needed for recovery.
-Do not use force to bypass these findings without explicit discard authority.
+Preserve active work, dirty files, unpushed commits, and evidence needed for recovery.
+Resolve these findings before discarding work.
 Use Loopflow's cleanup commands rather than raw branch or worktree deletion.
 
 After actions, reread the relevant worktree, remote branch, PR, and Task state.
@@ -112,7 +108,7 @@ put routine progress in this conversation, not Task comments.
 ## Drive work through Waves
 
 For each Wave that needs attention, apply `wave/operate`: read its objective,
-memory, plan, and current work; make useful authorized moves that advance its
+memory, plan, and current work; make useful moves that advance its
 Tasks. Use `lf --wave <wave> wave/operate "<concrete direction>"` when a separate
 Wave pass is useful. The repository view connects outcomes and dependencies
 across Waves; the Wave pass owns the detailed judgment within each Wave.
@@ -133,12 +129,10 @@ accepted direction; use `concept-review` when existing work needs rethinking.
 
 ## Reviewer mode
 
-- **Interactive reviewer:** discuss consequential decisions here; obtain only
-  authorization not already supplied.
+- **Interactive reviewer:** discuss consequential decisions here.
 - **Parent reviewer:** send evidence-backed recommendations through the
   review protocol and verify the Task's replies. Do not mutate its checkout or launch
-  competing execution. Destructive actions require prior authorization; missing
-  authority remains explicit in the review outcome.
+  competing execution. Keep unresolved choices explicit in the review outcome.
 
 ## Sessions and reviews
 
@@ -190,7 +184,7 @@ lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
 BRIEF
 ```
 
-When execution is intended and authorized, start the captured Task or reuse an existing one:
+When execution is intended, start the captured Task or reuse an existing one:
 
 ```bash
 lf --task <existing-issue> flow start <chosen-flow>
@@ -204,19 +198,18 @@ Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
-Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
+Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
 The complete content object has `metric_targets`, a nonempty `flow` string and
 `krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
 future plans; Completed Projects retain history. Future plan edits require an
-available authorized Linear writer, not a current-plan update.
+available Linear writer, not a current-plan update.
 
 Chapter rotation is repository-wide: preview with
 `lf repo new-chapter <name> --dry-run --json`, then apply the accepted name with
 `lf repo new-chapter <name> --json`. It takes no plan file or per-Wave selector.
-Respect the start-chapter direction and plan-review gates; prior authorization
-still applies. Retry interruptions with the same name against fresh Linear
-state. Started unfinished Tasks retain identity and execution; proven untouched
+Follow the start-chapter direction and plan-review gates. Retry interruptions
+with the same name against fresh Linear state. Started unfinished Tasks retain identity and execution; proven untouched
 backlog is canceled, retaining issues and history. Predecessor Projects become
 Completed. Missing evidence and competing plans require resolution, never a
 new name chosen to bypass them. Rotation output is dated evidence, not another
@@ -281,12 +274,12 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
+Use `lf id`, then `lf --wave <wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf task checkout <issue> --json`.
+Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's

@@ -295,7 +295,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nOmit owners when a command is unique: lf land → lf task pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
     let definition = match path {

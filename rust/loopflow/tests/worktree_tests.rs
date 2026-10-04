@@ -65,7 +65,7 @@ fn commit_worktree_at_age(path: &std::path::Path, age: Duration) {
 #[test]
 fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     assert!(result.path.exists());
     assert!(
         result.branch.contains("feature"),
@@ -77,7 +77,7 @@ fn worktree_add_creates_directory() {
 #[test]
 fn worktree_add_is_on_correct_branch() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
 
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -145,7 +145,7 @@ fn upstream_sync_replaces_base_tracking_with_the_own_remote_branch() {
 #[test]
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     worktree_remove(repo.path(), &result.path).expect("remove");
     assert!(!result.path.exists());
 }
@@ -153,7 +153,7 @@ fn worktree_remove_deletes_directory() {
 #[test]
 fn worktree_list_includes_created() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     let worktrees = list_worktrees(repo.path()).expect("list");
     assert!(worktrees
         .iter()
@@ -187,7 +187,7 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
 #[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
@@ -286,7 +286,7 @@ fn manual_prune_removes_recent_remote_gone_branch() {
 #[test]
 fn worktree_move_preserves_content() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     let file_path = result.path.join("note.txt");
     std::fs::write(&file_path, "content").expect("write");
 
@@ -299,70 +299,61 @@ fn worktree_move_preserves_content() {
 }
 
 #[test]
-fn create_named_worktree_synced_updates_main_before_creation() {
+fn create_named_worktree_preserves_caller_and_uses_selected_source() {
     let repo = TestRepo::new();
-    let original_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
-
     let clone_dir = tempfile::TempDir::new().expect("temp clone dir");
-    let status = Command::new("git")
-        .args([
+    git_stdout(
+        repo.path(),
+        &[
             "clone",
             repo.bare_path().to_str().expect("remote path"),
             clone_dir.path().to_str().expect("clone path"),
-        ])
-        .status()
-        .expect("clone remote");
-    assert!(status.success(), "clone should succeed");
-    let status = Command::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("set email");
-    assert!(status.success(), "git config user.email should succeed");
-    let status = Command::new("git")
-        .args(["config", "user.name", "test"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("set name");
-    assert!(status.success(), "git config user.name should succeed");
-    std::fs::write(clone_dir.path().join("remote.txt"), "remote update").expect("write file");
-    let status = Command::new("git")
-        .args(["add", "."])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git add");
-    assert!(status.success(), "git add should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "remote update"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git commit");
-    assert!(status.success(), "git commit should succeed");
-    let status = Command::new("git")
-        .args(["push", "origin", "main"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git push");
-    assert!(status.success(), "git push should succeed");
+        ],
+    );
+    git_stdout(clone_dir.path(), &["config", "user.email", "test@test.com"]);
+    git_stdout(clone_dir.path(), &["config", "user.name", "test"]);
+    fs::write(clone_dir.path().join("remote.txt"), "remote update").unwrap();
+    git_stdout(clone_dir.path(), &["add", "."]);
+    git_stdout(clone_dir.path(), &["commit", "-m", "remote update"]);
+    git_stdout(clone_dir.path(), &["push", "origin", "main"]);
+    git_stdout(repo.path(), &["fetch", "origin"]);
+    let source = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
 
-    let _ = create_named_worktree(repo.path(), "sync-check", None, true).expect("create");
+    fs::write(repo.path().join("local.txt"), "unpublished work").unwrap();
+    git_stdout(repo.path(), &["add", "local.txt"]);
+    git_stdout(repo.path(), &["commit", "-m", "local work"]);
+    let caller_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
+    let caller_branch = git_stdout(repo.path(), &["branch", "--show-current"]);
+    fs::write(repo.path().join("local.txt"), "staged work").unwrap();
+    git_stdout(repo.path(), &["add", "local.txt"]);
+    fs::write(repo.path().join("local.txt"), "unstaged work").unwrap();
+    fs::write(repo.path().join("untracked.txt"), "untracked work").unwrap();
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
 
-    let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
-    let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
-    assert_ne!(
-        original_head, updated_head,
-        "main head should advance after sync"
+    let selected = create_named_worktree(repo.path(), "selected", Some(&source), &|_| {}).unwrap();
+    let local = create_named_worktree(repo.path(), "local", None, &|_| {}).unwrap();
+    assert_eq!(git_stdout(&selected.path, &["rev-parse", "HEAD"]), source);
+    assert_eq!(git_stdout(&local.path, &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(git_stdout(repo.path(), &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(
+        git_stdout(repo.path(), &["branch", "--show-current"]),
+        caller_branch
+    );
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+        "unstaged work"
     );
     assert_eq!(
-        updated_head, origin_head,
-        "main should be reset to origin/main before worktree creation"
+        fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+        "untracked work"
     );
 }
 
 #[test]
 fn wt_switch_finds_worktree_by_sibling_name() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "docs", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "docs", None, &|_| {}).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let name = sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
@@ -397,12 +388,12 @@ fn wt_switch_prefers_exact_branch_match_over_sibling_name() {
     let directive_path = repo.path().join("directive.txt");
     let home = tempfile::tempdir().unwrap();
     let status = lf_command(home.path())
-        .args(["task", "wt", "switch", exact_branch])
+        .args(["wt", "switch", exact_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf task wt switch");
-    assert!(status.success(), "lf task wt switch should succeed");
+        .expect("run lf wt switch");
+    assert!(status.success(), "lf wt switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -430,12 +421,12 @@ fn wt_switch_finds_exact_branch_match() {
     let directive_path = repo.path().join("directive.txt");
     let home = tempfile::tempdir().unwrap();
     let status = lf_command(home.path())
-        .args(["task", "wt", "switch", "jack/feature"])
+        .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf task wt switch");
-    assert!(status.success(), "lf task wt switch should succeed");
+        .expect("run lf wt switch");
+    assert!(status.success(), "lf wt switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -469,13 +460,13 @@ fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
 
     let home = tempfile::tempdir().unwrap();
     let output = lf_command(home.path())
-        .args(["task", "wt", "switch", "jack/feature"])
+        .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .output()
-        .expect("run lf task wt switch");
+        .expect("run lf wt switch");
     assert!(
         !output.status.success(),
-        "lf task wt switch should fail for unrelated branch/worktree reuse"
+        "lf wt switch should fail for unrelated branch/worktree reuse"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -523,7 +514,7 @@ fn nested_worktree_not_recognized_as_wave() {
 fn branch_at_main_not_detected_as_squash_merged() {
     let repo = TestRepo::new();
     // Create a worktree whose branch points to the same commit as main.
-    let result = create_named_worktree(repo.path(), "fresh", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "fresh", None, &|_| {}).expect("create");
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
@@ -546,7 +537,7 @@ fn branch_at_main_not_detected_as_squash_merged() {
 #[test]
 fn fresh_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "newwave", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "newwave", None, &|_| {}).expect("create");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
     let wt = states
@@ -561,7 +552,7 @@ fn fresh_worktree_is_identified() {
 #[test]
 fn fresh_dirty_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "wip", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "wip", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
@@ -577,7 +568,7 @@ fn fresh_dirty_worktree_is_identified() {
 #[test]
 fn worktree_with_commits_is_active_not_fresh() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "active", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "active", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("feature.txt"), "work").expect("write");
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
@@ -597,7 +588,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     let repo = TestRepo::new();
 
     let landed =
-        create_named_worktree(repo.path(), "rules-old", None, false).expect("create landed");
+        create_named_worktree(repo.path(), "rules-old", None, &|_| {}).expect("create landed");
     std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
     git_stdout(&landed.path, &["add", "."]);
     git_stdout(&landed.path, &["commit", "-m", "add rule"]);
@@ -612,7 +603,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
         repo.path(),
         "rules-new",
         Some(landed.branch.as_str()),
-        false,
+        &|_| {},
     )
     .expect("create fresh from landed");
 
@@ -631,7 +622,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
 
 // --- Inspection surface is side-effect free (W2-169, R5) ---------------------
 //
-// `lf task wt list` used to call `sync_main`, which fetches origin and hard-resets
+// `lf wt list` used to call `sync_main`, which fetches origin and hard-resets
 // (auto-stashing) whichever worktree has main checked out. An inspection command
 // must never rewrite the canonical checkout the Wave/Project control-plane turns
 // depend on being clean. These pin the boundary: reads leave main untouched, and
@@ -649,7 +640,7 @@ fn repo_state(path: &std::path::Path) -> Vec<String> {
 }
 
 fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
-    let mut args = vec!["task", "wt", "list"];
+    let mut args = vec!["wt", "list"];
     args.extend_from_slice(extra);
     let home = tempfile::tempdir().unwrap();
     lf_command(home.path())
@@ -657,7 +648,7 @@ fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", repo.path().join("directive.txt"))
         .output()
-        .expect("run lf task wt list")
+        .expect("run lf wt list")
 }
 
 /// Put origin/main one commit ahead of local main, so a stray `sync_main` would
@@ -687,19 +678,19 @@ fn wt_list_leaves_canonical_main_byte_for_byte_unchanged() {
     let out = run_wt_list(&repo, &[]);
     assert!(
         out.status.success(),
-        "lf task wt list should succeed: {}",
+        "lf wt list should succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let after = repo_state(repo.path());
 
     assert_eq!(
         before, after,
-        "lf task wt list must not fetch, reset, or stash canonical main"
+        "lf wt list must not fetch, reset, or stash canonical main"
     );
     assert_ne!(
         repo.head_sha(),
         upstream,
-        "lf task wt list must not advance main to origin/main"
+        "lf wt list must not advance main to origin/main"
     );
 }
 
@@ -717,7 +708,7 @@ fn wt_list_sync_flag_owns_the_fast_forward() {
     let out = run_wt_list(&repo, &["--sync"]);
     assert!(
         out.status.success(),
-        "lf task wt list --sync should succeed: {}",
+        "lf wt list --sync should succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 

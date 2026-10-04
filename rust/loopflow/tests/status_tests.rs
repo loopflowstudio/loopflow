@@ -475,7 +475,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     );
 }
 
-/// The reproduced break: inside a resident wave, `LF_WAVE_ID` is a wave id, and
+/// The reproduced break: inside a Wave agent's environment, `LF_WAVE_ID` is a wave id, and
 /// bare `lf wave status` read it as a name.
 #[test]
 fn ambient_wave_id_resolves_the_wave_it_names() {

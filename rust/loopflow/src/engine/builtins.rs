@@ -350,7 +350,7 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- cmd: task pr land -c"));
+            .contains("- cmd: pr land -c"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());
@@ -509,6 +509,20 @@ mod tests {
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");
             assert!(!skill.contains("lf pm show"), "{name}");
+        }
+    }
+
+    #[test]
+    fn capture_tasks_is_discoverable_without_aliases() {
+        assert!(get_builtin_skill("capture-tasks").is_some());
+        assert!(!builtin_skill_description("capture-tasks").is_empty());
+        assert_eq!(
+            resolve_builtin_skill("capture-tasks"),
+            Some("capture-tasks")
+        );
+        assert!(get_builtin_skill("design").is_some());
+        for name in ["capture-task", "create-task"] {
+            assert!(get_builtin_skill(name).is_none());
         }
     }
 

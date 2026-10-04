@@ -99,14 +99,16 @@ where
     let (issue, prepared) =
         crate::ops::pm::pm_create_task_idempotent(repo, wave, title, report, marker, prepare)
             .await?;
+    // The mutation already committed. Confirm only its issue; a Wave-wide
+    // sweep makes unrelated Project latency a prerequisite for using the Task.
     let resolved = resolve_task_async(repo, &issue, PmRefresh::Force)
         .await
         .map_err(|error| OpsError::Message(format!(
-            "Linear task {issue} is committed, but its planning could not be confirmed: {error}. Retry the same `lf task create` command, retaining its original options, to reuse the issue's creation marker."
+            "Linear task {issue} is committed, but its planning record could not refresh: {error}. No new Task or worktree was created. Retry the same `lf task create` command, retaining its original options, to confirm the issue and reuse its creation marker."
         )))?;
     if resolved.wave != wave {
         return Err(OpsError::Message(format!(
-            "Linear task {issue} belongs to wave/{}, expected wave/{wave}",
+            "Linear task {issue} is committed in wave/{} rather than wave/{wave}; inspect the existing issue before starting it",
             resolved.wave
         )));
     }

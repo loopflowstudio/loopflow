@@ -2,12 +2,12 @@
 
 ```bash
 lf help --all
-lf help task pr land
+lf help pr land
 lf monitor --json
 ```
 
-Generated from the compiled Clap tree. [The workflow guide](lf.md) uses
-short forms; this reference names each canonical owner. Hidden commands
+Generated from the compiled Clap tree. Canonical command paths are shown; unique shortcuts also resolve. See
+[the workflow guide](lf.md) for examples. Hidden commands
 are internal process boundaries and are marked below.
 
 ## Selection and output
@@ -67,6 +67,203 @@ Open Loopflow or run its CLI
 | `--__flow-step` | Execute a skill from this saved Flow boundary, without resolving its definition again Internal. |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
+
+## lf pr
+
+Pull request lifecycle
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf pr reconcile
+
+Check recorded repository landings once, record CI failures, and settle verified merges
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf pr checks
+
+Show CI status for current branch
+
+| Argument | What it does |
+|---|---|
+| `--watch / -w` | watch Default: false. |
+| `--logs / -l` | logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf pr next
+
+After an out-of-band merge, rotate this Task to its next serial PR, carrying committed and uncommitted follow-up onto the new branch
+
+| Argument | What it does |
+|---|---|
+| `<slug>` | Name the next serial branch (defaults to the settled PR's next slug, then the sequence number) |
+| `--help / -h` | Print help |
+
+## lf pr publish
+
+Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface
+
+| Argument | What it does |
+|---|---|
+| `--model / -m` | model |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf pr open
+
+Push and create or update a draft PR, then open its GitHub page. Existing ready PRs stay ready; opening a draft does not publish it
+
+| Argument | What it does |
+|---|---|
+| `--model / -m` | model |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf pr submit
+
+Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--create-pr / -p` | create pr Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf pr arm
+
+Prepare a PR, request exact-head auto-merge, and return without watching
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--local` | local Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf pr land
+
+Request auto-merge, retain settlement intent, and return
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--local` | local Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf pr abandon
+
+Abandon branch: close PR, remove worktree, delete branch
+
+| Argument | What it does |
+|---|---|
+| `<branch>` | Branch to abandon (default: current) |
+| `--force / -f` | force Default: false. |
+| `--help / -h` | Print help |
+
+## lf wt
+
+Worktree operations
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wt create
+
+Create a low-level sibling worktree
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name |
+| `--plan` | Print the placement plan without creating a worktree Default: false. |
+| `--persistent` | Keep this workspace after delivery and keep scratch local Default: false. |
+| `--help / -h` | Print help |
+
+## lf wt switch
+
+Switch to a worktree by name, identity leaf, or full branch
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name or full branch name to switch to |
+| `--help / -h` | Print help |
+
+## lf wt list
+
+List worktrees (read-only; reflects the last-synced main)
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--sync` | Fetch origin and fast-forward main before listing (mutates the canonical checkout). Off by default so a list never touches it Default: false. |
+| `--help / -h` | Print help |
+
+## lf wt prune
+
+Remove clean terminal or inactive worktrees
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be pruned without removing anything Default: false. |
+| `--help / -h` | Print help |
+
+## lf wt delete
+
+Delete a worktree and its local and remote branch; retain PR and Task outcomes
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name to remove |
+| `--force / -f` | force Default: false. |
+| `--help / -h` | Print help |
+
+## lf sync
+
+Merge upstream into the current branch (default: main or stack parent)
+
+| Argument | What it does |
+|---|---|
+| `--plan` | Print the planned sync strategy without mutating git Default: false. |
+| `--manual` | Keep the sync local and leave conflicts for this process to resolve Default: false. |
+| `--continue` | Stage resolved conflict paths and continue the local sync Default: false. |
+| `--abort` | Abort the local sync in progress Default: false. |
+| `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
+| `<onto>` | Branch to sync onto |
+| `--help / -h` | Print help |
+
+## lf commit
+
+Commit changes
+
+| Argument | What it does |
+|---|---|
+| `--message / -m` | message |
+| `--no-add` | no add Default: false. |
+| `<paths>` | Commit only these paths, preserving other staged and unstaged edits |
+| `--help / -h` | Print help |
 
 ## lf monitor
 
@@ -243,6 +440,7 @@ List Sessions
 | `--all` | Include waiting steps from every repository on this machine Default: false. |
 | `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
 | `--history` | Include completed conversations and historical reviews Default: false. |
+| `--needs-me` | Only conversations waiting for review or a reply Default: false. |
 | `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
 | `--offset` | offset Default: 0. |
 | `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
@@ -980,7 +1178,7 @@ Replace the current chapter's KRs, targets, and Flow recommendation
 
 ## lf task
 
-Concrete work, worktrees, commits, and pull requests
+Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
@@ -1024,201 +1222,6 @@ Internal command; invoked by the owning operation.
 |---|---|
 | `<incident>` | incident |
 | `<launcher>` | launcher |
-| `--help / -h` | Print help |
-
-## lf task pr
-
-Pull request lifecycle
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task pr reconcile
-
-Check recorded repository landings once, record CI failures, and settle verified merges
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task pr checks
-
-Show CI status for current branch
-
-| Argument | What it does |
-|---|---|
-| `--watch / -w` | watch Default: false. |
-| `--logs / -l` | logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf task pr next
-
-After an out-of-band merge, rotate this Task to its next serial PR, carrying committed and uncommitted follow-up onto the new branch
-
-| Argument | What it does |
-|---|---|
-| `<slug>` | Name the next serial branch (defaults to the settled PR's next slug, then the sequence number) |
-| `--help / -h` | Print help |
-
-## lf task pr publish
-
-Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface
-
-| Argument | What it does |
-|---|---|
-| `--model / -m` | model |
-| `--title` | title |
-| `--body` | body |
-| `--help / -h` | Print help |
-
-## lf task pr open
-
-Push and create or update a draft PR, then open its GitHub page. Existing ready PRs stay ready; opening a draft does not publish it
-
-| Argument | What it does |
-|---|---|
-| `--model / -m` | model |
-| `--title` | title |
-| `--body` | body |
-| `--help / -h` | Print help |
-
-## lf task pr submit
-
-Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
-
-| Argument | What it does |
-|---|---|
-| `--strict` | strict Default: false. |
-| `--create-pr / -p` | create pr Default: false. |
-| `--complete / -c` | complete Default: false. |
-| `--next` | next |
-| `--worktree / -w` | worktree |
-| `--message / -m` | message |
-| `--title` | title |
-| `--body` | body |
-| `--help / -h` | Print help |
-
-## lf task pr arm
-
-Prepare a PR, request exact-head auto-merge, and return without watching
-
-| Argument | What it does |
-|---|---|
-| `--strict` | strict Default: false. |
-| `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
-| `--next` | next |
-| `--worktree / -w` | worktree |
-| `--message / -m` | message |
-| `--title` | title |
-| `--body` | body |
-| `--help / -h` | Print help |
-
-## lf task pr land
-
-Request auto-merge, retain settlement intent, and return
-
-| Argument | What it does |
-|---|---|
-| `--strict` | strict Default: false. |
-| `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
-| `--next` | next |
-| `--worktree / -w` | worktree |
-| `--message / -m` | message |
-| `--title` | title |
-| `--body` | body |
-| `--help / -h` | Print help |
-
-## lf task pr abandon
-
-Abandon branch: close PR, remove worktree, delete branch
-
-| Argument | What it does |
-|---|---|
-| `<branch>` | Branch to abandon (default: current) |
-| `--force / -f` | force Default: false. |
-| `--help / -h` | Print help |
-
-## lf task wt
-
-Worktree operations
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task wt create
-
-Create a low-level sibling worktree
-
-| Argument | What it does |
-|---|---|
-| `<name>` | Worktree name |
-| `--plan` | Print the placement plan without creating a worktree Default: false. |
-| `--help / -h` | Print help |
-
-## lf task wt switch
-
-Switch to a worktree by name, identity leaf, or full branch
-
-| Argument | What it does |
-|---|---|
-| `<name>` | Worktree name or full branch name to switch to |
-| `--help / -h` | Print help |
-
-## lf task wt list
-
-List worktrees (read-only; reflects the last-synced main)
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--sync` | Fetch origin and fast-forward main before listing (mutates the canonical checkout). Off by default so a list never touches it Default: false. |
-| `--help / -h` | Print help |
-
-## lf task wt prune
-
-Remove clean terminal or inactive worktrees
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be pruned without removing anything Default: false. |
-| `--help / -h` | Print help |
-
-## lf task wt delete
-
-Delete a worktree and its local and remote branch; retain PR and Task outcomes
-
-| Argument | What it does |
-|---|---|
-| `<name>` | Worktree name to remove |
-| `--force / -f` | force Default: false. |
-| `--help / -h` | Print help |
-
-## lf task sync
-
-Merge upstream into the current branch (default: main or stack parent)
-
-| Argument | What it does |
-|---|---|
-| `--plan` | Print the planned sync strategy without mutating git Default: false. |
-| `--manual` | Keep the sync local and leave conflicts for this process to resolve Default: false. |
-| `--continue` | Stage resolved conflict paths and continue the local sync Default: false. |
-| `--abort` | Abort the local sync in progress Default: false. |
-| `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
-| `<onto>` | Branch to sync onto |
-| `--help / -h` | Print help |
-
-## lf task commit
-
-Commit changes
-
-| Argument | What it does |
-|---|---|
-| `--message / -m` | message |
-| `--no-add` | no add Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task __worker
@@ -1285,9 +1288,22 @@ Show this Task's patch or list its changed files
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf task files
+
+List one directory in this Task's worktree
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<directory>` | directory Default: .. |
+| `--cursor` | cursor |
+| `--show-ignored` | show ignored Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf task file
 
-Read one file from this Task's worktree
+Read one file from the Task checkout
 
 | Argument | What it does |
 |---|---|

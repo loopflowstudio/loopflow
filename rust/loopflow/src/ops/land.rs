@@ -73,6 +73,7 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    crate::ops::commit::prepare_persistent_publication(&repo_root)?;
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
             // Rotation left one unpublished branch at its recorded base after
@@ -193,7 +194,7 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
@@ -407,7 +408,7 @@ fn prepare_land(
         ));
     }
 
-    if !options.strict {
+    if !options.strict && !crate::engine::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
             .clone()
@@ -495,7 +496,7 @@ fn ensure_pr(
             .map(Some);
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
             )));
         }
     }
@@ -596,6 +597,9 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(());
+    }
     let scratch = repo.join("scratch");
     let gitkeep = scratch.join(".gitkeep");
 

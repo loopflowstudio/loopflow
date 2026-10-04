@@ -40,8 +40,7 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
 
 3. **Advance the work.** Use `lf --task <issue> flow start` to continue, or
    `lf --task <issue> flow start <flow>` for the selected new Flow. Check installed
-   help first: installations exposing `lf task run <issue> [--flow <flow>]` use
-   that equivalent. Leave a live driver running. Recover a stopped driver through
+   help first. Leave a live driver running. Recover a stopped driver through
    the same saved Flow; never restart or replace it merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
    merely to reach the person already present. At a review boundary, collect the

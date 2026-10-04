@@ -85,7 +85,7 @@ fn run_git_inheriting(
     Ok(command.output()?)
 }
 
-fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     git_stdout_inheriting(repo, args, &|_| {})
 }
 
@@ -1136,14 +1136,15 @@ pub fn merge(
         // Git has populated the index/worktree with its normal three-way merge.
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
-        if fork_base.is_some() {
+        let preserve_scratch =
+            fork_base.is_some() || crate::engine::worktrees::is_persistent_worktree(worktree)?;
+        if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves
             // modify/delete conflicts which a text merge driver cannot handle.
             restore_scratch_from_head(worktree)?;
         }
-        if output.status.success() || (fork_base.is_some() && list_conflicts(worktree)?.is_empty())
-        {
+        if output.status.success() || (preserve_scratch && list_conflicts(worktree)?.is_empty()) {
             return continue_merge(worktree, None);
         }
     } else if !output.status.success() {

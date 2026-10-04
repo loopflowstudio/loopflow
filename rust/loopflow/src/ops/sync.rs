@@ -127,9 +127,15 @@ pub fn plan_sync(
     };
     // A stacked child's scratch deletion is intentional history. Resetting to
     // the parent would discard it and copy the parent's notes back into the child.
-    let strategy = if fork_base.is_some() {
+    let persistent = crate::engine::worktrees::is_persistent_worktree(repo)?;
+    let strategy = if fork_base.is_some() || persistent {
         if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
             SyncStrategy::Noop
+        } else if fork_base.is_none() && landed(repo, &base_ref)? {
+            // A persistent branch outlives its squash-merged PRs. Once the base
+            // holds everything it committed, restart it from the base instead
+            // of carrying the merged commits into every later PR.
+            SyncStrategy::ResetToBase
         } else {
             SyncStrategy::MergeTarget
         }
@@ -137,8 +143,9 @@ pub fn plan_sync(
         strategy
     };
 
-    let scratch_stashed =
-        matches!(strategy, SyncStrategy::ResetToBase) && repo.join("scratch").exists();
+    let scratch_stashed = !persistent
+        && matches!(strategy, SyncStrategy::ResetToBase)
+        && repo.join("scratch").exists();
 
     Ok(SyncPlan {
         branch,
@@ -544,7 +551,122 @@ fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
         .unwrap_or_else(|| "manual resolution required".to_string())
 }
 
+/// True when merging the base into `rev` would add nothing the base lacks.
+fn landed_at(repo: &Path, base_ref: &str, rev: &str) -> OpsResult<bool> {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(["merge-tree", "--write-tree", base_ref, rev])
+        .output()?;
+    // A conflicted merge exits 1: the branch still differs from the base.
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim()
+            == rev_parse(repo, &format!("{base_ref}^{{tree}}"))?)
+}
+
+fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
+    landed_at(repo, base_ref, "HEAD")
+}
+
+/// Recreate `commits` on top of `onto` without touching the working tree.
+/// Returns None when one of them conflicts with the new base.
+fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
+    let mut parent = rev_parse(repo, onto)?;
+    // A merge's first-parent delta includes both the incoming changes and any
+    // resolution authored in the merge itself. Replaying its side commits
+    // separately would lose those resolutions or reintroduce discarded edits.
+    let range = git(repo, &["rev-list", "--reverse", "--first-parent", commits])?;
+    for commit in range.lines() {
+        let merged = Command::new("git")
+            .current_dir(repo)
+            .args(["merge-tree", "--write-tree", "--merge-base"])
+            .args([&format!("{commit}^"), &parent, commit])
+            .output()?;
+        if !merged.status.success() {
+            return Ok(None);
+        }
+        let tree = String::from_utf8_lossy(&merged.stdout).trim().to_string();
+        if tree == rev_parse(repo, &format!("{parent}^{{tree}}"))? {
+            continue;
+        }
+        let author = git(repo, &["log", "-1", "--format=%an%n%ae%n%aI", commit])?;
+        let mut author = author.lines();
+        let message = git(repo, &["log", "-1", "--format=%B", commit])?;
+        let created = Command::new("git")
+            .current_dir(repo)
+            .env("GIT_AUTHOR_NAME", author.next().unwrap_or_default())
+            .env("GIT_AUTHOR_EMAIL", author.next().unwrap_or_default())
+            .env("GIT_AUTHOR_DATE", author.next().unwrap_or_default())
+            .args([
+                "commit-tree",
+                &tree,
+                "-p",
+                &parent,
+                "-m",
+                message.trim_end(),
+            ])
+            .output()?;
+        if !created.status.success() {
+            return Err(OpsError::Message(
+                String::from_utf8_lossy(&created.stderr).into_owned(),
+            ));
+        }
+        parent = String::from_utf8_lossy(&created.stdout).trim().to_string();
+    }
+    Ok(Some(parent))
+}
+
+/// Restart a persistent branch from the default branch once its PR has merged.
+/// Commits made after the last push are carried over. Returns false and
+/// leaves the checkout alone when nothing has landed or Git is mid-operation.
+pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
+    let base = format!("origin/{}", get_default_branch(repo)?);
+    // Offline, the last fetched base still answers for what it has seen.
+    let _ = fetch_target(repo, &base);
+    if rev_parse(repo, &base).is_err() {
+        return Ok(false);
+    }
+    if intervention_state(repo)?.is_some() || crate::engine::git::is_ancestor(repo, "HEAD", &base)?
+    {
+        return Ok(false);
+    }
+    let target = if landed(repo, &base)? {
+        Some(base.clone())
+    } else {
+        // After a squash merge the pushed head is what landed; anything
+        // committed since then is still unpublished work.
+        let branch = current_branch(repo)?.unwrap_or_default();
+        match rev_parse(repo, &format!("refs/remotes/origin/{branch}")) {
+            Ok(pushed)
+                if crate::engine::git::is_ancestor(repo, &pushed, "HEAD")?
+                    && landed_at(repo, &base, &pushed)? =>
+            {
+                replay(repo, &base, &format!("{pushed}..HEAD"))?
+            }
+            _ => None,
+        }
+    };
+    let Some(target) = target else {
+        return Ok(false);
+    };
+    // Reset clears staging even with --keep. Preserve the caller's index and
+    // working edits through the same recovery boundary as explicit sync.
+    crate::ops::checkout::with_preserved_edits(repo, || {
+        git(repo, &["reset", "--keep", &target]).map(|_| ())
+    })?;
+    Ok(true)
+}
+
 fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
+    if !plan.scratch_stashed && crate::engine::worktrees::is_persistent_worktree(repo)? {
+        progress.status(&format!(
+            "{} has landed; restarting it from {}...",
+            plan.branch, plan.base_ref
+        ));
+        // --keep moves the branch without touching uncommitted edits, and
+        // refuses rather than overwriting one the base also changed.
+        git(repo, &["reset", "--keep", &plan.base_ref])?;
+        return Ok(());
+    }
     let stash_path = if repo.join("scratch").exists() {
         let path = scratch_stash_path(repo, &plan.branch);
         if let Some(parent) = path.parent() {
@@ -602,18 +724,9 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::Git(crate::engine::GitError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        }));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(crate::engine::git::git_stdout(repo, args)?
+        .trim()
+        .to_string())
 }
 
 fn count_unique_commits(repo: &Path, base_ref: &str) -> OpsResult<usize> {
@@ -711,8 +824,215 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::scratch_stash_path;
+    use super::{restart_landed_persistent, scratch_stash_path};
     use std::path::Path;
+
+    fn git(repo: &Path, args: &[&str]) -> String {
+        crate::engine::git::git_stdout(repo, args).unwrap()
+    }
+
+    #[test]
+    fn merged_persistent_branch_restarts_from_main_and_keeps_local_files() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+            .unwrap();
+        std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+        std::fs::write(persistent.path.join("scratch/plan.md"), "private\n").unwrap();
+
+        // Unmerged commits: the checkout is left alone.
+        let before = git(&persistent.path, &["rev-parse", "HEAD"]);
+        assert!(!restart_landed_persistent(&persistent.path).unwrap());
+        assert_eq!(git(&persistent.path, &["rev-parse", "HEAD"]), before);
+
+        git(repo.path(), &["merge", "--squash", &persistent.branch]);
+        repo.commit("Merged document PR");
+        repo.push();
+        std::fs::write(persistent.path.join("memory.md"), "followup\n").unwrap();
+
+        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert_eq!(
+            git(&persistent.path, &["rev-parse", "HEAD"]),
+            git(&persistent.path, &["rev-parse", "origin/main"])
+        );
+        assert_eq!(
+            std::fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
+            "followup\n"
+        );
+        assert!(persistent.path.join("scratch/plan.md").exists());
+    }
+
+    #[test]
+    fn commits_made_after_the_merged_push_move_onto_main() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+            .unwrap();
+        git(&persistent.path, &["push", "origin", &persistent.branch]);
+        std::fs::write(persistent.path.join("later.md"), "unpublished\n").unwrap();
+        crate::ops::commit_selected(&persistent.path, &["later.md".into()], Some("Later")).unwrap();
+        git(
+            repo.path(),
+            &["merge", "--squash", &format!("{}~1", persistent.branch)],
+        );
+        repo.commit("Merged document PR");
+        repo.push();
+        std::fs::write(persistent.path.join("memory.md"), "local edit\n").unwrap();
+        git(&persistent.path, &["add", "memory.md"]);
+        std::fs::write(persistent.path.join("memory.md"), "later local edit\n").unwrap();
+        let staged = git(&persistent.path, &["diff", "--cached"]);
+        let unstaged = git(&persistent.path, &["diff"]);
+
+        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert_eq!(git(&persistent.path, &["diff", "--cached"]), staged);
+        assert_eq!(git(&persistent.path, &["diff"]), unstaged);
+        assert_eq!(
+            git(
+                &persistent.path,
+                &["log", "--format=%s", "origin/main..HEAD"]
+            ),
+            "Later\n"
+        );
+        assert_eq!(
+            git(&persistent.path, &["show", "HEAD:later.md"]),
+            "unpublished\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
+            "later local edit\n"
+        );
+    }
+
+    #[test]
+    fn unpublished_merge_results_survive_persistent_restart() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let persistent = crate::engine::worktrees::ensure_agent_worktree(
+            repo.path(),
+            crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        )
+        .unwrap();
+        std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+        crate::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+            .unwrap();
+        git(&persistent.path, &["push", "origin", &persistent.branch]);
+        let pushed = git(&persistent.path, &["rev-parse", "HEAD"]);
+
+        git(&persistent.path, &["checkout", "-b", "side"]);
+        std::fs::write(persistent.path.join("side.md"), "incoming\n").unwrap();
+        git(&persistent.path, &["add", "side.md"]);
+        git(&persistent.path, &["commit", "-m", "Side document"]);
+        git(&persistent.path, &["checkout", &persistent.branch]);
+        git(
+            &persistent.path,
+            &["merge", "--no-ff", "--no-commit", "side"],
+        );
+        std::fs::write(persistent.path.join("side.md"), "resolved in merge\n").unwrap();
+        std::fs::write(
+            persistent.path.join("resolution.md"),
+            "merge-only decision\n",
+        )
+        .unwrap();
+        git(&persistent.path, &["add", "."]);
+        git(&persistent.path, &["commit", "-m", "Resolve documents"]);
+        let tree = git(&persistent.path, &["rev-parse", "HEAD^{tree}"]);
+
+        git(repo.path(), &["merge", "--squash", pushed.trim()]);
+        repo.commit("Merged document PR");
+        std::fs::write(repo.path().join("upstream.md"), "new upstream\n").unwrap();
+        repo.stage_all();
+        repo.commit("Upstream document");
+        repo.push();
+        std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+        std::fs::write(persistent.path.join("scratch/plan.md"), "local plan\n").unwrap();
+
+        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert_eq!(
+            git(&persistent.path, &["show", "HEAD:side.md"]),
+            "resolved in merge\n"
+        );
+        assert_eq!(
+            git(&persistent.path, &["show", "HEAD:resolution.md"]),
+            "merge-only decision\n"
+        );
+        assert_eq!(
+            git(&persistent.path, &["show", "HEAD:upstream.md"]),
+            "new upstream\n"
+        );
+        assert_eq!(
+            git(
+                &persistent.path,
+                &["diff", "--name-only", tree.trim(), "HEAD"]
+            ),
+            "upstream.md\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(persistent.path.join("scratch/plan.md")).unwrap(),
+            "local plan\n"
+        );
+    }
+
+    #[test]
+    fn persistent_commit_after_merge_starts_from_main() {
+        for selected in [true, false] {
+            let repo = loopflow_test_support::TestRepo::new();
+            let persistent = crate::engine::worktrees::ensure_agent_worktree(
+                repo.path(),
+                crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+            )
+            .unwrap();
+            std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+            crate::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+                .unwrap();
+            git(repo.path(), &["merge", "--squash", &persistent.branch]);
+            repo.commit("Merged document PR");
+            repo.push();
+
+            // No sync and no settled landing: the next commit notices by itself.
+            std::fs::write(persistent.path.join("memory.md"), "followup\n").unwrap();
+            if selected {
+                crate::ops::commit_selected(
+                    &persistent.path,
+                    &["memory.md".into()],
+                    Some("Followup"),
+                )
+                .unwrap();
+            } else {
+                git(&persistent.path, &["add", "memory.md"]);
+                crate::ops::commit_workflow(
+                    &persistent.path,
+                    &crate::ops::CommitOptions {
+                        message: Some("Followup".into()),
+                        ..crate::ops::CommitOptions::for_task("commit")
+                    },
+                    &crate::ops::NullProgress,
+                    &|_| {},
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                git(
+                    &persistent.path,
+                    &["rev-list", "--count", "origin/main..HEAD"]
+                )
+                .trim(),
+                "1"
+            );
+            assert_eq!(
+                git(&persistent.path, &["show", "HEAD:memory.md"]),
+                "followup\n"
+            );
+        }
+    }
 
     #[test]
     fn scratch_stash_lands_under_the_ignored_tmp_prefix() {

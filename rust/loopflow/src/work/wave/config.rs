@@ -21,7 +21,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// `lf cron sync` installs these schedules on the placed Home.
+/// `lf wave cron sync` installs these schedules on the placed Home.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -433,8 +433,7 @@ mod tests {
         ));
     }
 
-    /// Crons live in GOAL.md frontmatter — the resident loop's schedule
-    /// source. Legacy `triggers:` keys are simply unknown fields now.
+    /// Crons live in GOAL.md frontmatter, the schedule source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
     fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
         let temp = tempdir().expect("temp dir");

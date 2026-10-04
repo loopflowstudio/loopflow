@@ -1,4 +1,4 @@
 - flow: task-design
 - flow: pursue
 - flow: queue
-- cmd: task pr land -c
+- cmd: pr land -c

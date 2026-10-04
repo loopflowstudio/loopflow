@@ -96,7 +96,7 @@ worktrees, placement and execution history.
 
 Distinguish completed effects, proposals, failed writes and unresolved readback;
 reconcile uncertain effects before retry. Keep planning at its existing owners
-without introducing a resident or another execution cursor.
+without introducing a long-running process or another execution cursor.
 
 A chapter boundary previews the whole repository with
 `lf repo new-chapter <name> --dry-run --json`. Apply with

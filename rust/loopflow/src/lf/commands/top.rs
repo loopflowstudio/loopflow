@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf ps` once, `lf top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};

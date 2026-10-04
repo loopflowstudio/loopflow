@@ -282,7 +282,7 @@ ARCHITECTURE_AREA = DocArea(
         DocPage(
             "Planning",
             "architecture/planning",
-            "Flows, Work, Steer, Ask, and resident loops",
+            "Flows, Work, Steer and Ask",
             parent="architecture",
         ),
         DocPage(

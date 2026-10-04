@@ -20,7 +20,7 @@ records the remaining implementation and proof gaps.
 
 ```bash
 lf repo new-chapter 2026-10
-lf repo refresh product
+lf refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
@@ -184,7 +184,7 @@ process evidence is uncertainty, and causal ancestry grants no signal authority.
 ```bash
 lf session list --json
 lf session connect SESSION --json
-lf session ready "Feedback and remaining work"
+lf ready "Feedback and remaining work"
 lf session complete SESSION
 ```
 
@@ -205,7 +205,7 @@ live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
-lf task comment INF-124 "keep the public name"
+lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 

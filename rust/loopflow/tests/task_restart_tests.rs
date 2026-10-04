@@ -179,7 +179,7 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             let expected = match condition {
                 "terminal" => "terminal",
                 "moved" => "no longer matches",
-                "advice" => "advice was not published",
+                "advice" => "Restart stopped before replacing",
                 _ => "planning",
             };
             assert!(error.contains(expected), "{condition}: {error}");

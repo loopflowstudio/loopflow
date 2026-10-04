@@ -5181,9 +5181,13 @@ async fn restart_task_async(
     task.updated_at = now;
 
     if let Some(advice) = advice.as_deref() {
-        super::linear_observe::publish_task_steer(&store, &task, advice).await.map_err(|error| {
-            task_error(format!("Restart advice was not published; the existing Flow and worker are preserved: {error}"))
-        })?;
+        super::linear_observe::publish_task_steer(&store, &task, advice)
+            .await
+            .map_err(|error| {
+                task_error(format!(
+                    "Restart stopped before replacing the existing Flow or worker: {error}"
+                ))
+            })?;
     }
     let stopped = stop_task_worker(&store, &task).await?;
     select_task_agent(&store, &mut task, agent.as_deref()).await?;

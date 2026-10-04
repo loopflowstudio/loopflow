@@ -15,5 +15,5 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 swift build --build-tests --package-path "$ROOT/swift" "${build_args[@]}"
-exec uv run --no-sync python "$ROOT/scripts/test_network.py" sandbox-exec -f "$ROOT/scripts/desktop-headless.sb" \
+exec uv run --no-sync python "$ROOT/scripts/test_network.py" --desktop \
   swift test --skip-build --disable-sandbox --package-path "$ROOT/swift" --no-parallel "${remaining[@]}"

@@ -11,12 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROFILE = """(version 1)
-(allow default)
-; macOS setuid ps cannot execute sandboxed. This fixed system reader neither
-; connects to services nor launches children; match desktop-headless.sb.
-(allow process-exec (literal "/bin/ps") (with no-sandbox))
-(deny network*)
+NETWORK_RULES = """(deny network*)
 (allow network-outbound (remote ip "localhost:*") (remote unix-socket))
 (allow network-inbound (local ip "localhost:*") (local unix-socket))
 (allow network-bind)
@@ -42,6 +37,9 @@ def _probe() -> None:
 
 def main() -> int:
     arguments = sys.argv[1:]
+    desktop = arguments[:1] == ["--desktop"]
+    if desktop:
+        arguments = arguments[1:]
     if arguments[:1] == ["--isolated"]:
         arguments = arguments[1:]
         if platform.system() == "Linux":
@@ -61,7 +59,16 @@ def main() -> int:
         raise SystemExit("usage: test_network.py COMMAND [ARGS...]")
     child = [sys.executable, str(Path(__file__).resolve()), "--isolated", *arguments]
     if platform.system() == "Darwin":
-        command = ["sandbox-exec", "-p", PROFILE, *child]
+        if desktop:
+            profile = Path(__file__).with_name("desktop-headless.sb").read_text()
+        else:
+            # macOS refuses its setuid ps inside a sandbox. Only this fixed
+            # system reader leaves it; ps cannot launch fixture descendants.
+            profile = (
+                "(version 1)(allow default)"
+                '(allow process-exec (literal "/bin/ps") (with no-sandbox))'
+            )
+        command = ["sandbox-exec", "-p", profile + NETWORK_RULES, *child]
     elif platform.system() == "Linux" and shutil.which("unshare") and shutil.which("ip"):
         command = [
             "sudo",

@@ -899,6 +899,33 @@ mod tests {
     }
 
     #[test]
+    fn completed_turn_does_not_complete_the_conversation() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session = store.test_session("unfinished", &crate::session_record::new_artifact_key());
+        for kind in [SessionEventKind::Started, SessionEventKind::Completed] {
+            store
+                .record_session_event(
+                    &session.id,
+                    "thread",
+                    "turn",
+                    kind,
+                    &json!({"status": "completed"}),
+                )
+                .unwrap();
+        }
+        for _ in 0..2 {
+            let rows = store
+                .session_summaries(&crate::session::SessionFilter::default())
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, session.id);
+            assert!(rows[0].completed_at.is_none());
+            assert_eq!(rows[0].latest_turn.as_deref(), Some("completed"));
+        }
+    }
+
+    #[test]
     fn stopped_turn_and_stale_driver_cannot_retire_a_resumed_conversation() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

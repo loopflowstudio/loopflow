@@ -1096,6 +1096,8 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     fs::remove_file(repo.path().join(".lf/skills/saved-review.md")).unwrap();
     fs::remove_file(repo.path().join(".lf/flows/review-flow.yaml")).unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // Startup logs can fill a pipe while this test waits for provider identity.
+    let stderr = home.path().join("review.stderr");
     let mut opened = lf_command(
         repo.path(),
         home.path(),
@@ -1104,7 +1106,7 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     )
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::piped())
+    .stderr(fs::File::create(&stderr).unwrap())
     .spawn()
     .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -1144,7 +1146,7 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     assert!(
         opened.status.success(),
         "{}",
-        String::from_utf8_lossy(&opened.stderr)
+        fs::read_to_string(&stderr).unwrap()
     );
     assert!(fs::read_to_string(received)
         .unwrap()

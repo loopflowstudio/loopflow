@@ -109,6 +109,30 @@ fn checkout_restoration_preserves_resolver_notes_index_and_retry() {
 }
 
 #[test]
+fn checkout_restoration_reserves_stashed_sidecar_directories() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("scratch/question.md", "original\n");
+    repo.create_file("scratch/question.md.lf-sync-1/note.md", "prior note\n");
+    loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+        repo.create_file("scratch/question.md", "resolver\n");
+        Ok(())
+    })
+    .unwrap();
+    for (path, expected) in [
+        ("scratch/question.md", "original\n"),
+        ("scratch/question.md.lf-sync-1/note.md", "prior note\n"),
+        ("scratch/question.md.lf-sync-2", "resolver\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            expected
+        );
+    }
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
 fn resolved_sync_restores_original_scratch_through_checkout_boundary() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();

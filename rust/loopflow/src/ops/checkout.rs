@@ -46,16 +46,19 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
     if rev_parse(repo, &format!("{stash}^3")).is_err() {
         return Ok(());
     }
-    let paths = git(
+    let paths: Vec<_> = git(
         repo,
         &["ls-tree", "-rz", "--name-only", &format!("{stash}^3")],
-    )?;
-    for relative in paths.split('\0').filter(|path| !path.is_empty()) {
-        let path = repo.join(relative);
+    )?
+    .split('\0')
+    .filter(|path| !path.is_empty())
+    .map(|path| repo.join(path))
+    .collect();
+    for path in &paths {
         let ancestors: Vec<_> = path.ancestors().take_while(|path| *path != repo).collect();
-        let Some(collision) = ancestors.into_iter().rev().find(|path| {
-            std::fs::symlink_metadata(path)
-                .is_ok_and(|metadata| *path == repo.join(relative) || !metadata.is_dir())
+        let Some(collision) = ancestors.into_iter().rev().find(|ancestor| {
+            std::fs::symlink_metadata(ancestor)
+                .is_ok_and(|metadata| *ancestor == path || !metadata.is_dir())
         }) else {
             continue;
         };
@@ -83,8 +86,7 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
             let mut name = collision.as_os_str().to_os_string();
             name.push(format!(".lf-sync-{suffix}"));
             let candidate = std::path::PathBuf::from(name);
-            let stashed = paths.split('\0').any(|path| repo.join(path) == candidate);
-            if !stashed
+            if !paths.iter().any(|path| path.starts_with(&candidate))
                 && !candidate.try_exists()?
                 && std::fs::symlink_metadata(&candidate).is_err()
             {

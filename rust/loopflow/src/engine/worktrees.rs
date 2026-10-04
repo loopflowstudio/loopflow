@@ -1174,11 +1174,10 @@ fn apply_placement_plan(
     })
 }
 
-/// Resolve or create an author-scoped sibling worktree for a main agent.
+/// Resolve or create a resident worktree for an agent scope.
 ///
-/// New worktrees start from the fetched default branch when `origin` exists,
-/// and from the local default branch otherwise. Existing placements are
-/// reused only at their deterministic sibling path.
+/// New branches use the fetched default branch, falling back to cached or local
+/// state offline. Existing placements are reused at their current path.
 pub fn ensure_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,

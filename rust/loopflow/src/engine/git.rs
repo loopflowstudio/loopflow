@@ -51,7 +51,7 @@ fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
         .output()?)
 }
 
-fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     let output = run_git(repo, args)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {

@@ -360,8 +360,10 @@ commit and publication untrack scratch without deleting local files. Scratch,
 including PR copy, and edits made after the selected commit survive delivery.
 
 After merge, the next `lf commit` or `lf pr publish` restarts the branch from
-main and carries over commits made since the last push. Run `lf sync` to bring
-in other upstream changes. Reuse the same branch;
+main and replays unpublished first-parent changes, including merge resolutions.
+Staged edits and scratch survive restart. If restoring edits conflicts, the command
+stops with the saved stash and recovery instructions. Run `lf sync` to bring in
+other upstream changes. Reuse the same branch;
 automatic pruning retains it. Moved worktrees are reused at their actual path.
 Missing checkouts recover committed state only. Live conversations retain their
 placement until an idle driver boundary permits adoption of the resident workspace.

@@ -570,7 +570,10 @@ fn landed(repo: &Path, base_ref: &str) -> OpsResult<bool> {
 /// Returns None when one of them conflicts with the new base.
 fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
     let mut parent = rev_parse(repo, onto)?;
-    let range = git(repo, &["rev-list", "--reverse", "--no-merges", commits])?;
+    // A merge's first-parent delta includes both the incoming changes and any
+    // resolution authored in the merge itself. Replaying its side commits
+    // separately would lose those resolutions or reintroduce discarded edits.
+    let range = git(repo, &["rev-list", "--reverse", "--first-parent", commits])?;
     for commit in range.lines() {
         let merged = Command::new("git")
             .current_dir(repo)
@@ -618,6 +621,9 @@ pub(crate) fn restart_landed_resident(repo: &Path) -> OpsResult<bool> {
     let base = format!("origin/{}", get_default_branch(repo)?);
     // Offline, the last fetched base still answers for what it has seen.
     let _ = fetch_target(repo, &base);
+    if rev_parse(repo, &base).is_err() {
+        return Ok(false);
+    }
     if intervention_state(repo)?.is_some() || crate::engine::git::is_ancestor(repo, "HEAD", &base)?
     {
         return Ok(false);
@@ -641,9 +647,11 @@ pub(crate) fn restart_landed_resident(repo: &Path) -> OpsResult<bool> {
     let Some(target) = target else {
         return Ok(false);
     };
-    // --keep leaves uncommitted edits in place and refuses rather than
-    // overwriting one the base also changed, so a live conversation is safe.
-    git(repo, &["reset", "--keep", &target])?;
+    // Reset clears staging even with --keep. Preserve the caller's index and
+    // working edits through the same recovery boundary as explicit sync.
+    crate::ops::checkout::with_preserved_edits(repo, || {
+        git(repo, &["reset", "--keep", &target]).map(|_| ())
+    })?;
     Ok(true)
 }
 
@@ -715,18 +723,9 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::Git(crate::engine::GitError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        }));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(crate::engine::git::git_stdout(repo, args)?
+        .trim()
+        .to_string())
 }
 
 fn count_unique_commits(repo: &Path, base_ref: &str) -> OpsResult<usize> {
@@ -826,7 +825,10 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 mod tests {
     use super::{restart_landed_resident, scratch_stash_path};
     use std::path::Path;
-    use std::process::Command;
+
+    fn git(repo: &Path, args: &[&str]) -> String {
+        crate::engine::git::git_stdout(repo, args).unwrap()
+    }
 
     #[test]
     fn merged_resident_branch_restarts_from_main_and_keeps_local_files() {
@@ -836,19 +838,6 @@ mod tests {
             crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
-        let git = |dir: &Path, args: &[&str]| {
-            let output = Command::new("git")
-                .current_dir(dir)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout).unwrap()
-        };
         std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
         crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
         std::fs::create_dir_all(resident.path.join("scratch")).unwrap();
@@ -884,19 +873,6 @@ mod tests {
             crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
-        let git = |dir: &Path, args: &[&str]| {
-            let output = Command::new("git")
-                .current_dir(dir)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout).unwrap()
-        };
         std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
         crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
         git(&resident.path, &["push", "origin", &resident.branch]);
@@ -909,8 +885,14 @@ mod tests {
         repo.commit("Merged document PR");
         repo.push();
         std::fs::write(resident.path.join("memory.md"), "local edit\n").unwrap();
+        git(&resident.path, &["add", "memory.md"]);
+        std::fs::write(resident.path.join("memory.md"), "later local edit\n").unwrap();
+        let staged = git(&resident.path, &["diff", "--cached"]);
+        let unstaged = git(&resident.path, &["diff"]);
 
         assert!(restart_landed_resident(&resident.path).unwrap());
+        assert_eq!(git(&resident.path, &["diff", "--cached"]), staged);
+        assert_eq!(git(&resident.path, &["diff"]), unstaged);
         assert_eq!(
             git(&resident.path, &["log", "--format=%s", "origin/main..HEAD"]),
             "Later\n"
@@ -921,53 +903,120 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(resident.path.join("memory.md")).unwrap(),
-            "local edit\n"
+            "later local edit\n"
         );
     }
 
     #[test]
-    fn resident_commit_after_merge_starts_from_main() {
+    fn unpublished_merge_results_survive_resident_restart() {
         let repo = loopflow_test_support::TestRepo::new();
         let resident = crate::engine::worktrees::ensure_agent_worktree(
             repo.path(),
             crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
         )
         .unwrap();
-        let git = |dir: &Path, args: &[&str]| {
-            let output = Command::new("git")
-                .current_dir(dir)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout).unwrap()
-        };
         std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
         crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory")).unwrap();
-        git(repo.path(), &["merge", "--squash", &resident.branch]);
-        repo.commit("Merged document PR");
-        repo.push();
+        git(&resident.path, &["push", "origin", &resident.branch]);
+        let pushed = git(&resident.path, &["rev-parse", "HEAD"]);
 
-        // No sync and no settled landing: the next commit notices by itself.
-        std::fs::write(resident.path.join("memory.md"), "followup\n").unwrap();
-        crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Followup"))
-            .unwrap();
+        git(&resident.path, &["checkout", "-b", "side"]);
+        std::fs::write(resident.path.join("side.md"), "incoming\n").unwrap();
+        git(&resident.path, &["add", "side.md"]);
+        git(&resident.path, &["commit", "-m", "Side document"]);
+        git(&resident.path, &["checkout", &resident.branch]);
+        git(&resident.path, &["merge", "--no-ff", "--no-commit", "side"]);
+        std::fs::write(resident.path.join("side.md"), "resolved in merge\n").unwrap();
+        std::fs::write(resident.path.join("resolution.md"), "merge-only decision\n").unwrap();
+        git(&resident.path, &["add", "."]);
+        git(&resident.path, &["commit", "-m", "Resolve documents"]);
+        let tree = git(&resident.path, &["rev-parse", "HEAD^{tree}"]);
+
+        git(repo.path(), &["merge", "--squash", pushed.trim()]);
+        repo.commit("Merged document PR");
+        std::fs::write(repo.path().join("upstream.md"), "new upstream\n").unwrap();
+        repo.stage_all();
+        repo.commit("Upstream document");
+        repo.push();
+        std::fs::create_dir_all(resident.path.join("scratch")).unwrap();
+        std::fs::write(resident.path.join("scratch/plan.md"), "local plan\n").unwrap();
+
+        assert!(restart_landed_resident(&resident.path).unwrap());
+        assert_eq!(
+            git(&resident.path, &["show", "HEAD:side.md"]),
+            "resolved in merge\n"
+        );
+        assert_eq!(
+            git(&resident.path, &["show", "HEAD:resolution.md"]),
+            "merge-only decision\n"
+        );
+        assert_eq!(
+            git(&resident.path, &["show", "HEAD:upstream.md"]),
+            "new upstream\n"
+        );
         assert_eq!(
             git(
                 &resident.path,
-                &["rev-list", "--count", "origin/main..HEAD"]
-            )
-            .trim(),
-            "1"
+                &["diff", "--name-only", tree.trim(), "HEAD"]
+            ),
+            "upstream.md\n"
         );
         assert_eq!(
-            git(&resident.path, &["show", "HEAD:memory.md"]),
-            "followup\n"
+            std::fs::read_to_string(resident.path.join("scratch/plan.md")).unwrap(),
+            "local plan\n"
         );
+    }
+
+    #[test]
+    fn resident_commit_after_merge_starts_from_main() {
+        for selected in [true, false] {
+            let repo = loopflow_test_support::TestRepo::new();
+            let resident = crate::engine::worktrees::ensure_agent_worktree(
+                repo.path(),
+                crate::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+            )
+            .unwrap();
+            std::fs::write(resident.path.join("memory.md"), "accepted\n").unwrap();
+            crate::ops::commit_selected(&resident.path, &["memory.md".into()], Some("Memory"))
+                .unwrap();
+            git(repo.path(), &["merge", "--squash", &resident.branch]);
+            repo.commit("Merged document PR");
+            repo.push();
+
+            // No sync and no settled landing: the next commit notices by itself.
+            std::fs::write(resident.path.join("memory.md"), "followup\n").unwrap();
+            if selected {
+                crate::ops::commit_selected(
+                    &resident.path,
+                    &["memory.md".into()],
+                    Some("Followup"),
+                )
+                .unwrap();
+            } else {
+                git(&resident.path, &["add", "memory.md"]);
+                crate::ops::commit_workflow(
+                    &resident.path,
+                    &crate::ops::CommitOptions {
+                        message: Some("Followup".into()),
+                        ..crate::ops::CommitOptions::for_task("commit")
+                    },
+                    &crate::ops::NullProgress,
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                git(
+                    &resident.path,
+                    &["rev-list", "--count", "origin/main..HEAD"]
+                )
+                .trim(),
+                "1"
+            );
+            assert_eq!(
+                git(&resident.path, &["show", "HEAD:memory.md"]),
+                "followup\n"
+            );
+        }
     }
 
     #[test]

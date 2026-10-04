@@ -33,7 +33,7 @@ class ResourcePolicy:
     cleanup_target_free_disk_bytes: int
     build_cache_retention_hours: int
     worktree_build_cleanup_bytes: int
-    maximum_run_record_bytes: int
+    maximum_session_capture_bytes: int
     maximum_uv_cache_bytes: int
     maximum_cargo_cache_bytes: int
     maximum_gate_artifact_bytes: int
@@ -223,20 +223,20 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         )
 
     authority_home = _authority_home()
-    run_root = authority_home / "runs"
+    capture_root = authority_home / "runs"
     sources.append(
         _measure_source(
-            id="runs:home",
-            kind="runs",
+            id="session-captures:home",
+            kind="session-captures",
             owner="Loopflow Home",
             root=authority_home,
-            paths=(run_root,),
-            budget=policy.maximum_run_record_bytes,
+            paths=(capture_root,),
+            budget=policy.maximum_session_capture_bytes,
             disposable=False,
             active=True,
             action=(
-                f"inspect {run_root}; Run records are durable local evidence and are never "
-                "auto-deleted"
+                f"inspect {capture_root}; Session captures are durable local evidence "
+                "and are never auto-deleted"
             ),
             issues=measurement_issues,
         )

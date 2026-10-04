@@ -5,6 +5,44 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Current Tasks and completion history (2026-10-02)
+
+Jack Heart requested current work without obsolete duplicates, completed Tasks
+hidden initially, and Show completed with 7 days, positive N days and All time
+(LOO-369). Coordinator guidance limits that control to successful completions;
+it is not attributed as a separate decision from Jack. Canceled/duplicate history
+remains in the shared inventory and Linear. Window-local filters affect displayed
+rows and their count, never Task lifecycle, Flow settlement or Session membership.
+
+The observed Growth snapshot already contained canceled states; the Task summary
+dropped them. Preserve provider state separately from successful completion and
+carry actual completion time. Unknown dates belong only in All time; reopening
+makes planning current despite an old timestamp. Equal-revision storage enrichment
+may fill a genuinely absent completion-date key, but cannot change an observed
+null or date. Snapshot acquisition and unrelated updates cannot establish recency.
+
+Jack relayed the coordinator finding that settled Tasks with removed checkouts
+still carried recovery conditions. That condition alone must not bypass history
+filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
+and observed unsettled files/commits remain visible; open Sessions stay reachable
+independently. This agrees with the Task workspace's checkout association contract.
+
+Jack Heart subsequently approved the inline checkbox/number prototype and
+requested Desktop implementation. Completed enables the remembered range
+(initially seven days); the active label edits N Days, with zero shown as All
+Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
+One native text surface handles display and editing to preserve glyph placement;
+long integers scroll within the compact viewport. Wave identity bounds drafts.
+
+The earlier affected gate and configured app compilation passed. The later inline
+revision and compression have seven focused passing tests and SwiftPM compilation;
+queue gate and native visual/focus review remain separate. Jack's Growth screenshot
+shows six current Tasks without the seven duplicates. The isolated offline capture
+has no successful completions or Sessions, so it cannot prove recency or native
+Session continuation. Live refresh and retained-Session review remain unproven.
+See [the review evidence](../../docs/reviews/task-history.md). These observations
+provide no sustained-use KR or external-progress credit.
+
 ## Ask removal decision (2026-10-01)
 
 Jack Heart requested ordinary headless failure without an escalation conversation,

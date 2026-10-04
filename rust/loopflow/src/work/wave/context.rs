@@ -45,7 +45,7 @@ pub struct ExecAttribution {
 
 /// The Exec attribution decision for the current process environment inside
 /// `repo`. One classification shared by every trace/Exec attribution site
-/// ([`crate::journal::ensure_run_context`] and the `lf` Exec wrapper).
+/// ([`crate::journal::ensure_exec_context`] and the `lf` Exec wrapper).
 pub fn exec_attribution(repo: Option<&Path>) -> ExecAttribution {
     match resolve_managed_wave_sync(repo, None) {
         Ok(wave) => ExecAttribution {

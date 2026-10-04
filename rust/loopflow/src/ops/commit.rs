@@ -103,6 +103,9 @@ fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
     Ok(())
 }
 
+/// `scratch/.gitkeep` stays tracked so the directory exists on every branch.
+const SCRATCH_PLACEHOLDER: &str = ":(top,exclude)scratch/.gitkeep";
+
 /// Commit an explicit document selection using an independent index. The real
 /// index retains unrelated staged work, and scratch remains on disk.
 pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
@@ -144,6 +147,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
             "-f".into(),
             "--".into(),
             ":(top)scratch".into(),
+            SCRATCH_PLACEHOLDER.into(),
         ])?;
     }
     run(&["commit".into(), "-m".into(), message.into()])?;
@@ -178,7 +182,8 @@ pub(crate) fn prepare_resident_publication(repo: &Path) -> OpsResult<()> {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ));
     }
-    if !output.stdout.is_empty() {
+    let tracked = String::from_utf8_lossy(&output.stdout);
+    if tracked.lines().any(|path| path != "scratch/.gitkeep") {
         commit_selected(repo, &[], Some("Keep resident scratch local"))?;
     }
     Ok(())
@@ -198,6 +203,7 @@ pub(crate) fn untrack_resident_scratch(repo: &Path) -> OpsResult<()> {
             "-f",
             "--",
             ":(top)scratch",
+            SCRATCH_PLACEHOLDER,
         ])
         .output()?;
     if !output.status.success() {

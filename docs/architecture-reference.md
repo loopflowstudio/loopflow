@@ -369,7 +369,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Boundary execution | `controller/` | — | shared Flow driver and claimed Task boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migrations engine, durable rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | Login, encrypted tokens, account homes, routes and leases |
-| Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifact switching, repository identity, subscriptions |
+| Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifact switching, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | Immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | Shared DTOs/services and macOS UI |
 | External Rust/Python/Swift tests | `rust/loopflow/tests/`, `python/tests/`, `swift/LoopflowTests/` | 27,100 | Cross-module, wire, migration, CLI, and app proofs |
@@ -512,6 +512,12 @@ detaching.
 The heading remains an inbound documentation anchor; Run is historical vocabulary.
 The execution cutover uses one AgentSession admission and capture path for Task,
 Wave, helper and direct callers.
+
+SQLite owns Exec history. Repository trace events live in
+`.lf/journal/traces/<trace-id>/events.jsonl` and name their `trace_id` and `exec`
+node explicitly. Session captures retain the published `~/.lf/runs` directory
+layout, selected through SQLite artifact keys. That directory contains current
+Session data; its historical name does not make it disposable Run history.
 
 1. Admit the actual lf Exec; resolve typed work without granting Flow authority.
 2. Reserve the AgentSession and its initial history/capture reference before

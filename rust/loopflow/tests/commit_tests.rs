@@ -100,6 +100,7 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("scratch/design.md", "private design\n");
+    repo.create_file("scratch/.gitkeep", "");
     repo.stage_all();
     repo.commit("existing scratch");
     let resident = loopflow::engine::worktrees::ensure_agent_worktree(
@@ -136,16 +137,18 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
         .unwrap();
 
     assert_eq!(git(&["show", "HEAD:memory.md"]), "durable\n");
-    assert!(git(&[
-        "ls-tree",
-        "-r",
-        "--name-only",
-        "HEAD",
-        "--",
-        "scratch",
-        "other.md"
-    ])
-    .is_empty());
+    assert_eq!(
+        git(&[
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+            "--",
+            "scratch",
+            "other.md"
+        ]),
+        "scratch/.gitkeep\n"
+    );
     assert_eq!(git(&["show", ":other.md"]), "staged\n");
     assert_eq!(
         std::fs::read_to_string(resident.path.join("other.md")).unwrap(),
@@ -161,6 +164,9 @@ fn resident_selection_preserves_scratch_and_unrelated_index() {
         &NullProgress,
     )
     .unwrap();
-    assert!(git(&["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"]).is_empty());
+    assert_eq!(
+        git(&["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"]),
+        "scratch/.gitkeep\n"
+    );
     assert!(resident.path.join("scratch/design.md").exists());
 }

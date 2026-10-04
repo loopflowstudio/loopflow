@@ -67,10 +67,12 @@ def test_main_refresh_repeats_and_observes_each_new_upstream(checkout: Checkout)
         _run(main, str(LF), "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
 
-    journals = list((main / ".lf/journal/runs").glob("*/events.jsonl"))
+    journals = list((main / ".lf/journal/traces").glob("*/events.jsonl"))
     assert len(journals) == 4
     for journal in journals:
         events = [json.loads(line) for line in journal.read_text().splitlines()]
+        assert events[0]["node"] == "exec"
+        assert all(event["trace_id"] == journal.parent.name for event in events)
         assert events[0]["command"][-1] == "sync"
         assert events[0]["event"] == "started"
         assert events[-1]["event"] == "completed"
@@ -342,7 +344,9 @@ def test_fetch_failure_preserves_state_and_later_invocation_catches_up(checkout:
     (main / "base.txt").write_text("caller edit\n")
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
-    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert "fetch" in result.stderr
     assert _run(main, "git", "rev-parse", "HEAD") == before
@@ -360,7 +364,9 @@ def test_main_merge_conflict_restores_original_history_and_edits(checkout: Check
     _commit(author, "base.txt", "upstream conflict\n")
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
-    result = subprocess.run([str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(LF), "sync"], cwd=main, env=env, capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert _run(main, "git", "rev-parse", "HEAD") == before
     assert (main / "base.txt").read_text() == "local commit\n"

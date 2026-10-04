@@ -602,7 +602,7 @@ impl SqliteStore {
     /// the same connection lock while the connection-level transaction stays
     /// open. Observability callers create a private read-only store for this
     /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_run_ledger_snapshot<T>(
+    pub(crate) fn read_exec_snapshot<T>(
         &self,
         read: impl FnOnce(&Self) -> StoreResult<T>,
     ) -> StoreResult<T> {

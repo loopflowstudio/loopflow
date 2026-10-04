@@ -187,6 +187,8 @@ final class PodiumModel {
         await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID)
     }
 
+    var taskHistoryFilters: [String: TaskHistoryFilter] = [:]
+    var taskHistoryNow = Date()
     var historyWave: WaveSnapshot?
     var historyReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
@@ -225,6 +227,7 @@ final class PodiumModel {
 
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
         didSet {
+            taskHistoryNow = Date()
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
@@ -344,6 +347,7 @@ final class PodiumModel {
     }
 
     func refresh() async {
+        taskHistoryNow = Date()
         guard !usesFixedFixture else { return }
         guard !isRefreshing else { return }
         isRefreshing = true

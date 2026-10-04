@@ -35,15 +35,6 @@ pub struct TaskActionModel {
     pub reason: String,
 }
 
-impl TaskActionModel {
-    pub fn no_task() -> Self {
-        Self {
-            recommended: None,
-            reason: "Task is ready to start".into(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,

@@ -195,7 +195,12 @@ missing or unrelated Session leaves the current workspace intact and offers Retr
 Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
-Flow template, all Tasks and chapter history. Templates fold composed Flows;
+Flow template, current Tasks and chapter history. Completed Tasks start hidden.
+**Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
+Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
+(successful completions of any age); click that label to edit again. The checkbox
+hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
+execution and retained Session access remain available. Templates fold composed Flows;
 click a group or its disclosure control to expand it. Repeated uses disclose
 independently, and both return edges remain visible at folded boundaries. Tab to
 a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;

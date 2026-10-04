@@ -23,7 +23,7 @@
 
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
 - A conversation started under A resumes under B across different workspaces or plans.
-- Whether a lent Codex account authenticates at all through `CODEX_ACCESS_TOKEN`; never exercised against a real `lf ssh` session.
+- A lent Codex account signing in through the engine protocol against OpenAI's real service, and whether relying on an interface OpenAI marks internal-only is acceptable (for Jack).
 
 ## Assumptions made while building slice 2
 

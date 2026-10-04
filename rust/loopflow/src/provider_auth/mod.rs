@@ -2856,7 +2856,7 @@ fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?.trim_end_matches('=');
     let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
     serde_json::from_slice(&claims).ok()

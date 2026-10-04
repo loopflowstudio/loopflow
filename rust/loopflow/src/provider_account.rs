@@ -179,7 +179,8 @@ enum AccountLogin {
         profile: PathBuf,
     },
     /// The origin of an `lf ssh` session owns the login and lends one access
-    /// token, which lives only in the provider's environment.
+    /// token, which is never written here. Claude takes it from its
+    /// environment; a Codex engine is handed it over its protocol.
     Lent {
         client: lease::AccountLeaseClient,
         access_token: String,
@@ -450,12 +451,54 @@ impl ProviderAccountRoute {
         {
             command.env(name, self.account_home());
         }
-        if let AccountLogin::Lent { access_token, .. } = &self.login {
-            match self.provider {
-                Provider::Claude => command.env("CLAUDE_CODE_OAUTH_TOKEN", access_token),
-                _ => command.env("CODEX_ACCESS_TOKEN", access_token),
-            };
+        // Codex has no variable for a ChatGPT login; see `engine_login`.
+        if let (Provider::Claude, AccountLogin::Lent { access_token, .. }) =
+            (self.provider, &self.login)
+        {
+            command.env("CLAUDE_CODE_OAUTH_TOKEN", access_token);
         }
+    }
+
+    /// The `account/login/start` request that signs a Codex engine in with a
+    /// lent token, held in the engine's memory. `None` for every other route,
+    /// whose login the engine reads from its home.
+    pub(crate) fn engine_login(&self) -> Result<Option<serde_json::Value>, ProviderAccountError> {
+        match (self.provider, &self.login) {
+            (Provider::Codex, AccountLogin::Lent { access_token, .. }) => {
+                let mut login = self.engine_tokens(access_token)?;
+                login["type"] = "chatgptAuthTokens".into();
+                Ok(Some(login))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// A fresh lent token for an engine whose own was refused. Only the
+    /// origin can renew it.
+    pub(crate) fn renew_engine_login(&self) -> Result<serde_json::Value, ProviderAccountError> {
+        let AccountLogin::Lent { client, .. } = &self.login else {
+            return Err(ProviderAccountError::Runtime(
+                "this account's login is renewed in its own home".into(),
+            ));
+        };
+        self.engine_tokens(&client.renew(self.provider, &self.account_id)?)
+    }
+
+    fn engine_tokens(&self, access_token: &str) -> Result<serde_json::Value, ProviderAccountError> {
+        let workspace = crate::provider_auth::jwt_claims(access_token)
+            .and_then(|claims| {
+                claims
+                    .get("https://api.openai.com/auth")?
+                    .get("chatgpt_account_id")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                provider: self.provider,
+                account_id: self.account_id.clone(),
+                reason: "the lent token names no ChatGPT workspace".into(),
+            })?;
+        Ok(serde_json::json!({"accessToken": access_token, "chatgptAccountId": workspace}))
     }
 
     /// The one place a launch takes on an account. Every route configures
@@ -463,6 +506,24 @@ impl ProviderAccountRoute {
     /// in as its account, doing nothing when that account is already active.
     /// Hold the returned lock until the child has spawned.
     pub(crate) async fn launch_as(
+        &self,
+        command: &mut Command,
+    ) -> Result<Option<fs::File>, ProviderAccountError> {
+        if self.engine_login()?.is_some() {
+            return Err(ProviderAccountError::ForwardingCredential {
+                provider: self.provider,
+                account_id: self.account_id.clone(),
+                reason: "a lent Codex account signs in through Loopflow's Codex engine, \
+                         and this launch starts Codex directly"
+                    .into(),
+            });
+        }
+        self.launch_engine_as(command).await
+    }
+
+    /// [`Self::launch_as`] for a Codex engine, which the caller then signs in
+    /// with [`Self::engine_login`].
+    pub(crate) async fn launch_engine_as(
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {

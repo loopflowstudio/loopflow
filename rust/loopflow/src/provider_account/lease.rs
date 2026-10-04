@@ -464,6 +464,11 @@ enum BrokerOperation {
         account_id: ProviderAccountId,
         provider_session_id: Option<String>,
     },
+    /// Refresh a credential the target reports as refused.
+    Renew {
+        provider: Provider,
+        account_id: ProviderAccountId,
+    },
     AccountFacts {
         provider: Provider,
         account_id: ProviderAccountId,
@@ -777,6 +782,21 @@ impl BrokerState {
                 self.resolve_exact(provider, &account_id, provider_session_id.as_deref())
                     .await?,
             )),
+            BrokerOperation::Renew {
+                provider,
+                account_id,
+            } => {
+                self.grant_contains(provider, &account_id)?;
+                self.prepared
+                    .credentials
+                    .remove(&(provider, account_id.clone()));
+                let access_token = self.access_token(provider, &account_id).await?;
+                Ok(BrokerResponse::Resolution(LeaseResolution {
+                    account_id,
+                    access_token,
+                    resume_requested_session: false,
+                }))
+            }
             BrokerOperation::AccountFacts {
                 provider,
                 account_id,
@@ -1132,6 +1152,22 @@ impl AccountLeaseClient {
         }
     }
 
+    pub(crate) fn renew(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<String, ProviderAccountError> {
+        match self.request(BrokerOperation::Renew {
+            provider,
+            account_id: account_id.clone(),
+        })? {
+            BrokerResponse::Resolution(resolution) => Ok(resolution.access_token),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
     pub(crate) fn account_facts(
         &self,
         provider: Provider,
@@ -1257,6 +1293,8 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
 
 #[cfg(test)]
 mod tests {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use std::collections::{HashMap, HashSet};
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
@@ -1738,7 +1776,16 @@ mod tests {
                 store.upsert_provider_account(&account).await.unwrap();
                 credentials.insert(
                     (grant.provider, account_id.clone()),
-                    format!("{}-{account_id}-secret", grant.provider),
+                    match grant.provider {
+                        // A ChatGPT access token names its workspace.
+                        Provider::Codex => format!(
+                            "h.{}.s",
+                            URL_SAFE_NO_PAD.encode(
+                                r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"workspace"}}"#
+                            )
+                        ),
+                        provider => format!("{provider}-{account_id}-secret"),
+                    },
                 );
             }
         }
@@ -1962,6 +2009,30 @@ mod tests {
         assert!(command
             .get_envs()
             .any(|(name, value)| name == "CLAUDE_CODE_OAUTH_TOKEN" && value.is_some()));
+        // Codex has no variable for a ChatGPT login: its engine is handed the
+        // lent token over its protocol, and a direct launch is refused.
+        let codex = crate::provider_account::ProviderAccountRoute::lent(
+            client.clone(),
+            Provider::Codex,
+            &client
+                .resolve_exact(Provider::Codex, &id("primary"), None)
+                .unwrap(),
+            false,
+            true,
+        );
+        let mut engine = tokio::process::Command::new("codex");
+        codex.launch_engine_as(engine.as_std_mut()).await.unwrap();
+        assert!(engine
+            .as_std()
+            .get_envs()
+            .all(|(name, value)| name != "CODEX_ACCESS_TOKEN" || value.is_none()));
+        let login = codex.engine_login().unwrap().unwrap();
+        assert_eq!(login["type"], "chatgptAuthTokens");
+        assert_eq!(login["chatgptAccountId"], "workspace");
+        assert!(codex
+            .launch_as(&mut std::process::Command::new("codex"))
+            .await
+            .is_err());
         probe_forwarded_authority().unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, "malformed");
         assert!(probe_forwarded_authority().is_err());

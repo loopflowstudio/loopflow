@@ -43,12 +43,9 @@ become a second driver.
 
 ## Develop direction
 
-When the user brings an idea, explore it with them and write it under
-`scratch/` in self-contained, topic-named notes. Keep proposals separate from
-choices the user has accepted, with dates and names. Create or reuse Tasks only
-once the direction is ready and the user has agreed; existing Tasks keep running
-while the design develops. Durable decisions belong in the Wave's memory, edited
-through the ordinary repository workflow.
+When the user brings an idea, read `lf skill show capture-tasks` and follow it
+in this conversation. Existing operational authority is unchanged; keep
+operating this Wave's Tasks within that authority.
 
 ## Limits
 

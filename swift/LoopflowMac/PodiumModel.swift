@@ -301,6 +301,24 @@ final class PodiumModel {
     private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
 
+    private var sessionSkillSelections = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
+
+    var selectedSessionSkill: String {
+        guard let repoPath else { return "capture-tasks" }
+        return sessionSkillSelections[repoIdentity(repoPath)] ?? "capture-tasks"
+    }
+
+    func selectSessionSkill(_ name: String, repo: String) {
+        var saved = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
+        saved[repoIdentity(repo)] = name
+        sessionSkillSelections = saved
+        UserDefaults.standard.set(saved, forKey: "sessionSkillsByRepository")
+    }
+
+    func sessionSkills(repo: String) async throws -> [DiscoveryEntry] {
+        try await query.sessionSkills(cwd: repo)
+    }
+
     private let query: RegistryQuery
     @ObservationIgnored private let cache: WorkspaceCache?
     /// The Home the saved workspace was read from, until `confirmHome` checks it.
@@ -748,6 +766,7 @@ final class PodiumModel {
             }
         } else { selection = requested }
         navigation.selectedSessionId = nil
+        navigation.showsRetainedTerminals = false
         navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()

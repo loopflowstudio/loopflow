@@ -405,6 +405,9 @@ struct SessionsContentView: View {
     let homeId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: store.repoPath) }
     private var currentIdentity: WorkspaceIdentity {
+        if navigation.showsRetainedTerminals {
+            return worktreeLayout.focusedPath ?? rootIdentity
+        }
         if navigation.selectedSessionId != nil {
             return selectedWorkspace?.identity ?? worktreeLayout.focusedPath ?? rootIdentity
         }
@@ -458,6 +461,9 @@ struct SessionsContentView: View {
     }
 
     private var navigation: WorkspaceNavigation { model.navigation }
+    private var usesWorktreeLayout: Bool {
+        navigation.showsRetainedTerminals || taskPath == nil && fileTask == nil
+    }
     private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
     private var fileTask: WorkspaceTask? {
         // A departing repository view must not mount the next repository's
@@ -482,8 +488,8 @@ struct SessionsContentView: View {
                     if worktreeLayout.focusedPath == nil { worktreeLayout.select(rootIdentity) }
                     multiplexer.newShell()
                     navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
-                    .frame(width: 264)
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
+                    .frame(width: 320)
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
@@ -493,7 +499,7 @@ struct SessionsContentView: View {
                             onOpenSession: openSession, onMonitor: showMonitor,
                             onTaskDetails: { workspace.showsDetails = true }
                         ) {
-                            if taskPath != nil {
+                            if taskPath != nil && !navigation.showsRetainedTerminals {
                                 taskStage
                                 WorkspaceGlyphButton("sidebar.left",
                                     label: workspace.showsMaterials ? "Hide Sessions" : "Show Sessions",
@@ -504,7 +510,7 @@ struct SessionsContentView: View {
                                     identifier: "workspace-toggle-files") { workspace.showsFiles.toggle() }
                             }
                             if terminalsVisible {
-                                if navigation.selectedSessionId != nil { worktreeChip }
+                                if usesWorktreeLayout { worktreeChip }
                                 else if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
@@ -512,24 +518,24 @@ struct SessionsContentView: View {
                                         .foregroundStyle(palette.textSecondary).help(taskPath)
                                         .accessibilityLabel("Task worktree")
                                         .accessibilityIdentifier("task-worktree-location")
-                                } else if fileTask == nil { worktreeChip }
+                                }
                                 if multiplexer.zoomedPaneId != nil {
                                     Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
                                         .accessibilityIdentifier("workspace-restore")
                                 }
-                                if navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil { completionControls }
+                                if usesWorktreeLayout || taskPath != nil { completionControls }
                             }
                         }
                         ZStack {
                             Group {
-                                if let taskPath {
+                                if let taskPath, !navigation.showsRetainedTerminals {
                                     HStack(spacing: 0) {
                                         if workspace.showsMaterials && multiplexer.zoomedPaneId == nil { taskMaterials }
                                         WorktreeTerminalsView(workspace: workspace,
                                             path: taskPath, isFocused: terminalsVisible, sessions: store)
                                             .id(taskIdentity)
                                     }
-                                } else if fileTask != nil {
+                                } else if fileTask != nil && !navigation.showsRetainedTerminals {
                                     VStack(spacing: Spacing.md) {
                                         if let task = fileTask { Text(task.task.task.description) }
                                         Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
@@ -574,7 +580,7 @@ struct SessionsContentView: View {
                         .frame(maxWidth: .infinity)
                         .clipped()
                     }
-                    if showsFiles, let taskId = fileTaskId, let taskPath {
+                    if showsFiles, !navigation.showsRetainedTerminals, let taskId = fileTaskId, let taskPath {
                         TaskFilesView(
                             store: workspace.files(
                                 taskId: taskId, issue: taskId, cwd: taskPath, query: query),
@@ -593,7 +599,7 @@ struct SessionsContentView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, navigation.palette == nil, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil, usesWorktreeLayout || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -954,6 +960,17 @@ struct SessionsContentView: View {
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
         model.observeActiveSessions()
+    }
+
+    private func launchSessionSkill(_ launch: SessionSkillLaunch) {
+        do {
+            let lf = try LocalWaveAgentLauncher.controlLfPath()
+            let identity = WorkspaceIdentity(homeId: homeId, worktree: launch.repoPath)
+            worktreeLayout.select(identity)
+            navigation.showsRetainedTerminals = true
+            navigation.content = .terminals
+            workspaces.workspace(for: identity).multiplexer.newShell(command: launch.arguments(lf: lf))
+        } catch { launchError = error.localizedDescription }
     }
 
     private func startConversation() {

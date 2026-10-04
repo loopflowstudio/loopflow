@@ -5,6 +5,33 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Capture and configurable New Session (2026-10-03 UTC)
+
+Jack Heart accepted capture on October 1, then selected New Session and the
+Linear-style compose row on October 2. Jack approved the searchable skill-picker
+prototype and requested pursue through its human demo boundary, preserving the
+existing opening prompt. New Session launches; choosing a skill only updates the
+next launch and persists per repository. The default is `capture-tasks`.
+
+Tasks express intention. Favor cohesive behavioral promises; several Tasks across
+Waves/repositories are supported, never a quota. Launch scope is a revisable clue,
+not a filing boundary. Capture stays in its repository/Wave conversation, files
+self-contained briefs without workers, and leaves operation to owners. Wave
+conversations read the same skill without changing their existing authority.
+Keep design and general/Task conversations. After an uncertain write, reconcile
+in its destination and retry identical input there; preserve each successful filing.
+
+The branch uses lf-owned discovery and explicit `skill <name>` launch syntax to
+avoid Flow-name collisions. Repository presentation retains `(Home, checkout)`
+identity and both layouts without changing Task selection. A successful app build
+proved insufficient when its configured CLI lacked the skill: configured runtime
+and shipped packaging need their own evidence. Six focused post-sync tests cover
+selection, scope and production-control layout/error behavior; native picker
+interaction, provider/draft continuity and real cross-repository capture remain
+unproven. Prototype approval supplies no native acceptance or sustained-use KR.
+The accepted design and dated demo evidence are retained at
+[the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
+
 ## Session working set (2026-10-03)
 
 Jack Heart requested unfinished interactive participation in ordinary API and
@@ -1052,10 +1079,6 @@ Wispr Flow owns dictation; configured UI execution requires a capable host.
   fresh `RepoSidebarWindow` re-derived the burgundy sidebar / create sheet /
   terminal panes and got each subtly wrong; the proven components already encode
   the right style + behavior — adapt them.
-- **Historical palette implementation, not a canvas requirement:** a custom `VStack{…}.background(Color.loopflowBurgundy)`
-  with white text (`WaveSidebar.swift`), NOT a `NavigationSplitView` column (its
-  gray vibrant material can't be overridden). Fields = `.textFieldStyle(.plain)` +
-  `palette.surfaceMuted` (`CatchWaveView`), NOT `.roundedBorder` (renders black).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
@@ -1069,7 +1092,9 @@ Wispr Flow owns dictation; configured UI execution requires a capable host.
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
-- Kickoff line numbers drift fast — re-verify before citing in a design.
-- Migration ordinals collide across branches and an in-place edit of a released
-  migration never reaches existing stores; AGENTS.md now owns the one-draft rule.
-  The June `061`/`057` incident is in `06e3fc455:wave/product/MEMORY.md`.
+- **Historical migrations demonstrated the shared-store blast radius.** Product
+  and Intelligence collided on `061`; editing an already-applied migration left
+  existing databases without a required column. Preserve released migrations and
+  test upgrades from the released frontier. The specific 057/061 incident and
+  proposed remedies are retained in the prior memory linked above; they are not
+  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.

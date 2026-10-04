@@ -94,6 +94,13 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub chrome: Option<BrowserMode>,
 
+    /// Exact cron receipt attribution for mechanical release execution
+    #[arg(long = "__cron-receipt", hide = true, requires = "cron_lock_fd")]
+    pub cron_receipt: Option<String>,
+
+    #[arg(long = "__cron-lock-fd", hide = true, requires = "cron_receipt")]
+    pub cron_lock_fd: Option<i32>,
+
     /// Select changed-code context; omission inherits configuration
     #[arg(long, value_enum)]
     pub diff: Option<DiffContext>,
@@ -176,6 +183,8 @@ impl Cli {
 
     pub(crate) fn exec_options(&self) -> Self {
         Self {
+            cron_receipt: self.cron_receipt.clone(),
+            cron_lock_fd: self.cron_lock_fd,
             command: None,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
@@ -1097,6 +1106,16 @@ pub enum PrCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum CronCommand {
+    /// Record repair ownership without changing the failed evidence
+    Disposition {
+        subject: String,
+        #[arg(long)]
+        wave: String,
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        reason: String,
+    },
     /// Install or replace a scheduled lf invocation
     Add {
         /// Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted)
@@ -1470,6 +1489,15 @@ pub enum RouteCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ReleaseCommand {
+    /// Show original due opportunities and their release evidence
+    History {
+        #[arg(short = 'w', long)]
+        wave: String,
+        #[arg(long, default_value_t = 35)]
+        days: u32,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the full release workflow end-to-end
     Run {
         /// Version to release: patch|minor|major|X.Y.Z (default: patch)

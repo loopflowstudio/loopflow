@@ -118,6 +118,12 @@ pub(crate) trait LandingDriver: Send + Sync {
 #[derive(Debug, Clone)]
 struct GithubLandingDriver {
     repairs: bool,
+    release: Option<
+        Arc<(
+            super::release_lock::ReleaseLock,
+            crate::engine::git::WorktreeLease,
+        )>,
+    >,
 }
 
 impl LandingDriver for GithubLandingDriver {
@@ -133,7 +139,7 @@ impl LandingDriver for GithubLandingDriver {
     }
 
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
-        admit_ci_fix(landing, incident)
+        admit_ci_fix(landing, incident, self.release.as_deref())
     }
 
     fn repairs(&self) -> bool {
@@ -206,7 +212,14 @@ fn classify_github_observation(
     }
 }
 
-fn admit_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+fn admit_ci_fix(
+    landing: &PrLanding,
+    incident: &CiIncident,
+    release: Option<&(
+        super::release_lock::ReleaseLock,
+        crate::engine::git::WorktreeLease,
+    )>,
+) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = landing_store().await?;
@@ -384,17 +397,36 @@ fn admit_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
             .as_ref()
             .map(|id| format!("task:{id}"))
             .unwrap_or_default();
-        crate::engine::process::start_lf_session_with_env(
-            &name,
-            &landing.worktree,
-            &argv,
-            &[
-                (crate::lf::WORK_DECLARATION_ENV, &work),
-                ("LF_USER_NAME", ""),
-            ],
-        )
-        .await
-        .map_err(repair_error)?;
+        let environment = [
+            (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
+            ("LF_USER_NAME", ""),
+        ];
+        if let Some((lock, lease)) = release {
+            crate::engine::process::start_lf_session_inheriting(
+                &name,
+                &landing.worktree,
+                &argv,
+                &environment,
+                &|command| {
+                    lock.inherit(command);
+                    lease.inherit(command);
+                },
+            )
+            .await
+            .map_err(repair_error)?;
+        } else {
+            crate::engine::process::start_lf_session_with_env(
+                &name,
+                &landing.worktree,
+                &argv,
+                &[
+                    (crate::lf::WORK_DECLARATION_ENV, &work),
+                    ("LF_USER_NAME", ""),
+                ],
+            )
+            .await
+            .map_err(repair_error)?;
+        }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
             let saved = store
@@ -515,7 +547,11 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         Ok::<_, OpsError>((store, landing, incident, captured))
     })?;
     let result = (|| {
-        let observation = GithubLandingDriver { repairs: true }.observe(&landing)?;
+        let observation = GithubLandingDriver {
+            repairs: true,
+            release: None,
+        }
+        .observe(&landing)?;
         let matching = match observation {
             LandingObservation::Failing {
                 head_sha,
@@ -1394,10 +1430,22 @@ pub(crate) fn reconcile_armed_pr(
     repo: &Path,
     options: &LandOptions,
     pr: &PrInfo,
+    lock: &super::release_lock::ReleaseLock,
+    lease: &crate::engine::git::WorktreeLease,
 ) -> OpsResult<PrLanding> {
     let landing = record_armed_pr(repo, options, pr)?;
-    tokio::runtime::Runtime::new()?
-        .block_on(async { repair_landing(landing_store().await?, landing).await })
+    let release = Some(Arc::new((lock.try_clone()?, lease.try_clone()?)));
+    tokio::runtime::Runtime::new()?.block_on(async {
+        reconcile_pr_landing(
+            landing_store().await?,
+            landing,
+            Arc::new(GithubLandingDriver {
+                repairs: true,
+                release,
+            }),
+        )
+        .await
+    })
 }
 
 /// One landing check that may start a ci-fix: the entry point `lf ci watch`
@@ -1407,7 +1455,10 @@ pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> Op
     reconcile_pr_landing(
         store,
         landing,
-        Arc::new(GithubLandingDriver { repairs: true }),
+        Arc::new(GithubLandingDriver {
+            repairs: true,
+            release: None,
+        }),
     )
     .await
 }
@@ -1470,7 +1521,10 @@ pub(crate) async fn reconcile_repository_async(
             reconcile_pr_landing(
                 store.clone(),
                 landing,
-                Arc::new(GithubLandingDriver { repairs: false }),
+                Arc::new(GithubLandingDriver {
+                    repairs: false,
+                    release: None,
+                }),
             ),
         )
         .await

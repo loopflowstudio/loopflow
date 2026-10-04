@@ -168,6 +168,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
             &repo,
             &path,
             lease.as_ref().expect("worktree has a deletion lease"),
+            &|_| {},
         )?;
     }
     if ref_exists(&repo, &format!("refs/heads/{branch}"))? {

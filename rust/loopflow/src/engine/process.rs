@@ -197,7 +197,7 @@ async fn start_session_with_context(
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(argv, &environment);
+    let shell_command = lf_session_shell_command(cwd, argv, &environment);
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
@@ -216,7 +216,11 @@ fn extend_session_control_context(
     }
 }
 
-pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
+pub(crate) fn lf_session_shell_command(
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> String {
     let command = argv
         .iter()
         .map(|arg| shell_escape(arg))
@@ -233,10 +237,12 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         PROCESS_CONTEXT_ENV.join(" "),
         FORWARDED_AUTHORITY_ENV.join(" "),
     );
+    // A long-lived tmux server can retain a deleted cwd despite new-session -c.
+    let enter_directory = format!("cd -- {} || exit", shell_escape(&cwd.to_string_lossy()));
     if env.is_empty() {
-        format!("{clear_context}; exec {command}")
+        format!("{enter_directory}; {clear_context}; exec {command}")
     } else {
-        format!("{clear_context}; exec env {env} {command}")
+        format!("{enter_directory}; {clear_context}; exec env {env} {command}")
     }
 }
 
@@ -246,6 +252,7 @@ pub(crate) async fn start_tmux_session(
     shell_command: &str,
 ) -> Result<()> {
     let mut command = tokio::process::Command::new("tmux");
+    command.current_dir(cwd);
     command.process_group(0);
     // This client may start the tmux server, whose environment every later
     // session inherits, including ones a person opens by hand.
@@ -270,7 +277,7 @@ pub(crate) async fn start_tmux_session(
         ])
         .status()
         .await
-        .map_err(|err| anyhow!("tmux failed to spawn: {err}"))?;
+        .map_err(|err| anyhow!("tmux failed to spawn in {cwd}: {err}"))?;
     if !status.success() {
         return Err(anyhow!("tmux failed to launch session '{session}'"));
     }
@@ -359,6 +366,91 @@ mod tests {
     };
 
     #[test]
+    fn detached_child_enters_quoted_directory_and_reports_missing_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("checkout with 'quotes'");
+        std::fs::create_dir(&cwd).unwrap();
+        let command = lf_session_shell_command(&cwd, &["pwd".into(), "-P".into()], &[]);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir(&cwd).unwrap();
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires a local tmux executable; uses an isolated server"]
+    fn detached_child_recovers_deleted_tmux_server_directory() {
+        let directory = tempfile::Builder::new()
+            .prefix("lf-tmux-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = directory.path().join("socket");
+        let original = directory.path().join("deleted");
+        let cwd = directory.path().join("checkout with 'quotes'");
+        let output_path = directory.path().join("pwd");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&cwd).unwrap();
+        let tmux = || {
+            let mut command = std::process::Command::new("tmux");
+            command
+                .env_remove("TMUX")
+                .args(["-S"])
+                .arg(&socket)
+                .args(["-f", "/dev/null"]);
+            command
+        };
+        assert!(tmux()
+            .current_dir(&original)
+            .args(["new-session", "-d", "-s", "anchor", "sleep 15"])
+            .status()
+            .unwrap()
+            .success());
+        std::fs::remove_dir(&original).unwrap();
+        let command = lf_session_shell_command(
+            &cwd,
+            &[
+                "/bin/sh".into(),
+                "-c".into(),
+                format!(
+                    "pwd -P > {}",
+                    super::shell_escape(output_path.to_str().unwrap())
+                ),
+            ],
+            &[],
+        );
+        let launched = tmux()
+            .args(["new-session", "-d", "-s", "child", "-c"])
+            .arg(&cwd)
+            .args(["/bin/sh", "-lc", &command])
+            .status()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !output_path.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let output = std::fs::read_to_string(&output_path);
+        let _ = tmux().arg("kill-server").status();
+        assert!(launched.success());
+        assert_eq!(
+            output.unwrap().trim(),
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
+    }
+
+    #[test]
     fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
         let dir = tempfile::tempdir().unwrap();
         let old = dir.path().join("lf-old");
@@ -389,9 +481,10 @@ mod tests {
             "task".to_string(),
             "tsk_123".to_string(),
         ];
-        let command = lf_session_shell_command(&argv, &[("LF_WAVE_ID", "infra")]);
+        let command =
+            lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
-        assert!(command.starts_with(
+        assert!(command.contains(
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
@@ -409,7 +502,7 @@ mod tests {
             "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_STEP-}${LF_BIN-}${LF_HOME-unset}\""
                 .into(),
         ];
-        let command = lf_session_shell_command(&argv, &[]);
+        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
         let output = std::process::Command::new("sh")
             .args(["-c", &command])
             .env("LF_RUN_ID", "run_dead")
@@ -427,7 +520,7 @@ mod tests {
     fn lf_session_without_explicit_identity_does_not_inherit_its_parent() {
         let argv = vec!["lf".to_string(), "wave".to_string(), "child".to_string()];
 
-        let command = lf_session_shell_command(&argv, &[]);
+        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_WORK_ADVANCE_CLAIM"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
@@ -445,7 +538,7 @@ mod tests {
             let env = name
                 .map(|name| vec![(crate::engine::config::USER_NAME_ENV, name)])
                 .unwrap_or_default();
-            let command = lf_session_shell_command(&argv, &env);
+            let command = lf_session_shell_command(std::path::Path::new("."), &argv, &env);
             let output = std::process::Command::new("sh")
                 .args(["-c", &command])
                 .env(crate::engine::config::USER_NAME_ENV, "Jack")
@@ -483,7 +576,11 @@ mod tests {
         assert!(forwarded_authority_env_names()
             .iter()
             .any(|name| name == DISCORD_TOKEN_ENV));
-        let command = lf_session_shell_command(&["lf".into(), "wave".into()], &[]);
+        let command = lf_session_shell_command(
+            std::path::Path::new("."),
+            &["lf".into(), "wave".into()],
+            &[],
+        );
         assert!(command.contains("unset "));
         assert!(command.contains(DISCORD_TOKEN_ENV));
     }
@@ -498,6 +595,7 @@ mod tests {
             "tsk_123".to_string(),
         ];
         let command = lf_session_shell_command(
+            std::path::Path::new("."),
             &argv,
             &[
                 ("LF_TRACE_ID", "run-1"),

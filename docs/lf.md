@@ -111,7 +111,10 @@ lf release check                   # inspect release eligibility
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
 own preparation and integration; publish does not sync. PR operations work
 on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges; `lf ci watch`
+`lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
+it also recovers an existing PR whose GitHub identity is missing from the Task,
+without publishing, rotating the branch, or completing the Task. Multiple PRs
+for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ## Keep Tasks progressing in the background
@@ -209,8 +212,13 @@ Task destinations open details; selecting a Flow opens its folded template.
 
 ```bash
 lf task status LOO-358 --json
-lf session list --task LOO-358 --history
+lf session list --task LOO-358 --interactive all --history
 ```
+
+`lf session list` defaults to unfinished interactive conversations and current
+Flow reviews. `--needs-me` narrows that selection to immediate attention;
+`--all` changes repository scope, `--interactive all` includes background work,
+and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
 including headless and completed work. Managed marks the Flow advanced by

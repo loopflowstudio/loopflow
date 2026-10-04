@@ -5,6 +5,16 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Session working set (2026-10-03)
+
+Jack Heart requested unfinished interactive participation in ordinary API and
+Desktop Session navigation (LOO-372). Task association still includes all work.
+`--needs-me` narrows the selected mode; explicit headless/history filters retain
+full inspection. Filtered absence cannot release native surfaces or clear drafts
+and selection. Explicit completion remains separate from turn completion.
+Local headless regressions cover visibility, counts and refresh/completion races;
+they establish no sustained-use KR or configured provider acceptance.
+
 ## Current Tasks and completion history (2026-10-02)
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
@@ -1023,55 +1033,13 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Historical Wave controls & truthful failures (`wave-controls`)
+## Historical Wave controls
 
-The resident/listener Stop lifecycle and chat rendering below are historical:
-upstream `3dc89bc9a` removed those runtime and UI surfaces. Do not restore them
-as dependencies of primary Sessions. The failure-evidence, native UI proof and
-dictation lessons remain useful independently.
-
-The 2026-07-10 dogfood exposed four independent surface failures; all repaired
-here on top of PR #849's signed-test/release hardening.
-
-- **Stop is a wave lifecycle verb: `lf stop <name>`.** Top-level command (not
-  `lf loop stop`), closing the old "no single-wave stop" gap. It discovers the
-  live loopback listener via the same `.wave-endpoint` `lf serve` writes, posts
-  `POST /stop`, and waits briefly for graceful shutdown. Missing/stale endpoint
-  = idempotent success ("already stopped"). **The listener is the sole cleanup
-  owner** (`run_listener`): stop supervisor → terminate resident → deregister
-  runtime registration → remove only this boot's endpoint + resident-token
-  files. Detached
-  worker loops stay independent; the listener never owned their tmux. The Mac
-  Stop button shells through the same CLI verb via `LocalWaveAgentLauncher`
-  (launcher tests pin the exact `lf stop <wave>` argv) — one implementation, CLI
-  and GUI. **The agent exec door denies `stop`** (`ExecVerdict::Deny`) so a
-  worker can't tear down its steward wave.
-- **Empty `Thought` records never become cards.** Whitespace-only thoughts are
-  dropped at the listener's shared turn-item boundary (clean new journals) AND
-  filtered in the shared Swift model (existing journals replay clean). Non-empty
-  thoughts and every other item type survive.
-- **Transcript follows only while the reader is at the bottom.** A near-bottom
-  flag derived from scroll geometry gates auto-follow; scrolling back disables
-  it, returning to the bottom re-enables. Initial replay starts in follow mode.
-  No timer, no buffered-copy model — it tracks reader intent only.
-- **Failed bodies are attempts, not failed waves** (`AttemptFailurePresentation`).
-  A surface-only projection over existing provenance; runtime/journal/wire
-  unchanged. Key: `StepKey = (invocation_id, step_index, iteration)`. A
-  body-backed failed turn retains its exact `termination_reason`; a later
-  different body with the same key ⇒ `retrying` (running) / `recovered on retry`
-  (complete); same step still selected, no active body, loop not failed ⇒
-  `retry pending`; else `Attempt failed`. Bodyless failed turns keep the neutral
-  `Turn failed` fallback. **Never infer terminal step or wave failure from an
-  attempt** — the capacity-error receipt now reads `Attempt failed · recovered
-  on retry` with the reason visible, and the successful retry is its own turn.
-- **Dictation is Wispr Flow (Mac + iOS), not a built-in.** The product owner
-  chose Wispr Flow, so the unused `VoiceInputService` (~1276 lines), WhisperKit
-  package, its tests (~554 lines), and microphone permission declarations left
-  the product rather than being carried into the signed build.
-- **Signed UI-test gate reconciled with CI:** PR #849's signed macOS
-  `xcodebuild build-for-testing` compiles the visible controls without requiring
-  hosted Automation permission; executing UI tests stays an explicit
-  host-permissioned action (macOS Automation can stop the runner pre-bootstrap).
+The retired listener controls, failed-turn presentation and dictation decisions
+are preserved in `12016c6d6dd34a4c1a553c25b5cf2529ee93615b:wave/product/MEMORY.md`
+under “Historical Wave controls & truthful failures”. They do not authorize
+restoring the listener. Attempt failure remains distinct from Work failure;
+Wispr Flow owns dictation; configured UI execution requires a capable host.
 
 ## Learnings
 

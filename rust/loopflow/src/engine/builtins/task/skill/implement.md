@@ -98,7 +98,7 @@ plan in the conversation; do not require a document template or a prior skill.
 **One concept, one authority.** A new type must represent a new real-world
 concept. Legacy/New enums, v2 types, adapters, fallbacks, dual writes,
 compatibility shims, and parallel stores are blocking by default. Use one only
-when the reviewed design explicitly authorizes it and names its deletion point.
+when the reviewed design explicitly calls for it and names its deletion point.
 
 **Test behavior.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
 

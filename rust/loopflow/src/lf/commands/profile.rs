@@ -53,6 +53,12 @@ struct RouteReport {
     provider: Provider,
     scope: String,
     ambient: bool,
+    /// Each conversation runs in its account's own home rather than the
+    /// provider's native one.
+    isolated: bool,
+    /// The stored account the native home is signed in as; absent when
+    /// isolated or when its login belongs to no stored account.
+    active_account: Option<ProviderAccountId>,
     candidates: Vec<RouteAccount>,
     diagnostic: Option<String>,
 }
@@ -156,10 +162,27 @@ async fn show_routes(
                 demotion,
             });
         }
+        let isolated = crate::provider_account::activation::launch_isolated();
+        let active_account = match store {
+            Some(store) if !isolated => {
+                let stored = store
+                    .list_provider_accounts(Some(provider.as_str()))
+                    .await?;
+                crate::provider_account::activation::active_account(
+                    provider,
+                    &crate::provider_account::activation::native_home(provider, None),
+                    &stored,
+                )
+                .map(|account| account.account_id.clone())
+            }
+            _ => None,
+        };
         reports.push(RouteReport {
             provider,
             scope,
             ambient,
+            isolated,
+            active_account,
             candidates,
             diagnostic,
         });
@@ -169,6 +192,24 @@ async fn show_routes(
     } else {
         for report in reports {
             println!("{} ({})", report.provider, report.scope);
+            if report.isolated {
+                println!("  isolated: each conversation runs in its account's own home");
+            } else {
+                let active = report.active_account.as_ref().map(|active| {
+                    report
+                        .candidates
+                        .iter()
+                        .find(|account| account.account_id == *active)
+                        .and_then(|account| account.login.clone())
+                        .unwrap_or_else(|| active.to_string())
+                });
+                println!(
+                    "  shared: {} is signed in as {}",
+                    crate::provider_account::activation::native_home(report.provider, None)
+                        .display(),
+                    active.as_deref().unwrap_or("no stored account")
+                );
+            }
             if report.ambient {
                 println!("  ambient");
             } else if report.candidates.is_empty() {
@@ -314,6 +355,14 @@ mod tests {
             serde_json::to_value(&reports).unwrap(),
             serde_json::from_str::<serde_json::Value>(fixture).unwrap()
         );
+        assert!(reports[0].isolated && reports[0].active_account.is_none());
+        assert_eq!(
+            reports[1].active_account.as_ref().map(|id| id.as_str()),
+            Some("personal")
+        );
+        let mut missing: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        missing[0].as_object_mut().unwrap().remove("isolated");
+        assert!(serde_json::from_value::<Vec<RouteReport>>(missing).is_err());
         assert_eq!(reports[0].candidates[0].account_id.as_str(), "engineering");
         assert_eq!(
             reports[0].candidates[0].login.as_deref(),

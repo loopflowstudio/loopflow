@@ -115,9 +115,27 @@ impl<'de> Deserialize<'de> for Command {
             args: Vec<String>,
         }
         let mut saved = SavedCommand::deserialize(deserializer)?;
-        if matches!(saved.command.as_str(), "rebase" | "sync") {
-            saved.command = "task".into();
-            saved.args.insert(0, "sync".into());
+        if saved.command == "rebase" {
+            saved.command = "sync".into();
+        }
+        if saved.command == "task"
+            && saved
+                .args
+                .first()
+                .is_some_and(|name| matches!(name.as_str(), "pr" | "wt" | "sync" | "commit"))
+        {
+            saved.command = saved.args.remove(0);
+        }
+        let owner = match saved.command.as_str() {
+            "doctor" | "install" | "screenshot" | "ssh" | "desktop" => Some("home"),
+            "usage" | "ps" | "top" | "activity" => Some("monitor"),
+            "release" | "tokens" | "ci" => Some("repo"),
+            "cron" => Some("wave"),
+            _ => None,
+        };
+        if let Some(owner) = owner {
+            saved.args.insert(0, saved.command);
+            saved.command = owner.into();
         }
         Ok(Self {
             command: saved.command,
@@ -1245,11 +1263,7 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(
-            flows.join("invalid.yaml"),
-            "- cmd: task sync\n  human: true\n",
-        )
-        .unwrap();
+        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()
@@ -1580,7 +1594,7 @@ Design the feature.
     #[test]
     fn parse_command_mapping_accepts_command_and_args() {
         let yaml = r#"
-- cmd: task pr land
+- cmd: pr land
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1591,8 +1605,8 @@ Design the feature.
                 target: Target::Command(item),
                 ..
             } => {
-                assert_eq!(item.command, "task");
-                assert_eq!(item.args, vec!["pr", "land"]);
+                assert_eq!(item.command, "pr");
+                assert_eq!(item.args, vec!["land"]);
             }
             other => panic!("expected command item, got {other:?}"),
         }
@@ -1783,7 +1797,7 @@ Design the feature.
         fs::write(tmp.path().join(".lf/skills/work.md"), "Captured work").unwrap();
         fs::write(
             tmp.path().join(".lf/flows/inner.yaml"),
-            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: task pr land --local\n",
+            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: pr land --local\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".lf/flows/outer.yaml"),
@@ -1817,7 +1831,7 @@ Design the feature.
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
             panic!("command")
         };
-        assert_eq!(command.item.argv(), ["lf", "task", "pr", "land", "--local"]);
+        assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);
     }
 
     #[test]

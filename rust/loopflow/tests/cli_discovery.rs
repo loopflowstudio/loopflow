@@ -68,22 +68,11 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["run", "debug", "--help"],
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
+        vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
+        vec![vec!["sync", "--help"], vec!["help", "sync"]],
+        vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
         vec![
-            vec!["task", "wt", "create", "--help"],
-            vec!["wt", "create", "--help"],
-        ],
-        vec![
-            vec!["task", "sync", "--help"],
-            vec!["task", "syn", "--help"],
-        ],
-        vec![
-            vec!["help", "land"],
-            vec!["land", "--help"],
-            vec!["task", "pr", "land", "--help"],
-            vec!["pr", "land", "--help"],
-        ],
-        vec![
-            vec!["help", "account", "rou"],
+            vec!["help", "account", "route"],
             vec!["account", "route", "--help"],
         ],
         vec![
@@ -248,10 +237,10 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["task", "changes", "INF-123", "--json"][..],
         &["task", "diff", "INF-123", "src.rs", "--files"],
         &["task", "diff", "INF-123", "--files", "--draft"],
-        &["task", "wt", "list", "--full"],
+        &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
-        &["task", "wt", "list", "--format", "json"],
-        &["task", "commit", "--push"],
+        &["wt", "list", "--format", "json"],
+        &["commit", "--push"],
         &["account", "status"],
         &["account", "--verify"],
         &["account", "route", "show"],
@@ -274,7 +263,7 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
             "work@example.com",
         ],
         &["account", "route", "--json", "set", "codex", "work@"],
-        &["task", "wt", "rm", "unused"],
+        &["wt", "rm", "unused"],
         &["-M", "unused", "run", "solo"],
         &["-C", "run", "solo"],
     ] {
@@ -425,7 +414,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let repo = fixture();
     fs::write(
         repo.path().join(".lf/flows/commands.yaml"),
-        "- cmd: task pr land --local\n",
+        "- cmd: pr land --local\n",
     )
     .unwrap();
     let flow = load_flow("commands", repo.path()).unwrap();
@@ -433,7 +422,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let ConcreteStep::Command(step) = &steps[0] else {
         panic!("expected command")
     };
-    assert_eq!(step.item.argv(), ["lf", "task", "pr", "land", "--local"]);
+    assert_eq!(step.item.argv(), ["lf", "pr", "land", "--local"]);
     let adapted = Target::Command(step.item.clone()).into_flow();
     assert_eq!(adapted.items, flow.items);
 
@@ -447,6 +436,13 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     };
     let canonical = normalize_args(captured.item.argv()).unwrap();
     assert_eq!(canonical, step.item.argv());
+    assert_eq!(serde_json::to_value(restored).unwrap(), saved);
+
+    let legacy = serde_json::json!({"Command": {
+        "item": {"command": "task", "args": ["pr", "land", "--local"]},
+        "sources": ["commands"]
+    }});
+    let restored: ConcreteStep = serde_json::from_value(legacy).unwrap();
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     fs::write(
@@ -470,7 +466,7 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     );
     assert_eq!(
         normalized(&["lf", "land", "--next", "show"]),
-        ["lf", "task", "pr", "land", "--next", "show"]
+        ["lf", "pr", "land", "--next", "show"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),
@@ -533,6 +529,19 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     let collision = tree.clone().subcommand(clap::Command::new("money"));
     assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
     assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+}
+
+#[test]
+fn git_commands_keep_their_root_ownership() {
+    let tree = loopflow::lf::navigation::command_tree();
+    for name in ["pr", "wt", "sync", "commit"] {
+        assert!(tree.find_subcommand(name).is_some());
+        assert!(tree
+            .find_subcommand("task")
+            .unwrap()
+            .find_subcommand(name)
+            .is_none());
+    }
 }
 
 #[test]
@@ -638,7 +647,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(expected), "{error}");
     }
-    for args in [vec!["home", "user", "name"], vec!["task", "pr", "status"]] {
+    for args in [vec!["home", "user", "name"], vec!["pr", "status"]] {
         let output = run(repo.path(), home.path(), &args);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());

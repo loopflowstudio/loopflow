@@ -66,7 +66,7 @@ Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
 updates keep the child's entire `scratch/` tree, including deleted files; the
 parent's notes remain on the parent branch. Even a child with only this cleanup
 commit merges updates instead of resetting onto the parent's scratch.
-After the parent merges, `lf task sync` merges current main using the recorded fork
+After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
 The parent Task does not hold two simultaneously open PRs.
@@ -154,7 +154,7 @@ not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
 
 A supervisor-started merge can be handed to an agent in the same checkout.
-`lf task sync --continue --adopt` claims a raw merge after resolution. For a stopped
+`lf sync --continue --adopt` claims a raw merge after resolution. For a stopped
 Loopflow sync, ordinary `--continue` retains the saved branch and pinned target.
 Launching the agent neither adopts the operation nor publishes the result.
 
@@ -336,7 +336,7 @@ still fence direct callers. A pass budgets 45 seconds and each Task or external
 operation 10 seconds; deferred work stays visible in check output. launchd's
 calendar entries run each minute and coalesce sleep into a wake-time check.
 The detached tmux launch starts a separate process group, including when it must
-start the tmux server. No resident or provider turn runs inside the tick.
+start the tmux server. No provider turn runs inside the tick.
 
 Desktop consumes the Rust automation projection: installed/enabled state,
 last successful and failed receipts, selection and blockers. A missing receipt

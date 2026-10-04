@@ -54,5 +54,5 @@ it must not select that reader's skill or claim its execution environment.
 The design should make the intended outcome, chosen approach, remaining work,
 and proof clear. Ask about consequential gaps while the person is present;
 retain unanswered questions as questions. Briefly identify what changed and what
-still needs a decision. Do not create a separate design-review report or infer
-permission to launch implementation from completion of this skill.
+still needs a decision. Leave the design ready for a separate implementation
+step. Do not create a separate design-review report.

@@ -1,4 +1,4 @@
-//! Account authority forwarded by `lf ssh` through a foreground broker.
+//! Account authority forwarded by `lf home ssh` through a foreground broker.
 //!
 //! The origin offers an ordered account catalog without refreshing credentials.
 //! The target merges that catalog with its local accounts, then requests only
@@ -464,6 +464,11 @@ enum BrokerOperation {
         account_id: ProviderAccountId,
         provider_session_id: Option<String>,
     },
+    /// Refresh a credential the target reports as refused.
+    Renew {
+        provider: Provider,
+        account_id: ProviderAccountId,
+    },
     AccountFacts {
         provider: Provider,
         account_id: ProviderAccountId,
@@ -472,6 +477,11 @@ enum BrokerOperation {
         provider: Provider,
         provider_session_id: String,
         account_id: ProviderAccountId,
+        isolated: bool,
+    },
+    SessionIsolation {
+        provider: Provider,
+        provider_session_id: String,
     },
     PinnedAccount {
         provider: Provider,
@@ -526,6 +536,7 @@ enum BrokerResponse {
     Resolution(LeaseResolution),
     AccountFacts(Box<LeaseAccountFacts>),
     PinnedAccount(Option<ProviderAccountId>),
+    SessionIsolation(Option<bool>),
     Ok,
     Error(String),
 }
@@ -777,6 +788,21 @@ impl BrokerState {
                 self.resolve_exact(provider, &account_id, provider_session_id.as_deref())
                     .await?,
             )),
+            BrokerOperation::Renew {
+                provider,
+                account_id,
+            } => {
+                self.grant_contains(provider, &account_id)?;
+                self.prepared
+                    .credentials
+                    .remove(&(provider, account_id.clone()));
+                let access_token = self.access_token(provider, &account_id).await?;
+                Ok(BrokerResponse::Resolution(LeaseResolution {
+                    account_id,
+                    access_token,
+                    resume_requested_session: false,
+                }))
+            }
             BrokerOperation::AccountFacts {
                 provider,
                 account_id,
@@ -814,6 +840,17 @@ impl BrokerState {
                     limits,
                 })))
             }
+            BrokerOperation::SessionIsolation {
+                provider,
+                provider_session_id,
+            } => {
+                let isolated = self
+                    .prepared
+                    .store
+                    .provider_session_isolated(provider, &provider_session_id)
+                    .await?;
+                Ok(BrokerResponse::SessionIsolation(isolated))
+            }
             BrokerOperation::PinnedAccount {
                 provider,
                 provider_session_id,
@@ -830,13 +867,19 @@ impl BrokerState {
                 provider,
                 provider_session_id,
                 account_id,
+                isolated,
             } => {
                 self.grant_contains(provider, &account_id)?;
                 self.spent_preferences
                     .remove(&(provider, account_id.clone()));
                 self.prepared
                     .store
-                    .pin_provider_session_route(provider, &provider_session_id, &account_id)
+                    .pin_provider_session_route(
+                        provider,
+                        &provider_session_id,
+                        &account_id,
+                        isolated,
+                    )
                     .await?;
                 Ok(BrokerResponse::Ok)
             }
@@ -1132,6 +1175,22 @@ impl AccountLeaseClient {
         }
     }
 
+    pub(crate) fn renew(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<String, ProviderAccountError> {
+        match self.request(BrokerOperation::Renew {
+            provider,
+            account_id: account_id.clone(),
+        })? {
+            BrokerResponse::Resolution(resolution) => Ok(resolution.access_token),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
     pub(crate) fn account_facts(
         &self,
         provider: Provider,
@@ -1174,13 +1233,31 @@ impl AccountLeaseClient {
         provider: Provider,
         provider_session_id: &str,
         account_id: &ProviderAccountId,
+        isolated: bool,
     ) -> Result<(), ProviderAccountError> {
         match self.request(BrokerOperation::PinSession {
             provider,
             provider_session_id: provider_session_id.to_string(),
             account_id: account_id.clone(),
+            isolated,
         })? {
             BrokerResponse::Ok => Ok(()),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn session_isolated(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> Result<Option<bool>, ProviderAccountError> {
+        match self.request(BrokerOperation::SessionIsolation {
+            provider,
+            provider_session_id: provider_session_id.to_string(),
+        })? {
+            BrokerResponse::SessionIsolation(isolated) => Ok(isolated),
             _ => Err(ProviderAccountError::Runtime(
                 "account lease broker returned the wrong response".to_string(),
             )),
@@ -1245,7 +1322,7 @@ pub fn account_lease_active() -> bool {
 }
 
 /// Confirm that this process inherited a valid lease and can reach its broker.
-/// `lf ssh` runs this before the target command so an incompatible remote `lf`
+/// `lf home ssh` runs this before the target command so an incompatible remote `lf`
 /// or a failed socket forward cannot fall through to ambient remote accounts.
 pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
     let client = AccountLeaseClient::from_env()?.ok_or_else(|| {
@@ -1257,6 +1334,8 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
 
 #[cfg(test)]
 mod tests {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use std::collections::{HashMap, HashSet};
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
@@ -1493,7 +1572,7 @@ mod tests {
             .unwrap()
             .expect("the inspected candidate should be selectable");
         assert_eq!(route.account_id(), &inspected[0].0.account_id);
-        assert_eq!(!route.uses_native_home(), inspected[0].1);
+        assert_eq!(route.is_forwarded(), inspected[0].1);
         route
     }
 
@@ -1601,14 +1680,14 @@ mod tests {
 
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let codex_preference =
             AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
         std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let target_preference =
             AccountSelection::from_flags(&["claude=forwarded@".to_string()], &[]).unwrap();
@@ -1618,7 +1697,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &forwarded.account_id);
-        assert!(!route.uses_native_home());
+        assert!(route.is_forwarded());
 
         let shared_preference =
             AccountSelection::from_flags(&["claude=shared@".to_string()], &[]).unwrap();
@@ -1628,7 +1707,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let missing_preference =
             AccountSelection::from_flags(&["claude=missing@".to_string()], &[]).unwrap();
@@ -1638,7 +1717,7 @@ mod tests {
         );
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let mut missing_route = local.clone();
         missing_route.credential_state = CredentialState::Missing;
@@ -1649,7 +1728,7 @@ mod tests {
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
-        assert!(route.uses_native_home());
+        assert!(!route.is_forwarded());
 
         let client = AccountLeaseClient::from_env().unwrap().unwrap();
         let facts = client
@@ -1738,7 +1817,16 @@ mod tests {
                 store.upsert_provider_account(&account).await.unwrap();
                 credentials.insert(
                     (grant.provider, account_id.clone()),
-                    format!("{}-{account_id}-secret", grant.provider),
+                    match grant.provider {
+                        // A ChatGPT access token names its workspace.
+                        Provider::Codex => format!(
+                            "h.{}.s",
+                            URL_SAFE_NO_PAD.encode(
+                                r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"workspace"}}"#
+                            )
+                        ),
+                        provider => format!("{provider}-{account_id}-secret"),
+                    },
                 );
             }
         }
@@ -1786,7 +1874,7 @@ mod tests {
             .contains("missing or expired"));
         // A resumed fallback account does not consume the preferred attempt.
         store
-            .pin_provider_session_route(Provider::Codex, "fallback-session", &id("primary"))
+            .pin_provider_session_route(Provider::Codex, "fallback-session", &id("primary"), true)
             .await
             .unwrap();
         let fallback_resume = client
@@ -1827,7 +1915,7 @@ mod tests {
             .is_err());
         // Resume stays on the account the store recorded for the session.
         store
-            .pin_provider_session_route(Provider::Codex, "existing-session", &id("reserve"))
+            .pin_provider_session_route(Provider::Codex, "existing-session", &id("reserve"), true)
             .await
             .unwrap();
         let resumed = client
@@ -1844,7 +1932,12 @@ mod tests {
         );
         store.upsert_provider_account(&remote_only).await.unwrap();
         store
-            .pin_provider_session_route(Provider::Codex, "outside-session", &id("remote-only"))
+            .pin_provider_session_route(
+                Provider::Codex,
+                "outside-session",
+                &id("remote-only"),
+                true,
+            )
             .await
             .unwrap();
         let outside = client
@@ -1933,6 +2026,79 @@ mod tests {
         assert!(command
             .get_envs()
             .any(|(name, value)| name == "CODEX_ACCESS_TOKEN" && value.is_none()));
+        // A lent account runs shared or isolated like a stored one. Either
+        // way its token stays in the environment and no login is written.
+        assert!(route.is_shared());
+        assert!(command
+            .get_envs()
+            .all(|(name, _)| name != "CLAUDE_CONFIG_DIR"));
+        let _isolation = RestoreEnv::capture("LF_ACCOUNT_ISOLATION");
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
+        let isolated = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut command = std::process::Command::new("claude");
+        isolated.launch_as(&mut command).await.unwrap();
+        let home = command
+            .get_envs()
+            .find(|(name, _)| *name == "CLAUDE_CONFIG_DIR")
+            .and_then(|(_, home)| home.map(PathBuf::from))
+            .unwrap();
+        assert!(home.starts_with(temp.path().join("accounts/claude")) && home.is_dir());
+        assert!(!home.join(".credentials.json").exists());
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "CLAUDE_CODE_OAUTH_TOKEN" && value.is_some()));
+        isolated.pin_session("lent-isolated").await.unwrap();
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "shared");
+        let resumed = crate::provider_account::resolve_provider_account(
+            Provider::Claude,
+            Some("lent-isolated"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!resumed.is_shared());
+        let mut reopened = std::process::Command::new("claude");
+        resumed.launch_as(&mut reopened).await.unwrap();
+        assert!(reopened
+            .get_envs()
+            .any(|(name, value)| name == "CLAUDE_CONFIG_DIR" && value == Some(home.as_os_str())));
+        route.pin_session("lent-shared").await.unwrap();
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
+        let resumed = crate::provider_account::resolve_provider_account(
+            Provider::Claude,
+            Some("lent-shared"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(resumed.is_shared());
+        // Codex has no variable for a ChatGPT login: its engine is handed the
+        // lent token over its protocol, and a direct launch is refused.
+        let codex = crate::provider_account::ProviderAccountRoute::lent(
+            client.clone(),
+            Provider::Codex,
+            &client
+                .resolve_exact(Provider::Codex, &id("primary"), None)
+                .unwrap(),
+            false,
+            true,
+        );
+        let mut engine = tokio::process::Command::new("codex");
+        codex.launch_engine_as(engine.as_std_mut()).await.unwrap();
+        assert!(engine
+            .as_std()
+            .get_envs()
+            .all(|(name, value)| name != "CODEX_ACCESS_TOKEN" || value.is_none()));
+        let login = codex.engine_login().unwrap().unwrap();
+        assert_eq!(login["type"], "chatgptAuthTokens");
+        assert_eq!(login["chatgptAccountId"], "workspace");
+        assert!(codex
+            .launch_as(&mut std::process::Command::new("codex"))
+            .await
+            .is_err());
         probe_forwarded_authority().unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, "malformed");
         assert!(probe_forwarded_authority().is_err());

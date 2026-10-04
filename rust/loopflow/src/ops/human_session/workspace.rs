@@ -128,7 +128,13 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
         if session.primary_scope.is_some() {
-            session.workspace = None;
+            let cwd = Path::new(&session.cwd);
+            session.workspace = Some(SessionWorkspace {
+                home_id: home.clone(),
+                worktree: resolver.root(cwd).unwrap_or_else(|| cwd.to_path_buf()),
+                task_id: None,
+                unavailable: (!cwd.exists()).then(|| "Persistent checkout is unavailable".into()),
+            });
             session.task_ids.clear();
             continue;
         }

@@ -95,6 +95,7 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
+    crate::ops::commit::prepare_persistent_publication(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -128,17 +129,19 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: false,
-        message: Some("lf task pr open: prepare branch".to_string()),
+        message: Some("lf pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
-    commit_workflow(repo, &commit_options, progress)?;
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+        commit_workflow(repo, &commit_options, progress, &|_| {})?;
+    }
     crate::ops::task::require_task_pr_range_nonempty(repo)?;
     require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
-    crate::ops::commit::push_with_upstream_if_needed(repo)?;
+    crate::ops::commit::push_with_upstream_if_needed(repo, &|_| {})?;
 
     let copy = resolve_pr_copy(repo, options, cached_copy, progress)?;
     let current_branch_state = current_branch(repo)?;
@@ -187,10 +190,10 @@ pub fn create_or_update_pr(
     let body = copy.body.trim();
     if let Some(mut pr) = existing_pr {
         let info = pr_info(&branch, &pr);
-        crate::ops::task::attach_task_github_pr(repo, Some(&info))?;
+        crate::ops::task::attach_task_github_pr(repo, Some(&info), &|_| {})?;
         if !draft {
             mark_pr_ready(repo, &mut pr)?;
-            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
         }
         crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Updating PR...");
@@ -202,7 +205,7 @@ pub fn create_or_update_pr(
     } else {
         crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Creating PR...");
-        let url = create_pr(repo, title, body, &base_branch, draft)?;
+        let url = create_pr(repo, title, body, &base_branch, draft, &|_| {})?;
         let acknowledged = pr_number_from_url(&url).map(|number| PrInfo {
             number,
             url: url.clone(),
@@ -215,16 +218,20 @@ pub fn create_or_update_pr(
         });
         // Creation identity survives a later read, readiness or linking failure.
         if let Some(info) = acknowledged.as_ref() {
-            crate::ops::task::attach_task_github_pr(repo, Some(info))?;
+            crate::ops::task::attach_task_github_pr(repo, Some(info), &|_| {})?;
         }
         if let Some(mut pr) = find_open_pr(repo)? {
-            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
+            crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
             if !draft {
                 mark_pr_ready(repo, &mut pr)?;
-                crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)))?;
+                crate::ops::task::attach_task_github_pr(
+                    repo,
+                    Some(&pr_info(&branch, &pr)),
+                    &|_| {},
+                )?;
             }
         } else if acknowledged.is_none() {
-            crate::ops::task::attach_task_github_pr(repo, None)?;
+            crate::ops::task::attach_task_github_pr(repo, None, &|_| {})?;
         }
         Ok(PrResult { url, created: true })
     }
@@ -368,7 +375,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let branch = current_branch(repo)?;
     if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf --task <issue-id> flow start`"
+            "the default branch cannot open a PR; use `lf wt create <name>` or publish from the persistent conversation checkout"
                 .to_string(),
         ));
     }
@@ -408,6 +415,9 @@ fn resolve_pr_copy(
 
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(cached);
+    }
     let scratch = repo.join("scratch");
     let mut removed = false;
     for name in [".pr-copy-ref", "pr-title.txt", "pr-body.md"] {
@@ -760,11 +770,16 @@ pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Optio
 
 /// Revoke GitHub auto-merge or queue membership before a stored request is cleared.
 /// The read makes replay idempotent after a prior disable succeeded.
-pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
+pub(crate) fn disable_auto_merge(
+    repo: &Path,
+    number: u32,
+    inherit: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let Some(request) = observe_merge_request(repo, u64::from(number))? else {
         return Ok(());
     };
     let mut command = Command::new("gh");
+    inherit(&mut command);
     let description = match request {
         MergeRequest::Auto | MergeRequest::AwaitingQueue => {
             command.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
@@ -793,11 +808,13 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
     })
 }
 
+/// Inherit the caller's capabilities in both replacement and arming children.
 pub(crate) fn enable_auto_merge(
     repo: &Path,
     number: u64,
     copy: Option<&PrCopy>,
     head_sha: &str,
+    inherit: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     if auto_merge_enabled(repo, number)? {
         let number = u32::try_from(number).map_err(|_| {
@@ -806,11 +823,12 @@ pub(crate) fn enable_auto_merge(
         // A pre-existing remote arm carries no durable Loopflow head binding.
         // Replace it so every accepted Auto request crosses our exact-head
         // command boundary, even when GitHub already reports auto-merge.
-        disable_auto_merge(repo, number)?;
+        disable_auto_merge(repo, number, inherit)?;
     }
 
     let number_arg = number.to_string();
     let mut command = Command::new("gh");
+    inherit(&mut command);
     command
         .arg("pr")
         .arg("merge")
@@ -1119,14 +1137,12 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
     if let Some(cursor) = cursor {
         command.args(["-f", &format!("endCursor={cursor}")]);
     }
-    let output = command.current_dir(repo).output()?;
-    // gh api fails on GraphQL errors even when the response has partial data.
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh api graphql [PR #{number} checks]"),
-            stderr: stderr_from_output(&output),
-        });
-    }
+    let output = super::read_retry::retry_read("GitHub check page", || {
+        super::read_retry::bounded_output(
+            command.current_dir(repo),
+            std::time::Duration::from_secs(30),
+        )
+    })?;
     serde_json::from_slice(&output.stdout).map_err(|error| {
         OpsError::Parse(format!(
             "could not parse GitHub checks for PR #{number}: {error}"
@@ -1457,18 +1473,23 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> O
     Ok(())
 }
 
-pub(crate) fn retarget_open_pr(repo: &Path, base: &str) -> OpsResult<()> {
+pub(crate) fn retarget_open_pr(
+    repo: &Path,
+    base: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let Some(pr) = find_open_pr(repo)? else {
         return Ok(());
     };
-    let output = Command::new("gh")
-        .arg("pr")
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
         .arg("edit")
         .arg(pr.number.to_string())
         .arg("--base")
         .arg(base)
-        .current_dir(repo)
-        .output()?;
+        .current_dir(repo);
+    inherit_pr(&mut cmd);
+    let output = cmd.output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
             command: "gh pr edit --base".to_string(),
@@ -1498,7 +1519,14 @@ fn mark_pr_ready(repo: &Path, pr: &mut GhPr) -> OpsResult<()> {
     Ok(())
 }
 
-fn create_pr(repo: &Path, title: &str, body: &str, base: &str, draft: bool) -> OpsResult<String> {
+fn create_pr(
+    repo: &Path,
+    title: &str,
+    body: &str,
+    base: &str,
+    draft: bool,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("create")
@@ -1508,6 +1536,7 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str, draft: bool) -> O
         .arg(body)
         .arg("--base")
         .arg(base);
+    inherit_pr(&mut cmd);
     if draft {
         cmd.arg("--draft");
     }
@@ -1528,8 +1557,9 @@ pub(crate) fn create_pr_from_pushed_branch(
     title: &str,
     body: &str,
     base: &str,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<PrInfo> {
-    let url = create_pr(repo, title, body, base, false)?;
+    let url = create_pr(repo, title, body, base, false, inherit_pr)?;
     let number = pr_number_from_url(&url).ok_or_else(|| {
         OpsError::Message(format!("could not read PR number from created URL {url}"))
     })?;
@@ -1900,6 +1930,55 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 mod tests {
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn release_merge_observation_respects_queue_membership() {
+        for (entry, auto, queue_enabled, behind, dirty) in [
+            (
+                serde_json::json!({"id":"queue"}),
+                serde_json::Value::Null,
+                true,
+                false,
+                false,
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::json!({"enabledAt":"now"}),
+                true,
+                false,
+                true,
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::json!({"enabledAt":"now"}),
+                false,
+                true,
+                true,
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                false,
+                true,
+                true,
+            ),
+        ] {
+            let value = serde_json::json!({"data":{"repository":{"pullRequest":{
+                "id":"pr", "number":1, "url":"https://example.test/pr/1", "state":"OPEN", "isDraft":false,
+                "headRefName":"release", "headRefOid":"exact-head", "mergedAt":null, "mergeCommit":null,
+                "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":queue_enabled,
+                "autoMergeRequest":auto, "mergeQueueEntry":entry
+            }}}});
+            let observation = super::parse_pr_merge(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(
+                super::merge_needs_integration(Some("behind"), observation.request.as_ref()),
+                behind
+            );
+            assert_eq!(
+                super::merge_needs_integration(Some("dirty"), observation.request.as_ref()),
+                dirty
+            );
+        }
+    }
 
     use super::{
         classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
@@ -1928,6 +2007,11 @@ mod tests {
                 &script,
                 r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *endCursor=*)
     cat "$fixture/second.json"
@@ -1960,6 +2044,22 @@ esac
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
             }
+        }
+    }
+
+    #[test]
+    fn check_page_recovers_502_without_accepting_a_changed_head() {
+        for head in ["head-1", "head-2"] {
+            let fixture = CheckFixture::new(
+                page(
+                    head,
+                    vec![run("test", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+                    None,
+                ),
+                page(head, vec![], None),
+            );
+            std::fs::write(fixture.directory.path().join("transient"), "").unwrap();
+            assert_eq!(fixture.read().unwrap().is_some(), head == "head-1");
         }
     }
 
@@ -2070,6 +2170,11 @@ esac
             fixture.directory.path().join("gh"),
             r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *--disable-auto*) rm "$fixture/armed" ;;
   *) if [ -f "$fixture/armed" ]; then cat "$fixture/first.json"; else cat "$fixture/second.json"; fi ;;
@@ -2082,7 +2187,7 @@ esac
             observe_merge_request(repo, 1329).unwrap(),
             Some(MergeRequest::AwaitingQueue)
         ));
-        disable_auto_merge(repo, 1329).unwrap();
+        disable_auto_merge(repo, 1329, &|_| {}).unwrap();
         assert!(observe_merge_request(repo, 1329).unwrap().is_none());
     }
 
@@ -2124,7 +2229,7 @@ esac
             .read()
             .unwrap_err()
             .to_string()
-            .contains("GitHub unavailable"));
+            .contains("GitHub check page: read failed after 1 attempt"));
     }
 
     #[test]
@@ -2713,14 +2818,13 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf task pr open" after gating to open or update the PR."}"###;
+Use "lf pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body:
-                    "## Summary\n\nUse \"lf task pr open\" after gating to open or update the PR."
-                        .to_string(),
+                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
+                    .to_string(),
             })
         );
     }

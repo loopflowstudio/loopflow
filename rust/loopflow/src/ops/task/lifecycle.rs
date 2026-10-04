@@ -617,7 +617,7 @@ fn execution_blockers(
             }
         }
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
-            if !input.interactive && !input.input_published {
+            if input.completed_at.is_none() && !input.interactive && !input.input_published {
                 blockers.push(format!("Session {} has a reserved input", session.id));
             }
         }
@@ -658,7 +658,7 @@ fn execution_blockers(
         };
         if blocks {
             blockers.push(format!(
-                "Exec {} has live or unresolved execution; inspect `lf mon show {}`",
+                "Exec {} has live or unresolved execution; inspect `lf monitor show {}`",
                 exec.id, exec.id
             ));
         }

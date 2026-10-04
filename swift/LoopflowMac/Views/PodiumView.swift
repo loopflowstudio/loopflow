@@ -12,7 +12,7 @@ struct PodiumView: View {
     @State private var model: PodiumModel
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
-    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
+    @State private var sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkspaceLinkRouter?
     private let query: RegistryQuery
 
@@ -26,16 +26,11 @@ struct PodiumView: View {
         self.initialRepoPath = initialRepoPath
         self.query = query
         self.taskLinks = taskLinks
-        let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
-            ? loadLoopflowState()?.selectedRepoPath
-                .flatMap(PortfolioDiscovery.resolveLaunchRepo)
-            : nil
-        let startingRepoPath = initialRepoPath
-            .flatMap(PortfolioDiscovery.resolveLaunchRepo)
-            ?? restoredRepoPath
-        let model = PodiumModel(query: query, repoPath: startingRepoPath)
-        PodiumFixture.applyIfRequested(to: model)
+        let restored = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
+            ? loadLoopflowState()?.selectedRepoPath : nil
+        let model = PodiumModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         _model = State(initialValue: model)
+        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
     }
 
     var body: some View {
@@ -99,17 +94,7 @@ struct PodiumView: View {
                 }
             }
         }
-        .task(id: model.repoPath) {
-            await model.refresh()
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(15))
-                } catch {
-                    return
-                }
-                await model.refresh()
-            }
-        }
+        .task(id: model.repoPath) { await model.keepWorkspaceCurrent() }
         .task(id: model.repoPath) {
             // Fixture and UI-test runs render without background helpers.
             guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
@@ -125,13 +110,6 @@ struct PodiumView: View {
                     initialRepoPath: initialRepoPath,
                     persistedRepos: portfolioService.repos
                 )
-            }
-        }
-        .task(id: model.repoPath) {
-            while !Task.isCancelled {
-                await model.refreshSessions()
-                do { try await Task.sleep(for: .seconds(2)) }
-                catch { return }
             }
         }
     }

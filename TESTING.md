@@ -86,6 +86,28 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## External network isolation
+
+```bash
+uv sync
+uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
+```
+
+Prepare dependencies and compile binaries before isolating test execution.
+The test runner and CI use `test_network.py` for Python, Rust test executables,
+Swift tests, website tests and smoke tests. Each invocation proves loopback works
+and an external connection is denied; the OS boundary covers descendants too.
+Git transport is file-only. Local bare remotes and loopback protocol fixtures
+remain available. No developer shell or global Git configuration changes.
+
+macOS uses `sandbox-exec`; Linux uses passwordless sudo, `unshare --net` and `ip`
+to create a private network namespace, enable loopback and restore the caller's
+user identity. macOS permits only the fixed `/bin/ps` system reader outside the
+sandbox, matching Desktop's existing headless profile; it cannot launch fixture
+children or open service connections. Unsupported isolation fails explicitly. Installation-container
+proofs disconnect their external Docker network after compiling, then run the
+same denial/loopback probes before executing tests. Display diagnostics remain opt-in.
+
 ## Changed-Aware Runner
 
 ```bash
@@ -504,6 +526,15 @@ Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
 or successful retry, `--flow-blocked` for keyed feedback continuation, and
 `--public-connect` for a live headless-to-terminal handoff.
+`--shared-provider-home` proves Loopflow and plain Codex share one home signed
+in as one stored account at a time: switching, saved-back logins, isolation,
+and provider conversation IDs in `lf session`.
+`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
+target/debug/lf --output <dir>` proves the same for Claude with synthetic
+logins and a local endpoint: a Claude started after a switch sends the login
+Loopflow installed, a shared launch gets no account home or credential
+variable, and an isolated launch stays in its account's home. On macOS it
+writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Homes and stops only its identified
 engine children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior

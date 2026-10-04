@@ -31,7 +31,7 @@ and headless failures remain visible in ordinary output and recorded outcomes.
 A Wave directing a task is the internal case:
 
 ```bash
-lf task checkout INF-123                              # tracked Work, no execution
+lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf --task INF-123 flow start                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
@@ -78,14 +78,14 @@ default execution surface.
 the fork commit, and adds a `Clear inherited scratch` commit before execution.
 Parent syncs keep the child's scratch, including its deletions. The parent retains
 its own notes. The child's PR targets the parent's branch until
-merge, then `lf task sync` merges main using the recorded fork as the comparison base.
+merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
 
 ## Steer
 
 ```bash
-lf task comment INF-123 "keep the public API"          # post a Linear Task comment
-lf task comment INF-123 --steer "keep the public API"  # explicit direction from an agent
+lf comment INF-123 "keep the public API"          # post a Linear Task comment
+lf comment INF-123 --steer "keep the public API"  # explicit direction from an agent
 lf --wave <wave> wave/operate "prioritize the parser"
 lf --wave <wave> wave/operate "reassess Project priorities"
 ```
@@ -116,11 +116,11 @@ the same account. Other integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
-`lf task interrupt INF-123` appends a durable interrupt comment;
+`lf interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
-tmux name. Project operations are ordinary finite conversations; they have no resident
+tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. `lf --task INF-123 flow start` continues the saved

@@ -262,6 +262,11 @@ pub struct Config {
     /// PM provider selection.
     #[serde(default)]
     pub pm: Option<PmConfig>,
+
+    /// Run provider conversations in the selected account's own home rather
+    /// than the provider's native one. `--shared` overrides it per launch.
+    #[serde(default)]
+    pub isolate: bool,
 }
 
 fn default_land() -> String {
@@ -314,6 +319,7 @@ impl Default for Config {
             release: ReleaseConfig::default(),
             linear: LinearConfig::default(),
             pm: None,
+            isolate: false,
         }
     }
 }

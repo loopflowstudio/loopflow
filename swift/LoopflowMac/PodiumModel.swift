@@ -43,6 +43,26 @@ enum PodiumReading<Value> {
 
 extension PodiumReading: Equatable where Value: Equatable {}
 
+/// What the workspace is waiting on: the one loading vocabulary every surface uses.
+enum WorkspaceStatus: Equatable {
+    /// Nothing to show yet; only a first launch without a saved workspace.
+    case loading
+    /// The saved workspace is shown while this launch's first reads finish.
+    case updating
+    case current
+    /// The last refresh failed; what is shown is the last good reading.
+    case failed(String)
+
+    var message: String? {
+        switch self {
+        case .loading: "Loading workspace…"
+        case .updating: "Updating…"
+        case .current: nil
+        case .failed(let reason): reason
+        }
+    }
+}
+
 /// Readings keyed by planning Task id, so a late response can only settle
 /// its own Task.
 struct TaskReadings<Value> {
@@ -281,16 +301,146 @@ final class PodiumModel {
     private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
 
+    private var sessionSkillSelections = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
+
+    var selectedSessionSkill: String {
+        guard let repoPath else { return "capture-tasks" }
+        return sessionSkillSelections[repoIdentity(repoPath)] ?? "capture-tasks"
+    }
+
+    func selectSessionSkill(_ name: String, repo: String) {
+        var saved = UserDefaults.standard.dictionary(forKey: "sessionSkillsByRepository") as? [String: String] ?? [:]
+        saved[repoIdentity(repo)] = name
+        sessionSkillSelections = saved
+        UserDefaults.standard.set(saved, forKey: "sessionSkillsByRepository")
+    }
+
+    func sessionSkills(repo: String) async throws -> [DiscoveryEntry] {
+        try await query.sessionSkills(cwd: repo)
+    }
+
     private let query: RegistryQuery
+    @ObservationIgnored private let cache: WorkspaceCache?
+    /// The Home the saved workspace was read from, until `confirmHome` checks it.
+    @ObservationIgnored private(set) var savedHomeId: String?
+    /// Parts still showing saved text instead of a read from this launch.
+    private var showsSavedPlanning = false
+    private var savedSessionRepos: Set<String> = []
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
     private var roadmapGeneration = 0
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
-    init(query: RegistryQuery, repoPath: String? = nil) {
+    /// A launch repository taken from the saved workspace without running
+    /// `git`; `refreshPortfolio` checks it off the main thread.
+    @ObservationIgnored private var unverifiedRepoPath: String?
+
+    init(query: RegistryQuery, repoPath: String? = nil, cache: WorkspaceCache? = nil) {
         self.query = query
+        self.cache = cache
         self.repoPath = repoPath.map(WaveOrigin.resolve)
+        if let saved = cache?.load() { restore(saved) }
+    }
+
+    /// A window's model, scoped to the first candidate that names a repository.
+    /// One the saved workspace was last scoped to opens without running `git`.
+    init(query: RegistryQuery, launchCandidates: [String], cache: WorkspaceCache?) {
+        self.query = query
+        self.cache = cache
+        let saved = cache?.load()
+        for candidate in launchCandidates {
+            let path = candidate.normalizedFilePath
+            if saved?.repositories[path] != nil {
+                repoPath = path
+                unverifiedRepoPath = path
+                WaveOrigin.remember(origin: path)
+            } else {
+                repoPath = PortfolioDiscovery.resolveLaunchRepo(candidate)
+            }
+            if repoPath != nil { break }
+        }
+        if let saved { restore(saved) }
+    }
+
+    /// The model every window builds: saved workspace first, except in fixture
+    /// and proof runs, which render only what they read.
+    static func window(query: RegistryQuery, launchCandidates: [String] = []) -> PodiumModel {
+        let model = PodiumModel(query: query, launchCandidates: launchCandidates,
+                                cache: AppTestMode.current() == nil ? .home : nil)
+        PodiumFixture.applyIfRequested(to: model)
+        return model
+    }
+
+    var workspaceStatus: WorkspaceStatus {
+        let sessionsError = repoPath == nil ? nil : sessions.errorMessage
+        switch (roadmap.errorMessage, sessionsError) {
+        case (let planning?, let sessions?):
+            return .failed(planning == sessions
+                ? "Couldn't update: \(planning)"
+                : "Couldn't update planning: \(planning); Sessions: \(sessions)")
+        case (let planning?, nil): return .failed("Couldn't update planning: \(planning)")
+        case (nil, let sessions?): return .failed("Couldn't update Sessions: \(sessions)")
+        case (nil, nil): break
+        }
+        if roadmap.isLoading || (repoPath != nil && sessions.isLoading) { return .loading }
+        if showsSavedPlanning || savedSessionRepos.contains(repoPath ?? "") { return .updating }
+        return .current
+    }
+
+    /// Show the saved workspace before any read. Text that no longer decodes is skipped.
+    private func restore(_ saved: WorkspaceSnapshot) {
+        savedHomeId = saved.homeId
+        if let text = saved.roadmap, let value = try? RegistryQuery.decode(RoadmapSnapshot.self, from: text) {
+            roadmap = .available(value)
+            showsSavedPlanning = true
+        }
+        if let text = saved.waves, let value = try? RegistryQuery.decode([WaveSnapshot].self, from: text) {
+            waves = .available(value.map { $0.toWave() })
+        }
+        for (repo, entry) in saved.repositories {
+            if let pages = entry.sessionPages,
+               let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
+                sessionReadings[repo] = .available(records)
+                savedSessionRepos.insert(repo)
+            }
+            guard let selection = entry.selection, let waves = roadmap.value?.waves else { continue }
+            let evidence = waves.lazy.compactMap { wave in
+                wave.tasks.items.first { $0.id == selection.id }.map { (wave, $0) }
+            }.first
+            guard selection.kind == .task ? evidence != nil : waves.contains(where: { $0.wave.id == selection.id }) else { continue }
+            let navigation = navigationByRepo[repo] ?? WorkspaceNavigation()
+            navigationByRepo[repo] = navigation
+            navigation.selection = selection
+            navigation.selectedTaskEvidence = evidence
+            navigation.content = .details
+        }
+    }
+
+    private func endLaunchWhenCurrent() {
+        if workspaceStatus == .current { Perf.end(Perf.workspaceCurrent, id: "launch") }
+    }
+
+    /// Reads now come from `id`. A workspace saved under another Home is dropped
+    /// unless this launch has already replaced it.
+    func confirmHome(_ id: String) {
+        if let savedHomeId, savedHomeId != id {
+            if showsSavedPlanning {
+                roadmap = .loading
+                waves = .loading
+                showsSavedPlanning = false
+                // Work chosen from the other Home's rows names nothing here.
+                for navigation in navigationByRepo.values {
+                    navigation.selection = nil
+                    navigation.selectedTaskEvidence = nil
+                    navigation.content = .overview
+                }
+            }
+            for repo in savedSessionRepos { sessionReadings[repo] = nil }
+            savedSessionRepos = []
+        }
+        savedHomeId = id
+        cache?.confirmHome(id)
     }
 
     var visibleRoadmaps: [WaveRoadmap] {
@@ -351,7 +501,36 @@ final class PodiumModel {
         }
     }
 
+    /// The window's one refresh owner. Planning and Sessions keep their own
+    /// cadence, so a slow planning read never delays Session rows.
+    func keepWorkspaceCurrent() async {
+        async let planning: Void = keepPlanningCurrent()
+        async let sessions: Void = keepSessionsCurrent()
+        _ = await (planning, sessions)
+    }
+
+    private func keepPlanningCurrent() async {
+        while !Task.isCancelled {
+            await refreshPlanning()
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+        }
+    }
+
+    private func keepSessionsCurrent() async {
+        while !Task.isCancelled {
+            await refreshSessions()
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
+    }
+
+    /// One explicit read of everything, for a change the cadence should not wait on.
     func refresh() async {
+        async let sessions: Void = refreshSessions()
+        await refreshPlanning()
+        await sessions
+    }
+
+    func refreshPlanning() async {
         taskHistoryNow = Date()
         guard !usesFixedFixture else { return }
         guard !isRefreshing else { return }
@@ -366,15 +545,11 @@ final class PodiumModel {
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let sessionRefresh: Void = refreshSessions()
         let nextWaves = reading(from: await wavesResult, lastGood: previousWaves)
         if waves != nextWaves { waves = nextWaves }
-        await sessionRefresh
         let result = await roadmapResult
-        if generation == roadmapGeneration {
-            let nextRoadmap = reading(from: result, lastGood: previousRoadmap)
-            if roadmap != nextRoadmap { roadmap = nextRoadmap }
-        }
+        if generation == roadmapGeneration { publishRoadmap(result, lastGood: previousRoadmap) }
+        endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
             guard case .available(_, false) = wave.tasks else { return false }
@@ -525,6 +700,11 @@ final class PodiumModel {
             persistedRepos: persistedRepos
         )
         await Self.resolveRepoOrigins(discovered.map(\.path))
+        if let trusted = unverifiedRepoPath {
+            unverifiedRepoPath = nil
+            let checked = await Task.detached { PortfolioDiscovery.resolveLaunchRepo(trusted) }.value
+            if repoPath == trusted, checked != trusted { setRepoPath(checked) }
+        }
         repos = discovered
         authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: discovered)
         if repoPath == nil, let initialRepoPath {
@@ -556,11 +736,9 @@ final class PodiumModel {
         roadmapGeneration &+= 1
         let generation = roadmapGeneration
         let result = await readRoadmap()
-        if generation == roadmapGeneration {
-            roadmap = reading(from: result, lastGood: roadmap.value)
-        }
+        if generation == roadmapGeneration { publishRoadmap(result, lastGood: roadmap.value) }
         switch result {
-        case .success(let snapshot):
+        case .success(let (snapshot, _)):
             guard snapshot.waves.contains(where: { row in
                 row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
             }) else {
@@ -588,6 +766,7 @@ final class PodiumModel {
             }
         } else { selection = requested }
         navigation.selectedSessionId = nil
+        navigation.showsRetainedTerminals = false
         navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()
@@ -644,6 +823,8 @@ final class PodiumModel {
         var records: [SessionRecord] = []
         var after: String?
         let includingHeadless = navigation.showsHeadlessSessions
+        let wire = WireCapture()
+        let query = query.recording(wire.record)
         do {
             repeat {
                 let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
@@ -661,6 +842,10 @@ final class PodiumModel {
                 if sessions != next { sessions = next }
                 after = page.next
             } while after != nil
+            savedSessionRepos.remove(repoPath)
+            endLaunchWhenCurrent()
+            // Explicit history is read on request, never restored at launch.
+            if !includingHeadless { cache?.saveSessions(wire.texts, repo: repoPath) }
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                   !Task.isCancelled else { return }
@@ -1011,6 +1196,7 @@ final class PodiumModel {
         workActivityGeneration &+= 1
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
+        cache?.saveSelection(selection, repo: repoPath ?? "")
         if !usesFixedFixture { workActivity = .loading }
     }
 
@@ -1020,18 +1206,32 @@ final class PodiumModel {
         select(.wave(id: wave.wave.id))
     }
 
-    private func readRoadmap() async -> Result<RoadmapSnapshot, Error> {
+    /// The snapshot with the wire text it was decoded from.
+    private func readRoadmap() async -> Result<(RoadmapSnapshot, String), Error> {
+        let wire = WireCapture()
         do {
-            return .success(try await query.roadmap())
+            let snapshot = try await query.recording(wire.record).roadmap()
+            return .success((snapshot, wire.texts.last ?? ""))
         } catch {
             return .failure(error)
         }
     }
 
+    /// A successful read replaces the saved workspace, on screen and on disk.
+    private func publishRoadmap(_ result: Result<(RoadmapSnapshot, String), Error>, lastGood: RoadmapSnapshot?) {
+        let next = reading(from: result.map(\.0), lastGood: lastGood)
+        if roadmap != next { roadmap = next }
+        guard case .success(let (_, text)) = result else { return }
+        showsSavedPlanning = false
+        cache?.saveRoadmap(text)
+    }
+
     private func readWaves() async -> Result<[Wave], Error> {
+        let wire = WireCapture()
         do {
-            let waves = try await query.allWaves()
+            let waves = try await query.recording(wire.record).allWaves()
             await Self.resolveRepoOrigins(waves.map(\.repo))
+            if let text = wire.texts.last { cache?.saveWaves(text) }
             return .success(waves)
         } catch {
             return .failure(error)

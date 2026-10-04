@@ -72,8 +72,8 @@ date and evidence gaps. The repository start-chapter owner reconciles and applie
 accepted changes. A standalone invocation returns the same scoped proposal; it
 does not rotate, cancel Tasks, create Projects or edit the parent mandate.
 
-Future plan authoring needs an available authorized Linear writer; there is no
-`lf` writer for a Planned Project. `lf wave update-plan --wave <wave> --plan
+Future plan authoring needs an available Linear writer; there is no
+`lf` writer for a Planned Project. `lf update-plan --wave <wave> --plan
 <plan.json>` replaces only the current Project's complete content. Never apply
 next-chapter JSON to the predecessor as a shortcut. If the writer is unavailable,
 return the exact pending operation without inventing a command or local owner.
@@ -94,9 +94,8 @@ Mark possible solutions as tentative. Keep architecture, implementation steps,
 and detailed proof in the design, linked and available to the worker.
 
 Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments when posting
-is authorized. A comment should say what changed and what it means; link detailed
-receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
+changes, launch attempts, and verification updates in Task comments.
+A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
 dated application evidence in existing records. Proposals draft comments without posting.
 Do not use a description update or worker steering as a substitute log channel.
 
@@ -123,5 +122,5 @@ In operational lists, put the ID first: `[Task ID or PR number · Title](known U
 
 Apply these rules within the chapter’s existing proposal and acceptance boundaries.
 Preserve the accepted brief when applying it; retain dated application evidence;
-summarize relevant changes in authorized Task comments, never
+summarize relevant changes in Task comments, never
 prepend or append allocation logs to the description.

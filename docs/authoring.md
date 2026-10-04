@@ -69,8 +69,8 @@ explicitly; this also lets a flow call its own same-named skill without a cycle.
 An invalid flow reports its error instead of falling back to the skill.
 
 Skills that need another Work's perspective launch it directly with
-`lf --task <task> : "<prompt>"`. Headless skills missing required input or
-authorization explain the failure in ordinary output and stop. The Wave operator
+`lf --task <task> : "<prompt>"`. Headless skills missing required input
+explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
 Run a step interactively with `human: true`. Give it an `id` stable within
@@ -96,7 +96,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```yaml
 - implement
 - gate
-- cmd: task pr land
+- cmd: pr land
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
@@ -143,7 +143,7 @@ one path runs:
     paths:
       repair:
         flow: code
-        description: "Reproduced defects within the authorized change need repair"
+        description: "Reproduced defects within the change need repair"
       silence:
         description: "No actionable defect in the supplied change"
 ```
@@ -206,7 +206,7 @@ Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
 decision: return it with a required reason in the final structured result.
-Existing logs and outcomes provide the evidence. The Wave operator resolves authorized
+Existing logs and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 

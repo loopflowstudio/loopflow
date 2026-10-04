@@ -151,30 +151,13 @@ completion step was deferred because those obligations remain unproven. Resolve
 their outcome or explicit remaining disposition before treating the Task as done;
 do not recreate a PR merely because the generic action suggests a next PR.
 
-Configured acceptance attempted October 2 at 19:12 UTC after Jack Heart requested
-the checks and retirement. The machine install receipt selects published v0.12.29
-(`61d21f88564783a5fc8f63e385ec035f096fc069`) and `~/.lf/loopflow.db`.
-`gh release view` confirmed [v0.12.29](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.29)
-was still the latest published release (September 30, 23:45 UTC). Git ancestry
-confirms it excludes the October 1 one-Home merge. Installed `lf home id` returned
-the main Home, but an explicit fresh `LF_HOME` through both the public entry gate
-and selected artifact still returned main's identity and Waves without creating
-the experimental database. The available source CLI was v0.12.27. These are
-pre-cutover observations, not failures of the merged implementation. Installed
-acceptance requires a published release containing #1381; do not repeat the same
-checks against v0.12.29 or treat a source-only proof as installed acceptance.
-
-Fresh `lsof +D` inspection found live database handles in all four retained
-`installed/local-*` stores above (15 distinct processes in the initial read).
-No process was stopped and those stores remain untouched. Seven inactive
-worktree snapshots, including `loopflow-growth-thoughts-1c80b40d4504`, were checked
-again individually and moved intact to
-`~/.lf-retired/20261002T191224Z/worktrees/`; `retirement.json` there records exact
-source and destination paths. This retires their old routing locations while
-preserving history; it does not reclaim their disk space. The four live stores
-remain pending until their owners settle. After release, repeat default/source,
-nested Flow/agent and disposable-Home acceptance, then recheck live ownership
-before retiring the remaining stores. LOO-342 remains open.
+October 2's initial installed check used v0.12.29, which predated #1381 and
+failed explicit-Home isolation; it did not test the merged implementation.
+The release and acceptance checks below supersede that pre-cutover evidence.
+Seven inactive worktree snapshots moved intact to
+`~/.lf-retired/20261002T191224Z/worktrees/`, with source/destination paths in
+`retirement.json`. Fifteen live owners initially prevented retiring four other
+stores; October 4's authorized retirement below resolves that remaining gap.
 
 ### Release and acceptance recovery (2026-10-02)
 

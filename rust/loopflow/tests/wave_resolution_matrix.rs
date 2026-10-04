@@ -88,6 +88,7 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "cron", "preflight"],
     &["wave", "cron", "run"],
     &["wave", "cron", "history"],
+    &["wave", "cron", "disposition"],
     &["wave", "cron", "trigger"],
     &["wave", "cron", "remove"],
 ];

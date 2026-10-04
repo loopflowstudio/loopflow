@@ -681,12 +681,6 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   establishes a forward boundary; retain later wording changes as dated evidence.
   Append-only PM revisions or provider KR identities remain an instrumentation
   option when a real review needs lineage the archive cannot supply.
-- **LOO-278 delivery is consolidated, Task placement is not** (observed
-  2026-09-23). The combined code and sealed archive are in
-  `loopflow.review-chapter`; the Task still records `loopflow.chapter-planning`
-  and its original serial PR branch. Preserve that checkout and history until
-  supported reassignment exists. Do not infer a binding from copied files,
-  rewrite the registry, or start a second writer. No publication is established.
 
 ## Work and continuity (reconciled 2026-09-23)
 
@@ -826,22 +820,27 @@ substitute for another merely because identifiers coincide.
   `ok`, `waiting`, `failed`, `pending`), not the lfd int enum. No invented
   `cancelled`. An unknown status must be **loud** (surface it), never a silent
   `?? .pending`. When `lf` and lfd disagree, `lf` wins.
-## Performance — reads never block on lfd
+## Performance — launch renders before any read (2026-10-04)
 
-- **Governing invariant: the repo/wave list paints from `lf` (daemon-less); a
-  listener or Home process must never gate a read.** First instance
-  (diagnosed, fix implemented this branch): `WavesView.syncRepoStates`
-  early-returned while `SharedDaemon.currentConnection == nil` and
-  `prepareConnectionIfNeeded` awaited `SharedDaemon.manager.start()` — the wave
-  list waited on lfd booting even though `RegistryQuery`/`lf ls` is daemon-less.
-- Cheap wins landed this branch: one machine-wide `RegistryQuery.allWaves()`
-  (`lf ls --json`) per poll distributed to each `PortfolioRepoState` (was one
-  spawn per repo); memoized `lf` binary resolution (was `lf help wave` probe per
-  query); first paint boots lfd concurrently, not as a barrier; `WavePlanParser`
-  moved off render/`body` onto a per-refresh cache; one `tmux list-sessions`
-  snapshot + Set lookup (was `tmux has-session` per wave). These are historical
-  reductions, not measurements of the current canvas. Use the two experience
-  runners above to establish current budgets.
+Jack Heart requested Desktop open on a usable workspace with one loading
+vocabulary and one refresh path (LOO-376). On Jack's Home, installed `lf`
+0.12.32, single samples: `roadmap --all` 14.5 s, `session list` 12.4 s,
+`wave list` 2.4 s, `home id` and `ps` 1.2 s each. No read fits the 1000 ms
+budget, so a returning launch shows saved wire text first; that CLI latency has
+no owning Task (LOO-375 owns `wt list` only).
+
+- Save the reads' wire text, restore through the live decoder, and strip
+  liveness and legal actions before saving. Display evidence, never authority.
+  Keep it inside the Home; a different `lf home id` drops content and selection.
+- One model owns refresh; views that each start a loop supersede each other's
+  reads. A view that builds its own model reopens the blocking path.
+- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
+  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
+  CPU and the 400/1000 ms targets are unmeasured.
+- Jack's delivery contract (2026-10-04): land on autonomous checks and honest
+  benchmark evidence; rendered startup is post-merge validation, not a gate.
+  Still owed on LOO-376 after PR #1425: recorded timing of real launches and
+  refreshes with a documented report command. Not complete without it.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

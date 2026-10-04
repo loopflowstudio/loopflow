@@ -989,7 +989,7 @@ fn flow_parsing_parity() {
 }
 
 #[test]
-fn code_flow_records_each_skill_as_one_generic_run() {
+fn authored_flow_records_each_skill_as_one_session() {
     let repo = TempDir::new().unwrap();
     run_git(repo.path(), &["init", "-b", "main"]);
     run_git(repo.path(), &["config", "user.email", "test@example.com"]);
@@ -997,6 +997,7 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     for skill in ["implement", "compress"] {
         write_skill(repo.path(), skill, &format!("Run the {skill} step."));
     }
+    write_flow(repo.path(), "two-skills", "- implement\n- compress\n");
     run_git(repo.path(), &["add", "."]);
     run_git(repo.path(), &["commit", "-m", "fixture"]);
 
@@ -1013,12 +1014,12 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["code", "--mode", "batch", "--no-loopflow"],
+        &["two-skills", "--mode", "batch", "--no-loopflow"],
         Some(&path),
     );
     assert!(
         output.status.success(),
-        "lf code failed:\n{}\n{}",
+        "two-skills failed:\n{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

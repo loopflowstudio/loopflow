@@ -385,12 +385,18 @@ struct SessionsView: View {
             } else {
                 HStack {
                     WorkspaceNavigator(model: model, onOpenSession: { _ in })
-                    ContentUnavailableView("Reading workspace Home", systemImage: "folder",
-                        description: Text(workspaces.homeError ?? "Reading local checkout identity…"))
+                    if let error = workspaces.homeError {
+                        ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
         }
-        .task { await workspaces.refreshHome(query: query) }
+        .task {
+            await workspaces.refreshHome(query: query)
+            if let home = workspaces.localHomeId, workspaces.homeError == nil { model.confirmHome(home) }
+        }
     }
 }
 
@@ -469,11 +475,6 @@ struct SessionsContentView: View {
     var body: some View {
         let _ = layoutRevision
         VStack(spacing: 0) {
-            if let error = model.sessions.errorMessage {
-                Text("Sessions unavailable — \(error)")
-                    .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-                    .padding(Spacing.sm)
-            }
             HStack(spacing: 0) {
                 WorkspaceNavigator(model: model, onOpenSession: openSession, onConversation: { work in
                     model.select(work)

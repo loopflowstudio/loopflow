@@ -1172,7 +1172,7 @@ mod tests {
     }
 
     #[test]
-    fn human_reviews_return_feedback_to_explicit_deciding_occurrences() {
+    fn human_reviews_do_not_own_return_edges() {
         let tmp = TempDir::new().unwrap();
         let steps = compile_flow(&load_flow("feature", tmp.path()).unwrap(), tmp.path()).unwrap();
         let edges: Vec<_> = steps
@@ -1190,10 +1190,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            edges,
-            [("loop-decide", "implement"), ("loop-decide", "implement")]
-        );
+        assert_eq!(edges, [("loop-decide", "implement")]);
         let flows = tmp.path().join(".lf/flows");
         fs::create_dir_all(&flows).unwrap();
         fs::write(flows.join("invalid.yaml"), "- step: {id: implement, name: implement}\n- step: {id: demo, name: demo, human: true, repeat: {from: implement}}\n").unwrap();
@@ -2077,14 +2074,6 @@ Design the feature.
                 });
             assert!(result.unwrap_err().to_string().contains("not found"));
         }
-    }
-
-    #[test]
-    fn code_flow_parses_and_compiles() {
-        let tmp = TempDir::new().unwrap();
-        let flow = load_flow("code", tmp.path()).unwrap();
-        let items = compile_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 2); // implement, compress
     }
 
     #[test]

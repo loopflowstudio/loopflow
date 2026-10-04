@@ -73,20 +73,18 @@ struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var model: PodiumModel
+    private let model: PodiumModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
 
+    /// Renders the window's model; that window keeps it current.
     init(
-        repoPath: String?,
+        model: PodiumModel,
         onOpenWave: @escaping (WaveSnapshot) -> Void
     ) {
-        _model = State(initialValue: PodiumModel(
-            query: RegistryQueryLocal.shared,
-            repoPath: repoPath
-        ))
+        self.model = model
         _selection = .constant(nil)
         self.onOpenWave = onOpenWave
     }
@@ -134,14 +132,6 @@ struct RoadmapView: View {
             content
         }
         .background(palette.background)
-        .task(id: repoPath) {
-            await refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                if Task.isCancelled { return }
-                await refresh()
-            }
-        }
     }
 
     private var header: some View {
@@ -251,7 +241,7 @@ struct RoadmapView: View {
     @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
-            ProgressView("Reading roadmap…")
+            ProgressView(WorkspaceStatus.loading.message ?? "")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("podium-work-loading")
         } else if snapshot == nil {

@@ -1,11 +1,13 @@
 # infrastructure wave memory
 
+## Review replacement (2026-10-04)
 
-## Waiting-review restart (LOO-377, branch evidence 2026-10-04)
-
-Jack Heart authorized autonomous repair and landing after LOO-370's restart
-left its former review alive and blocking admission. Emergency recovery restored
-LOO-370 separately; this branch does not alter its implementation or processes.
+Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
+with hosted CI passing. Restart serializes review launch, fences writers and
+retains exact stop evidence for retry. Independent reviews remain protected.
+LOO-370's replacement Flow finished after recovery; its Task remains open.
+Installed acceptance remains unproved;
+LOO-373 owns the retained landing-placement reconciliation error.
 
 A review's service, Session driver and provider are distinct process owners.
 Record the service's exact Exec before child launch. Acquire the existing launch
@@ -16,9 +18,6 @@ Save exact process identities before signaling: native stop removes client recei
 so an interruption before replacement otherwise destroys retry evidence. The
 public restart fixture reproduces that boundary with no Session provider PID;
 retry uses saved identities. Unknown ownership and independent reviews still block.
-Source fixtures and transactional rollback checks passed. Full local gate was
-unavailable below the disk reserve; hosted CI owns remaining verification. Neither
-source proof nor publication establishes installed acceptance or merge. Release's retained-landing findings remain in its child memory.
 
 ## Transient recovery (LOO-326, branch evidence 2026-10-04)
 
@@ -243,30 +242,13 @@ completion step was deferred because those obligations remain unproven. Resolve
 their outcome or explicit remaining disposition before treating the Task as done;
 do not recreate a PR merely because the generic action suggests a next PR.
 
-Configured acceptance attempted October 2 at 19:12 UTC after Jack Heart requested
-the checks and retirement. The machine install receipt selects published v0.12.29
-(`61d21f88564783a5fc8f63e385ec035f096fc069`) and `~/.lf/loopflow.db`.
-`gh release view` confirmed [v0.12.29](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.29)
-was still the latest published release (September 30, 23:45 UTC). Git ancestry
-confirms it excludes the October 1 one-Home merge. Installed `lf home id` returned
-the main Home, but an explicit fresh `LF_HOME` through both the public entry gate
-and selected artifact still returned main's identity and Waves without creating
-the experimental database. The available source CLI was v0.12.27. These are
-pre-cutover observations, not failures of the merged implementation. Installed
-acceptance requires a published release containing #1381; do not repeat the same
-checks against v0.12.29 or treat a source-only proof as installed acceptance.
-
-Fresh `lsof +D` inspection found live database handles in all four retained
-`installed/local-*` stores above (15 distinct processes in the initial read).
-No process was stopped and those stores remain untouched. Seven inactive
-worktree snapshots, including `loopflow-growth-thoughts-1c80b40d4504`, were checked
-again individually and moved intact to
-`~/.lf-retired/20261002T191224Z/worktrees/`; `retirement.json` there records exact
-source and destination paths. This retires their old routing locations while
-preserving history; it does not reclaim their disk space. The four live stores
-remain pending until their owners settle. After release, repeat default/source,
-nested Flow/agent and disposable-Home acceptance, then recheck live ownership
-before retiring the remaining stores. LOO-342 remains open.
+October 2's initial installed check used v0.12.29, which predated #1381 and
+failed explicit-Home isolation; it did not test the merged implementation.
+The release and acceptance checks below supersede that pre-cutover evidence.
+Seven inactive worktree snapshots moved intact to
+`~/.lf-retired/20261002T191224Z/worktrees/`, with source/destination paths in
+`retirement.json`. Fifteen live owners initially prevented retiring four other
+stores; October 4's authorized retirement below resolves that remaining gap.
 
 ### Release and acceptance recovery (2026-10-02)
 
@@ -324,12 +306,30 @@ Configured checks passed on the installed release:
   and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
   issue, checkout, PR ids and saved Flow invocation match the pre-install read.
 
-Final `lsof` inspection still found 15 processes holding the four retained
-development stores. `lf monitor prune --dry-run --json` reported no registered
-orphan providers; its dead receipt cleanup cannot retire these live stores.
-No legacy process was signaled. The seven archived snapshots remain preserved
-at the retirement path above. Installed routing acceptance is now demonstrated;
-retirement of the four live stores remains the reason LOO-342 is open.
+### Legacy retirement completed (2026-10-04)
+
+Jack Heart explicitly authorized clearing all legacy stores and their process
+owners. Fresh `lsof` identified 15 owners of the four retained installed stores.
+Current `lf monitor prune` had no registered orphan targets; the old `ask cancel`
+command failed reading the current installation manifest (`work_dispositions`
+missing). Exact executable/start-time checks and process ancestry bounded the
+shutdown to those owners, their matching legacy wrappers and descendants.
+All 37 processes exited after SIGTERM; no SIGKILL was required. The current
+Session and main-Home processes were outside that set.
+
+The four stores moved intact to `~/.lf-retired/20261004T161815Z/installed/`.
+The unused root database and two demo databases moved with the remaining legacy
+root to `remaining-home/` in the same archive. Its `retirement.json` records
+process identities, signals and source/destination paths. The seven earlier
+snapshots remain at `~/.lf-retired/20261002T191224Z/worktrees/`. Archives preserve
+history and consume disk space; retirement does not mean erasure.
+
+Verification: all 37 recorded process identities exited, legacy handles reached
+zero, `~/.lf-dev` no longer exists, and installed `lf home id` still returns
+`home_39860354aaca640c2ccb50bf6ca609d8`; prune inspection reports zero errors.
+LOO-342 was already marked done in the October 4 status read. This retirement
+supersedes the pending-store findings above and closes the remaining acceptance
+gap after the October 2 installed routing checks.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

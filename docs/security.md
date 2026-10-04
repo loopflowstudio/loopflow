@@ -175,7 +175,8 @@ process:
    launch that starts Codex directly, outside Loopflow's engine, refuses a
    forwarded identity.
 6. Health results and session pins return to the origin database that owns the
-   identity.
+   identity. Pins retain the shared/isolated home mode so reopening uses the
+   original home even after the target's default changes.
 
 The access token really does enter the target's process boundary. It is not put
 in argv, logs, a remote account home, or a durable Loopflow store, but the

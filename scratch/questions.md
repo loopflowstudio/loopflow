@@ -18,7 +18,7 @@
 - Claude: a running shared agent adopts the native login, and how soon. Read from the binary only.
 - A conversation started under A resumes under B across different workspaces or plans.
 - A lent Codex account signing in through the engine protocol against OpenAI's real service, and whether relying on an interface OpenAI marks internal-only is acceptable (for Jack).
-- Lent session pins omit the shared/isolated mode. Preserve it through the broker so a lent isolated conversation resumes in its original home even under a shared default; this remains an implementation gap, not a new product decision.
+- Lent session pins now preserve shared/isolated mode through the broker. Regression coverage reopens both modes after changing the default; execution is deferred by the gate resource floor.
 - Claude acceptance: plain `claude --resume` of a Loopflow conversation and a Claude conversation ID through `lf session connect` remain unexercised.
 
 ## Assumptions made while building slice 2

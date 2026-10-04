@@ -477,6 +477,11 @@ enum BrokerOperation {
         provider: Provider,
         provider_session_id: String,
         account_id: ProviderAccountId,
+        isolated: bool,
+    },
+    SessionIsolation {
+        provider: Provider,
+        provider_session_id: String,
     },
     PinnedAccount {
         provider: Provider,
@@ -531,6 +536,7 @@ enum BrokerResponse {
     Resolution(LeaseResolution),
     AccountFacts(Box<LeaseAccountFacts>),
     PinnedAccount(Option<ProviderAccountId>),
+    SessionIsolation(Option<bool>),
     Ok,
     Error(String),
 }
@@ -834,6 +840,17 @@ impl BrokerState {
                     limits,
                 })))
             }
+            BrokerOperation::SessionIsolation {
+                provider,
+                provider_session_id,
+            } => {
+                let isolated = self
+                    .prepared
+                    .store
+                    .provider_session_isolated(provider, &provider_session_id)
+                    .await?;
+                Ok(BrokerResponse::SessionIsolation(isolated))
+            }
             BrokerOperation::PinnedAccount {
                 provider,
                 provider_session_id,
@@ -850,13 +867,19 @@ impl BrokerState {
                 provider,
                 provider_session_id,
                 account_id,
+                isolated,
             } => {
                 self.grant_contains(provider, &account_id)?;
                 self.spent_preferences
                     .remove(&(provider, account_id.clone()));
                 self.prepared
                     .store
-                    .pin_provider_session_route(provider, &provider_session_id, &account_id, true)
+                    .pin_provider_session_route(
+                        provider,
+                        &provider_session_id,
+                        &account_id,
+                        isolated,
+                    )
                     .await?;
                 Ok(BrokerResponse::Ok)
             }
@@ -1210,13 +1233,31 @@ impl AccountLeaseClient {
         provider: Provider,
         provider_session_id: &str,
         account_id: &ProviderAccountId,
+        isolated: bool,
     ) -> Result<(), ProviderAccountError> {
         match self.request(BrokerOperation::PinSession {
             provider,
             provider_session_id: provider_session_id.to_string(),
             account_id: account_id.clone(),
+            isolated,
         })? {
             BrokerResponse::Ok => Ok(()),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn session_isolated(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> Result<Option<bool>, ProviderAccountError> {
+        match self.request(BrokerOperation::SessionIsolation {
+            provider,
+            provider_session_id: provider_session_id.to_string(),
+        })? {
+            BrokerResponse::SessionIsolation(isolated) => Ok(isolated),
             _ => Err(ProviderAccountError::Runtime(
                 "account lease broker returned the wrong response".to_string(),
             )),
@@ -2009,6 +2050,31 @@ mod tests {
         assert!(command
             .get_envs()
             .any(|(name, value)| name == "CLAUDE_CODE_OAUTH_TOKEN" && value.is_some()));
+        isolated.pin_session("lent-isolated").await.unwrap();
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "shared");
+        let resumed = crate::provider_account::resolve_provider_account(
+            Provider::Claude,
+            Some("lent-isolated"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!resumed.is_shared());
+        let mut reopened = std::process::Command::new("claude");
+        resumed.launch_as(&mut reopened).await.unwrap();
+        assert!(reopened
+            .get_envs()
+            .any(|(name, value)| name == "CLAUDE_CONFIG_DIR" && value == Some(home.as_os_str())));
+        route.pin_session("lent-shared").await.unwrap();
+        std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
+        let resumed = crate::provider_account::resolve_provider_account(
+            Provider::Claude,
+            Some("lent-shared"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(resumed.is_shared());
         // Codex has no variable for a ChatGPT login: its engine is handed the
         // lent token over its protocol, and a direct launch is refused.
         let codex = crate::provider_account::ProviderAccountRoute::lent(

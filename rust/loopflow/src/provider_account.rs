@@ -571,7 +571,12 @@ impl ProviderAccountRoute {
                     .await?;
             }
             AccountLogin::Lent { client, .. } => {
-                client.pin_session(self.provider, provider_session_id, &self.account_id)?;
+                client.pin_session(
+                    self.provider,
+                    provider_session_id,
+                    &self.account_id,
+                    matches!(self.home, RouteHome::Isolated),
+                )?;
             }
             AccountLogin::Replayed { .. } => {}
         }
@@ -946,11 +951,15 @@ pub(crate) async fn resolve_provider_account_exact(
         }
         _ => None,
     };
+    let client = lease::AccountLeaseClient::from_env()?;
+    let recorded = match (recorded, &client, provider_session_id) {
+        (None, Some(client), Some(id)) => client.session_isolated(provider, id)?,
+        (recorded, _, _) => recorded,
+    };
     let isolated = recorded.unwrap_or_else(activation::launch_isolated);
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
     let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
-    let client = lease::AccountLeaseClient::from_env()?;
     if client.is_some() || !lease::AccountSelection::from_env()?.is_default() {
         return resolve_merged_provider_account(
             provider,

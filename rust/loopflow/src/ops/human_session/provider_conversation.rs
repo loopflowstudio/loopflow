@@ -189,7 +189,12 @@ fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{recorded, recorded_cwd, transcript};
+    use crate::provider_auth::Provider;
+    use crate::session::AgentSession;
+    use crate::store::SharedStore;
+    use std::fs;
+    use std::path::PathBuf;
 
     const ID: &str = "0199a213-81c0-7800-8aa1-bbab2a035a53";
 

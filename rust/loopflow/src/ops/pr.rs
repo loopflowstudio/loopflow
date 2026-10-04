@@ -95,6 +95,7 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
+    crate::ops::commit::prepare_persistent_publication(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -128,11 +129,13 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: false,
-        message: Some("lf task pr open: prepare branch".to_string()),
+        message: Some("lf pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
-    commit_workflow(repo, &commit_options, progress, &|_| {})?;
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+        commit_workflow(repo, &commit_options, progress, &|_| {})?;
+    }
     crate::ops::task::require_task_pr_range_nonempty(repo)?;
     require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let branch =
@@ -372,7 +375,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let branch = current_branch(repo)?;
     if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf --task <issue-id> flow start`"
+            "the default branch cannot open a PR; use `lf wt create <name>` or publish from the persistent conversation checkout"
                 .to_string(),
         ));
     }
@@ -412,6 +415,9 @@ fn resolve_pr_copy(
 
 fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
     let cached = read_cached_pr_copy(repo, progress)?;
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(cached);
+    }
     let scratch = repo.join("scratch");
     let mut removed = false;
     for name in [".pr-copy-ref", "pr-title.txt", "pr-body.md"] {
@@ -1131,14 +1137,12 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
     if let Some(cursor) = cursor {
         command.args(["-f", &format!("endCursor={cursor}")]);
     }
-    let output = command.current_dir(repo).output()?;
-    // gh api fails on GraphQL errors even when the response has partial data.
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh api graphql [PR #{number} checks]"),
-            stderr: stderr_from_output(&output),
-        });
-    }
+    let output = super::read_retry::retry_read("GitHub check page", || {
+        super::read_retry::bounded_output(
+            command.current_dir(repo),
+            std::time::Duration::from_secs(30),
+        )
+    })?;
     serde_json::from_slice(&output.stdout).map_err(|error| {
         OpsError::Parse(format!(
             "could not parse GitHub checks for PR #{number}: {error}"
@@ -2003,6 +2007,11 @@ mod tests {
                 &script,
                 r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *endCursor=*)
     cat "$fixture/second.json"
@@ -2035,6 +2044,22 @@ esac
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
             }
+        }
+    }
+
+    #[test]
+    fn check_page_recovers_502_without_accepting_a_changed_head() {
+        for head in ["head-1", "head-2"] {
+            let fixture = CheckFixture::new(
+                page(
+                    head,
+                    vec![run("test", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+                    None,
+                ),
+                page(head, vec![], None),
+            );
+            std::fs::write(fixture.directory.path().join("transient"), "").unwrap();
+            assert_eq!(fixture.read().unwrap().is_some(), head == "head-1");
         }
     }
 
@@ -2145,6 +2170,11 @@ esac
             fixture.directory.path().join("gh"),
             r#"#!/bin/sh
 fixture="$(dirname "$0")"
+if [ -f "$fixture/transient" ]; then
+  rm "$fixture/transient"
+  echo "HTTP 502: Bad Gateway" >&2
+  exit 1
+fi
 case "$*" in
   *--disable-auto*) rm "$fixture/armed" ;;
   *) if [ -f "$fixture/armed" ]; then cat "$fixture/first.json"; else cat "$fixture/second.json"; fi ;;
@@ -2199,7 +2229,7 @@ esac
             .read()
             .unwrap_err()
             .to_string()
-            .contains("GitHub unavailable"));
+            .contains("GitHub check page: read failed after 1 attempt"));
     }
 
     #[test]
@@ -2788,14 +2818,13 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf task pr open" after gating to open or update the PR."}"###;
+Use "lf pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body:
-                    "## Summary\n\nUse \"lf task pr open\" after gating to open or update the PR."
-                        .to_string(),
+                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
+                    .to_string(),
             })
         );
     }

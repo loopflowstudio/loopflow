@@ -248,7 +248,7 @@ default login.
 Inspect a running worker's selected account:
 
 ```bash
-lf monitor list <run-id> --events
+lf mon list <run-id> --events
 ```
 
 `provider_account_selected` records the actual account and attempt, including

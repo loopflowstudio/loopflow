@@ -420,7 +420,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf ssh` resolves the PM
+    // A forwarded token wins over the local store: `lf home ssh` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf repo refresh` could never authenticate.
@@ -586,7 +586,7 @@ async fn resolve_pm_token_from_store(
     unreachable!("both refresh attempts return or retry")
 }
 
-/// Env var carrying a PM access token forwarded by `lf ssh`.
+/// Env var carrying a PM access token forwarded by `lf home ssh`.
 pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
 /// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
 pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
@@ -2985,7 +2985,7 @@ fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> Op
     if linear_name.contains(" — ") {
         return Err(OpsError::Message(format!(
             "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             inspect `lf doctor --planning` and correct the provider title before retrying"
+             inspect `lf home doctor --planning` and correct the provider title before retrying"
         )));
     }
     Ok(linear_name.trim().to_string())

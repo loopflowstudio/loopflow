@@ -76,7 +76,7 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
     let home = tempfile::tempdir().unwrap();
     let decoy = tempfile::tempdir().unwrap();
     fs::write(decoy.path().join("loopflow.db"), b"never open this store").unwrap();
-    repo.create_file(".lf/flows/home-proof.yaml", "- cmd: task sync --plan\n");
+    repo.create_file(".lf/flows/home-proof.yaml", "- cmd: sync --plan\n");
     let output = command(
         home.path(),
         repo.path(),
@@ -102,8 +102,16 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
 fn local_promotion_and_retained_home_commands_are_removed() {
     let home = tempfile::tempdir().unwrap();
     for args in [
-        vec!["install", "local-preflight", "--store", "/unused", "--json"],
         vec![
+            "home",
+            "install",
+            "local-preflight",
+            "--store",
+            "/unused",
+            "--json",
+        ],
+        vec![
+            "home",
             "install",
             "promote",
             "--from-build",
@@ -111,8 +119,16 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "--cli-target",
             "/unused",
         ],
-        vec!["install", "promote", "--fresh", "--cli-target", "/unused"],
         vec![
+            "home",
+            "install",
+            "promote",
+            "--fresh",
+            "--cli-target",
+            "/unused",
+        ],
+        vec![
+            "home",
             "install",
             "promote",
             "--reuse-home",

@@ -2126,6 +2126,72 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn review_retirement_fences_service_and_driver_and_retries_replacement() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let flow = store
+            .start_task_flow(&task_id, &review_position(&task_id))
+            .unwrap();
+        let flow = store.reserve_task_review(flow.id(), flow.version).unwrap();
+        let id = flow.pending_session_id.as_ref().unwrap();
+        let before = store.session(id).unwrap().unwrap();
+        let exec = ExecId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&exec],
+            )
+            .unwrap();
+        store.record_review_service(&flow, &exec).unwrap();
+        let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+        assert_eq!(store.review_execs(id).unwrap(), vec![exec.clone()]);
+        store.retire_task_review(&flow).unwrap();
+        let retired_driver = store.session_driver(id).unwrap();
+        store.retire_task_review(&flow).unwrap();
+        assert_eq!(store.session_driver(id).unwrap(), retired_driver);
+        assert!(store.with_session_driver(id, &driver, || Ok(())).is_err());
+        assert!(store.record_review_service(&flow, &ExecId::new()).is_err());
+        assert!(store
+            .claim_session_driver(id, retired_driver.as_ref(), &exec, false)
+            .is_err());
+        assert!(store.reserve_review_run(&flow).is_err());
+        assert!(store
+            .ready_session(id, before.captured, "late approval")
+            .is_err());
+        // Retirement is durable, but cannot authorize replacement until its exact
+        // processes are observed stopped. Re-entry uses the same Session/capture.
+        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
+        store.record_review_stop_processes(id, &[]).unwrap();
+        store.review_execution_stopped(id).unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER interrupt_restart BEFORE UPDATE ON flow_sessions WHEN NEW.state='replaced' BEGIN SELECT RAISE(FAIL,'interrupted replacement'); END;"
+        ).unwrap();
+        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER interrupt_restart")
+            .unwrap();
+        store.restart_task_flow(&task, Some(&flow), "head").unwrap();
+        let replacement = store
+            .start_task_flow(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        assert_eq!(store.task_flow(&task_id).unwrap(), Some(replacement));
+        let retired = store.session(id).unwrap().unwrap();
+        assert_eq!(retired.captured, before.captured);
+        assert_eq!(retired.artifact_key, before.artifact_key);
+        assert!(retired.completed_at.is_some());
+        assert!(retired.ready_summary.is_none());
+        assert_eq!(retained_invocation(&store, flow.id()).1, "replaced");
+    }
+
+    #[test]
     fn human_completion_retains_feedback_without_leaving_a_pending_review() {
         let (_dir, store, task_id) = store_with_task();
         let (position, _, _) = parked_review(

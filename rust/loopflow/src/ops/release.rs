@@ -2305,23 +2305,22 @@ fn prepare_publisher(
         workflow.database_id,
     );
 
-    let hosted_artifacts = tempfile::tempdir()?;
     let run_id = workflow.database_id.to_string();
     progress.status(&format!(
         "Downloading candidate artifacts for {}...",
         candidate.tag
     ));
-    run_stdout(
-        repo,
-        "gh",
-        &[
-            "run",
-            "download",
-            &run_id,
-            "--dir",
-            hosted_artifacts.path().to_string_lossy().as_ref(),
-        ],
-    )?;
+    let hosted_artifacts = super::read_retry::retry_read("candidate artifact download", || {
+        let directory = tempfile::tempdir()?;
+        super::read_retry::bounded_output(
+            Command::new("gh")
+                .current_dir(repo)
+                .args(["run", "download", &run_id, "--dir"])
+                .arg(directory.path()),
+            std::time::Duration::from_secs(300),
+        )?;
+        Ok(directory)
+    })?;
 
     let wt_name = prepare_worktree_name(target, candidate);
     let wt_path = worktree_path(repo, &wt_name);

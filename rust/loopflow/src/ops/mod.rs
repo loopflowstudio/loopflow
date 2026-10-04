@@ -19,6 +19,7 @@ pub mod pr_landing;
 mod present;
 mod progress;
 pub mod project;
+mod read_retry;
 mod release;
 mod release_lock;
 mod run;
@@ -37,7 +38,7 @@ pub mod wt;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
-pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
     list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,

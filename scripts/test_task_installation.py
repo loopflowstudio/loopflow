@@ -84,14 +84,29 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         rustc --version
         version=$(sed -n "s/^version = \"\([^\"]*\)\"/\1/p" Cargo.toml | head -1)
         python3 scripts/canonicalize_migrations.py "$version" --materialize-for-tests
-        nice -n 10 cargo test -p loopflow --lib \
-            migration_preserves_planning_identity_and_removes_snapshot_storage
+        nice -n 10 cargo test -p loopflow --lib --no-run
         nice -n 10 cargo test -p loopflow TARGETS --no-run
-        CHECKS'
+        '
 """
-        command = command.replace("TARGETS", targets).replace("CHECKS", checks)
+        command = command.replace("TARGETS", targets)
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
+        )
+        # Dependency downloads and compilation are complete. Docker keeps loopback
+        # while disconnecting the only external interface, including descendants.
+        subprocess.run(["docker", "network", "disconnect", "bridge", container], check=True)
+        isolated = r"""
+runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file \
+    LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 \
+    CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
+    flock /source/target/.installation-proof.lock sh -ec 'cd /source
+        PYTHONPATH=scripts python3 -c "from test_network import _probe; _probe()"
+        timeout 180 cargo test -p loopflow --lib \
+            migration_preserves_planning_identity_and_removes_snapshot_storage
+        CHECKS'
+""".replace("CHECKS", checks)
+        subprocess.run(
+            ["docker", "exec", container, "sh", "-ec", isolated], check=True, timeout=1800
         )
     finally:
         try:

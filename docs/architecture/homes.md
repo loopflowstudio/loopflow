@@ -5,7 +5,7 @@ credentials, planning storage, command and conversation records, and OS locks.
 Its SSH route may change without changing its identity.
 
 ```bash
-lf home id
+lf id
 lf wave place product <home-id>
 lf ssh <home-id> --wave product wave/operate
 ```
@@ -13,7 +13,7 @@ lf ssh <home-id> --wave product wave/operate
 ## Local by default
 
 ```bash
-lf monitor list                                # Execs recorded on this Home
+lf mon list                                # Execs recorded on this Home
 lf ps --json                           # OS-live processes on this Home
 lf wave status product                 # current plan, Task conditions and Session evidence
 
@@ -35,7 +35,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 not whether a process exists. `lf wave place` sets the Home used by Wave schedules
 and inherited once by new Projects; new Tasks inherit their Project's Home. It
 does not move existing child work or launch a process. `lf wave status` reads
-planning, Task conditions, metrics and Session history without a resident.
+planning, Task conditions, metrics and Session history; no process needs to be running.
 
 ## Process topology
 

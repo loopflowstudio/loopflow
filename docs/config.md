@@ -231,14 +231,14 @@ release:
       completion: github-release
 ```
 
-`lf repo run patch --target cli` selects changes from the exact
+`lf release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf repo run`, after Loopflow resolves the version and
+`verify` runs during `lf release run`, after Loopflow resolves the version and
 exact change range but before it prepares release changes. `lf check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types

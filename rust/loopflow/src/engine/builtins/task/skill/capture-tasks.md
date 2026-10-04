@@ -33,8 +33,8 @@ existing Task for the same work rather than filing a duplicate.
 
 ## Capture clear intent
 
-File once intent is clear. Show the concrete brief in the conversation and honor
-existing authorization to capture; do not impose another confirmation ritual.
+File once intent is clear. Show the concrete brief in the conversation and capture it;
+do not impose another confirmation ritual.
 Exploratory possibilities remain proposals.
 
 Each Task must stand alone for its owner: include the problem, beneficiary,
@@ -46,7 +46,7 @@ intent in the Task itself. A transcript or path in another checkout is insuffici
 
 From the destination repository, file with `lf task create --wave <owner>` without
 `--run`. Supply the title and complete brief through `--title` and stdin or
-`--notes`; use `lf task edit` for authorized refinements to a confirmed Task.
+`--notes`; use `lf task edit` for refinements to a confirmed Task.
 Return each actual Task link, repository and owning Wave.
 
 If the repository is inaccessible, ownership unresolved, or its Project unavailable,
@@ -64,5 +64,5 @@ Capture does not start workers or supervise captured Tasks. Stay in this Session
 original repository/Wave scope for further ideas; do not bind it to the first Task,
 move its checkout, or redirect Desktop focus after filing. Destination-scoped CLI
 calls do not relocate the conversation. The owning Waves operate their Tasks.
-When used inside an existing Wave conversation, follow this skill there; capture
-neither grants nor withdraws that conversation's existing operating authority.
+When used inside an existing Wave conversation, follow this skill there; keep operating
+that Wave's Tasks while capturing new work.

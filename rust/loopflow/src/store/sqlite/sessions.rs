@@ -571,6 +571,115 @@ impl SqliteStore {
         Ok((histories, truncated))
     }
 
+    pub(crate) fn record_review_service(
+        &self,
+        flow: &FlowSession,
+        exec: &crate::id::ExecId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if super::flows::flow_in(&tx, flow.id())?.as_ref() != Some(flow) {
+            return Err(StoreError::InvalidAuthority(
+                "review service changed before admission".into(),
+            ));
+        }
+        let id = flow
+            .pending_session_id
+            .as_ref()
+            .ok_or(StoreError::NotFound)?;
+        if tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,'{\"type\":\"review_service\"}',current_capture
+             FROM agent_sessions WHERE id=?1 AND completed_at IS NULL",
+            params![id, format!("review_service:{exec}"), exec, crate::store::rows::now_unix()],
+        )? != 1 {
+            return Err(StoreError::InvalidAuthority("review has been retired".into()));
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Fence the exact review before stopping its execution. Keep process owners
+    /// and history so an interrupted restart can finish stopping the same work.
+    pub(crate) fn retire_task_review(&self, expected: &FlowSession) -> StoreResult<()> {
+        let Some(id) = expected.pending_session_id.as_deref() else {
+            return Ok(());
+        };
+        let _dispatch = self.lock_session_driver(id)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if super::flows::task_flow_in(&tx, expected.task_id.as_ref().ok_or(StoreError::NotFound)?)?
+            .as_ref()
+            != Some(expected)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task review changed before retirement".into(),
+            ));
+        }
+        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.completed_at.is_none() {
+            tx.execute(
+                "UPDATE agent_sessions SET completed_at=?2,driver_generation=driver_generation+CASE WHEN driver_generation>0 THEN 1 ELSE 0 END WHERE id=?1",
+                params![id, crate::store::rows::now_unix()],
+            )?;
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                 VALUES(?1,'observed','task_restart:retired',?2,?3,?4)",
+                params![id, crate::store::rows::now_unix(),
+                    serde_json::json!({"type":"review_retired","reason":"explicit Task restart","flow_id":expected.id()}).to_string(), session.captured],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn review_stop_processes(&self, id: &str) -> StoreResult<Option<Vec<(u32, i64)>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT payload FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:processes'",
+            [id], |row| row.get::<_, String>(0),
+        ).optional()?.map(|value| serde_json::from_str(&value).map_err(StoreError::from)).transpose()
+    }
+
+    pub(crate) fn record_review_stop_processes(
+        &self,
+        id: &str,
+        owners: &[(u32, i64)],
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed','task_restart:processes',?2,?3,current_capture FROM agent_sessions
+             WHERE id=?1 AND completed_at IS NOT NULL ON CONFLICT DO NOTHING",
+            params![id, crate::store::rows::now_unix(), serde_json::to_string(owners)?],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn review_execution_stopped(&self, id: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed','task_restart:stopped',?2,'{\"type\":\"review_execution_stopped\"}',current_capture
+             FROM agent_sessions WHERE id=?1 AND completed_at IS NOT NULL
+             ON CONFLICT DO NOTHING",
+            params![id, crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn review_execs(&self, id: &str) -> StoreResult<Vec<crate::id::ExecId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.current_capture=e.seq WHERE s.id=?1 AND e.exec_id IS NOT NULL
+             UNION SELECT exec_id FROM session_events WHERE session_id=?1 AND receipt_key='review_service:'||exec_id AND exec_id IS NOT NULL
+             UNION SELECT driver_exec_id FROM agent_sessions WHERE id=?1 AND driver_exec_id IS NOT NULL
+             UNION SELECT provider_exec_id FROM agent_sessions WHERE id=?1 AND provider_exec_id IS NOT NULL",
+        )?;
+        let rows = query.query_map([id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -744,6 +853,25 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(session)
+    }
+
+    /// Called under the Session launch lock after proving there is no live client.
+    pub(crate) fn move_primary_workspace(
+        &self,
+        session: &AgentSession,
+        cwd: &std::path::Path,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND primary_scope IS NOT NULL AND completed_at IS NULL AND task_id IS NULL",
+            params![session.id, session.captured, cwd.to_string_lossy()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "primary Session changed before workspace admission".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// The scope a Session is or was primary for.

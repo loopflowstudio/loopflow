@@ -73,7 +73,7 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
-Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
+Task status and `lf mon list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
@@ -120,7 +120,7 @@ lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
 Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
-for another planning pass; it has no resident Project process to resume.
+for another planning pass; there is no long-running Project process to resume.
 
 Other options:
 
@@ -145,7 +145,7 @@ or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf task sync
+lf sync
 ```
 
 Refreshes the local default branch, preserving its unpublished commits and edits,

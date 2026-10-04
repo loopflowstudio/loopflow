@@ -20,14 +20,15 @@ records the remaining implementation and proof gaps.
 
 ```bash
 lf repo new-chapter 2026-10
-lf repo refresh product
+lf refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
 successor or creates one with the predecessor's Flow. Started unfinished Tasks
 move with identity, checkout, PR and captured execution intact. Proven untouched
 backlog is canceled; completed Tasks stay historical. Missing local or provider
-evidence cannot authorize retirement. Linear keeps the Projects and their Tasks.
+evidence cannot establish that work should be retired. Linear keeps the Projects
+and their Tasks.
 
 Rotation reads fresh provider state after each interruption. A partial transition
 to the requested name is recoverable using stable Project identities and one
@@ -148,7 +149,7 @@ two corrective turns in the same conversation; provider failure remains distinct
 Helpers, older successes and late generations cannot settle the current selection.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
-and outcomes provide the evidence. The Wave operator resolves authorized
+and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 
@@ -184,7 +185,7 @@ process evidence is uncertainty, and causal ancestry grants no signal authority.
 ```bash
 lf session list --json
 lf session connect SESSION --json
-lf session ready "Feedback and remaining work"
+lf ready "Feedback and remaining work"
 lf session complete SESSION
 ```
 
@@ -205,7 +206,7 @@ live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
-lf task comment INF-124 "keep the public name"
+lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 

@@ -102,7 +102,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         String::from_utf8(run(&["pr"])).unwrap().trim(),
         "No open PR for the current branch."
     );
-    run(&["task", "commit", "-m", "Record local work"]);
+    run(&["commit", "-m", "Record local work"]);
     let committed = repo.head_sha();
     assert_ne!(before, committed);
     assert!(!state.exists(), "commit published a PR");
@@ -113,14 +113,13 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         .unwrap();
     assert!(remote.status.success());
     assert!(remote.stdout.is_empty(), "commit pushed the branch");
-    run(&["task", "sync", "--plan"]);
+    run(&["sync", "--plan"]);
     assert_eq!(repo.head_sha(), committed);
     let worktrees: serde_json::Value =
-        serde_json::from_slice(&run(&["task", "wt", "list", "--json"])).unwrap();
+        serde_json::from_slice(&run(&["wt", "list", "--json"])).unwrap();
     assert_eq!(worktrees.as_array().unwrap().len(), 1);
     for (verb, expected) in [("open", "draft"), ("publish", "open")] {
         run(&[
-            "task",
             "pr",
             verb,
             "--title",
@@ -129,7 +128,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
             "No Task required.",
         ]);
         assert_eq!(fs::read_to_string(&state).unwrap(), expected);
-        let status = String::from_utf8(run(&["task", "pr"])).unwrap();
+        let status = String::from_utf8(run(&["pr"])).unwrap();
         assert!(status.contains("#1") && status.contains("https://example.com/pr/1"));
     }
     let remote = Command::new("git")
@@ -185,18 +184,15 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 execute_flow_command(
                     repo.path(),
                     &FlowCommand {
-                        command: "task".to_string(),
-                        args: std::iter::once("pr")
-                            .chain(args.iter().copied())
-                            .map(str::to_string)
-                            .collect(),
+                        command: "pr".to_string(),
+                        args: args.iter().map(|arg| (*arg).to_string()).collect(),
                     },
                     &NullProgress,
                 )
                 .unwrap();
             } else {
                 let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-                    .args(["task", "pr"])
+                    .args(["pr"])
                     .args(args)
                     .current_dir(repo.path())
                     .output()
@@ -1714,8 +1710,10 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
 }
 
 #[test]
-fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
+fn default_branch_refuses_pr_before_committing_or_pushing() {
     let repo = TestRepo::new();
+    let head = repo.head_sha();
+    repo.create_file("notes.md", "unpublished\n");
 
     let result = create_or_update_pr(
         repo.path(),
@@ -1731,9 +1729,14 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
     assert!(matches!(
         result,
         Err(OpsError::Message(message))
-            if message.contains("canonical checkout")
-                && message.contains("lf --task <issue-id> flow start")
+            if message.contains("default branch")
+                && message.contains("lf wt create")
     ));
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("notes.md")).unwrap(),
+        "unpublished\n"
+    );
 }
 
 #[test]
@@ -1928,4 +1931,61 @@ Body:
         panic!("expected labeled codex output to succeed");
     };
     assert!(result.created);
+}
+
+#[test]
+fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join("pr-state");
+    let gh = draft_pr_script(&state);
+    let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
+    let repo = TestRepo::new();
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    fs::write(persistent.path.join("scratch/design.md"), "private\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Save memory"))
+        .unwrap();
+    fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
+    fs::write(persistent.path.join("unrelated.md"), "unpublished\n").unwrap();
+    let options = PrOptions {
+        draft: false,
+        title: Some("Document accepted decisions".into()),
+        body: Some("Durable repository memory.".into()),
+        agent: None,
+    };
+    let first = create_or_update_pr(&persistent.path, &options, &NullProgress).unwrap();
+    let second = create_or_update_pr(&persistent.path, &options, &NullProgress).unwrap();
+    assert_eq!(first.url, second.url);
+    let published = Command::new("git")
+        .current_dir(&persistent.path)
+        .args(["show", &format!("origin/{}:memory.md", persistent.branch)])
+        .output()
+        .unwrap();
+    assert!(published.status.success());
+    assert_eq!(published.stdout, b"accepted\n");
+    let scratch = Command::new("git")
+        .current_dir(&persistent.path)
+        .args([
+            "ls-tree",
+            "-r",
+            "--name-only",
+            &format!("origin/{}", persistent.branch),
+            "--",
+            "scratch",
+            "unrelated.md",
+        ])
+        .output()
+        .unwrap();
+    assert!(scratch.stdout.is_empty());
+    assert_eq!(
+        fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
+        "next decision\n"
+    );
+    assert!(persistent.path.join("scratch/design.md").exists());
+    assert!(persistent.path.join("unrelated.md").exists());
 }

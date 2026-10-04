@@ -1,5 +1,6 @@
 mod directory;
 mod lifecycle;
+mod restart;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
@@ -737,7 +738,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf task sync` in {} to integrate it.",
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
         task.plan.identifier, parent.id, task.worktree.display()
     );
     Ok(())
@@ -1298,10 +1299,10 @@ fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
     Ok(())
 }
 
+/// Existing work consumes validated local facts; refresh and provider writes own acquisition.
 pub(crate) async fn resolve_managed_task_planning(
     store: &SharedStore,
     task: &Task,
-    refresh: crate::ops::pm::PmRefresh,
 ) -> OpsResult<crate::ops::task_pm::ResolvedTask> {
     if task_work_status(store, task).await? != WorkStatus::Ready {
         return Err(task_error(format!(
@@ -1309,9 +1310,12 @@ pub(crate) async fn resolve_managed_task_planning(
             task.plan.identifier
         )));
     }
-    let resolved =
-        crate::ops::task_pm::resolve_task_async(&task.worktree, task.plan.id.as_str(), refresh)
-            .await?;
+    let resolved = crate::ops::task_pm::resolve_task_async(
+        &task.worktree,
+        task.plan.id.as_str(),
+        crate::ops::pm::PmRefresh::Never,
+    )
+    .await?;
     require_startable_issue(&resolved.item)?;
     let project = store
         .get_project(&task.project_id)
@@ -1492,16 +1496,16 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
     task_error(match err {
         RegistryUnavailable::MissingFile { path } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is missing. \
-             Start the owning Wave (it creates the registry) or run `lf doctor`.",
+             Start the owning Wave (it creates the registry) or run `lf home doctor`.",
             path.display()
         ),
         RegistryUnavailable::Unresolved { error } => format!(
             "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_HOME or run `lf doctor`."
+             Fix LF_HOME or run `lf home doctor`."
         ),
         RegistryUnavailable::Incompatible { path, error } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is present but \
-             inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
+             inaccessible or schema-incompatible: {error}. Run `lf home doctor`.",
             path.display()
         ),
     })
@@ -2441,6 +2445,7 @@ async fn stop_task_worker(store: &SharedStore, task: &Task) -> OpsResult<Option<
     let Some(position) = position else {
         return Ok(None);
     };
+    let position = restart::stop_review(store, &position).await?;
     let claim = position.claim.as_ref();
     if flow_worker_live(store, &position)? {
         store
@@ -2973,7 +2978,7 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
 /// settlement. Merged evidence remains available to completion retries.
 ///
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
-/// deciding it — `lf task pr abandon` runs `gh pr close` before stamping it — so a
+/// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
 async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
     if let Some(active) = store
@@ -3343,7 +3348,7 @@ pub(crate) async fn task_recovery_adoption(
     {
         return Err(task_error(format!(
             "Task {identifier} cannot recover between PRs while {} has uncommitted changes; \
-             carry them forward with `lf task pr next` or commit before resuming, recovery refused \
+             carry them forward with `lf pr next` or commit before resuming, recovery refused \
              before moving any ownership",
             worktree.display()
         )));
@@ -3373,7 +3378,7 @@ pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, task: &Task) -
     }
     Err(task_error(format!(
         "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
-         forward with `lf task pr next` or commit before resuming",
+         forward with `lf pr next` or commit before resuming",
         task.plan.identifier,
         task.worktree.display()
     )))
@@ -3387,7 +3392,7 @@ pub(crate) async fn ensure_working_pr(
 }
 
 /// How a serial-PR rotation treats the worktree. Automated settlement rotates
-/// only a clean tree (`carry_dirty = false`); the operator's `lf task pr next` carries the
+/// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
 /// (`carry_dirty = true`) and may name that branch via `slug_override`.
 #[derive(Debug, Clone, Default)]
@@ -3843,7 +3848,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 .map(|github| format!("#{}", github.number))
                 .unwrap_or_else(|| format!("sequence {}", active.sequence));
             return Err(task_error(format!(
-                "current PR {which} is not merged yet; land it or wait for the merge before `lf task pr next`"
+                "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
             )));
         }
         if matches!(
@@ -4101,7 +4106,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let outcome =
         crate::ops::pm::pm_link_pr_async(&task.worktree, wave.slug(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
-    // reading, but an operator running `lf task pr open` should not have to go looking.
+    // reading, but an operator running `lf pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
         tracing::warn!(
             issue = task.plan.identifier,
@@ -4288,10 +4293,10 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open; merge it or run `lf task pr abandon`"
+                "pull request {which} is open; merge it or run `lf pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
-                "pull request {which} is still publishing; wait for it to land or run `lf task pr abandon`"
+                "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
             )),
             // An unpublished PR means three different things; say which. The
             // classification is inert: a gate that goes on to refuse leaves the
@@ -4301,11 +4306,11 @@ pub(crate) async fn task_completion_gate(
                     gate.discardable_successor = Some(pr.clone());
                 }
                 CommittedFollowUp::ProvenEmpty => gate.blockers.push(format!(
-                    "pull request {which} is unpublished; publish and merge it or run `lf task pr abandon`"
+                    "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
                 )),
                 CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
                     "follow-up work is committed on unpublished pull request {which}; \
-                     publish and merge it or run `lf task pr abandon`"
+                     publish and merge it or run `lf pr abandon`"
                 )),
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove unpublished pull request {which} is empty: {reason}"
@@ -5149,8 +5154,7 @@ async fn restart_task_async(
         load_task_flow(&task.worktree, flow)?;
     }
 
-    let resolved =
-        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Force).await?;
+    let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow =
         select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
     let mut project = store
@@ -5190,9 +5194,19 @@ async fn restart_task_async(
     task.updated_at = now;
 
     if let Some(advice) = advice.as_deref() {
-        super::linear_observe::publish_task_steer(&store, &task, advice).await?;
+        super::linear_observe::publish_task_steer(&store, &task, advice)
+            .await
+            .map_err(|error| {
+                task_error(format!(
+                    "Restart stopped before replacing the existing Flow or worker: {error}"
+                ))
+            })?;
     }
     let stopped = stop_task_worker(&store, &task).await?;
+    let blockers = lifecycle::recovery_execution_blockers(&store, &task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     select_task_agent(&store, &mut task, agent.as_deref()).await?;
     store
         .restart_task_flow(&task, stopped.as_ref(), &head)
@@ -5218,8 +5232,7 @@ pub(crate) async fn continue_task_async(
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     let saved = store.task_flow(&task.id).await.map_err(task_error)?;
-    let resolved =
-        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Auto).await?;
+    let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow = match saved.as_ref() {
         Some(position) => {
             if let Some(flow) = requested_flow
@@ -5828,6 +5841,86 @@ mod tests {
             crate::journal::ProcessIdentityEvidence::Live,
             "fixture receipt must describe the spawned process",
         );
+    }
+
+    #[tokio::test]
+    async fn restart_waits_for_review_launch_before_retiring_or_reading_owners() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("RESTART-LAUNCH").await;
+        let flow = fixture
+            .store
+            .start_task_flow(
+                &fixture.task.id,
+                crate::durable::FlowSession {
+                    invocation: crate::durable::test_flow_invocation(
+                        "review",
+                        0,
+                        "demo",
+                        Some("review"),
+                        true,
+                    ),
+                    task_id: Some(fixture.task.id.clone()),
+                    wave_id: Some(fixture.task.wave_id.clone()),
+                    cwd: fixture.task.worktree.clone(),
+                    cursor: Default::default(),
+                    version: 0,
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    ready_summary: None,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    finished: false,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let flow = fixture
+            .store
+            .reserve_task_review(flow.id(), flow.version)
+            .await
+            .unwrap();
+        let id = flow.pending_session_id.as_ref().unwrap();
+        let launch = crate::ops::human_session::lock_session_exec(id).unwrap();
+        let stop = super::restart::stop_review(&fixture.store, &flow);
+        tokio::pin!(stop);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut stop)
+                .await
+                .is_err()
+        );
+        assert!(fixture
+            .store
+            .session(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        // The launching service may finish its reservation while restart waits.
+        // Re-entry must read that version under the lock, not retire a stale copy.
+        rusqlite::Connection::open(&fixture.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
+                [flow.id()],
+            )
+            .unwrap();
+        drop(launch);
+        let stopped = stop.await.unwrap();
+        assert_eq!(stopped.id(), flow.id());
+        assert_eq!(stopped.version, flow.version + 1);
+        assert!(fixture
+            .store
+            .session(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     #[tokio::test]

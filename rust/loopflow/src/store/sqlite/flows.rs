@@ -1773,6 +1773,56 @@ mod tests {
     }
 
     #[test]
+    fn saved_flow_commands_migrate_without_changing_the_cursor_or_identity() {
+        use clap::Parser;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let commands = [
+            ("task", vec!["sync", "--plan"], "sync --plan"),
+            ("task", vec!["pr", "land", "-c"], "pr land -c"),
+            ("task", vec!["wt", "list"], "wt list"),
+            (
+                "task",
+                vec!["commit", "-m", "captured"],
+                "commit -m captured",
+            ),
+            ("rebase", vec![], "sync"),
+            ("install", vec![], "home install"),
+        ];
+        let steps = commands
+            .iter()
+            .map(|(command, args, _)| {
+                ConcreteStep::Command(ConcreteCommand {
+                    item: Command {
+                        command: (*command).into(),
+                        args: args.iter().map(|arg| (*arg).into()).collect(),
+                    },
+                    sources: vec!["captured-custom-flow".into()],
+                })
+            })
+            .collect();
+        let flow = launched(&store, steps, 1);
+        let restored = store.flow(flow.id()).unwrap().unwrap();
+        assert_eq!(restored.id(), flow.id());
+        assert_eq!(restored.cursor, flow.cursor);
+        assert_eq!(restored.version, flow.version);
+        assert_eq!(restored.worker_generation, flow.worker_generation);
+        assert_eq!(restored.claim, flow.claim);
+        for (step, (_, _, expected)) in restored.invocation.steps.iter().zip(commands) {
+            let ConcreteStep::Command(command) = step else {
+                panic!("saved command")
+            };
+            assert_eq!(command.item.display_name(), expected);
+            assert_eq!(command.sources, ["captured-custom-flow"]);
+            crate::lf::Cli::try_parse_from(command.item.argv()).unwrap();
+        }
+        let again: QueuedInvocation =
+            serde_json::from_str(&serde_json::to_string(&restored.invocation).unwrap()).unwrap();
+        assert_eq!(again, restored.invocation);
+    }
+
+    #[test]
     fn repeated_node_acknowledges_only_consumed_successful_steers() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();

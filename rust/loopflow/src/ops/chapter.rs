@@ -595,6 +595,7 @@ async fn apply_rotation(
                     project: None,
                     observed_at: items_observed_at,
                 },
+                Some((wave.id().clone(), ctx.initiative.clone())),
             )
             .await
             .map_err(error)?;
@@ -638,6 +639,7 @@ async fn apply_rotation(
                         project,
                         observed_at,
                     },
+                    Some((wave.id().clone(), ctx.initiative.clone())),
                 )
                 .await
                 .map_err(error)?;
@@ -686,6 +688,7 @@ async fn apply_rotation(
                             project,
                             observed_at,
                         },
+                        Some((wave.id().clone(), ctx.initiative.clone())),
                     )
                     .await
                     .map_err(error)?;

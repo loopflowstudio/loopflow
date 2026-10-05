@@ -88,7 +88,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(resolved.wave, "product");
             assert_eq!(resolved.item, record.item);
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
-            assert!(fixture.store.list_projects(None).await.unwrap().is_empty());
+            assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
             assert!(fixture
                 .store
                 .pm_snapshot(wave.id())
@@ -114,7 +114,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             edited.observed_at += 1;
             fixture
                 .store
-                .put_pm_task(&repo.to_string_lossy(), "linear", edited.clone())
+                .put_pm_task(&repo.to_string_lossy(), "linear", edited.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -164,6 +164,7 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     snapshot.items.clear();
     snapshot.projects.truncate(1);
     snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
+    snapshot.projects[0].initiative_ids = vec!["initiative-1".into()];
     let ctx = super::PmContext {
         repository: super::RepositoryPmContext {
             client: crate::pm::linear::LinearClient::with_base_url(
@@ -438,7 +439,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     .unwrap();
     fixture
         .store
-        .put_pm_task(&repo.to_string_lossy(), "linear", record.clone())
+        .put_pm_task(&repo.to_string_lossy(), "linear", record.clone(), None)
         .await
         .unwrap();
     let (url, _) = spawn(vec![
@@ -502,7 +503,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone())
+                .put_pm_task(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             list.synced_at += 10;
@@ -528,7 +529,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             conflicting.item.name = "Contradiction at the same revision".into();
             assert!(fixture
                 .store
-                .put_pm_task(&scope, "linear", conflicting)
+                .put_pm_task(&scope, "linear", conflicting, None)
                 .await
                 .is_err());
             assert_eq!(
@@ -546,7 +547,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             delayed.observed_at += 20;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", delayed)
+                .put_pm_task(&scope, "linear", delayed, None)
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -566,7 +567,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.completed = true;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone())
+                .put_pm_task(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             // Duplicate and older change receipts cannot invalidate an equal/newer observation.
@@ -594,7 +595,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .is_err());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone())
+                .put_pm_task(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -611,7 +612,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed)
+                .put_pm_task(&scope, "linear", confirmed, None)
                 .await
                 .unwrap();
             fixture.store.put_pm_snapshot(list).await.unwrap();
@@ -638,7 +639,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             uncached.item.identifier = "FIX-2".into();
             fixture
                 .store
-                .put_pm_task(&scope, "linear", uncached)
+                .put_pm_task(&scope, "linear", uncached, None)
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
@@ -786,7 +787,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             newer.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone())
+                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone(), None)
                 .await
                 .unwrap();
             // The list arrived later but its provider revision is older.
@@ -831,7 +832,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 project.initiative_ids = vec!["different-wave".into()];
                 let result = fixture
                     .store
-                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting)
+                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting, None)
                     .await;
                 if revision != Some("2026-09-29T11:00:00Z") {
                     assert!(result.is_err());
@@ -883,4 +884,91 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
+}
+
+#[tokio::test]
+async fn cold_detail_resolves_configured_wave_before_projecting() {
+    for ownership in ["same", "foreign", "unmapped"] {
+        let fixture = Fixture::new().await;
+        let (repo, wave) = fixture.planning_repo().await;
+        fixture.seed(now() + 3600).await;
+        let mut refreshed = project();
+        refreshed["name"] = "Refreshed plan".into();
+        refreshed["updatedAt"] = "2026-09-30T11:00:00Z".into();
+        if ownership != "same" {
+            refreshed["initiatives"]["nodes"][0]["id"] = "elsewhere".into();
+        }
+        if ownership == "foreign" {
+            std::fs::create_dir_all(repo.join("wave/other")).unwrap();
+            std::fs::write(
+                repo.join("wave/other/GOAL.md"),
+                "---\npm:\n  linear_initiative: elsewhere\n---\nOther work.\n",
+            )
+            .unwrap();
+            fixture
+                .store
+                .create_wave(&crate::work::wave::Wave::new(
+                    WaveId::new(),
+                    "other".into(),
+                    repo.to_string_lossy().into_owned(),
+                ))
+                .await
+                .unwrap();
+        }
+        let (url, _) = spawn(vec![
+            team_response(),
+            json_response(StatusCode::OK, issue(project())),
+            team_response(),
+            json_response(StatusCode::OK, issue(refreshed)),
+        ])
+        .await;
+        PM_TEST_CONTEXT
+            .scope(fixture.context(&url), async {
+                read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                    .await
+                    .unwrap();
+                let original = fixture
+                    .store
+                    .list_projects(Some(wave.id()))
+                    .await
+                    .unwrap()
+                    .remove(0);
+                // Evict normalized provider facts, retaining durable work as on a cold detail read.
+                let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+                conn.execute_batch(
+                    "DELETE FROM pm_wave_projects; DELETE FROM pm_items; DELETE FROM pm_projects;",
+                )
+                .unwrap();
+                drop(conn);
+                let result = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                    .await
+                    .unwrap();
+                let current = fixture
+                    .store
+                    .get_project(&original.id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if ownership == "same" {
+                    assert!(result.refresh_error.is_none(), "{:?}", result.refresh_error);
+                    assert_eq!(current.id, original.id);
+                    assert_eq!(current.wave_id, original.wave_id);
+                    assert_eq!(current.plan.name, "Refreshed plan");
+                } else {
+                    assert!(result.refresh_error.is_some());
+                    assert_eq!(current, original);
+                    assert_eq!(
+                        fixture.store.list_projects(None).await.unwrap(),
+                        vec![original]
+                    );
+                }
+                assert!(fixture
+                    .store
+                    .pm_snapshot(wave.id())
+                    .await
+                    .unwrap()
+                    .is_none());
+            })
+            .await;
+    }
 }

@@ -275,17 +275,18 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 
 October 5 source permits empty Flow and preserves names. Jack Heart's comment
 `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only correction,
-retaining original evidence and strict subsequent conflicts. At `ec5501f25`,
-ingestion commits accepted facts, conversion markers and durable projection together
-with each entity's acquisition time; projection failure rolls back acceptance.
-Full and partial association must validate the accepted Initiative transactionally:
-a stale full response otherwise records a fresh empty Wave after readers exclude
-the foreign Project. The extended store regression reproduced and repairs this gap.
-Disputed membership remains recorded before acceptance. Replay and generic planning
-writers are deleted; restart retains accepted planning.
-Rotation readbacks replace durable-only writes at `661622ee2`; partial reads retain refresh age. Reteam lacks full issue readbacks,
-planning locks and authorized Team-relationship acceptance. Lock all participating Waves from acquisition through acceptance, reusing held
-locks; final-refresh locking leaves earlier reads exposed. Focused proofs are synthetic; installed acceptance remains open.
+retaining original evidence and strict subsequent conflicts. Atomic ingestion/projection (`ec5501f25`) and accepted-Initiative association
+(`b3d8a6366`) preserve entity ages and reject stale full/partial Wave association.
+Replay and generic planning writers are deleted; restart retains accepted facts.
+Rotation readbacks replace durable-only writes (`661622ee2`). Reteam lacks full readbacks, Team acceptance and acquisition locks. Lock Waves before reads through acceptance; reuse held locks.
+
+October 5's cold-detail regression disproved durable identity as Wave ownership:
+foreign-Initiative detail overwrote a retained plan without normalized planning.
+Both shortcuts are deleted. Detail resolves configured Initiative/Wave ownership;
+association and projection commit together without advancing full-Wave age.
+Store/operation proofs cover same-Wave refresh, foreign/unmapped preservation and
+Task/PR identity. Reteam's full readbacks, authorized Team acceptance and acquisition
+locks remain; locks cannot supply ownership evidence. Installed recovery is unproved.
 
 Created-successor recovery retains Task/PR/Flow identity, then rejects
 `A — next` and `A — previous` under the old selector. Its proof therefore belongs

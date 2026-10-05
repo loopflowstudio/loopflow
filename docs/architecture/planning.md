@@ -98,6 +98,14 @@ not advance the Wave's full-refresh timestamp. Reteam still writes identifiers
 independently; its full readbacks and serialized relationship reconciliation remain
 unfinished. Rotation's name-based recovery still requires replacement.
 
+Full and partial Wave ingestion validate the accepted Project's Initiative before
+recording membership or freshness. Detail refresh resolves that Initiative through
+Wave configuration and the registry, then accepts the association and projects
+facts in one transaction. A durable Project row alone grants no Wave ownership.
+Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
+the operation boundary reports an error. Both Project and Task projection require
+an exact accepted Initiative match. Acquisition serialization remains unfinished.
+
 The `project_readiness` migration preserves original Linear Project bodies and
 acquisition evidence before a one-time name/slug correction from fresh provider
 facts. Only pre-cutover rows receive this exception; all non-name conflict checks

@@ -5,13 +5,11 @@ Jack Heart concluded review before the October 5 implementation attempt. The
 status and evidence; earlier review notes remain at
 `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
-- Preservation mechanics: follow the design's **Accepted planning must own durable
-  projection**, **Reteam relationship acceptance** and **Preservation boundary**
-  sections in that order. They own the two original reteam failures and the new created-successor
-  recovery failure; no new product decision is needed. The design now places that
-  recovery proof with binding/transition replacement because name-based selection
-  cannot recover preserved provider names. Collection now preserves
-  issue-reported ownership; its former listing-based rewrite is removed.
+- Preservation mechanics need no product decision. Cold-detail ownership and
+  projection preservation now have focused proof. Reteam's full readbacks,
+  authorized Team acceptance and shared acquisition locks remain next, followed
+  by membership fencing. Created-successor recovery stays with binding/transition
+  replacement; name-based selection cannot recover preserved provider names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.
 - Skill/Flow composition and the retained Task-candidate format between KR planning,

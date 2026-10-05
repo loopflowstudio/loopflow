@@ -1745,6 +1745,20 @@ async fn inspect_task_planning_async(
                 item.identifier, item.team_id, repository.team_id
             )));
         }
+        let confirmed_wave = if let Some(project) = &project {
+            let initiative = singular_project_initiative(project)?;
+            let wave = wave_for_initiative(repo, &initiative)?;
+            let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
+                .map_err(|error| OpsError::Message(error.to_string()))?;
+            let registered = store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
+            Some((registered.id().clone(), initiative))
+        } else {
+            None
+        };
         store
             .put_pm_task(
                 &scope,
@@ -1754,6 +1768,7 @@ async fn inspect_task_planning_async(
                     project,
                     observed_at: now,
                 },
+                confirmed_wave,
             )
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -2153,7 +2168,7 @@ async fn apply_or_plan_repository_reteam(
                 resolved
                     .repository
                     .client
-                    .move_project_to_team(&project.id, team_id)
+                    .set_project_teams(&project.id, std::slice::from_ref(team_id))
                     .await
                     .map_err(pm_to_ops)?;
             }
@@ -3359,6 +3374,16 @@ mod tests {
             assert!(pm.provider.is_none());
             assert!(pm.linear_team.is_none());
             assert!(pm.linear_initiative.is_some());
+            let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
+            let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
+            let planning = resolved
+                .store
+                .pm_snapshot(registered.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(planning.snapshot.projects.len(), 1);
+            assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
         }
 
         let requests = requests.lock().await;

@@ -46,7 +46,7 @@ impl SqliteStore {
             provider,
             std::slice::from_ref(project),
             &[],
-            Some(wave),
+            Some((wave, initiative)),
         )?;
         tx.commit()?;
         Ok(())
@@ -57,6 +57,7 @@ impl SqliteStore {
         repo: &str,
         provider: &str,
         record: &PmTaskRecord,
+        confirmed_wave: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         if let Some(project) = &record.project {
@@ -81,13 +82,34 @@ impl SqliteStore {
                 params![repo, provider, record.item.id],
             )?;
         }
+        if let Some((wave, initiative)) = confirmed_wave {
+            let project_id = record.item.project_id.as_deref().ok_or_else(|| {
+                StoreError::InvalidData("confirmed Wave requires a Project association".into())
+            })?;
+            require_accepted_initiative(&tx, repo, provider, project_id, initiative)?;
+            let wave_repo: String =
+                tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
+                    row.get(0)
+                })?;
+            if wave_repo != repo {
+                return Err(StoreError::InvalidData(
+                    "confirmed Wave belongs to another repository".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO pm_wave_projects(wave_id,project_id,position)
+                 VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+                 ON CONFLICT(wave_id,project_id) DO NOTHING",
+                params![wave,project_id],
+            )?;
+        }
         project_accepted_planning(
             &tx,
             repo,
             provider,
             record.project.as_slice(),
             std::slice::from_ref(&record.item),
-            None,
+            confirmed_wave,
         )?;
         tx.commit()?;
         Ok(())
@@ -379,8 +401,9 @@ fn project_accepted_planning(
     provider: &str,
     projects: &[PmProject],
     items: &[PmItem],
-    confirmed_wave: Option<&WaveId>,
+    confirmed_wave: Option<(&WaveId, &str)>,
 ) -> StoreResult<()> {
+    let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
     let projects = {
@@ -394,15 +417,18 @@ fn project_accepted_planning(
              JOIN pm_wave_projects m ON m.project_id=p.id
              LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
              JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
-             WHERE m.wave_id=?4 OR EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=sync.initiative)
-             UNION
-             SELECT p.body,p.observed_at,existing.wave_id FROM accepted p
-             JOIN projects existing ON existing.external_project_id=p.id
-             JOIN waves w ON w.id=existing.wave_id AND w.repo=p.repo",
+             WHERE json_array_length(p.body,'$.initiative_ids')=1 AND
+             json_extract(p.body,'$.initiative_ids[0]')=CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END",
         )?;
         let rows = query
             .query_map(
-                params![repo, provider, project_ids, confirmed_wave],
+                params![
+                    repo,
+                    provider,
+                    project_ids,
+                    confirmed_wave,
+                    confirmed_initiative
+                ],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -458,18 +484,23 @@ fn project_accepted_planning(
              issue_description=json_extract(i.body,'$.description'),
              pm_snapshot_synced_at=i.observed_at,project_id=p.id
          FROM pm_items i
-         JOIN tasks source ON source.external_issue_id=i.id
-         JOIN projects current ON current.id=source.project_id
+         JOIN projects p ON p.external_project_id=i.project_id
+         JOIN projects current ON current.wave_id=p.wave_id
          JOIN waves w ON w.id=current.wave_id
-         JOIN projects p ON p.external_project_id=i.project_id AND p.wave_id=current.wave_id
          JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider AND observed.id=i.project_id
-         WHERE target.id=source.id
+         WHERE target.external_issue_id=i.id AND target.project_id=current.id
          AND i.repo=?1 AND i.provider=?2 AND w.repo=i.repo AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND observed.archived=0 AND observed.membership_unresolved=0
+         AND EXISTS(SELECT 1 FROM pm_wave_projects membership
+             LEFT JOIN pm_wave_sync sync ON sync.wave_id=membership.wave_id AND sync.provider=i.provider
+             WHERE membership.project_id=i.project_id AND membership.wave_id=p.wave_id
+             AND json_array_length(observed.body,'$.initiative_ids')=1
+             AND json_extract(observed.body,'$.initiative_ids[0]')=
+                 CASE WHEN membership.wave_id=?4 THEN ?5 ELSE sync.initiative END)
          AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)",
-        params![repo, provider, item_ids],
+        params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
     )?;
     Ok(())
 }

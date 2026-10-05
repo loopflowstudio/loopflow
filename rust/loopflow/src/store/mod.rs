@@ -318,11 +318,19 @@ impl Store {
         repo: &str,
         provider: &str,
         record: PmTaskRecord,
+        confirmed_wave: Option<(WaveId, String)>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.put_pm_task(&repo, &provider, &record)
+            store.put_pm_task(
+                &repo,
+                &provider,
+                &record,
+                confirmed_wave
+                    .as_ref()
+                    .map(|(wave, initiative)| (wave, initiative.as_str())),
+            )
         })
         .await
     }
@@ -1568,6 +1576,7 @@ mod tests {
                     project: Some(snapshot.snapshot.projects[0].clone()),
                     observed_at: snapshot.synced_at,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1658,6 +1667,7 @@ mod tests {
                     project: Some(older_project),
                     observed_at: 20,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1794,6 +1804,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cold_detail_preserves_durable_work_without_confirmed_wave_membership() {
+        let (_directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        let mut observed_project = snapshot.snapshot.projects.remove(0);
+        observed_project.initiative_ids = vec!["elsewhere".into()];
+        observed_project.name = "Another Wave's plan".into();
+        observed_project.slug = "another-waves-plan".into();
+        let mut item = snapshot.snapshot.items.remove(0);
+        item.name = "Work now owned elsewhere".into();
+
+        // Durable identity survives a cold planning cache. It does not prove
+        // that this freshly observed Initiative still belongs to that Wave.
+        store
+            .put_pm_task(
+                wave.repo(),
+                "linear",
+                crate::store::PmTaskRecord {
+                    item,
+                    project: Some(observed_project),
+                    observed_at: 10,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert_eq!(store.get_project(&project.id).await.unwrap(), Some(project));
+        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
+    }
+
+    #[tokio::test]
+    async fn cold_detail_refreshes_confirmed_work_and_retains_identity() {
+        let (_directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        let mut observed = snapshot.snapshot.projects.remove(0);
+        observed.name = "Refreshed plan".into();
+        let mut item = snapshot.snapshot.items.remove(0);
+        item.name = "Refreshed work".into();
+        store
+            .put_pm_task(
+                wave.repo(),
+                "linear",
+                crate::store::PmTaskRecord {
+                    item,
+                    project: Some(observed),
+                    observed_at: 10,
+                },
+                Some((wave.id().clone(), snapshot.initiative)),
+            )
+            .await
+            .unwrap();
+        let updated_project = store.get_project(&project.id).await.unwrap().unwrap();
+        assert_eq!(updated_project.plan.name, "Refreshed plan");
+        assert_eq!(updated_project.wave_id, project.wave_id);
+        let mut updated_task = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(updated_task.plan.title, "Refreshed work");
+        assert_eq!(updated_task.plan.pm_snapshot_synced_at, 10);
+        updated_task.plan = task.plan.clone();
+        assert_eq!(updated_task, task);
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn stale_project_readback_cannot_assign_newer_membership_to_a_wave() {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
@@ -1812,6 +1897,7 @@ mod tests {
                     project: Some(current.clone()),
                     observed_at: 10,
                 },
+                None,
             )
             .await
             .unwrap();
@@ -1845,6 +1931,10 @@ mod tests {
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
         confirmed.flow.clear();
+        confirmed.krs.push(crate::pm::PmKr {
+            text: "Preserve the authored proof".into(),
+            holds: false,
+        });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
         store
             .put_pm_project(
@@ -1861,6 +1951,12 @@ mod tests {
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.plan.pm_snapshot_synced_at, 10);
+        assert!(durable
+            .plan
+            .prompt_context
+            .starts_with("Project metric targets:"));
+        assert!(!durable.plan.prompt_context.contains("flow:"));
+        assert!(durable.plan.prompt_context.contains(&confirmed.krs[0].text));
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(store
@@ -1916,6 +2012,7 @@ mod tests {
                     project: Some(response.snapshot.projects[1].clone()),
                     observed_at: 2,
                 },
+                None,
             )
             .await
             .unwrap();

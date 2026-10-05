@@ -344,7 +344,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed))
+                    .block_on(store.put_pm_task(&scope, "linear", observed, None))
                     .unwrap();
                 if condition == "connection" {
                     fs::write(

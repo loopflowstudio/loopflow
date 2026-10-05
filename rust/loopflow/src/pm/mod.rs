@@ -121,10 +121,12 @@ pub struct PmProject {
 impl PmProject {
     pub(crate) fn prompt_context(&self) -> String {
         let mut context = format!(
-            "Chapter metric targets:\n{}",
+            "Project metric targets:\n{}",
             serde_json::to_string(&self.metric_targets).expect("metric targets serialize")
         );
-        context.push_str(&format!("\n\nChapter Task flow: {}", self.flow));
+        if !self.flow.trim().is_empty() {
+            context.push_str(&format!("\n\nProject Task flow: {}", self.flow));
+        }
         if !self.krs.is_empty() {
             context.push_str("\n\nKRs:");
             for kr in &self.krs {

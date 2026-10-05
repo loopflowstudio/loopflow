@@ -59,10 +59,10 @@ a valid result only when every started Task already holds a disposition above.
   in `execution.work.execs` without a `completed_at`, against `lf ps --json`.
   A live process on any of them makes the Task moving, whoever launched it.
 - **A defined Flow proceeds.** A started Task whose selected Flow has steps
-  left is continued with `lf --task <issue-id> flow start`, then verified with
-  `lf task status <issue> --json`. This needs no permission. It applies only
-  when the Task has no live driver, no pending review on any of its Flows and
-  no hold in `lf task automation`; each of those is its own disposition.
+  left is continued with `lf --task <issue> flow start`, then verified with
+  `lf task status <issue> --json`. It applies only when the Task has no live
+  driver, no pending review on any of its Flows and no hold in
+  `lf task automation`; each of those is its own disposition.
   If the command refuses, its message is the evidence: the Task waits on a
   person or is unknown, and you do not work around the refusal.
 - **Recover before reporting a blocker.** Read `lf task status`, the failed
@@ -181,8 +181,7 @@ headings in this order, omitting an empty group:
 
 Then list unstarted backlog, and after it any judgment, unresolved decisions
 and evidence gaps. Keep each row to its disposition and decisive evidence. If
-nothing needed action, say why briefly.
-Persist only changed decisions, durable learning and unresolved concerns at
+nothing needed action, say why briefly. Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;
 this skill does not automatically send the reply to a channel.
 
@@ -196,10 +195,11 @@ references when unambiguous.
 
 Fill the link from `task.identifier` and `reference.issue_url`, and the readable
 title from `task.name`. Give the Task's disposition as its status, not
-`runtime.status` alone, and take the next owner from `next_move.owner`. An owner of `wave` names work
-this pass acts on, not a handoff: report its result. Link each published PR
-from that Task's `prs[].publication.github` `number` and `url`. State the next action only
-when supported by current evidence; leave unknown state unknown. Include an
+`runtime.status` alone, and take the next owner from `next_move.owner`. An
+owner of `wave` names work this pass acts on, not a handoff: report its result.
+Link each published PR from that Task's `prs[].publication.github` `number` and
+`url`. State the next action only when supported by current evidence; leave
+unknown state unknown. Include an
 active PR/workspace slug only when navigating that workspace is the job. In
 roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
 use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a

@@ -2,9 +2,10 @@
 
 Dated 2026-10-05. These are **simulations**: each row reads the assembled
 `wave/session` prompt (session text plus the composed `wave/operate` procedure)
-and states what its instructions require. No model was run against them. They
-show that the prompts agree with each other, not that an agent follows them.
-The runtime evidence is the post-install demo in "Not yet shown" below.
+and states what its instructions require. No model was run for this table. It
+shows that the prompts agree with each other, not that an agent follows them.
+Two read-only model runs are described below; the runtime evidence is the
+post-install demo in "Not yet shown".
 
 Jack Heart's decisions on 2026-10-05 set the contract: started Tasks keep
 moving, unstarted backlog is not started, a defined Flow proceeds, and a Task

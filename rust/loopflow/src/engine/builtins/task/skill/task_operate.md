@@ -50,13 +50,14 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    implementation remaining can use `pursue`; unresolved design needs the design
    review in `feature`. Read composed delivery and review steps before launching.
    Explain any departure from the default. Scratch history alone cannot approve
-   a design or waive a review. A finished Flow is not evidence of unfinished work:
-   stop if the Task's outcome is already satisfied. Ask about consequential scope
+   a design or waive a review. A finished Flow proves neither completion nor
+   unfinished work: inspect its outcome, and stop if the Task's outcome is
+   already satisfied. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** Use `lf --task <issue> flow start` to continue, or
    `lf --task <issue> flow start <flow>` for the selected new Flow. Check installed
-   help first. Leave a live driver running. Recover a stopped driver through
+   help first. Recover a stopped driver through
    the same saved Flow; never restart or replace it merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
    merely to reach the person already present. A review belongs to its own
@@ -75,9 +76,8 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    before retrying, and retry with `--reason "<what changed>"` only on new
    evidence or a repaired cause. Stop when the Task lands,
    its intended outcome is otherwise complete, or a concrete blocker remains.
-   A finished Flow alone does not prove the Task is complete: inspect its outcome
-   and remaining work, and report publication, review, landing, Task completion
-   and remaining scope as separate facts. Arming a merge the Flow did not, and
+   Report publication, review, landing, Task completion and remaining scope as
+   separate facts. Arming a merge the Flow did not, and
    rotating to a next PR with `lf pr next`, are the person's to choose. Repeated
    calls must preserve existing work without duplicating Flows or conversations.
 

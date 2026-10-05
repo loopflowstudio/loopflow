@@ -234,7 +234,15 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for target in publish_release.TARGETS:
         with tarfile.open(artifacts / f"lf-{target}.tar.gz", "w:gz") as package:
             for name in ("lf",):
-                body = f"#!/bin/sh\necho '{name} 1.2.3'\n".encode()
+                body = (
+                    "#!/bin/sh\n"
+                    'case "$*" in\n'
+                    f"  --version) echo '{name} 1.2.3' ;;\n"
+                    "  --help) echo 'Usage: lf' ;;\n"
+                    "  'list --json') echo '[]' ;;\n"
+                    "  *) echo 'unknown command' >&2; exit 2 ;;\n"
+                    "esac\n"
+                ).encode()
                 info = tarfile.TarInfo(name)
                 info.mode = 0o755
                 info.size = len(body)

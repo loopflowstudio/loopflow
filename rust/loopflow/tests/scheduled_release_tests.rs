@@ -415,7 +415,6 @@ esac
         }
         let successor_commit = repo.head_sha();
         let stages: Vec<_> = [
-            "ui_host_verified",
             "public_artifacts_verified",
             "versioned_dmg_verified",
             "latest_dmg_verified",

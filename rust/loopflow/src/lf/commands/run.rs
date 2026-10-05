@@ -1295,33 +1295,11 @@ mod tests {
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
     use crate::engine::{Config, ExecTarget, Skill, Surface};
     use crate::lf::Cli;
+    use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-
-    struct EnvironmentRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
-
-    impl EnvironmentRestore {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self(
-                keys.iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvironmentRestore {
-        fn drop(&mut self) {
-            for (key, value) in self.0.drain(..).rev() {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
 
     #[test]
     fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
@@ -1356,7 +1334,7 @@ mod tests {
     #[test]
     fn context_choices_override_config_and_omission_inherits() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let _restore = EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let repo = loopflow_test_support::TestRepo::new();
@@ -1419,7 +1397,7 @@ mod tests {
     #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&[
+        let _restore = EnvGuard::clear(&[
             "LF_HOME",
             "LF_USER_NAME",
             "GIT_CONFIG_COUNT",
@@ -1428,7 +1406,6 @@ mod tests {
         ]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        std::env::remove_var("LF_USER_NAME");
         std::env::set_var("GIT_CONFIG_COUNT", "1");
         std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
         std::env::set_var("GIT_CONFIG_VALUE_0", "Git User");
@@ -1484,7 +1461,7 @@ mod tests {
     #[test]
     fn preferred_name_uses_remote_caller_and_leaves_background_work_unattributed() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let _restore = EnvGuard::clear(&["LF_HOME", "LF_USER_NAME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::fs::write(
@@ -1560,22 +1537,21 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::session_record::CAPTURE_KEY_ENV,
             "LF_RUN_DIR",
         ];
-        let _environment = EnvironmentRestore::capture(&keys);
         let path = format!(
             "{}:{}",
             bin.display(),
             std::env::var("PATH").unwrap_or_default()
         );
+        let _environment = EnvGuard::clear(&keys);
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
-        std::env::remove_var(crate::session_record::CAPTURE_KEY_ENV);
         std::env::set_var("LF_RUN_DIR", home.path().join("stale-run"));
 
-        let task = "prove the generic Run launch";
+        let task = "prove the captured Session launch";
         let context = crate::trace::PreparedTurnContext::from_prompts("", task);
         let mut env = std::collections::BTreeMap::new();
         env.insert(
@@ -1748,30 +1724,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // A suite launched from a live agent session must not inherit that
-        // session's execution identity.
-        let ambient_identity = [
-            crate::session_record::CAPTURE_KEY_ENV,
-            "LF_RUN_DIR",
-            "LF_WAVE_ID",
-            "LF_ACCOUNT_LEASE",
-        ];
-        let keys: Vec<&'static str> = ["PATH", "LF_BIN", "LF_HOME"]
-            .into_iter()
-            .chain(ambient_identity)
-            .collect();
-        let _environment = EnvironmentRestore::capture(&keys);
-        for name in ambient_identity {
-            std::env::remove_var(name);
-        }
-        std::env::set_var(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        );
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
+        let _ambient = EnvGuard::new();
+        let _environment = EnvGuard::clear(&["PATH", "LF_BIN", "LF_HOME"]);
+        std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
 
@@ -1979,7 +1938,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn ide_wave_skill_launch_delivers_the_authored_goal() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let _restore = EnvGuard::clear(&["HOME", "LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         // A regression into native skill sync must never write personal skills.
         std::env::set_var("HOME", home.path());

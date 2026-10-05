@@ -20,20 +20,11 @@ The October 4 restart/admission failure is preserved at
 no competing worker, manual Session completion or database repair was performed.
 That earlier observation does not establish the current state of those Execs.
 
-## Earlier verification capacity — October 4
+## Verification and integration
 
-The compression pass retried `uv run python scripts/resource_envelope.py --recover`:
-13.3 GiB free against the 32 GiB emergency reserve, no inactive eligible build roots,
-and uv cache pruning could not acquire its lock. No active build, installed Home,
-live conversation or other checkout was deleted. Build/focused-test/Clippy/Desktop
-verification defers to capable gate/CI; compression source edits can proceed.
-This does not waive conversion acceptance or establish readiness to land.
-
-October 5: capacity no longer blocks source verification. Rust compilation,
-focused Session/authority/history tests and all-target Clippy now pass. The
-conversion and populated released-Home matrix remain implementation work;
-no installed data or unrelated writer was changed.
-
-October 5 sync onto `8ea0bec9c`: retained native conversation selection/reopening and review retirement, using capture-owned paths and excluding capture mutation aliases; accepted main's shared memory curation.
-
-Check: materialized `cargo test -p loopflow --test session_cli_tests --no-fail-fast` passed 9/10; repaired the new stub's retired environment reader, then the exact failing test passed (1/1); broader gate/CI remains with the caller.
+October 5 builds supersede the October 4 disk-capacity limitation. Its diagnostics,
+the sync onto `8ea0bec9c`, and the Session CLI run (9/10 followed by the repaired
+case passing 1/1) remain at
+`71a784cdf5135fad8b26a21ddd6ea1ab354c4a93:scratch/questions.md`.
+No installed data, unrelated writer or other checkout was changed. Conversion,
+populated released-Home preservation and the affected gate remain outstanding.

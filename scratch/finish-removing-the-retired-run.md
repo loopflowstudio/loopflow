@@ -41,13 +41,11 @@ the repaired replacement-race fixture uses durable Session IDs and retains feedb
 client ownership, lock handoff and exactly-once completion assertions. Public CLI
 coverage retains capture-key/prefix rejection and stale-actor mutation rejection.
 
-Earlier runtime/compression findings and exact checks are preserved at
-`c79203717c5e812284835591fe514d37b543d813:scratch/finish-removing-the-retired-run.md`.
-That checkpoint records passing Session CLI/lifecycle, PR authority, history/DTO,
-Session-owner, formatting, architecture and Clippy checks, with a Session skip.
-Those earlier checks did not cover the controller alias fixtures; the retained
-October 5 Session/controller evidence below covers their repair. Conversion and full gate remain unproved.
-The earlier disk-capacity limitation is superseded by October 5 source builds.
+Earlier runtime, controller, Session/authority/history and replay checks are
+preserved at `71a784cdf5135fad8b26a21ddd6ea1ab354c4a93:scratch/finish-removing-the-retired-run.md`,
+including the exact earlier checkpoints and the Session skip. Those focused passes
+and formatting/Clippy results do not establish conversion, Desktop acceptance or
+a full gate. October 5 builds supersede the earlier disk-capacity limitation.
 
 Preservation findings remain binding: a native conversation can resume without its
 old manifest; validate present payload without making absence erase SQLite identity.
@@ -68,21 +66,9 @@ Remaining indivisible source work:
 - Finish current-reference and native callback/Flow consumer audits, Desktop
   validation, populated released-Home fault matrix, final inventory/delta and gate.
 
-Recorded compression checks passed 29 Session-record tests, Clippy and formatting;
-the preceding 49-pass Session/controller evidence remains at
-`fc911bc18:scratch/finish-removing-the-retired-run.md`. Neither covers conversion.
-
-October 5 evidence at `9d4d97e72:scratch/finish-removing-the-retired-run.md`
-records fixture lint/help/host-refusal passes and three isolated replay, inherited
-capture and review tests passing, followed by replay's final resolver check,
-formatting and Clippy. Docker exclusion execution was unavailable; neither those
-passes nor the checkpoint establishes conversion or a full gate.
-
-The preceding implementation verified the exclusion runner's pinned checksums against published v0.13.3 SHA256SUMS; no container or hosted exclusion result is established.
-
-Compression evidence is preserved at
-`514bb9f3e4c2664fe93522d4795082b46e9f5be2:scratch/finish-removing-the-retired-run.md`: replay passed 1/1, compilation, formatting, all-target Clippy and runner Ruff checks passed.
-These checks are reused for the unchanged source; exclusion and conversion remain unproved.
+The exclusion runner's pinned checksums were verified against published v0.13.3
+SHA256SUMS. Docker was unavailable; no container or hosted exclusion result exists.
+The executed macOS alias counterexample below remains contrary evidence.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -375,29 +361,19 @@ does not establish configured launch exclusion or installed preservation.
 
 ## Delete — do not maintain
 
-Removed `CaptureHandle::begin_with_key_and_caller`: both callers always supplied
-a fresh key, inherited caller and present context. `begin_with_request` now uses
-`begin_with_context` directly; replay retains its explicit historical input path.
-The current build also exposed three stale `current_attempt` fixture fields in
-`ops/task.rs` and `tests/task_restart_tests.rs`; use `selected_capture` throughout.
-Keep rename's distinct managed-review lock/relookup and ordinary Session paths.
+Completed cuts and their detailed rationale are preserved at
+`71a784cdf5135fad8b26a21ddd6ea1ab354c4a93:scratch/finish-removing-the-retired-run.md`:
+unused capture constructors/provider helpers, replay's duplicate selector and
+manifest readers, request clones, mutation aliases and runner orchestration.
+Retain `resolve_manifest` as replay's selector owner, `inherited_capture_key` for
+subordinate history and `journal::agent_caller` for Session/Exec provenance.
+Rename still needs its distinct managed-review lock/relookup path.
 
-Removed replay's duplicate SQLite selector lookup and `verified_caller` manifest
-reader. `resolve_manifest` already resolves Session IDs/history selectors and
-validates the payload path; replay retains that source key without a second read
-silently dropping its provenance. Its fixture uses the shared environment guard.
-`inherited_capture_key` now names the capture selector explicitly, distinct from
-`journal::agent_caller`'s Session/Exec provenance. Review opening shares one
-previous-capture branch across resume and replacement checks.
-
-Replay now moves its retained request into the capture and reuses the execution
-config for prompt recording and the temporary context file, removing two complete
-request clones. The exclusion runner uses foreground `docker run` exit status,
-removing create/attach/wait orchestration and success flags. Cleanup still removes
-its named container after timeout and attempts image removal even if container
-cleanup fails. Checkpoint `514bb9f3e4c2664fe93522d4795082b46e9f5be2` preserves
-this compression and its incoming evidence; it supersedes the earlier failed
-checkpoint attempt.
+Direct-skill tests now use the shared `test_ambient::EnvGuard`; their private
+`EnvironmentRestore`, manual identity clearing and temporary key vector are
+removed. Save PATH before clearing it, and keep the guard inside the environment
+lock. The shared guard also clears agent caller and Task authority for the paired
+research fixture. This changes fixture isolation, not production behavior.
 
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
@@ -491,4 +467,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5): `uv run python tests/e2e/capture_exclusion.py --probe-aliases` reproduced payload/SQLite writes through aliases; Ruff lint/format and `git diff --check` passed. Docker unavailable; hosted pathname proof remains with CI, and the replacement boundary/conversion remain design and implementation work.
+Check (October 5 compression): `cargo test -p loopflow --lib --no-run --message-format=json` built; its executable under `scripts/test_network.py` with `lf::commands::run::tests:: --test-threads=1` passed 31/31; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. Conversion/affected gate remain outstanding; hosted exclusion belongs to CI.

@@ -22,9 +22,7 @@ struct WorkspaceTask: Identifiable {
     /// Work has left it even while planning has not caught up.
     var inWorkingSet: Bool {
         if !sessions.isEmpty { return true }
-        guard started else { return false }
-        let settled = task.task.isTerminal || task.runtime?.status != .ready
-        return !settled || TaskHistoryFilter.hasUnresolvedExecution(
+        return started && TaskHistoryFilter.hasUnresolvedExecution(
             runtime: task.runtime, condition: task.condition, flow: task.flow
         )
     }

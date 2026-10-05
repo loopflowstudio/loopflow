@@ -1,0 +1,18 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.96s)
+Test Suite 'Selected tests' started at 2026-10-04 00:04:49.029.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-10-04 00:04:49.031.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-10-04 00:04:49.031.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-04 00:04:49.031.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureSnapshotTaskOpening() started.
+✔ Test measureSnapshotTaskOpening() passed after 169.405 seconds.
+✔ Suite "Desktop experience measurements" passed after 169.405 seconds.
+✔ Test run with 1 test in 1 suite passed after 169.406 seconds.

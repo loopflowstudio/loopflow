@@ -13,26 +13,29 @@ import json
 import math
 import os
 import platform
+import shutil
 import signal
+import sqlite3
 import statistics
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import FrameType
+from typing import TextIO
 
 REPO = Path(__file__).resolve().parent.parent
-COMMAND = [
+BUILD_COMMAND = [
     "swift",
-    "test",
+    "build",
     "--package-path",
     "swift",
+    "--build-tests",
     "-Xswiftc",
     "-gnone",
     "--jobs",
     "4",
-    "--no-parallel",
-    "--filter",
-    "DesktopPerformanceTests",
 ]
 
 
@@ -158,11 +161,25 @@ def _comparison(current: dict, baseline: dict) -> dict:
     for key in ["host", "build_mode", "command", "measurement_source"]:
         if current["metadata"][key] != baseline["metadata"][key]:
             return {"available": False, "reason": f"Different {key}"}
+    for key in ["snapshot", "repo", "issue"]:
+        if current["metadata"].get(key) != baseline["metadata"].get(key):
+            return {"available": False, "reason": f"Different {key}"}
     for key in ["population_version", "populations", "scenarios", "endpoint", "poll_interval_ms"]:
         if (current.get("plan") or {}).get(key) != (baseline.get("plan") or {}).get(key):
             return {"available": False, "reason": f"Different {key}"}
-    if current["status"] != "complete" or baseline["status"] != "complete":
-        return {"available": False, "reason": "Both runs need complete, source-stable observations"}
+    for run in [current, baseline]:
+        metadata = run["metadata"]
+        if (
+            metadata.get("exit_code") != 0
+            or metadata["source_before"] != metadata["source_after"]
+            or run["not_started"] != 0
+            or run["journal_errors"]
+            or any(attempt["outcome"] == "interrupted" for attempt in run["attempts"])
+        ):
+            return {
+                "available": False,
+                "reason": "Both runs need complete, source-stable observations",
+            }
     previous = {
         (g["metric"], g["scenario"], g["population"], g["state"]): g for g in baseline["groups"]
     }
@@ -175,7 +192,11 @@ def _comparison(current: dict, baseline: dict) -> dict:
         deltas.append(
             {
                 **dict(zip(["metric", "scenario", "population", "state"], key)),
-                "p50_delta_ms": group["p50_ms"] - before["p50_ms"],
+                "p50_delta_ms": group["p50_ms"] - before["p50_ms"]
+                if group["p50_ms"] is not None and before["p50_ms"] is not None
+                else None,
+                "before_failure_rate": before["failure_rate"],
+                "after_failure_rate": group["failure_rate"],
                 "p95_delta_ms": (group["p95_ms"] - before["p95_ms"])
                 if group["p95_ms"] is not None and before["p95_ms"] is not None
                 else None,
@@ -210,15 +231,24 @@ def _report(output: Path, baseline: Path | None) -> dict:
             summary, json.loads((baseline / "report.json").read_text())
         )
     _write(output / "report.json", summary)
+    snapshot_run = metadata.get("snapshot") is not None
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
-        "Endpoint: in-process native bitmap capture with text verification; "
-        "Session return also waits for owned PTY replies.",
+        "Endpoint: in-process native bitmap capture with text verification."
+        + ("" if snapshot_run else " Session return also waits for owned PTY replies."),
         "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
         "",
-        "Fixture data excludes CLI/registry discovery, network and provider startup. "
-        "Three retained cat PTYs per population.",
+        (
+            "Production Podium, router and local CLI reads over an isolated SQLite snapshot. "
+            "Copied provider connections are refused. "
+            "Cold workspace construction is not OS app launch. "
+            "Session input readiness is unmeasured. "
+            "Key-window and intermediate-sheet observations remain in each attempt."
+            if snapshot_run
+            else "Fixture data excludes CLI/registry discovery, network and provider startup. "
+            "Three retained cat PTYs per population."
+        ),
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
@@ -248,9 +278,10 @@ def _report(output: Path, baseline: Path | None) -> dict:
             ]
             for delta in comparison["deltas"]:
                 p95 = f"{delta['p95_delta_ms']:+.2f}" if delta["p95_delta_ms"] is not None else "—"
+                p50 = f"{delta['p50_delta_ms']:+.2f}" if delta["p50_delta_ms"] is not None else "—"
                 lines.append(
                     f"| {delta['population']} | {delta['scenario']} | {delta['state']} | "
-                    f"{delta['p50_delta_ms']:+.2f} | {p95} |"
+                    f"{p50} | {p95} |"
                 )
     if not complete:
         lines += [
@@ -263,14 +294,139 @@ def _report(output: Path, baseline: Path | None) -> dict:
     return summary
 
 
-def _run(output: Path, samples: int, baseline: Path | None) -> int:
+def _snapshot(source: Path, output: Path) -> None:
+    output.mkdir(parents=True, exist_ok=False, mode=0o700)
+    database = output / "loopflow.db"
+    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as source_db:
+        with sqlite3.connect(database) as target:
+            source_db.backup(target)
+    database.chmod(0o600)
+    with sqlite3.connect(database) as target:
+        tables = [
+            row[0] for row in target.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        counts = {
+            name: target.execute(
+                'SELECT count(*) FROM "' + name.replace('"', '""') + '"'
+            ).fetchone()[0]
+            for name in tables
+        }
+    _write(
+        output / "snapshot.json",
+        {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "sha256": hashlib.sha256(database.read_bytes()).hexdigest(),
+            "counts": counts,
+        },
+    )
+
+
+def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
+    swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
+    platform_path = Path(
+        subprocess.check_output(
+            ["xcrun", "--sdk", "macosx", "--show-sdk-platform-path"], text=True
+        ).strip()
+    )
+    developer = platform_path / "Developer"
+    environment["DYLD_FRAMEWORK_PATH"] = ":".join(
+        str(developer / "Library" / name) for name in ["Frameworks", "PrivateFrameworks"]
+    )
+    environment["DYLD_LIBRARY_PATH"] = str(developer / "usr/lib")
+    return [
+        str(swift.parent.parent / "libexec/swift/pm/swiftpm-testing-helper"),
+        "--test-bundle-path",
+        str(
+            REPO
+            / "swift/.build/debug/LoopflowSwiftPackageTests.xctest"
+            / "Contents/MacOS/LoopflowSwiftPackageTests"
+        ),
+        "--testing-library",
+        "swift-testing",
+        "--filter",
+        test_filter,
+    ]
+
+
+def _run_process(
+    command: list[str], environment: dict[str, str], log: TextIO, timeout: float
+) -> tuple[int, str | None]:
+    interrupted = False
+
+    def _terminate(signum: int, frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = True
+
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=REPO,
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout
+        outcome = None
+        try:
+            while not interrupted:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    outcome = "timeout"
+                    break
+                try:
+                    process.wait(timeout=min(remaining, 0.1))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+        except KeyboardInterrupt:
+            interrupted = True
+        if interrupted:
+            outcome = "interrupted"
+        if outcome:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # The leader can exit before its children. Stop the remaining group
+            # even when wait() has already returned, so the journal stays frozen.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+        return process.returncode, outcome
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _run(
+    output: Path,
+    samples: int,
+    baseline: Path | None,
+    snapshot: Path | None = None,
+    binary: Path | None = None,
+    repo: Path | None = None,
+    issue: str | None = None,
+) -> int:
     output.mkdir(parents=True, exist_ok=False)
+    test_filter = (
+        "DesktopPerformanceTests.measureSnapshotTaskOpening"
+        if snapshot
+        else "DesktopPerformanceTests.measureExperiences"
+    )
     metadata = {
         "schema": 1,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
         "build_mode": "SwiftPM debug -gnone",
-        "command": COMMAND,
+        "build_command": BUILD_COMMAND,
+        "command": None,
         "source_before": _sources(),
         "measurement_source": hashlib.sha256(
             b"".join(
@@ -283,7 +439,27 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
             )
         ).hexdigest(),
         "population_source": "isolated DTO fixtures; no configured Home",
+        "resources_before": {
+            "load_average": os.getloadavg(),
+            "free_bytes": shutil.disk_usage(output).free,
+        },
     }
+    if snapshot:
+        manifest = json.loads((snapshot / "snapshot.json").read_text())
+        database = snapshot / "loopflow.db"
+        if hashlib.sha256(database.read_bytes()).hexdigest() != manifest["sha256"]:
+            raise ValueError("Snapshot changed since capture; create a new consistent snapshot")
+        home = output / "home"
+        home.mkdir(mode=0o700)
+        shutil.copyfile(database, home / "loopflow.db")
+        (home / "loopflow.db").chmod(0o600)
+        metadata.update(
+            population_source="isolated SQLite online backup",
+            snapshot=manifest,
+            binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+            repo=str(repo),
+            issue=issue,
+        )
     _write(output / "run.json", metadata)
     if sys.platform != "darwin":
         metadata.update(
@@ -296,36 +472,47 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
             LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
             LF_DESKTOP_PERF_SAMPLES=str(samples),
         )
+        if snapshot:
+            environment.update(
+                LOOPFLOW_UI_TEST_MODE="live",
+                LF_DESKTOP_TASK_SNAPSHOT=str(home),
+                LF_DESKTOP_TASK_BINARY=str(binary),
+                LF_DESKTOP_TASK_REPO=str(repo),
+                LF_DESKTOP_TASK_ISSUE=issue,
+            )
         # These are host-boundary time limits, never latency targets. The attempt
         # journal survives termination; only this invocation's process group stops.
         with (output / "native.log").open("w") as log:
             try:
-                process = subprocess.Popen(
-                    COMMAND,
-                    cwd=REPO,
-                    env=environment,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
+                # SwiftPM can put its test child in a separate process group.
+                # Both journeys build first, then own the native process directly.
+                code, outcome = _run_process(BUILD_COMMAND, environment, log, timeout=600)
+                if outcome:
+                    metadata.update(outcome=outcome, exit_code=code)
+                if code != 0 or outcome:
+                    raise subprocess.CalledProcessError(code, BUILD_COMMAND)
+                command = _native_command(test_filter, environment)
+                metadata["command"] = command
+                bundle = Path(command[2])
+                metadata["test_binary_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+                code, outcome = _run_process(
+                    command,
+                    environment,
+                    log,
+                    timeout=600 + samples * (150 if snapshot else 30),
                 )
-            except OSError as error:
-                metadata.update(outcome="unavailable", reason=str(error), exit_code=None)
-                process = None
-            if process is not None:
-                try:
-                    metadata["exit_code"] = process.wait(timeout=600 + samples * 30)
-                except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-                    metadata["outcome"] = (
-                        "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
-                    )
-                    os.killpg(process.pid, signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
-                    metadata["exit_code"] = process.returncode
+                metadata["exit_code"] = code
+                if outcome:
+                    metadata["outcome"] = outcome
+            except (OSError, subprocess.SubprocessError) as error:
+                metadata.setdefault("outcome", "unavailable")
+                metadata.setdefault("exit_code", None)
+                metadata["reason"] = str(error)
     metadata["source_after"] = _sources()
+    metadata["resources_after"] = {
+        "load_average": os.getloadavg(),
+        "free_bytes": shutil.disk_usage(output).free,
+    }
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)
     print(f"{summary['status']}: {output / 'report.md'}")
@@ -350,16 +537,41 @@ def main() -> int:
         help="Attempts per scenario/population; default 1 first + 20 warm",
     )
     run.add_argument("--baseline", type=Path)
+    run.add_argument("--snapshot", type=Path, help="Home snapshot created by the snapshot command")
+    run.add_argument(
+        "--lf", dest="binary", type=Path, help="Exact lf executable for snapshot reads"
+    )
+    run.add_argument("--repo", type=Path)
+    run.add_argument("--issue", help="Task deep-link identifier, e.g. LOO-368")
+    snapshot_command = commands.add_parser(
+        "snapshot", help="Consistent private SQLite backup; preserves all rows"
+    )
+    snapshot_command.add_argument("--database", type=Path, required=True)
+    snapshot_command.add_argument("--output", type=Path, required=True)
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
     report.add_argument("output", type=Path)
     report.add_argument("--baseline", type=Path)
     args = parser.parse_args()
+    if args.command == "snapshot":
+        _snapshot(args.database, args.output)
+        print(args.output / "snapshot.json")
+        return 0
     if args.command == "run":
         if args.samples < 1:
             parser.error("--samples must be positive")
-        return _run(args.output.resolve(), args.samples, args.baseline)
+        if args.snapshot and not all([args.binary, args.repo, args.issue]):
+            parser.error("--snapshot requires --lf, --repo and --issue")
+        return _run(
+            args.output.resolve(),
+            args.samples,
+            args.baseline,
+            args.snapshot.resolve() if args.snapshot else None,
+            args.binary.resolve() if args.binary else None,
+            args.repo.resolve() if args.repo else None,
+            args.issue,
+        )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")
     return 0 if summary["status"] == "complete" else 1

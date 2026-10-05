@@ -103,13 +103,21 @@ final class PodiumModel {
         let generation = destinationGeneration
         taskLinkURL = url
         taskLinkExpectedID = expectedTaskID
-        taskLinkReading = .loading
-        showsTaskLink = true
+        showsTaskLink = false
         do {
             let link = try TaskLink(url: url)
-            let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
+            // Navigation can use already observed planning, just like the outline
+            // and palette. Unscoped links still resolve globally for ambiguity.
+            let cached = cachedTaskDestination(link)
+            taskLinkReading = .loading
+            let result: RoadmapSnapshot
+            if let cached { result = cached }
+            else { result = try await query.taskDestination(issue: link.issue, repo: link.repo) }
             guard destinationGeneration == generation else { return }
-            let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
+            let candidates = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
+            let matches = cached == nil ? candidates : candidates.filter {
+                $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath && $0.1.task.identifier == link.issue
+            }
             let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
             if let expectedTaskID {
                 guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
@@ -122,10 +130,13 @@ final class PodiumModel {
             taskLinkReading = .available(result)
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation)
+            } else {
+                showsTaskLink = true
             }
         } catch {
             guard destinationGeneration == generation else { return }
             taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+            showsTaskLink = true
         }
     }
 
@@ -143,6 +154,31 @@ final class PodiumModel {
         } catch {
             guard destinationGeneration == generation else { return }
             taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+            showsTaskLink = true
+        }
+    }
+
+    private func cachedTaskDestination(_ link: TaskLink) -> RoadmapSnapshot? {
+        guard let repo = link.repo?.normalizedFilePath else { return nil }
+        for snapshot in [roadmap.value, taskLinkReading.value].compactMap({ $0 }) {
+            let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }
+                .flatMap { $0.tasks.items }.filter { $0.task.identifier == link.issue }
+            if matches.count == 1 {
+                // Keep the shared reader's envelope, but restrict the destination
+                // below to the exact requested issue/repository.
+                return snapshot
+            }
+        }
+        return nil
+    }
+
+    func containsTaskDestination(_ url: URL) -> Bool {
+        guard let link = try? TaskLink(url: url), let repo = link.repo?.normalizedFilePath else { return false }
+        return navigationByRepo.values.contains { state in
+            guard let evidence = state.selectedTaskEvidence,
+                  evidence.wave.wave.repo.normalizedFilePath == repo,
+                  evidence.task.task.identifier == link.issue else { return false }
+            return link.session == nil || state.selectedSessionId == link.session
         }
     }
 
@@ -151,14 +187,20 @@ final class PodiumModel {
             openTaskDestination(wave: wave, task: task)
             return
         }
-        var after: String?
-        var records: [SessionRecord] = []
-        repeat {
-            let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
-            guard destinationGeneration == generation else { return }
-            records += page.entries
-            after = page.next
-        } while after != nil
+        let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
+        var records = sameRepo ? sessions.value ?? [] : []
+        if !records.contains(where: { $0.id == sessionID }) {
+            // Publishing a partial inventory would retire retained panes whose
+            // records occur on later pages. Only retained targets skip this read.
+            records = []
+            var after: String?
+            repeat {
+                let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
+                guard destinationGeneration == generation else { return }
+                records += page.entries
+                after = page.next
+            } while after != nil
+        }
         guard let taskID = task.runtime?.workId,
               let record = records.first(where: { $0.id == sessionID }),
               record.taskIds.contains(taskID) || record.workspace?.taskId == taskID else {
@@ -175,7 +217,10 @@ final class PodiumModel {
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
         setRepoPath(wave.wave.repo)
         navigation.selectedTaskEvidence = (wave, task)
-        select(.task(id: task.id))
+        // Reopening a Task must not clear its focused Session or retrigger entry.
+        let isSelected = selection?.kind == .task
+            && (selection?.id == task.id || selection?.id == task.runtime?.workId)
+        if !isSelected { select(.task(id: task.id)) }
         remember(.task(task.id))
     }
 

@@ -63,7 +63,7 @@ struct PodiumView: View {
         .accessibilityIdentifier("podium")
         .background {
             if let taskLinks {
-                WorkspaceLinkReceiver(router: taskLinks) { url in
+                WorkspaceLinkReceiver(router: taskLinks, contains: model.containsTaskDestination) { url in
                     Task { await model.openTaskLink(url) }
                 }.frame(width: 0, height: 0)
             }

@@ -480,6 +480,7 @@ private struct PerformanceFailure: Error, CustomStringConvertible {
     init(_ outcome: String, _ description: String) { self.outcome = outcome; self.description = description }
 }
 
+@MainActor
 private final class PerformanceJournal {
     private let file: FileHandle
     init(url: URL) throws {
@@ -495,5 +496,174 @@ private final class PerformanceJournal {
         try file.write(contentsOf: data)
         try file.synchronize()
     }
+}
+
+extension DesktopPerformanceTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LF_DESKTOP_TASK_SNAPSHOT"] != nil))
+    func measureSnapshotTaskOpening() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let snapshot = try #require(env["LF_DESKTOP_TASK_SNAPSHOT"])
+        let binary = try #require(env["LF_DESKTOP_TASK_BINARY"])
+        let repo = try #require(env["LF_DESKTOP_TASK_REPO"])
+        let issue = try #require(env["LF_DESKTOP_TASK_ISSUE"])
+        let samples = Int(env["LF_DESKTOP_PERF_SAMPLES"] ?? "21") ?? 21
+        let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
+        try journal.write(["event": "plan", "population_version": "home-snapshot-v2",
+                           "populations": ["snapshot": 1], "samples": samples,
+                           "scenarios": ["cold_workspace", "warm_task", "reopen_task"],
+                           "endpoint": "native_capture_ocr", "poll_interval_ms": 5,
+                           "gaps": ["A new Podium and native window measure cold workspace construction, not OS application launch.",
+                                    "Bitmap capture is not compositor presentation; OCR adds observer cost.",
+                                    "Copied providers cannot be connected. Session usability/provider startup are unmeasured."]])
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        guard NSScreen.main != nil else {
+            try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
+            throw PerformanceFailure("unavailable", "No native screen")
+        }
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "task"
+        components.path = "/" + issue
+        components.queryItems = [URLQueryItem(name: "repo", value: repo)]
+        let url = try #require(components.url)
+        for attempt in 0..<samples {
+            let reads = SnapshotReads()
+            let query = RegistryQuery { args, cwd in
+                let start = DispatchTime.now().uptimeNanoseconds
+                let result = await reads.read(binary: binary, home: snapshot, args: args, cwd: cwd ?? repo)
+                try await MainActor.run {
+                    try journal.write(["event": "read", "sample": attempt, "args": args,
+                                       "duration_ms": Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000,
+                                       "outcome": result.isSuccess ? "passed" : "unavailable"])
+                }
+                return try result.get()
+            }
+            let router = WorkspaceLinkRouter()
+            let view = PodiumView(portfolioService: PortfolioService(), initialRepoPath: repo,
+                                  query: query, taskLinks: router)
+            let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
+                                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.contentView = nil; window.close() }
+            var model: PodiumModel?
+            for scenario in ["cold_workspace", "warm_task", "reopen_task"] {
+                let start = DispatchTime.now().uptimeNanoseconds
+                var record: [String: Any] = ["event": "begin", "id": "snapshot-\(scenario)-\(attempt)",
+                    "metric": "task_workspace_ready_ms", "scenario": scenario,
+                    "population": "snapshot", "attempt": attempt,
+                    "state": attempt == 0 ? "first_interaction" : "warm"]
+                try journal.write(record)
+                var transitions: [[String: Any]] = []
+                var lastState = ""
+                do {
+                    if scenario == "cold_workspace" {
+                        router.deliver(url)
+                        window.contentView = NSHostingView(rootView: view)
+                        window.makeKeyAndOrderFront(nil)
+                    } else {
+                        if scenario == "warm_task" { model?.select(nil) }
+                        router.deliver(url)
+                    }
+                    // The receiver schedules its async resolution on the main actor.
+                    // Do not accept the previous destination before that request starts.
+                    try await Task.sleep(for: .milliseconds(5))
+                    let deadline = ContinuousClock.now + .seconds(45)
+                    var ready = false
+                    repeat {
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        window.displayIfNeeded()
+                        if model == nil { model = try? view.inspect().find(SessionsView.self).actualView().model }
+                        let visible = NSApp.windows.filter(\.isVisible)
+                        let sheet = model?.showsTaskLink ?? false
+                        let selected = model?.selection?.id ?? ""
+                        let state = "\(visible.map(\.windowNumber).sorted())/\(NSApp.keyWindow?.windowNumber ?? -1)/\(sheet)/\(selected)"
+                        if state != lastState {
+                            transitions.append(["at_ms": milliseconds(start), "window_numbers": visible.map(\.windowNumber),
+                                                "key_window": NSApp.keyWindow?.windowNumber ?? -1,
+                                                "task_link_sheet": sheet, "selection": selected])
+                            lastState = state
+                        }
+                        if let model, let selected = model.selection,
+                           model.task(id: selected.id)?.task.task.identifier == issue,
+                           !model.taskLinkReading.isLoading, !sheet {
+                            try window.capture()
+                            ready = (window.contentText + window.outlineText).contains { $0.contains(issue) }
+                            if ready { break }
+                        }
+                        try await Task.sleep(for: .milliseconds(5))
+                    } while ContinuousClock.now < deadline
+                    guard ready else { throw PerformanceFailure("timeout", "Task identity not captured in 45 seconds") }
+                    record["outcome"] = "passed"
+                    record["capture_ready_ms"] = Double(window.observedAt - start) / 1_000_000
+                } catch {
+                    record["outcome"] = (error as? PerformanceFailure)?.outcome ?? "failed"
+                    record["reason"] = String(describing: error)
+                }
+                record["event"] = "end"
+                record["duration_ms"] = milliseconds(start)
+                record["observation"] = ["transitions": transitions, "selected_session": model?.navigation.selectedSessionId as Any? ?? NSNull(),
+                                         "session_usable_ms": NSNull()]
+                try journal.write(record)
+            }
+            window.contentView = nil
+            window.close()
+            // Disappearing SwiftUI views cancel their pollers, but detached CLI
+            // reads must finish before another sample constructs its workspace.
+            await reads.finish()
+        }
+    }
+}
+
+private actor SnapshotReads {
+    private var active = 0
+    private var closed = false
+
+    func read(binary: String, home: String, args: [String], cwd: String) async -> Result<String, Error> {
+        guard !closed else { return .failure(CancellationError()) }
+        active += 1
+        defer { active -= 1 }
+        return await Task.detached {
+            Result { try snapshotRead(binary: binary, home: home, args: args, cwd: cwd) }
+        }.value
+    }
+
+    func finish() async {
+        closed = true
+        while active > 0 { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+}
+
+private func snapshotRead(binary: String, home: String, args: [String], cwd: String) throws -> String {
+    // Copied launch authority is never exercised. This transport permits only local
+    // reads; no network, Session connection, watcher, worker or provider can start.
+    let verb = args.prefix(2).joined(separator: " ")
+    guard args.first == "roadmap" || ["wave list", "wave status", "session list", "home id", "task files", "task diff"].contains(verb) else {
+        throw RegistryQueryError("Snapshot does not execute \(verb)")
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: binary)
+    process.arguments = args
+    process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("LF_") }
+    environment["LF_HOME"] = home
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    process.environment = environment
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeout)
+    defer { timeout.cancel() }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { throw RegistryQueryError("Snapshot read failed: \(verb) (\(process.terminationStatus))") }
+    return String(decoding: data, as: UTF8.self)
+}
+
+private extension Result {
+    var isSuccess: Bool { if case .success = self { return true }; return false }
 }
 #endif

@@ -44,6 +44,13 @@ they establish no sustained-use KR or configured provider acceptance.
 
 ## Current Tasks and completion history (2026-10-02)
 
+Jack Heart's LOO-371 direct-open work preserves realistic history in isolated
+SQLite backups. October 4 measurements exposed benchmark children surviving
+launcher interruption; overlapping runs prove no speedup. Own process groups
+and drain reads between samples. LOO-376 owns startup/caching; LOO-371 keeps
+routing, window churn and the runner. See [failed observations and remaining
+proof](../../scripts/benchmarks/desktop-performance/20261004-task-open/README.md).
+
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time
 (LOO-369). Coordinator guidance limits that control to successful completions;
@@ -1050,17 +1057,14 @@ parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell bloc
 geometry, long-output measurements, and visual proof,
 [LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
 [LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
-comparison. This branch does not establish any Project's week/month evidence
-window; definitions and KRs remain unchanged. No open Task had enough evidence
-to close during this reconciliation.
+comparison. No definition, KR or Task state changed in that reconciliation.
 
 ## Historical remote client
 
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
+The superseded June HTTP-to-lfd, bearer-token and Concerto build recipes live in
+the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
+and [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md);
+they are not current setup instructions.
 
 ## Learnings
 
@@ -1077,8 +1081,8 @@ They explain the topology change; they are not current setup instructions.
 - **Interactive provider clients resume natively.** Reuse `SessionRecord` and
   `lf session open`; do not restore lfd terminal attachment, a tmux presentation
   path, or Ask-specific Swift plumbing.
-- The high-value review move was catching invented fields that duplicate existing
-  ones (e.g. `RunStatus`), not re-litigating the approach.
+- The high-value review move was catching invented fields duplicating existing
+  ones (e.g. `RunStatus`).
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
@@ -1086,6 +1090,5 @@ They explain the topology change; they are not current setup instructions.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The specific 057/061 incident and
-  proposed remedies are retained in the prior memory linked above; they are not
-  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.
+  test upgrades from the released frontier. AGENTS.md owns the current
+  one-draft-per-Task rule.

@@ -1,0 +1,66 @@
+{"endpoint":"native_capture_ocr","event":"plan","gaps":["A new Podium and native window measure cold workspace construction, not OS application launch.","Bitmap capture is not compositor presentation; OCR adds observer cost.","Copied providers cannot be connected. Session usability\/provider startup are unmeasured."],"poll_interval_ms":5,"population_version":"home-snapshot-v1","populations":{"snapshot":1},"samples":3,"scenarios":["cold_workspace","warm_task","reopen_task"]}
+{"attempt":0,"event":"begin","id":"snapshot-cold_workspace-0","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"cold_workspace","state":"first_interaction"}
+{"args":["ps","--json"],"duration_ms":24.009166,"event":"read","outcome":"unavailable"}
+{"args":["home","id","--json"],"duration_ms":1874.152417,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":2551.5216249999999,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":2547.2497090000002,"event":"read","outcome":"passed"}
+{"args":["wave","list","--all","--current","--json"],"duration_ms":3396.6484580000001,"event":"read","outcome":"passed"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":3971.6578330000002,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":1743.2728750000001,"event":"read","outcome":"passed"}
+{"args":["session","connect","session_a0c231326e1f4e48a126e46d1024c2b6","--json"],"duration_ms":74.435916000000006,"event":"read","outcome":"unavailable"}
+{"args":["task","comment","f9d86c53-f190-4f55-9983-8cff9cd4ecd8","--wave","product","--json"],"duration_ms":73.664584000000005,"event":"read","outcome":"unavailable"}
+{"args":["task","status","LOO-368","--json"],"duration_ms":73.714916000000002,"event":"read","outcome":"unavailable"}
+{"args":["flow","list","--json"],"duration_ms":73.757458,"event":"read","outcome":"unavailable"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":1818.5580419999999,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":1864.890292,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":1594.0052499999999,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":1664.4835,"event":"read","outcome":"passed"}
+{"args":["roadmap","--all","--json"],"duration_ms":14637.472417000001,"event":"read","outcome":"passed"}
+{"args":["activity","--since","7d","--limit","50","--wave","product","--task","LOO-368","--json"],"duration_ms":2338.6939160000002,"event":"read","outcome":"unavailable"}
+{"attempt":0,"capture_ready_ms":17242.861375,"duration_ms":17317.828582999999,"event":"end","id":"snapshot-cold_workspace-0","metric":"task_workspace_ready_ms","observation":{"selected_session":"session_a0c231326e1f4e48a126e46d1024c2b6","session_usable_ms":null,"transitions":[{"at_ms":242.00512499999999,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112499]},{"at_ms":4535.841625,"key_window":-1,"selection":"task_6eacca1dd17545548e72e876b4637fd3","task_link_sheet":false,"window_numbers":[112499]}]},"outcome":"passed","population":"snapshot","scenario":"cold_workspace","state":"first_interaction"}
+{"attempt":0,"event":"begin","id":"snapshot-warm_task-0","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"warm_task","state":"first_interaction"}
+{"args":["task","comment","f9d86c53-f190-4f55-9983-8cff9cd4ecd8","--wave","product","--json"],"duration_ms":686.833125,"event":"read","outcome":"unavailable"}
+{"args":["task","status","LOO-368","--json"],"duration_ms":686.97850000000005,"event":"read","outcome":"unavailable"}
+{"args":["flow","list","--json"],"duration_ms":687.07170900000006,"event":"read","outcome":"unavailable"}
+{"attempt":0,"capture_ready_ms":6247.1053750000001,"duration_ms":6759.7339590000001,"event":"end","id":"snapshot-warm_task-0","metric":"task_workspace_ready_ms","observation":{"selected_session":"session_a0c231326e1f4e48a126e46d1024c2b6","session_usable_ms":null,"transitions":[{"at_ms":6210.0249590000003,"key_window":-1,"selection":"f9d86c53-f190-4f55-9983-8cff9cd4ecd8","task_link_sheet":false,"window_numbers":[112499]}]},"outcome":"passed","population":"snapshot","scenario":"warm_task","state":"first_interaction"}
+{"attempt":0,"event":"begin","id":"snapshot-reopen_task-0","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"reopen_task","state":"first_interaction"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":6764.9715839999999,"event":"read","outcome":"passed"}
+{"attempt":0,"capture_ready_ms":91.390665999999996,"duration_ms":724.53366600000004,"event":"end","id":"snapshot-reopen_task-0","metric":"task_workspace_ready_ms","observation":{"selected_session":"session_a0c231326e1f4e48a126e46d1024c2b6","session_usable_ms":null,"transitions":[{"at_ms":59.373041000000001,"key_window":-1,"selection":"f9d86c53-f190-4f55-9983-8cff9cd4ecd8","task_link_sheet":false,"window_numbers":[112499]}]},"outcome":"passed","population":"snapshot","scenario":"reopen_task","state":"first_interaction"}
+{"attempt":1,"event":"begin","id":"snapshot-cold_workspace-1","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"cold_workspace","state":"warm"}
+{"args":["task","comment","f9d86c53-f190-4f55-9983-8cff9cd4ecd8","--wave","product","--json"],"duration_ms":1671.8657499999999,"event":"read","outcome":"unavailable"}
+{"args":["task","status","LOO-368","--json"],"duration_ms":1672.2391250000001,"event":"read","outcome":"unavailable"}
+{"args":["flow","list","--json"],"duration_ms":1672.492917,"event":"read","outcome":"unavailable"}
+{"args":["ps","--json"],"duration_ms":1673.080416,"event":"read","outcome":"unavailable"}
+{"args":["ps","--json"],"duration_ms":54.298416000000003,"event":"read","outcome":"unavailable"}
+{"args":["home","id","--json"],"duration_ms":26513.418125,"event":"read","outcome":"passed"}
+{"attempt":1,"duration_ms":45359.168666999998,"event":"end","id":"snapshot-cold_workspace-1","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":373.39120800000001,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112506]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"cold_workspace","state":"warm"}
+{"attempt":1,"event":"begin","id":"snapshot-warm_task-1","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"warm_task","state":"warm"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":46820.496583,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":46871.643834000002,"event":"read","outcome":"passed"}
+{"args":["wave","list","--all","--current","--json"],"duration_ms":53862.214500000002,"event":"read","outcome":"passed"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":61579.069541999997,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":31227.449250000001,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":39114.647875000002,"event":"read","outcome":"passed"}
+{"attempt":1,"duration_ms":45017.630208000002,"event":"end","id":"snapshot-warm_task-1","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":11.503875000000001,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112506]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"warm_task","state":"warm"}
+{"attempt":1,"event":"begin","id":"snapshot-reopen_task-1","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"reopen_task","state":"warm"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":63061.643041000003,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":41867.608709,"event":"read","outcome":"passed"}
+{"attempt":1,"duration_ms":45017.608791999999,"event":"end","id":"snapshot-reopen_task-1","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":11.063041999999999,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112506]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"reopen_task","state":"warm"}
+{"attempt":2,"event":"begin","id":"snapshot-cold_workspace-2","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"cold_workspace","state":"warm"}
+{"args":["ps","--json"],"duration_ms":22.375917000000001,"event":"read","outcome":"unavailable"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":75048.072750000007,"event":"read","outcome":"passed"}
+{"args":["home","id","--json"],"duration_ms":27817.086959,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":51413.7935,"event":"read","outcome":"passed"}
+{"attempt":2,"duration_ms":45162.333500000001,"event":"end","id":"snapshot-cold_workspace-2","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":172.051917,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112523]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"cold_workspace","state":"warm"}
+{"attempt":2,"event":"begin","id":"snapshot-warm_task-2","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"warm_task","state":"warm"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":46133.120959,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":49153.324416000003,"event":"read","outcome":"passed"}
+{"args":["wave","list","--all","--current","--json"],"duration_ms":58003.660958,"event":"read","outcome":"passed"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":77436.731333999996,"event":"read","outcome":"passed"}
+{"attempt":2,"duration_ms":45040.960458000001,"event":"end","id":"snapshot-warm_task-2","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":8.5854999999999997,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112523]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"warm_task","state":"warm"}
+{"attempt":2,"event":"begin","id":"snapshot-reopen_task-2","metric":"task_workspace_ready_ms","population":"snapshot","scenario":"reopen_task","state":"warm"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":53042.031917,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100"],"duration_ms":51779.618875,"event":"read","outcome":"passed"}
+{"args":["roadmap","--task","LOO-368","--json"],"duration_ms":74641.007249999995,"event":"read","outcome":"passed"}
+{"args":["session","list","--json","--page","--interactive","all","--limit","100","--after","session_a0c231326e1f4e48a126e46d1024c2b6"],"duration_ms":25409.656958,"event":"read","outcome":"passed"}
+{"attempt":2,"duration_ms":45025.059915999998,"event":"end","id":"snapshot-reopen_task-2","metric":"task_workspace_ready_ms","observation":{"selected_session":null,"session_usable_ms":null,"transitions":[{"at_ms":11.139708000000001,"key_window":-1,"selection":"","task_link_sheet":false,"window_numbers":[112523]}]},"outcome":"timeout","population":"snapshot","reason":"Task identity not captured in 45 seconds","scenario":"reopen_task","state":"warm"}

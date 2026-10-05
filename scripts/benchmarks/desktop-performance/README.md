@@ -19,8 +19,14 @@ uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/d
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
-# The older capture/OCR journeys and their hash-pinned baseline.
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
+# Capture/OCR journeys: record a baseline before changing the production build.
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-before
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline /tmp/desktop-before
+
+# Preserve a realistic Home, then exercise Task links through Podium and local CLI reads.
+uv run python scripts/desktop_performance.py snapshot --database /path/to/Home/loopflow.db --output /tmp/task-snapshot
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-before
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/optimized-lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-after --baseline /tmp/task-before
 ```
 
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
@@ -43,6 +49,23 @@ timeout, so a hung read shows as a launch that never reached `fresh`. A launch
 still running, or quit early, is counted the same way. `first_frame` is a
 commit, not on-glass presentation; CPU, memory and main-thread stalls are
 `record_live.py`'s.
+
+Snapshot runs preserve every database row and use a fresh private copy for each
+invocation. Keep snapshots outside Git: they contain private history and credentials.
+Only local read commands run against copied records; provider connection and
+execution are refused. Repository files and placement metadata still come from
+the supplied repository, so preserve those inputs across comparisons too.
+Use the same host, CLI build mode, snapshot and measurement source before/after.
+Both runner modes build their native tests and launch the selected test directly
+so interruption can stop its process group. Allow disk/build capacity first.
+Archived SwiftPM-launcher runs remain historical evidence; the changed command
+requires fresh baselines for comparisons.
+
+The endpoint is a native bitmap with recognized Task identity, not OS application
+launch, compositor presentation or usable Session input. Read timings and sampled
+window/focus/sheet transitions are in `attempts.jsonl`. The
+[October 4 evidence](20261004-task-open/README.md) records failed attempts,
+overlapping-run discovery and remaining acceptance; it establishes no speedup.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes

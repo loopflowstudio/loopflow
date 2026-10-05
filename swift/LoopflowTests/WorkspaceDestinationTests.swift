@@ -9,6 +9,85 @@ import ViewInspector
 @Suite("Workspace destinations", .serialized)
 @MainActor
 struct WorkspaceDestinationTests {
+    @Test func resolvingTaskKeepsTheWorkspaceVisible() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.waves.first?.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        let barrier = LinkedDestinationBarrier()
+        let model = PodiumModel(query: RegistryQuery { _, _ in
+            await barrier.wait("read")
+            return exact
+        })
+        let url = try #require(URL(string: "loopflow://task/\(task.task.identifier)"))
+        let opening = Task { await model.openTaskLink(url) }
+        while !(await barrier.contains("read")) { await Task.yield() }
+        #expect(model.taskLinkReading.isLoading)
+        #expect(!model.showsTaskLink)
+        await barrier.release("read")
+        await opening.value
+        #expect(model.selection == .task(id: task.id))
+        #expect(!model.showsTaskLink)
+    }
+
+    @Test(arguments: [false, true])
+    func reopeningLoadedTaskPreservesItsSessionWithoutAnotherRead(runtimeSelection: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = PodiumModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("A loaded destination needs no new read")
+        }, repoPath: wave.wave.repo)
+        // The ordinary outline has already published this planning inventory.
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
+                           processActivity: .loading, workActivity: .loading, repos: [])
+        model.openTaskDestination(wave: wave, task: task)
+        let selectedID = runtimeSelection ? try #require(task.runtime?.workId) : task.id
+        model.select(.task(id: selectedID))
+        model.navigation.selectedSessionId = "retained-conversation"
+        model.navigation.content = .terminals
+        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
+        await model.openTaskLink(try #require(url.url))
+        #expect(model.selection == .task(id: selectedID))
+        #expect(model.navigation.selectedSessionId == "retained-conversation")
+        #expect(model.navigation.content == .terminals)
+        #expect(model.taskLinkReading.errorMessage == nil)
+        #expect(!model.showsTaskLink)
+        #expect(model.containsTaskDestination(try #require(url.url)))
+    }
+
+    @Test func taskLinkRetainsLaterPagesAndReusesTheConversation() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let record = try renameFixtureRecord("first-page", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let other = try renameFixtureRecord("later-page", title: "Another conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let otherEncoded = String(decoding: try JSONEncoder().encode(other), as: UTF8.self)
+        let model = PodiumModel(query: RegistryQuery { args, _ in
+            guard args.first == "session" else {
+                throw RegistryQueryError("Planning is already available")
+            }
+            if args.contains("--after") { return #"{"entries":[\#(otherEncoded)],"next":null}"# }
+            return #"{"entries":[\#(encoded)],"next":"remaining-history"}"#
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
+                           processActivity: .loading, workActivity: .loading, repos: [])
+        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
+        await model.openTaskLink(try #require(url.url))
+        #expect(model.linkedSession?.id == record.id)
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.taskLinkReading.errorMessage == nil)
+        // Reopening from retained evidence must preserve the conversation too.
+        await model.openTaskLink(try #require(url.url))
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
+    }
+
     @Test func paletteBindingTargetsOnlyTheSelectedUnassignedSession() async throws {
         let scopes: [WorkReference?] = [nil, .wave(id: "wave-product"), .task(id: "task-bound")]
         for work in scopes {
@@ -297,6 +376,7 @@ struct WorkspaceDestinationTests {
         let router = WorkspaceLinkRouter()
         let url = try #require(URL(string: "loopflow://task/LOO-303"))
         #expect(!router.deliver(url))
+        #expect(router.deliver(url)) // the requested window has not mounted yet
         let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
         let other = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil); other.orderOut(nil) }
@@ -310,6 +390,21 @@ struct WorkspaceDestinationTests {
         #expect(router.deliver(url))
         #expect(received == [url, url])
         #expect(otherReceived.isEmpty)
+    }
+
+    @Test func linkPrefersTheWindowAlreadyHoldingItsDestination() throws {
+        _ = NSApplication.shared
+        let router = WorkspaceLinkRouter()
+        let url = try #require(URL(string: "loopflow://task/LOO-368?repo=%2Fsrc%2Floopflow"))
+        let retained = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        let unrelated = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { retained.orderOut(nil); unrelated.orderOut(nil) }
+        var opened = ""
+        router.register(UUID(), window: retained, contains: { $0 == url }) { _ in opened = "retained" }
+        router.register(UUID(), window: unrelated) { _ in opened = "unrelated" }
+        unrelated.makeKeyAndOrderFront(nil)
+        #expect(router.deliver(url))
+        #expect(opened == "retained")
     }
 
     @Test(arguments: [false, true])

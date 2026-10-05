@@ -15,18 +15,44 @@ interpretations are at `6f246fda4:scratch/questions.md`.
   introduce parallel paths or drivers." A Task command may prepare, then it
   enters the ordinary path; it never owns a second launcher, driver or record.
 
-## Asked by Jack, open
+## Step invocation — decided by Jack Heart (October 5)
 
-- **How a step learns and records its position.** At `45ca0d2ac` the driver
-  passes a JSON `FlowStep` as the hidden `--__flow-step` argument (the hidden
-  `__flow-step` command for operations), and the Exec's recorded argv is the
-  record. Jack: "Can we do this environemnt variables? I hate __ and hidden
-  arguments." Proposed, not decided: the driver sets one environment variable;
-  the step's `lf` consumes and removes it at startup, as it already replaces
-  `LF_PROCESS_ID`, so nested commands never inherit it; the Exec row gains one
-  nullable field for flow, sequence, label, graph key and iterations, because
-  Execs record argv and not environment. Step Execs then read as plain
-  commands (`lf -b implement`, `lf task sync --plan`).
+At `45ca0d2ac` the driver passes each step a JSON `FlowStep` through the
+hidden `--__flow-step` argument (the hidden `__flow-step` command for
+operations); readers find Flows by searching recorded command text.
+
+Jack: "Can we do this environemnt variables? I hate __ and hidden arguments."
+The agent proposed an environment variable plus a nullable Exec field. Jack
+rejected both halves:
+
+1. "the skill is its own argument. we should use lf from flows in the
+   'natural' way, invoking the right skill".
+2. On needing a field for position: "right, but execs are supposed to trakc
+   their parents already".
+
+So a step is the command a person would type, started as a child of the
+driver: `lf -b skill implement [message]`, `lf task sync --plan`. No
+`FlowStep` payload, hidden argument, hidden command, position variable or new
+Exec field. A Flow is read from the driver Exec, its children in start order
+and their commands; iteration is the count of earlier siblings with the same
+command.
+
+Agent's reading of what follows, for the implementing pass to confirm in
+source:
+
+- The step looks its skill up by name when it runs. A mid-run edit to the
+  skill file changes later steps. Step-level overrides become ordinary
+  arguments or go.
+- A deciding or routing step gets its answer contract in its message; the
+  driver already validates the answer and corrects it. A correction continues
+  the same conversation through the ordinary resume command.
+- The driver finds its step's Exec and conversation as its own child, not by
+  sequence number.
+- Identifying a driver among Execs must not depend on re-resolving names
+  later. `drive()` already journals Flow started/ended with the Flow name
+  against the driver Exec; that is ordinary logging and can carry the name.
+- `LF_FLOW_ID` (driver Exec id, for shared notes) is the step's parent Exec
+  id; whether it stays is open.
 
 ## Asked of Jack, unanswered; the pass took the default
 

@@ -133,7 +133,10 @@ struct WorkspaceNavigator: View {
         .accessibilityIdentifier("workspace-navigator")
         .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
         .onChange(of: rows.isEmpty, initial: true) { _, empty in
-            if !empty { Perf.endAfterCommit(Perf.coldStart, id: "launch") }
+            guard !empty else { return }
+            Perf.endAfterCommit(Perf.coldStart, id: "launch")
+            let source = model.showsSavedWorkspace ? "saved" : "fresh"
+            DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
         .onChange(of: rows.map(\.id)) { _, _ in
             Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")

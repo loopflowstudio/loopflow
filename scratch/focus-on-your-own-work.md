@@ -82,25 +82,24 @@ Add ordinary detached skill/prompt/Flow launch through one
 placement/Exec path, returning durable Session/invocation identity after admission.
 Batch selects provider behavior; detachment is separate. Delete the worker path.
 
-October 4 source reconciliation corrects stale iteration feedback: Ready/Complete
-handlers and `exec_driver` no longer execute. `TaskWorkerClaim`, Task `__worker`,
-`serve-flow` and managed selection still do.
-At `77721ca23` plus the local compression changes, public saved Flow resume is
-also gone, contrary to the supplied previous-step feedback. Internal
-`recover_flow`, `retry_flow`, `reserve_task_review` and worker claims remain in
-`store/flows.rs`; `human_session::launch_flow` still launches `serve-flow`.
-Removing entry points has not removed store/driver authority. The next runtime
-cut remains necessary; no new product decision is needed to proceed with it.
-The public saved `flow resume` command and its managed dispatch branch are now
-deleted; Flow inventory and error messages direct callers to retained evidence.
-The surviving-agent crash proof retains exact native completion without consuming
-it or creating a replacement driver. Ordinary mixed-provider account selection
-now has direct execution coverage independent of the deleted resume behavior.
-Compression removes redundant feedback plumbing, not these controllers. Attention still
-projects Review/Reply and `--needs-me`; Task primaries, workflows and autonomous
-loop syntax remain unimplemented. The draft migration only removes scheduling
-columns and live readiness; it does not yet convert legacy review boundaries or
-remove worker control state. These are substantial remaining implementation work.
+October 4 implementation deletes new review reservation, `serve-flow`, its capture
+environment, review launcher/checkpoint push and store publication APIs. Operational
+launch rejects human steps before capture, recursively through resolved subflows and
+XOR paths. The draft records each legacy review as a Session observation and converts
+its kind to Conversation, preserving identity, completion, pending-boundary links,
+captures and effect history. Read-only historical review projections still exist.
+
+`TaskWorkerClaim`, Task `__worker`, managed selection, `recover_flow`, `retry_flow`
+and worker control columns still execute. Their store/driver removal remains the
+next runtime cut; deleting the review branch is not complete worker removal. Public
+saved Flow resume, Ready/Complete, `exec_driver` and completion-only `stop-client`
+are already deleted. Worker-exclusive controller tests are retired with the review
+path; ordinary Flow tests carry execution and crash/effect proof.
+
+Attention still projects Review/Reply and `--needs-me`; Task primaries, workflows,
+autonomous loop syntax and ordinary detached launch remain unimplemented. Current
+human-bearing templates must become conversation workflow guidance before release;
+they now fail operational launch. No live Home or saved invocation was changed.
 
 [Workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
 `bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` retain
@@ -291,16 +290,17 @@ modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
 - `ops/run.rs::TaskWorkerExec`, `controller/task` worker/review progression,
   Task `__worker` and managed
   branches in `lf/commands/flow.rs`. Keep shared engine graph/cursor traversal.
-- New `FlowReview` Session creation in `ops/flow_session.rs`; review-complete-to-driver
-  restart and `exec_driver` are deleted. `serve-flow` and managed review launch/token branches
-  in `ops/human_session.rs`. Preserve existing review histories during conversion.
+- Review reservation/launch in `ops/flow_session.rs`, `serve-flow`, review capture
+  reservation/publication and automatic review checkpoint/push are deleted. The draft
+  converts legacy review kinds without resolving their boundaries. Retained token/read
+  branches in `ops/human_session.rs` still need pruning with managed projections.
 - Ready/Complete and hidden `stop-client` CLI handlers, store mutations, Session action/Ready state,
   Desktop completion controls and pane-resolution callback are deleted. Historical
   feedback remains in the read DTOs, sourced from Session evidence. Generated
   instructions and affected docs no longer prescribe those commands. Preserve
   provider Completed, historical completion timestamps and primary-successor
-  bookkeeping. New review creation/serve-flow and legacy boundary conversion
-  remain; removed completion controls do not make that cut complete.
+  bookkeeping. New review reservation/serve-flow and legacy kind conversion are cut;
+  the remaining managed projection and restart consumers still need deletion.
 - Resume scheduling in `ops/task_automation.rs` and cron consumers; singular-Flow
   conditions/actions in `ops/task_execution.rs`, `ops/task_flow.rs`,
   `ops/task_actions.rs` and Task controller projections. Retain unrelated cron
@@ -329,7 +329,9 @@ targets; deleting the public command does not remove their authority.
 
 One draft migration, generated with `uv run python scripts/new_migration.py task_flow_observations`
 converts the released schema directly; it removes five scheduling columns and
-archives review feedback before dropping the live readiness column. Extend that same draft for the remaining cut. Preserve every invocation,
+archives review feedback before dropping the live readiness column, and converts
+legacy review kinds to conversations with unresolved-boundary observations. Extend
+that same draft for worker-control deletion. Preserve every invocation,
 Session, event, exact review and effect receipt; archive last legacy position as
 historical evidence, not resumable state. Existing pending reviews remain visible
 as unresolved historical boundaries attached to their original conversations; they
@@ -357,17 +359,19 @@ One coherent runtime/UI change, with no intermediate release of two executors:
    and internal Task recovery still exist; public saved Flow resume is deleted.
    Ready/Complete store/CLI/UI paths, `exec_driver`,
    review-completion restart and feedback-to-Flow-result consumption are deleted;
-   new review creation/serve-flow and legacy conversion remain. Remove Task-worker
+   new review creation/serve-flow are deleted and legacy conversion is implemented.
+   Remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
    history and cutting over the minimum DTO consumers. Build the changed Rust code
-   and run the focused ordinary-Flow crash/no-restart case in `flow_tests`. The existing case proves
+   and retain the focused ordinary-Flow crash/no-restart case in `flow_tests`. It proves
    repository inspection does not restart a killed ordinary Flow before or after
    its surviving effect receipt. It does not prove Task-worker removal, detached
-   admission, legacy review conversion or delivery-effect deduplication.
+   admission or delivery-effect deduplication. The populated migration case separately
+   proves review-kind conversion while retaining unresolved links and effect history.
 2. Separate workflow source guidance from executable operational graphs; implement
    canonical autonomous loops/XOR composition and the loop-or-next catalog rename.
-   Delete the remaining human-review launch paths and convert legacy boundaries;
-   settlement APIs and consumers are already deleted. Add
+   Prune retained review-specific token/read branches with the managed projections;
+   new review launch and settlement APIs are deleted. Add
    ordinary `-b` launch, Task primary selection and caller-owned recovery paths.
 3. Cut all Flow views to the shared lazy detail renderer; implement Waiting through
    Rust/provider mappings. Remove managed fields, controls, automation, exclusive
@@ -456,4 +460,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks (compression, reused): `cargo build -p loopflow --bin lf`; focused `cargo test -p loopflow` filters `--test session_cli_tests session_cli_uses_one_truthful_resolution_contract -- --exact`, `--lib lf::commands::util::tests::provider_client_`, `--lib ops::human_session::primary::tests`, `--lib engine::flow_graph::tests`; `cargo fmt --check`; `git diff --check` — passed (24 tests). Prior Flow crash/effect/account checks and Clippy remain at `77721ca23:scratch/focus-on-your-own-work.md`; Flow code is unchanged by this reduction. `lf context --skill compress`: memory and scratch fit; stored Task goal excerpted, submitted input within budget. Store/driver worker removal, final migration, gate and configured demo remain outstanding; live Home and authored Task steers are unchanged. Realign: source audit and `git diff --check` passed; `lf context --skill realign` reports memory 15,965/16,000 and scratch within budget; stored goal remains excerpted (659 tokens over), with no authored-steer edits.
+Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.

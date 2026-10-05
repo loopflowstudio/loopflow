@@ -1041,129 +1041,51 @@ fn authored_flow_records_each_skill_as_one_session() {
 }
 
 #[test]
-fn a_review_executes_its_captured_skill_after_sources_disappear() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let bin = TempDir::new().unwrap();
-    write_skill(repo.path(), "saved-review", "CAPTURED_REVIEW_MARKER");
-    write_flow(
-        repo.path(),
-        "review-flow",
-        "- step:\n    id: review\n    name: saved-review\n    human: true\n",
-    );
-    let received = home.path().join("review-input");
-    write_executable(&bin.path().join("opencode"), &format!(
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\nprintf '%s\\n' \"$*\" > '{}'\nprintf '%s\\n' 'message=created id=ses_review-proof' >&2\nread -r input\n", received.display()
-    ));
-    let path = format!(
-        "{}:{}",
-        bin.path().display(),
-        std::env::var("PATH").unwrap()
-    );
-    let prepared = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "--model",
-            "opencode",
-            "--mode",
-            "batch",
-            "flow",
-            "review-flow",
-        ],
-        Some(&path),
-    );
-    assert!(
-        String::from_utf8_lossy(&prepared.stderr).contains("waiting for human input"),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
-    );
-    let listed = run_lf(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--json"],
-        Some(&path),
-    );
-    assert!(listed.status.success());
-    let sessions: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    let id = sessions[0]["id"].as_str().unwrap();
-    fs::remove_file(repo.path().join(".lf/skills/saved-review.md")).unwrap();
-    fs::remove_file(repo.path().join(".lf/flows/review-flow.yaml")).unwrap();
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // Startup logs can fill a pipe while this test waits for provider identity.
-    let stderr = home.path().join("review.stderr");
-    let mut opened = lf_command(
-        repo.path(),
-        home.path(),
-        &["session", "connect", id],
-        Some(&path),
-    )
-    .stdin(std::process::Stdio::piped())
-    .stdout(std::process::Stdio::null())
-    .stderr(fs::File::create(&stderr).unwrap())
-    .spawn()
-    .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        let native: i64 = conn.query_row(
-            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source') LIKE 'provider-session:%'",
-            [], |r| r.get(0),
-        ).unwrap();
-        if native > 0 {
-            break;
+fn operational_flow_rejects_review_before_launch_or_capture() {
+    for source in [
+        "- step:
+    id: review
+    name: review-proof
+    human: true
+",
+        "- flow: nested-review
+",
+        "- xor:\n    paths:\n      review:\n        flow: nested-review\n        description: Discuss work\n      work:\n        skill: review-proof\n        description: Autonomous work\n",
+    ] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        write_skill(repo.path(), "review-proof", "Discuss the work.");
+        write_flow(
+            repo.path(),
+            "nested-review",
+            "- step:
+    id: review
+    name: review-proof
+    human: true
+",
+        );
+        write_flow(repo.path(), "operational", source);
+        let output = run_lf(
+            repo.path(),
+            home.path(),
+            &["--mode", "batch", "flow", "operational"],
+            None,
+        );
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"),
+            "{output:?}"
+        );
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        for table in ["flow_sessions", "agent_sessions"] {
+            let count: i64 = db
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "rejected definition created {table}");
         }
-        assert!(
-            opened.try_wait().unwrap().is_none(),
-            "review command exited before publishing its native identity"
-        );
-        assert!(
-            std::time::Instant::now() < deadline,
-            "review did not publish native identity"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    // Rename waits for the review's startup lock: native identity alone does
-    // not mean that the caller has observed a live, resumable provider yet.
-    let renamed = run_lf(
-        repo.path(),
-        home.path(),
-        &["session", "rename", id, "Captured review"],
-        Some(&path),
-    );
-    assert!(
-        renamed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&renamed.stderr)
-    );
-    std::io::Write::write_all(&mut opened.stdin.take().unwrap(), b"done\n").unwrap();
-    let opened = opened.wait_with_output().unwrap();
-    assert!(
-        opened.status.success(),
-        "{}",
-        fs::read_to_string(&stderr).unwrap()
-    );
-    assert!(fs::read_to_string(received)
-        .unwrap()
-        .contains("CAPTURED_REVIEW_MARKER"));
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let commands: Vec<String> = conn
-        .prepare("SELECT command FROM execs WHERE command LIKE '%saved-review%'")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(commands.len(), 1, "one actual skill Exec: {commands:?}");
-    let argv: Vec<String> = serde_json::from_str(&commands[0]).unwrap();
-    assert!(argv
-        .windows(3)
-        .any(|args| args == ["skill", "--", "saved-review"]));
-    assert_eq!(
-        conn.query_row("SELECT state FROM flow_sessions", [], |row| row
-            .get::<_, String>(0))
-            .unwrap(),
-        "current"
-    );
 }
 
 #[test]
@@ -1382,7 +1304,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
     assert!(!prepared.status.success());
     assert!(
-        String::from_utf8_lossy(&prepared.stderr).contains("waiting for human input"),
+        String::from_utf8_lossy(&prepared.stderr).contains("belongs in the Task conversation"),
         "{}",
         String::from_utf8_lossy(&prepared.stderr)
     );
@@ -1398,15 +1320,9 @@ fn observing_and_preparing_a_task_are_not_execution() {
         String::from_utf8_lossy(&sessions.stderr)
     );
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
-    assert_eq!(sessions.len(), 1);
-    assert!(sessions[0]["id"].as_str().is_some());
-    // A Flow about the Task names it on its review Run, and the first Run
-    // that names a Task starts it, opened or not.
-    assert_eq!(starts(), 1, "a review Run naming the Task starts it");
-    assert!(
-        started(),
-        "a reserved Run naming the Task is start evidence"
-    );
+    assert!(sessions.is_empty());
+    assert_eq!(starts(), 0, "rejected review does not start its Task");
+    assert!(!started());
 }
 
 #[test]
@@ -2073,7 +1989,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         Some(&path),
     );
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Flow is waiting for human input"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"));
     assert!(!home.path().join("prompts").exists());
     let listed = run_lf(
         repo.path(),
@@ -2087,79 +2003,11 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         String::from_utf8_lossy(&listed.stderr)
     );
     let sessions: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    let session = sessions
+    assert!(sessions
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["kind"] == "flow")
-        .unwrap();
-    // A Flow about the Task names it on its review too, without becoming the
-    // Task's Flow.
-    assert_eq!(
-        session["work"],
-        serde_json::json!({"kind": "task", "id": task.task.id})
-    );
-    assert_eq!(session["flow_membership"]["flow"], "review-contribution");
-    assert_eq!(session["flow_membership"]["occurrence"], "current");
-    assert_eq!(session["flow_membership"]["node"], 0);
-    let session_id = session["id"].as_str().unwrap();
-    let listed = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
-        ],
-        None,
-    );
-    assert!(listed.status.success());
-    let listed: Vec<serde_json::Value> = serde_json::from_slice(&listed.stdout).unwrap();
-    assert!(
-        listed.iter().any(|run| session_id_for_capture(
-            home.path(),
-            run["artifact_key"].as_str().unwrap()
-        ) == session_id),
-        "{listed:?}"
-    );
-    let renamed = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "session",
-            "rename",
-            session_id,
-            "Contribution review",
-            "--json",
-        ],
-        Some(&path),
-    );
-    assert!(
-        renamed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&renamed.stderr)
-    );
-    let renamed: serde_json::Value = serde_json::from_slice(&renamed.stdout).unwrap();
-    assert_eq!(renamed["id"], session["id"]);
-    assert_eq!(renamed["title_source"], "human");
-    let opened = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "session",
-            "connect",
-            session["id"].as_str().unwrap(),
-            "--json",
-        ],
-        Some(&path),
-    );
-    assert!(
-        opened.status.success(),
-        "{}",
-        String::from_utf8_lossy(&opened.stderr)
-    );
-    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    assert_eq!(opened["title"], "Contribution review");
-    assert_eq!(opened["id"], session_id);
-    assert_eq!(opened["work"], session["work"]);
+        .all(|session| session["kind"] != "flow"));
     assert!(!home.path().join("prompts").exists());
     assert_eq!(
         runtime
@@ -2805,74 +2653,4 @@ fn worktree_selector_uses_the_named_checkout_without_changing_the_caller() {
         assert!(output.status.success(), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("Inspect the selected checkout."));
     }
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn flow_start_preserves_the_selected_review_from_another_checkout() {
-    use loopflow::durable::FlowSession;
-    use loopflow::engine::invocation::QueuedInvocation;
-    use loopflow_test_support::TestRepo;
-    let repo = TestRepo::new();
-    support::bind_task_planning(&repo);
-    repo.create_branch("managed-review");
-    let caller = TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let task =
-        support::register_unrun_task(home.path(), repo.path(), "managed-review", &repo.head_sha());
-    write_skill(repo.path(), "review-proof", "Review the saved design.");
-    write_flow(
-        repo.path(),
-        "managed-proof",
-        "- step:\n    id: review\n    name: review-proof\n    human: true\n",
-    );
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let saved = runtime
-        .block_on(task.store.start_task_flow(
-            &task.task.id,
-            FlowSession {
-                invocation: QueuedInvocation::load(repo.path(), "managed-proof").unwrap(),
-                cursor: Default::default(),
-                version: 0,
-                task_id: Some(task.task.id.clone()),
-                wave_id: Some(task.task.wave_id.clone()),
-                cwd: repo.path().to_owned(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        ))
-        .unwrap();
-    let saved = runtime
-        .block_on(task.store.reserve_task_review(saved.id(), saved.version))
-        .unwrap();
-    assert!(saved.pending_session_id.is_some());
-    fs::remove_file(repo.path().join(".lf/flows/managed-proof.yaml")).unwrap();
-    let output = run_lf(
-        caller.path(),
-        home.path(),
-        &["--task", "INF-123", "flow", "start", "--json"],
-        None,
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(snapshot["task_id"], task.task.id.as_str());
-    let after = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(after.invocation, saved.invocation);
-    assert_eq!(after.cursor, saved.cursor);
-    assert_eq!(after.pending_session_id, saved.pending_session_id);
-    assert_eq!(after.current_attempt, saved.current_attempt);
 }

@@ -12,8 +12,7 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
         | SessionCommand::Resume { .. }
-        | SessionCommand::ServeConversation { .. }
-        | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
+        | SessionCommand::ServeConversation { .. } => Some(crate::repo::working_directory()?),
         _ => None,
     };
     let Some(worktree) = worktree else {
@@ -167,26 +166,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 );
             }
             Ok(())
-        }
-        SessionCommand::ServeFlow {
-            task_id,
-            invocation_id,
-            flow,
-            node_id,
-            skill,
-            iteration,
-        } => {
-            let store = open_shared_store().await?;
-            crate::ops::human_session::serve_flow(
-                store,
-                task_id.clone(),
-                invocation_id.clone(),
-                flow.clone(),
-                node_id.clone(),
-                skill.clone(),
-                *iteration,
-            )
-            .await
         }
         SessionCommand::ServeConversation { input } => {
             let store = open_shared_store().await?;

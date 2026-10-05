@@ -29,6 +29,7 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_flow(flow, repo)?;
+    require_autonomous_steps(&items)?;
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
@@ -41,6 +42,23 @@ pub fn run(
         repo,
         binding,
     )
+}
+
+pub(crate) fn require_autonomous_steps(items: &[ConcreteStep]) -> Result<()> {
+    for item in items {
+        match item {
+            ConcreteStep::Skill(skill) if skill.human => anyhow::bail!(
+                "Human step {} belongs in the Task conversation; operational Flows cannot launch review Sessions", skill.skill.name
+            ),
+            ConcreteStep::Xor(branch) => {
+                for path in branch.paths.values() {
+                    require_autonomous_steps(&path.steps)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -318,6 +336,7 @@ pub(crate) async fn drive(
     claim: Option<TaskWorkerClaim>,
     launcher: &Cli,
 ) -> Result<FlowOutcome> {
+    require_autonomous_steps(&flow.invocation.steps)?;
     let fields = |extra: LfEventFields| LfEventFields {
         flow: Some(flow.invocation.flow.clone()),
         ..extra
@@ -656,33 +675,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
-        if skill.human {
-            // Reaching review releases the claim. The Task's selected Flow
-            // still owns review preparation.
-            let managed_task = match &flow.task_id {
-                Some(task_id)
-                    if self
-                        .store
-                        .task_flow(task_id)
-                        .await?
-                        .is_some_and(|managed| managed.id() == flow.id()) =>
-                {
-                    Some(task_id)
-                }
-                _ => None,
-            };
-            if let Some(task_id) = managed_task {
-                let task = self
-                    .store
-                    .get_task(task_id)
-                    .await?
-                    .context("Task disappeared")?;
-                crate::controller::task::park_at_review(&self.store, &task, &flow).await?;
-            } else {
-                crate::ops::flow_session::reserve(&self.store, &flow).await?;
-            }
-            return Ok(SkillOutcome::Waiting);
-        }
+        anyhow::ensure!(!skill.human, "Human review belongs in the Task conversation; operational Flows cannot launch review Sessions");
         let mut flow = flow;
         if let Some(progress) = ctx.progress {
             print_skill_progress(progress, &skill.skill.name);

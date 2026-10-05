@@ -252,49 +252,9 @@ pub(crate) mod tests {
     use crate::work::task::{Task, TaskId, TaskLinearObservation};
 
     use crate::pm::test_server::{self, json_response};
-    use crate::store::{CredentialType, ProviderToken, SharedStore};
+    use crate::store::{CredentialType, ProviderToken};
     use axum::http::StatusCode;
     use serde_json::json;
-    use std::future::Future;
-
-    pub(crate) async fn with_posted_comment<T>(
-        store: &SharedStore,
-        task: &Task,
-        body: &str,
-        future: impl Future<Output = T>,
-    ) -> T {
-        let (url, _) = test_server::spawn(vec![
-            json_response(StatusCode::OK, json!({"data": {"commentCreate": {"comment": {"id": "comment-1"}}}})),
-            json_response(StatusCode::OK, json!({"data": {"issue": {
-                "updatedAt": "2026-09-23T00:00:00Z", "title": task.plan.title, "description": task.plan.description,
-                "comments": {"nodes": [{"id": "comment-1", "body": body, "updatedAt": "2026-09-23T00:00:00Z", "user": {"id": "user-loopflow"}}], "pageInfo": {"hasNextPage": false, "endCursor": null}}
-            }}})),
-        ]).await;
-        let file = tempfile::NamedTempFile::new().unwrap();
-        store
-            .upsert_provider_token(&ProviderToken {
-                provider: "linear".into(),
-                access_token: "fixture-token".into(),
-                refresh_token: None,
-                oauth_client_id: None,
-                expires_at: None,
-                login: Some("fixture".into()),
-                updated_at: 1,
-                credential_type: CredentialType::OAuth,
-            })
-            .await
-            .unwrap();
-        crate::ops::pm::PM_TEST_CONTEXT
-            .scope(
-                crate::ops::pm::PmTestContext {
-                    path: file.path().to_path_buf(),
-                    store: store.clone(),
-                    graphql_url: url,
-                },
-                future,
-            )
-            .await
-    }
 
     #[tokio::test]
     async fn uncertain_publication_reconciles_the_existing_linear_comment() {

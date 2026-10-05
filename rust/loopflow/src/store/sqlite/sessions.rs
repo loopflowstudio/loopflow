@@ -593,34 +593,6 @@ impl SqliteStore {
         Ok((histories, truncated))
     }
 
-    pub(crate) fn record_review_service(
-        &self,
-        flow: &FlowSession,
-        exec: &crate::id::ExecId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if super::flows::flow_in(&tx, flow.id())?.as_ref() != Some(flow) {
-            return Err(StoreError::InvalidAuthority(
-                "review service changed before admission".into(),
-            ));
-        }
-        let id = flow
-            .pending_session_id
-            .as_ref()
-            .ok_or(StoreError::NotFound)?;
-        if tx.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,'{\"type\":\"review_service\"}',current_capture
-             FROM agent_sessions WHERE id=?1 AND completed_at IS NULL",
-            params![id, format!("review_service:{exec}"), exec, crate::store::rows::now_unix()],
-        )? != 1 {
-            return Err(StoreError::InvalidAuthority("review has been retired".into()));
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Fence the exact review before stopping its execution. Keep process owners
     /// and history so an interrupted restart can finish stopping the same work.
     pub(crate) fn retire_task_review(&self, expected: &FlowSession) -> StoreResult<()> {
@@ -700,68 +672,6 @@ impl SqliteStore {
         )?;
         let rows = query.query_map([id], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
-    }
-
-    pub fn reserve_review_run(
-        &self,
-        expected: &FlowSession,
-    ) -> StoreResult<(FlowSession, AgentSession)> {
-        let _admission = self.lock_checkout(&expected.cwd)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
-        if current != *expected || current.claim.is_some() || current.failure.is_some() {
-            return Err(StoreError::InvalidAuthority(
-                "review changed before input reservation".into(),
-            ));
-        }
-        let id = review_id(expected)?;
-        let mut session = session_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
-        if session.completed_at.is_some() {
-            return Err(StoreError::InvalidAuthority("review is complete".into()));
-        }
-        if session.input_published {
-            session.artifact_key = crate::session_record::new_artifact_key();
-            session.input_published = false;
-            replace_input_in(
-                &tx,
-                &mut session,
-                crate::journal::current_exec_id().as_ref(),
-            )?;
-            tx.execute(
-                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
-                [expected.id()],
-            )?;
-        }
-        let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
-        select_input_in(&tx, &flow, &session)?;
-        let flow = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok((flow, session))
-    }
-
-    pub(crate) fn publish_review_capture(
-        &self,
-        session_id: &str,
-        captured: i64,
-        version: u64,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.execute("UPDATE flow_sessions SET position_version=position_version+1
-            WHERE state='current' AND pending_session_id=?1 AND position_version=?3
-            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.current_capture=?2 AND s.input_published=0 AND s.completed_at IS NULL)",
-            params![session_id, captured, i64::try_from(version).map_err(invalid)?])? != 1 {
-            return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
-        }
-        tx.execute(
-            "UPDATE agent_sessions SET input_published=1, provider=?2, model=?3 WHERE current_capture=?1",
-            params![captured, provider, model],
-        )?;
-        tx.commit()?;
-        Ok(())
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
@@ -1184,59 +1094,6 @@ pub(super) fn retain_history_in(
         changed = true;
     }
     Ok(changed)
-}
-
-pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
-    let task = flow
-        .task_id
-        .as_ref()
-        .ok_or_else(|| invalid("review belongs to no Task"))?;
-    let step = flow
-        .current_checked()
-        .ok_or_else(|| invalid("review has no captured step"))?;
-    let node = step
-        .id
-        .ok_or_else(|| invalid("review has no captured node"))?;
-    Ok(format!(
-        "{}:{}:{}:{}:{}",
-        task, flow.invocation.id, step.flow, node, flow.cursor.iteration
-    ))
-}
-
-/// Store the review Session a Task's Flow parks at, with its first Run
-/// reserved. Parking at the same review again finds the Session it left.
-pub(super) fn reserve_task_review_in(
-    conn: &Transaction<'_>,
-    flow: &FlowSession,
-) -> StoreResult<()> {
-    if !flow.is_human() {
-        return Err(StoreError::InvalidAuthority(
-            "only a review reserves a review Session".into(),
-        ));
-    }
-    let id = review_id(flow)?;
-    let session = match session_in(conn, &id)? {
-        Some(session) if session.completed_at.is_some() => {
-            return Err(StoreError::InvalidAuthority(
-                "completed review cannot be reopened by a cursor write".into(),
-            ))
-        }
-        Some(session) => session,
-        None => {
-            let title = conn.query_row(
-                "SELECT issue_title FROM tasks WHERE id=?1",
-                [flow.task_id.as_ref().map(TaskId::as_str)],
-                |row| row.get(0),
-            )?;
-            reserve_flow_conversation_in(conn, flow, id, SessionKind::FlowReview, title, None)?
-        }
-    };
-    if conn.execute("UPDATE flow_sessions SET pending_session_id=?2 WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
-        params![flow.id(),session.id,i64::try_from(flow.version).map_err(invalid)?])? != 1
-    {
-        return Err(StoreError::InvalidAuthority("review changed before reservation".into()));
-    }
-    select_input_in(conn, flow, &session)
 }
 
 pub(super) fn reserve_flow_conversation_in(

@@ -17,7 +17,7 @@ use serde_json::json;
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_adopts_linear_checkout_and_preserves_saved_progress() {
-    for (operation, remote_only) in [("checkout", false), ("start", false), ("checkout", true)] {
+    for (operation, remote_only) in [("checkout", false), ("checkout", true)] {
         let repo = TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
@@ -265,9 +265,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             .block_on(store.task_flow(&task.id))
             .unwrap()
             .unwrap();
-        let saved = runtime
-            .block_on(store.reserve_task_review(saved.id(), saved.version))
-            .unwrap();
         // Catalog changes must not replace the saved graph or reset its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
@@ -275,7 +272,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         )
         .unwrap();
         invoke("checkout");
-        invoke("start");
         assert_eq!(
             runtime
                 .block_on(store.task_flow(&task.id))

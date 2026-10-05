@@ -198,14 +198,6 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowSession> {
-        let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_review(&id, version)
-        })
-        .await
-    }
-
     pub async fn claim_task_worker(
         &self,
         task_id: &TaskId,

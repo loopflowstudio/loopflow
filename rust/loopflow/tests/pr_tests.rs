@@ -4,9 +4,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::{FlowSession, WorkStatus};
+use loopflow::durable::WorkStatus;
 use loopflow::engine::flow::Command as FlowCommand;
-use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_command,
@@ -1295,107 +1294,6 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
     assert_eq!(persisted.head_sha(), Some("new-head"));
     assert!(persisted.merge_request().is_none());
     assert_eq!(persisted.after_merge(), AfterMerge::ContinueTask);
-    let log = std::fs::read_to_string(log_path).expect("read gh log");
-    assert!(log.contains("pr merge 912 --disable-auto"));
-}
-
-#[test]
-fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let log_path = home.path().join("gh.log");
-    let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
-    let repo = TestRepo::new();
-    support::bind_task_planning(&repo);
-    let base = repo.head_sha();
-    let branch = "jack/task-resume-proof";
-    repo.create_branch(branch);
-    point_origin_at_github(&repo);
-    // Planning lookup uses the canonical repository path, including macOS /var aliases.
-    let canonical_repo = repo.path().canonicalize().expect("canonical fixture repo");
-    let task = register_task(home.path(), &canonical_repo, branch, &base);
-    let now = time::OffsetDateTime::now_utc();
-    let head = repo.head_sha();
-    let mut pr = task.pr.clone();
-    pr.publication = Some(PrPublication {
-        requested_at: now,
-        presentation: Some(reviewer_copy(&head)),
-        github: Some(GithubPr {
-            number: 912,
-            url: "https://example.com/pr/912".to_string(),
-            head_sha: Some(head.clone()),
-        }),
-        merge: Some(PrMergeRequest {
-            mode: PrMergeMode::Auto,
-            requested_at: now,
-            head_sha: head,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-        }),
-    });
-    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let position = FlowSession {
-        invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
-        cursor: loopflow::engine::ExecutionCursor {
-            index: 1,
-            iteration: 0,
-            ..Default::default()
-        },
-        version: 0,
-        task_id: Some(task.task.id.clone()),
-        wave_id: Some(task.task.wave_id.clone()),
-        cwd: task.task.worktree.clone(),
-        message: None,
-        model: None,
-        current_attempt: None,
-        pending_session_id: None,
-        worker_generation: 0,
-        claim: None,
-        failure: None,
-        finished: false,
-        updated_at: now,
-    };
-    assert!(position.is_human());
-    let position = runtime
-        .block_on(task.store.start_task_flow(&task.task.id, position))
-        .expect("persist review boundary");
-    let position = runtime
-        .block_on(
-            task.store
-                .reserve_task_review(position.id(), position.version),
-        )
-        .expect("reserve the review Session");
-    runtime
-        .block_on(task.store.update_task_pr(&pr))
-        .expect("store auto merge request");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["--task", "INF-123", "flow", "start", "--json"])
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let result: loopflow::ops::task::TaskSnapshot = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result.task_id, task.task.id.to_string());
-    let resumed = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .expect("review boundary remains available");
-    assert_eq!(resumed.invocation, position.invocation);
-    assert_eq!(resumed.cursor, position.cursor);
-    assert!(resumed.is_human());
-    assert!(resumed.pending_session_id.is_some());
-
-    let persisted = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    assert!(persisted.merge_request().is_none());
     let log = std::fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("pr merge 912 --disable-auto"));
 }

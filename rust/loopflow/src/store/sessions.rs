@@ -15,16 +15,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
     }
 
-    pub async fn reserve_review_run(
-        &self,
-        expected: &FlowSession,
-    ) -> StoreResult<(FlowSession, AgentSession)> {
-        let expected = expected.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_review_run(&expected)
-        })
-        .await
-    }
     pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await

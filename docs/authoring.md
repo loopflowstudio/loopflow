@@ -73,8 +73,10 @@ Skills that need another Work's perspective launch it directly with
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Keep design and review in the Task conversation. Save agreed feedback and
-remaining work there; Session completion controls are retired. Inspect the exact
+Keep design and review in the Task conversation. Operational Flows reject
+`human: true` steps, including inside composed Flows and XOR alternatives, before
+launching work. Save agreed feedback and remaining work in the conversation;
+Session completion controls are retired. Inspect the exact
 invocation and its effects before selecting further work. Historical captures
 with human steps retain their evidence; they are not approval to replay work.
 
@@ -170,11 +172,6 @@ The work and updated plan supply evidence; loop-decide chooses Advance or Iterat
 with direction; Advance leaves the loop and publishes. This is `pursue`: one
 implementation loop with no human review or outer return edge.
 
-`code` composes `pursue` followed by a human `pr-review` walkthrough. `feature`
-adds design review before `pursue`, then a human demo, the final gate and landing.
-Completing either delivery review does not restart the pursuit. Existing saved
-Flows retain their captured steps; these definitions govern new invocations.
-
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
 `{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The provider receives
@@ -190,13 +187,12 @@ Existing logs and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 
-Resume the saved invocation to preserve its captured definition, position,
-direction, and accepted decisions. Edits to the source apply to new invocations.
+Inspect saved invocation history and effects before launching further work.
+Edits to the source apply to new invocations.
 Finishing a Flow grants no implicit merge or Task-completion authority and
 does not choose another Flow; author delivery explicitly.
 
-`feature` combines design review with this loop; `pursue` starts at
-implementation. Ordinary and Task invocations capture every XOR router and path
+`pursue` starts at implementation. Ordinary and Task invocations capture every XOR router and path
 before execution and use the same cursor for nested paths and backward edges.
 Recovery reads that captured definition, including paths not yet selected.
 The implementation and recovery fixtures do not establish live provider/Session

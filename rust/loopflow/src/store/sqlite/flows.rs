@@ -507,7 +507,7 @@ fn reserve_attempt_in(
         return Ok(());
     }
     if flow.is_human() {
-        return super::sessions::reserve_task_review_in(tx, flow);
+        return Err(invalid("Human review belongs in the Task conversation"));
     }
     let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
     let existing: Option<String> = tx.query_row(
@@ -699,7 +699,7 @@ fn claim_task_worker_in(
     let flow = task_flow_in(tx, task_id)?.ok_or(StoreError::NotFound)?;
     if flow.is_human() {
         return Err(StoreError::InvalidAuthority(
-            "Review Flow positions wait for their Session to complete".to_string(),
+            "Historical review positions do not execute; discuss the retained conversation and launch fresh operational work".to_string(),
         ));
     }
     if flow.invocation.id != expected_invocation
@@ -1400,25 +1400,6 @@ impl SqliteStore {
         end_flow_in(&tx, id, version, claim, summary)?;
         tx.commit()?;
         Ok(())
-    }
-
-    /// Park a Task's Flow at its review: the review Session exists and the
-    /// row waits on it.
-    pub fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowSession> {
-        let cwd = self.flow(id)?.ok_or(StoreError::NotFound)?.cwd;
-        let _admission = self.lock_checkout(&cwd)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let flow = current_flow_in(&tx, id)?;
-        if flow.version != version {
-            return Err(stale(id));
-        }
-        if flow.pending_session_id.is_none() {
-            super::sessions::reserve_task_review_in(&tx, &flow)?;
-        }
-        let flow = current_flow_in(&tx, id)?;
-        tx.commit()?;
-        Ok(flow)
     }
 
     pub fn claim_task_worker(

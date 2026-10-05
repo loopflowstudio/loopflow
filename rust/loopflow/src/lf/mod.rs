@@ -633,16 +633,6 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run the exact review skill in its durable terminal
-    #[command(name = "serve-flow", hide = true)]
-    ServeFlow {
-        task_id: crate::work::task::TaskId,
-        invocation_id: String,
-        flow: String,
-        node_id: String,
-        skill: String,
-        iteration: u32,
-    },
     /// Run one prepared conversation in its durable terminal
     #[command(name = "serve-conversation", hide = true)]
     ServeConversation { input: String },

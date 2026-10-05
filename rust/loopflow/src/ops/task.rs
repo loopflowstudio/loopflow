@@ -1226,9 +1226,6 @@ async fn select_task_agent(
             .await
             .map_err(|error| task_error(format!("failed to save Task agent: {error}")))?;
         task.agent = Some(agent.to_string());
-        crate::ops::human_session::retarget_prepared_task_review(store, task)
-            .await
-            .map_err(task_error)?;
     }
     Ok(())
 }
@@ -2592,9 +2589,6 @@ pub(crate) async fn exec_task_process(
             "Task {} advancement is blocked: {}",
             task.plan.identifier, failure.reason
         )));
-    }
-    if position.is_human() {
-        return Ok(());
     }
     let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
     let agent = resolve_task_agent(
@@ -5911,85 +5905,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_waits_for_review_launch_before_retiring_or_reading_owners() {
-        let _ledger = crate::journal::TestLedgerGuard::new();
-        let fixture = task_fixture("RESTART-LAUNCH").await;
-        let flow = fixture
-            .store
-            .start_task_flow(
-                &fixture.task.id,
-                crate::durable::FlowSession {
-                    invocation: crate::durable::test_flow_invocation(
-                        "review",
-                        0,
-                        "demo",
-                        Some("review"),
-                        true,
-                    ),
-                    task_id: Some(fixture.task.id.clone()),
-                    wave_id: Some(fixture.task.wave_id.clone()),
-                    cwd: fixture.task.worktree.clone(),
-                    cursor: Default::default(),
-                    version: 0,
-                    message: None,
-                    model: None,
-                    current_attempt: None,
-                    pending_session_id: None,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-                    finished: false,
-                    updated_at: time::OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .unwrap();
-        let flow = fixture
-            .store
-            .reserve_task_review(flow.id(), flow.version)
-            .await
-            .unwrap();
-        let id = flow.pending_session_id.as_ref().unwrap();
-        let launch = crate::ops::human_session::lock_session_exec(id).unwrap();
-        let stop = super::restart::stop_review(&fixture.store, &flow);
-        tokio::pin!(stop);
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut stop)
-                .await
-                .is_err()
-        );
-        assert!(fixture
-            .store
-            .session(id)
-            .await
-            .unwrap()
-            .unwrap()
-            .completed_at
-            .is_none());
-        // The launching service may finish its reservation while restart waits.
-        // Re-entry must read that version under the lock, not retire a stale copy.
-        rusqlite::Connection::open(&fixture.database_path)
-            .unwrap()
-            .execute(
-                "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
-                [flow.id()],
-            )
-            .unwrap();
-        drop(launch);
-        let stopped = stop.await.unwrap();
-        assert_eq!(stopped.id(), flow.id());
-        assert_eq!(stopped.version, flow.version + 1);
-        assert!(fixture
-            .store
-            .session(id)
-            .await
-            .unwrap()
-            .unwrap()
-            .completed_at
-            .is_some());
-    }
-
-    #[tokio::test]
     async fn task_stop_waits_for_selected_step_after_driver_death() {
         for released in [false, true] {
             assert_task_stop_waits_for_selected_step(released).await;
@@ -6761,105 +6676,6 @@ time.sleep(30)
                 .filter(|event| matches!(event.kind, TaskEventKind::Completed { .. }))
                 .count(),
             1
-        );
-    }
-
-    #[tokio::test]
-    async fn parked_human_boundary_reports_blockers_without_provider_preflight() {
-        let TaskFixture {
-            _database,
-            store,
-            mut task,
-            ..
-        } = task_fixture("TEST-HUMAN-ADVANCE").await;
-        store
-            .restart_task_flow(&task, None, "checkpoint")
-            .await
-            .unwrap();
-        let position = store
-            .start_task_flow(
-                &task.id,
-                crate::durable::FlowSession {
-                    invocation: crate::durable::test_flow_invocation(
-                        "task-design",
-                        1,
-                        "review-design",
-                        Some("review_kickoff"),
-                        true,
-                    ),
-                    cursor: crate::engine::ExecutionCursor {
-                        index: 1,
-                        iteration: 0,
-                        ..Default::default()
-                    },
-                    version: 0,
-                    task_id: Some(task.id.clone()),
-                    wave_id: Some(task.wave_id.clone()),
-                    cwd: task.worktree.clone(),
-                    message: None,
-                    model: None,
-                    current_attempt: None,
-                    pending_session_id: None,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-                    finished: false,
-                    updated_at: time::OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .unwrap();
-        let position = store
-            .reserve_task_review(position.id(), position.version)
-            .await
-            .unwrap();
-        let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
-
-        exec_task_process(&store, &mut task, None).await.unwrap();
-
-        // A parked human boundary keeps its Session's reserved Run without
-        // launching a provider; everything else about the position is untouched.
-        let stored = store.task_flow(&task.id).await.unwrap().unwrap();
-        let sessions = store
-            .sessions(&crate::session::SessionFilter::default())
-            .await
-            .unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].task_id, Some(task.id.clone()));
-        assert!(!sessions[0].input_published);
-        assert_eq!(stored.review_artifact_key(), None);
-        assert_eq!(stored, position);
-        assert_eq!(
-            store.task_events_after(&task.id, 0).await.unwrap().len(),
-            event_count
-        );
-
-        let blocked = store
-            .fail_flow(
-                stored.id(),
-                stored.version,
-                None,
-                &crate::durable::TaskFlowBlocker {
-                    captured: None,
-                    reason: "Saved instructions are unavailable; explicitly restart this Task"
-                        .to_string(),
-                    restart_required: true,
-                    observed_at: time::OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .unwrap();
-        let event_count = store.task_events_after(&task.id, 0).await.unwrap().len();
-
-        let error = exec_task_process(&store, &mut task, None)
-            .await
-            .unwrap_err();
-
-        assert!(error.to_string().contains("explicitly restart this Task"));
-        assert_eq!(store.task_flow(&task.id).await.unwrap(), Some(blocked));
-        assert_eq!(
-            store.task_events_after(&task.id, 0).await.unwrap().len(),
-            event_count
         );
     }
 

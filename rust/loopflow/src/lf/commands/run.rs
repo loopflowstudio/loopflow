@@ -921,16 +921,6 @@ fn begin_run_capture(
                 )
             },
         )
-    } else if let Some((run_id, membership)) = crate::ops::human_session::reserved_capture()? {
-        let spec = SessionCaptureSpec {
-            flow: membership,
-            ..spec
-        };
-        let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        CaptureHandle::begin_reserved_with_context(spec, run_id, None, &built.context, |run_id| {
-            crate::ops::human_session::publish_capture_binding(run_id, &provider, model.as_deref())
-                .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
-        })
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {

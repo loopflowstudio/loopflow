@@ -514,22 +514,6 @@ Assign a Task to a Session that has none; the Task never changes after
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf session serve-flow
-
-Run the exact review skill in its durable terminal
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<task_id>` | task id |
-| `<invocation_id>` | invocation id |
-| `<flow>` | flow |
-| `<node_id>` | node id |
-| `<skill>` | skill |
-| `<iteration>` | iteration |
-| `--help / -h` | Print help |
-
 ## lf session serve-conversation
 
 Run one prepared conversation in its durable terminal

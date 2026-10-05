@@ -72,49 +72,6 @@ pub async fn latest_interactive_session(
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
-pub(crate) const REVIEW_CAPTURE_ENV: &str = "LF_REVIEW_RUN_RESERVATION";
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ReviewCaptureReservation {
-    captured: i64,
-    session_id: String,
-    run_id: String,
-    version: u64,
-}
-
-pub(crate) fn reserved_capture(
-) -> Result<Option<(String, crate::session_record::SessionFlowMembership)>> {
-    let Some(raw) = std::env::var_os(REVIEW_CAPTURE_ENV) else {
-        return Ok(None);
-    };
-    let reservation: ReviewCaptureReservation = serde_json::from_str(&raw.to_string_lossy())?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let session = store
-        .session(&reservation.session_id)?
-        .ok_or_else(|| anyhow!("review reservation disappeared"))?;
-    let task_id = session
-        .task_id
-        .as_ref()
-        .ok_or_else(|| anyhow!("review reservation has no Task"))?;
-    let position = store
-        .task_flow(task_id)?
-        .ok_or_else(|| anyhow!("review invocation is no longer current"))?;
-    if session.captured != Some(reservation.captured)
-        || session.completed_at.is_some()
-        || session.input_published
-        || position.version != reservation.version
-        || flow_id(&position)? != session.id
-    {
-        bail!("review Run reservation is stale");
-    }
-    let mut membership = crate::session_record::SessionFlowStep::of(&position)?;
-    membership.task_pr_id = store.active_task_pr(task_id)?.map(|pr| pr.id);
-    Ok(Some((
-        reservation.run_id,
-        crate::session_record::SessionFlowMembership::Step(membership),
-    )))
-}
-
 /// Launch exclusion is process state beside the Home, not a Session record.
 const LAUNCH_LOCK_DIRECTORY: &str = "human-sessions";
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -398,74 +355,15 @@ pub(crate) fn publish_prepared_input(
         .ok_or_else(|| session_not_found(&session.id))
 }
 
-pub(crate) async fn prepare(
-    store: &SharedStore,
-    task: &Task,
-    position: &FlowSession,
-) -> Result<SessionRecord> {
-    validate_task_position(task, position)?;
-    let placement = store.placement(&WorkRef::Task(task.id.clone())).await?;
-    let home = store
-        .home_by_id(&placement.home_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {} Home {} disappeared", task.id, placement.home_id))?;
-    if home.route != "local" {
-        bail!("session starts on its placed Home; resume the Task there");
-    }
-    if position.review_artifact_key().is_none() {
-        select_review_agent(store, task, position).await?;
-        launch_flow(task, position).await?;
-    }
-    flow_surface(store, task, position).await
-}
-
-/// Choose the reserved review Run's agent from the Task's current choice,
-/// then the step's, then the checkout's config. A published Run keeps what
-/// it launched with; the choice is read back at launch.
-pub(crate) async fn select_review_agent(
-    store: &SharedStore,
-    task: &Task,
-    position: &FlowSession,
-) -> Result<String> {
-    let task = store.get_task(&task.id).await?.ok_or_else(|| {
-        anyhow!(
-            "Task {} disappeared while selecting its review agent",
-            task.id
-        )
-    })?;
-    let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
-    let agent = crate::ops::task::resolve_task_agent(
-        &task.worktree,
-        task.agent.as_deref(),
-        skill.as_ref().map(|step| &step.skill),
-    );
-    if let Some(session) = store.session(&flow_id(position)?).await? {
-        let (provider, model) = crate::engine::config::parse_agent(&agent);
-        store
-            .retarget_unpublished_run(&session.artifact_key, &provider, model.as_deref())
-            .await?;
-    }
-    Ok(agent)
-}
-
-/// A changed Task choice applies to a review that has not launched.
-pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Task) -> Result<()> {
-    if let Some(position) = store
-        .task_flow(&task.id)
-        .await?
-        .filter(FlowSession::is_human)
-    {
-        select_review_agent(store, task, &position).await?;
-    }
-    Ok(())
-}
-
 /// The Task whose own Flow waits at this Run's review: the Run's invocation is
 /// the one the Task points at. Any other review naming a Task is a Flow about it.
 async fn managed_review(
     store: &SharedStore,
     session: &AgentSession,
 ) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowSession)>> {
+    if session.kind != crate::session::SessionKind::FlowReview {
+        return Ok(None);
+    }
     let (Some(task_id), Some(invocation)) = (&session.task_id, &session.flow_session_id) else {
         return Ok(None);
     };
@@ -851,111 +749,6 @@ async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<
     }
 }
 
-pub(crate) async fn serve_flow(
-    store: SharedStore,
-    task_id: TaskId,
-    invocation_id: String,
-    flow: String,
-    node_id: String,
-    skill: String,
-    iteration: u32,
-) -> Result<()> {
-    let task = store
-        .get_task(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
-    let position = store
-        .task_flow(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("review session is no longer waiting"))?;
-    let token = flow_token(&task, &position)?;
-    if token.invocation_id != invocation_id
-        || token.flow != flow
-        || token.node_id != node_id
-        || token.skill.name != skill
-        || token.iteration != iteration
-    {
-        bail!("review session is stale");
-    }
-    let launch_lock = lock_session_exec(&flow_token_id(&token))?;
-    let current = store
-        .task_flow(&task_id)
-        .await?
-        .ok_or_else(|| anyhow!("review is no longer waiting"))?;
-    if current.review_artifact_key().is_some() {
-        return Ok(());
-    }
-    serve_flow_locked(store, token, &current, launch_lock)
-        .await
-        .map(|_| ())
-}
-
-async fn serve_flow_locked(
-    store: SharedStore,
-    token: FlowSessionToken,
-    position: &FlowSession,
-    launch_lock: File,
-) -> Result<String> {
-    let task = store
-        .get_task(&token.task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
-    validate_token(&store, &token).await?;
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| anyhow!("review service has no Exec identity"))?;
-    store.sqlite.record_review_service(position, &exec)?;
-    if let Some(failure) = &position.failure {
-        bail!("review session cannot start: {}", failure.reason);
-    }
-    let message = flow_message(&task, &token);
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let serialized = serde_json::to_string(&HumanSessionToken::Flow {
-        token: Box::new(token.clone()),
-    })?;
-    let (position, reserved) = store.reserve_review_run(position).await?;
-    let accounts = position.invocation.accounts.clone().unwrap_or_default();
-    let _accounts = accounts.activate()?;
-    let agent = select_review_agent(&store, &task, &position).await?;
-    let reservation = ReviewCaptureReservation {
-        captured: reserved.captured.context("review has no captured event")?,
-        session_id: flow_token_id(&token),
-        run_id: reserved.artifact_key.clone(),
-        version: position.version,
-    };
-    let mut command = tokio::process::Command::new(lf);
-    command
-        .args([
-            "--mode",
-            "tui",
-            "--model",
-            &agent,
-            "--task",
-            task.id.as_str(),
-        ])
-        .args(["skill", "--", &token.skill.name, &message])
-        .current_dir(&task.worktree)
-        .env(HUMAN_SESSION_ENV, serialized)
-        .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?)
-        .env(
-            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
-            accounts.env_value()?,
-        )
-        .envs(position.invocation.isolation_env());
-    let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
-    drop(launch_lock);
-    let status = child.wait().await.context("wait for review skill")?;
-    if !token_is_current(&store, &token).await? {
-        let execution = crate::ops::task_execution::task_execution(&store, &token.task_id).await?;
-        println!("Review session finished. {}", execution.reason);
-        return Ok(reserved.artifact_key);
-    }
-    if status.success() {
-        Ok(reserved.artifact_key)
-    } else {
-        Err(anyhow!("review skill exited with {status}"))
-    }
-}
-
 pub(crate) async fn serve_conversation(store: &SharedStore, run_id: &String) -> Result<()> {
     let session = store
         .session_for_artifact(run_id)
@@ -1002,14 +795,7 @@ async fn serve_locked(
     command
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
-    match &token {
-        HumanSessionToken::StandaloneFlow { id } => {
-            crate::ops::flow_session::prepare_exec(store, &mut command, id).await?
-        }
-        _ => {
-            command.args(conversation_launch_args(store, session).await);
-        }
-    }
+    command.args(conversation_launch_args(store, session).await);
     let mut child = spawn_session_exec(&mut command, &session.artifact_key).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
@@ -1060,29 +846,6 @@ fn work_selector(session: &AgentSession) -> Option<String> {
         (None, Some(wave)) => Some(format!("wave:{wave}")),
         (None, None) => None,
     }
-}
-
-pub(crate) fn publish_capture_binding(
-    run_id: &String,
-    provider: &str,
-    model: Option<&str>,
-) -> Result<()> {
-    let raw = std::env::var_os(REVIEW_CAPTURE_ENV)
-        .ok_or_else(|| anyhow!("review Run has no launch reservation"))?;
-    std::env::remove_var(REVIEW_CAPTURE_ENV);
-    let reservation: ReviewCaptureReservation = serde_json::from_str(&raw.to_string_lossy())?;
-    if reservation.run_id != *run_id {
-        bail!("review Run differs from its reservation");
-    }
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    store.publish_review_capture(
-        &reservation.session_id,
-        reservation.captured,
-        reservation.version,
-        provider,
-        model,
-    )?;
-    Ok(())
 }
 
 pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
@@ -1415,13 +1178,17 @@ async fn open_flow_locked(
             bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
-    serve_flow_locked(
-        store.clone(),
-        token,
-        position,
-        launch_lock.expect("unresumed review retains its launch lock"),
+    let session = store
+        .session(&flow_id(position)?)
+        .await?
+        .context("historical review conversation is missing")?;
+    serve_locked(
+        store,
+        &session,
+        launch_lock.expect("unresumed conversation retains its launch lock"),
     )
-    .await
+    .await?;
+    Ok(session.artifact_key)
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
@@ -1831,17 +1598,6 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) async fn token_is_current(
-    store: &SharedStore,
-    token: &FlowSessionToken,
-) -> Result<bool> {
-    Ok(store
-        .task_flow(&token.task_id)
-        .await?
-        .as_ref()
-        .is_some_and(|position| token_matches(token, position)))
-}
-
 async fn flow_surface(
     store: &SharedStore,
     task: &Task,
@@ -1899,14 +1655,6 @@ fn validate_task_position(task: &Task, position: &FlowSession) -> Result<()> {
     Ok(())
 }
 
-async fn validate_token(store: &SharedStore, token: &FlowSessionToken) -> Result<()> {
-    if token_is_current(store, token).await? {
-        Ok(())
-    } else {
-        Err(anyhow!("review session is stale"))
-    }
-}
-
 fn flow_token(task: &Task, position: &FlowSession) -> Result<FlowSessionToken> {
     validate_task_position(task, position)?;
     let step = position.current();
@@ -1923,46 +1671,7 @@ fn flow_token(task: &Task, position: &FlowSession) -> Result<FlowSessionToken> {
     })
 }
 
-fn token_matches(token: &FlowSessionToken, position: &FlowSession) -> bool {
-    let step = position.current();
-    position.task_id.as_ref() == Some(&token.task_id)
-        && position.invocation.id == token.invocation_id
-        && step.human
-        && step.flow == token.flow
-        && step.id.as_deref() == Some(token.node_id.as_str())
-        && step.step == token.skill.name
-        && position.cursor.iteration == token.iteration
-}
-
-fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
-    format!(
-        "<lf:human-session>\nThis conversation retains the historical `{}` review for Task {}. Discuss feedback and save agreed changes and remaining work in scratch. Review completion controls are retired; retain this conversation and inspect execution/effect history before choosing further work.\n</lf:human-session>",
-        token.skill.name, task.plan.identifier,
-    )
-}
-
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
-
-async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
-    let step = position.current();
-    let node_id = step
-        .id
-        .as_deref()
-        .ok_or_else(|| anyhow!("review flow position has no node id"))?;
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let argv = vec![
-        lf.to_string_lossy().to_string(),
-        "session".to_string(),
-        "serve-flow".to_string(),
-        task.id.to_string(),
-        position.invocation.id.clone(),
-        step.flow,
-        node_id.to_string(),
-        step.step,
-        position.cursor.iteration.to_string(),
-    ];
-    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv).await
-}
 
 #[cfg(not(test))]
 async fn conversation_exec_is_running(id: &str) -> Result<bool> {
@@ -2035,13 +1744,6 @@ pub(crate) fn flow_id(position: &FlowSession) -> Result<String> {
     ))
 }
 
-fn flow_token_id(token: &FlowSessionToken) -> String {
-    format!(
-        "{}:{}:{}:{}:{}",
-        token.task_id, token.invocation_id, token.flow, token.node_id, token.iteration
-    )
-}
-
 pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
     let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
     fs::create_dir_all(&directory).context("create Session directory")?;
@@ -2068,42 +1770,6 @@ pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
         }
     }
     Ok(file)
-}
-
-fn flow_background_name(position: &FlowSession) -> Result<String> {
-    let step = position.current();
-    Ok(flow_token_background_name(&FlowSessionToken {
-        task_id: position
-            .task_id
-            .clone()
-            .ok_or_else(|| anyhow!("review flow position belongs to no Task"))?,
-        invocation_id: position.invocation.id.clone(),
-        flow: step.flow,
-        node_id: step
-            .id
-            .ok_or_else(|| anyhow!("review flow position has no node id"))?,
-        skill: match position.current_plan() {
-            crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
-            _ => bail!("review flow position does not select a Skill"),
-        },
-        iteration: position.cursor.iteration,
-    }))
-}
-
-fn flow_token_background_name(token: &FlowSessionToken) -> String {
-    let task = token
-        .task_id
-        .to_string()
-        .chars()
-        .skip(5)
-        .take(8)
-        .collect::<String>();
-    let node = crate::engine::process::tmux_session_slug(&token.node_id)
-        .chars()
-        .take(24)
-        .collect::<String>();
-    let invocation = token.invocation_id.chars().take(8).collect::<String>();
-    format!("lf-human-{task}-{node}-{invocation}-{}", token.iteration)
 }
 
 fn conversation_background_name(id: &str) -> String {
@@ -2286,8 +1952,8 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     use super::{
-        flow_background_name, flow_id, flow_token_id, human_open_argv, session_is_resumable,
-        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
+        human_open_argv, session_is_resumable, FlowSessionToken, HumanSessionToken,
+        HUMAN_SESSION_ENV,
     };
     use crate::durable::FlowSession;
     use crate::session::AgentSession;
@@ -2745,30 +2411,6 @@ mod tests {
                     }
                 }
             });
-    }
-
-    #[test]
-    fn session_identity_is_the_exact_human_flow_position() {
-        let position = position();
-        let step = position.current();
-        let token = FlowSessionToken {
-            task_id: position.task_id.clone().unwrap(),
-            invocation_id: position.invocation.id.clone(),
-            flow: step.flow,
-            node_id: step.id.unwrap(),
-            skill: match position.current_plan() {
-                crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
-                _ => panic!("human position must select a Skill"),
-            },
-            iteration: position.cursor.iteration,
-        };
-
-        assert!(token_matches(&token, &position));
-        assert!(flow_id(&position).unwrap().contains("review_kickoff"));
-        assert_eq!(flow_id(&position).unwrap(), flow_token_id(&token));
-        assert!(flow_background_name(&position)
-            .unwrap()
-            .starts_with("lf-human-"));
     }
 
     #[test]

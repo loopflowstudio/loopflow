@@ -1909,9 +1909,14 @@ mod tests {
               automation_checked_at,automation_detail)
             VALUES('t','p','linear-t','LOO-1',1,'/repo/task',0,'old-exec','old-position',3,20,'stopped');
             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('t','{"kind":"started"}',17);
-            INSERT INTO agent_sessions(id,title,title_source,created_at,ready_summary,completed_at,input_published,cwd)
-            VALUES('review','Review','human',3,'Retained exact feedback',NULL,0,'/repo/task'),
-                  ('closed','Closed','human',4,'Historical result',7,0,'/repo/task');
+            INSERT INTO agent_sessions(id,title,title_source,created_at,ready_summary,completed_at,input_published,cwd,kind,task_id,wave_id)
+            VALUES('review','Review','human',3,'Retained exact feedback',NULL,0,'/repo/task','flow_review','t','w'),
+                  ('closed','Closed','human',4,'Historical result',7,0,'/repo/task','flow_review','t','w');
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,pending_session_id)
+            VALUES('legacy-flow','t','w','{"id":"legacy-flow","flow":"feature"}',2,3,4,0,5,'current','review');
+            UPDATE agent_sessions SET flow_session_id='legacy-flow' WHERE id='review';
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,observed_at,payload)
+            VALUES('legacy-flow',4,2,'[]','operation_started',5,'{"command":"pr publish"}');
         "#).unwrap();
         conn.execute_batch(&current_draft_sql("task_flow_observations"))
             .unwrap();
@@ -1925,6 +1930,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(feedback, ("Retained exact feedback".into(), None));
+        let boundary: (String, String, i64, Option<i64>) = conn.query_row(
+            "SELECT s.kind,json_extract(e.payload,'$.flow_id'),json_extract(e.payload,'$.pending'),s.completed_at FROM agent_sessions s JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_flow_review' WHERE s.id='review'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            boundary,
+            ("conversation".into(), "legacy-flow".into(), 1, None)
+        );
+        let history: (i64, i64, String, String) = conn.query_row(
+            "SELECT f.step_index,f.iteration,f.pending_session_id,e.payload FROM flow_sessions f JOIN flow_events e ON e.flow_id=f.id WHERE f.id='legacy-flow'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            history,
+            (2, 3, "review".into(), r#"{"command":"pr publish"}"#.into())
+        );
         assert_eq!(
             conn.query_row(
                 "SELECT completed_at FROM agent_sessions WHERE id='closed'",

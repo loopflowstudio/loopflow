@@ -348,7 +348,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::ops::flow_run::FLOW_STEP_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
-    crate::ops::human_session::REVIEW_CAPTURE_ENV,
     crate::session_record::RUN_DIR_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,

@@ -33,19 +33,21 @@ single-capture human-segment proposals preserved at
 
 Design review is approved; the full runtime cut remains. Scheduling/enrollment
 and five scheduling columns are deleted; Task/PR checks share delivery reconciliation
-and per-landing locks, preserving CI repair holds. Ready/Complete CLI/store/Desktop
-controls, `exec_driver` and review-completion restart are now deleted. The draft archives feedback
-in Session observations before dropping its live column; historical feedback and
-completion remain readable without readiness or navigation authority. Task-worker
-claims, managed selection, internal recovery and new review launch still exist.
-Public saved Flow resume is deleted; inspection retains native child completion
-and mechanical effects without restarting or consuming them.
-Compression removes duplicate Flow feedback plumbing; Session observations retain
-the history. It also removes hidden `session stop-client` and its completion-only
-shutdown helper; native replacement and primary succession retain process fencing
-and history. Public command deletion does not remove internal recovery, worker
-claims or `serve-flow`. Ordinary detached launch, Task
+and per-landing locks, preserving CI repair holds. Ready/Complete, `exec_driver`,
+review-completion restart, `stop-client` and duplicate feedback plumbing are deleted.
+New review reservation, `serve-flow`, review capture publication and automatic
+review checkpoint/push are also removed. Operational launch rejects human steps
+inside resolved subflows and XOR alternatives before capture.
+
+The draft archives feedback and legacy review boundaries as Session observations,
+then converts review kinds to Conversation. Identity, historical completion,
+pending-boundary links, captured positions and effect receipts remain; conversion
+grants no navigation authority. Native replacement and primary succession retain
+process fencing. Task-worker claims, managed selection, internal recovery and
+legacy review read/token branches still remain. Ordinary detached launch, Task
 primary selection, Waiting and workflow/loop authoring remain unimplemented.
+Human-bearing templates need the workflow cut before release.
+
 Focused migration, projection, CLI, Desktop and crash/effect checks establish local
 behavior only. Preserve main's confirmed-dead completed-provider admission exemption
 and Session fencing outside async waits. No live Home migration or configured

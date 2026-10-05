@@ -40,31 +40,6 @@ impl CommitOptions {
     }
 }
 
-/// Stage, commit, and push a Task worktree so its state survives this
-/// machine. Runs off the async worker thread because commit_workflow drives
-/// its own runtime for the push settlement fence.
-pub(crate) async fn checkpoint_task_worktree(
-    worktree: std::path::PathBuf,
-    task_identifier: String,
-    message: String,
-) -> anyhow::Result<()> {
-    let outcome = tokio::task::spawn_blocking(move || {
-        let options = CommitOptions {
-            add: true,
-            push: true,
-            create_draft_pr: false,
-            task: task_identifier,
-            sources: Vec::new(),
-            message: Some(message),
-            agent: None,
-        };
-        commit_workflow(&worktree, &options, &NullProgress, &|_| {}).map(|_| ())
-    })
-    .await
-    .map_err(|join_error| anyhow::anyhow!("Task worktree checkpoint panicked: {join_error}"))?;
-    outcome.map_err(anyhow::Error::from)
-}
-
 pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) -> OpsResult<String> {
     let _mutation = crate::ops::task::lock_task_pr_mutation(worktree)?;
     if !is_clean(worktree)? {

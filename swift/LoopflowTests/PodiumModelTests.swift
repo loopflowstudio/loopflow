@@ -639,6 +639,62 @@ struct PodiumModelStreamTests {
         try await eventually { model.sessions.value?.isEmpty == true }
     }
 
+    @Test("Another Home's frame replaces what the previous Home showed")
+    func anotherHomeDropsPreviousContent() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
+        let session = try fixture.sessionEntries()
+        await feed.send(try fixture.sessionsFrame(sequence: 2, answers: scope.id, repo: "/src/loopflow", entries: session.json))
+        try await eventually { model.sessions.value?.count == session.ids.count }
+        model.select(.task(id: "issue-now"))
+
+        // The other Home has the same repository path and none of these Sessions.
+        await feed.send(try fixture.heartbeat(sequence: 3, home: "/elsewhere"))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.selection == .task(id: "issue-now"))
+        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Home", home: "/elsewhere"))
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "Other Home" }
+        #expect(model.selection == nil)
+        #expect(model.sessions.value == nil)
+    }
+
+    @Test("A Task completed elsewhere leaves the working set and stays under Completed")
+    func completedTaskLeavesWorkingSet() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+        let listed = { (filter: TaskHistoryFilter) -> Bool in
+            guard let row = model.task(id: "issue-now")?.task else { return false }
+            return filter.includes(row.task, runtime: row.runtime, condition: row.condition, flow: row.flow,
+                                   now: model.taskHistoryNow)
+        }
+        var completed = TaskHistoryFilter()
+        completed.showCompleted = true
+
+        try await feed.opened(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+        try await eventually { model.roadmap.value != nil }
+        model.select(.task(id: "issue-now"))
+        #expect(listed(TaskHistoryFilter()))
+
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: nil, completing: "issue-now"))
+        try await eventually { model.task(id: "issue-now")?.task.task.isTerminal == true }
+        #expect(!listed(TaskHistoryFilter()))
+        #expect(listed(completed))
+        // Still in the reading, so the open Task is not deselected.
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(!model.roadmap.isLoading)
+    }
+
     @Test("Refresh returns when a planning frame answers it")
     func refreshWaitsForItsAnswer() async throws {
         let fixture = try PodiumTestFixture.load()
@@ -822,18 +878,44 @@ private struct PodiumTestFixture {
         }
     }
 
-    private func frame(_ part: String, sequence: Int, answers: Int?, body: String) throws -> WorkspaceFrame {
+    private func frame(
+        _ part: String, sequence: Int, answers: Int?, home: String = "/home", body: String
+    ) throws -> WorkspaceFrame {
         let answers = answers.map(String.init) ?? "null"
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"/home","revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"\#(home)","revisions":null,"unavailable":null,"body":\#(body)}"#
         return try WorkspaceFrame.decode(line: Data(line.utf8))
     }
 
-    func planningFrame(sequence: Int, answers: Int?, renaming name: String? = nil) throws -> WorkspaceFrame {
+    /// `completing` settles that Task successfully a minute ago, with no runtime left.
+    func planningFrame(
+        sequence: Int, answers: Int?, renaming name: String? = nil, completing task: String? = nil,
+        home: String = "/home"
+    ) throws -> WorkspaceFrame {
         var roadmap = roadmapJSON
         if let name {
             roadmap = roadmap.replacingOccurrences(of: "Make lf roadmap the machine-wide view", with: name)
         }
-        return try frame("planning", sequence: sequence, answers: answers,
+        if let task {
+            var root = try #require(JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as? [String: Any])
+            var waves = try #require(root["waves"] as? [[String: Any]])
+            for wave in waves.indices {
+                guard var evidence = waves[wave]["tasks"] as? [String: Any],
+                      var rows = evidence["items"] as? [[String: Any]] else { continue }
+                for row in rows.indices {
+                    guard var plan = rows[row]["task"] as? [String: Any], plan["id"] as? String == task else { continue }
+                    plan["state"] = "completed"
+                    plan["completed"] = true
+                    plan["completed_at"] = Date().addingTimeInterval(-60).formatted(.iso8601)
+                    rows[row]["task"] = plan
+                    rows[row]["runtime"] = NSNull()
+                }
+                evidence["items"] = rows
+                waves[wave]["tasks"] = evidence
+            }
+            root["waves"] = waves
+            roadmap = try #require(String(data: JSONSerialization.data(withJSONObject: root), encoding: .utf8))
+        }
+        return try frame("planning", sequence: sequence, answers: answers, home: home,
                          body: #"{"roadmap":\#(roadmap),"waves":\#(wavesJSON)}"#)
     }
 
@@ -842,8 +924,8 @@ private struct PodiumTestFixture {
                   body: #"{"repo":"\#(repo)","includes_headless":false,"entries":\#(entries)}"#)
     }
 
-    func heartbeat(sequence: Int) throws -> WorkspaceFrame {
-        try frame("heartbeat", sequence: sequence, answers: nil, body: #"{"projections":{}}"#)
+    func heartbeat(sequence: Int, home: String = "/home") throws -> WorkspaceFrame {
+        try frame("heartbeat", sequence: sequence, answers: nil, home: home, body: #"{"projections":{}}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {

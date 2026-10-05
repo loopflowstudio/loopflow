@@ -313,19 +313,39 @@ BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'execs';
 END;
 
--- sessions: every Session event except transcript lines and usage.
+-- sessions: every Session event except usage and transcript lines. A transcript
+-- line is an `events.jsonl` observation of a type no summary reader selects;
+-- provider attempts and identities share that receipt key and are displayed.
+-- Token totals therefore follow the next displayed change, not each usage row.
 CREATE TRIGGER store_revision_session_events_insert AFTER INSERT ON session_events
-WHEN NEW.kind != 'usage' AND NOT (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0)
+WHEN NOT (NEW.kind = 'usage' OR (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0
+    AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, '$.evidence.schema_version'), 0) = 1
+        AND COALESCE(json_extract(NEW.payload, '$.evidence.type'), '') IN
+            ('activity', 'handoff', 'user_input', 'conversation', 'text', 'tool_use', 'result', 'provider_output', 'usage')
+        ELSE 0 END))
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;
 CREATE TRIGGER store_revision_session_events_update AFTER UPDATE ON session_events
-WHEN (NEW.kind != 'usage' AND NOT (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0)) OR (OLD.kind != 'usage' AND NOT (OLD.kind = 'observed' AND instr(OLD.receipt_key, ':events.jsonl:') > 0))
+WHEN NOT (NEW.kind = 'usage' OR (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0
+    AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, '$.evidence.schema_version'), 0) = 1
+        AND COALESCE(json_extract(NEW.payload, '$.evidence.type'), '') IN
+            ('activity', 'handoff', 'user_input', 'conversation', 'text', 'tool_use', 'result', 'provider_output', 'usage')
+        ELSE 0 END))
+    OR NOT (OLD.kind = 'usage' OR (OLD.kind = 'observed' AND instr(OLD.receipt_key, ':events.jsonl:') > 0
+    AND CASE WHEN json_valid(OLD.payload) THEN COALESCE(json_extract(OLD.payload, '$.evidence.schema_version'), 0) = 1
+        AND COALESCE(json_extract(OLD.payload, '$.evidence.type'), '') IN
+            ('activity', 'handoff', 'user_input', 'conversation', 'text', 'tool_use', 'result', 'provider_output', 'usage')
+        ELSE 0 END))
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;
 CREATE TRIGGER store_revision_session_events_delete AFTER DELETE ON session_events
-WHEN OLD.kind != 'usage' AND NOT (OLD.kind = 'observed' AND instr(OLD.receipt_key, ':events.jsonl:') > 0)
+WHEN NOT (OLD.kind = 'usage' OR (OLD.kind = 'observed' AND instr(OLD.receipt_key, ':events.jsonl:') > 0
+    AND CASE WHEN json_valid(OLD.payload) THEN COALESCE(json_extract(OLD.payload, '$.evidence.schema_version'), 0) = 1
+        AND COALESCE(json_extract(OLD.payload, '$.evidence.type'), '') IN
+            ('activity', 'handoff', 'user_input', 'conversation', 'text', 'tool_use', 'result', 'provider_output', 'usage')
+        ELSE 0 END))
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;

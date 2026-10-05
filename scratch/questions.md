@@ -39,10 +39,11 @@ Added 2026-10-05 in design review. Still unconfirmed.
    question 8 has a cost. Narrowing the `execs` domain to Execs the planning
    conditions can read (those inside a Task checkout, or unfinished) would
    remove it. Not designed here.
-10. **The transcript predicate is built and unverified.** It exempts kind
-    `usage`, and kind `observed` with `:events.jsonl:` in the receipt key.
-    Nobody has checked every `observed` receipt key that `session list` reads,
-    and no test covers each displayed Session field.
+10. **Narrowed in implementation, 2026-10-05.** The first predicate exempted
+    every `:events.jsonl:` observation, including provider attempts that Work
+    activity and Wave history read. It now exempts only the types the summary
+    readers skip, plus usage. `session list` fields are tested; Work activity
+    and Wave history are not.
 
 Added 2026-10-05 in implementation. Nobody has confirmed these.
 
@@ -71,3 +72,28 @@ Added 2026-10-05 in realign. Nobody has confirmed these.
     it is shown (LOO-327). Each read writes an Exec and re-runs planning in
     the watch. Whether this Task removes that loop, or question 9 narrows the
     `execs` domain instead, is undecided.
+18. **Token totals in a Wave's Session history lag** until the next displayed
+    change or five minutes, because usage moves no revision. A `usage` domain
+    that invalidates only the Wave part would fix it at the cost of re-reading
+    that part every few seconds while agents work. Not built.
+19. **One loop reads the parts in turn.** A Session commit that lands while
+    planning is being read waits about 2 s for it on Jack's store. Reading
+    Sessions on its own connection would remove the wait. Not built; it is
+    the same gap as the planning reading being 2 s.
+20. **The write-to-visible benchmark writes rows with `sqlite3`**, cloning a
+    current Task's planning item, because `lf task create` needs Linear. It
+    measures the reader and the window, not `lf`'s own write path.
+21. **A frame from another Home is applied after dropping the old Home's
+    content**, where the plan said it would be ignored. The reader exits on a
+    Home change, so one reader never sends two Homes; the drop is what a
+    reopened reader needs.
+22. **A Task created without a Run never reaches the left pane.** The outline
+    lists a Task only when work on it has started or it has an open Session
+    (`WorkspaceTask.inWorkingSet`; Jack Heart accepted "started Tasks only"
+    on 2026-09-25). LOO-382 asks for a new Task to appear in the left pane
+    "without an execution-start prerequisite", and its demo creates one with
+    no `--run`. Both cannot hold. The stream delivers the Task: it shows in
+    its Wave's Task list at once. Whether the outline should also list
+    unstarted Tasks, or only new ones, is Jack's to decide; nothing was
+    changed. Desktop's own Create uses `--run`, so that Task appears once
+    its Run is recorded.

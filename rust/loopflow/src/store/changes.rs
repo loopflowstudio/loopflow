@@ -158,4 +158,39 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
         writer.join().unwrap();
     }
+
+    /// SQLite removes the log when its last connection closes. The next
+    /// writer's log is a different file, and its commits must still wake.
+    #[test]
+    fn a_removed_and_recreated_log_is_watched_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let wal = dir.path().join("db-wal");
+        let first = rusqlite::Connection::open(&path).unwrap();
+        first
+            .execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t(x);")
+            .unwrap();
+        let mut changes = StoreChanges::watch(&path);
+        changes.wait(Duration::from_millis(1));
+        drop(first);
+        assert!(!wal.exists());
+        // Notices the removal; nothing to watch until a writer returns.
+        changes.wait(Duration::from_millis(50));
+        changes.wait(Duration::from_millis(50));
+
+        let second = rusqlite::Connection::open(&path).unwrap();
+        second.execute("INSERT INTO t VALUES(1)", []).unwrap();
+        assert!(wal.exists());
+        // Arm on the new log, then expect its next commit promptly.
+        changes.wait(Duration::from_millis(1));
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            second.execute("INSERT INTO t VALUES(2)", []).unwrap();
+            second
+        });
+        let started = Instant::now();
+        changes.wait(Duration::from_secs(20));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        drop(writer.join().unwrap());
+    }
 }

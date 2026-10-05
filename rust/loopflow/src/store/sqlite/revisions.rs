@@ -80,9 +80,13 @@ mod tests {
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,?1,'human',1,0,'/repo')", [id]).unwrap();
     }
 
-    fn event(store: &SqliteStore, session: &str, kind: &str, receipt: &str) {
+    fn event(store: &SqliteStore, session: &str, kind: &str, receipt: &str, payload: &str) {
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,1,'{}')", params![session, kind, receipt]).unwrap();
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,1,?4)", params![session, kind, receipt, payload]).unwrap();
+    }
+
+    fn evidence(kind: &str) -> String {
+        format!(r#"{{"evidence":{{"schema_version":1,"type":"{kind}"}}}}"#)
     }
 
     #[test]
@@ -168,20 +172,55 @@ mod tests {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        event(&store, "conversation", "observed", "input:events.jsonl:1");
-        event(&store, "conversation", "observed", "input:events.jsonl:2");
-        event(&store, "conversation", "usage", "turn");
+        // The types every summary reader skips, and usage.
+        for (line, kind) in [
+            "activity",
+            "handoff",
+            "user_input",
+            "conversation",
+            "text",
+            "tool_use",
+            "result",
+            "provider_output",
+            "usage",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let receipt = format!("input:events.jsonl:{line}");
+            event(
+                &store,
+                "conversation",
+                "observed",
+                &receipt,
+                &evidence(kind),
+            );
+        }
+        event(&store, "conversation", "usage", "turn", "{}");
         assert_eq!(store.revisions().unwrap(), before);
-        // Lifecycle facts share the `observed` kind with transcript lines.
-        for (kind, receipt) in [
-            ("observed", "input:manifest.json"),
-            ("observed", "input:terminal.json"),
-            ("observed", "driver:0:exit"),
-            ("started", "turn"),
-            ("completed", "turn"),
+        // Lifecycle facts share the `observed` kind with transcript lines, and
+        // provider attempts share their receipt key. Unreadable evidence counts.
+        for (kind, receipt, payload) in [
+            ("observed", "input:manifest.json", "{}".to_owned()),
+            ("observed", "input:terminal.json", "{}".to_owned()),
+            ("observed", "driver:0:exit", "{}".to_owned()),
+            ("started", "turn", "{}".to_owned()),
+            ("completed", "turn", "{}".to_owned()),
+            (
+                "observed",
+                "input:events.jsonl:20",
+                evidence("provider_session_observed"),
+            ),
+            (
+                "observed",
+                "input:events.jsonl:21",
+                evidence("provider_attempt_finished"),
+            ),
+            ("observed", "input:events.jsonl:22", "{".to_owned()),
+            ("observed", "input:events.jsonl:23", "{}".to_owned()),
         ] {
             let sessions = store.revisions().unwrap().sessions;
-            event(&store, "conversation", kind, receipt);
+            event(&store, "conversation", kind, receipt, &payload);
             assert_eq!(
                 store.revisions().unwrap().sessions,
                 sessions + 1,

@@ -320,6 +320,8 @@ fn fingerprint(unavailable: &Option<String>, content: &WorkspaceContent) -> Resu
 struct Reader {
     database: PathBuf,
     store: Option<SharedStore>,
+    /// Why the store that exists could not be opened.
+    refused: Option<String>,
     scope: Scope,
     parts: BTreeMap<Part, PartState>,
     runtime: tokio::runtime::Runtime,
@@ -336,8 +338,17 @@ impl Reader {
             .runtime
             .block_on(crate::store::open_read_only_store(&config))
         {
-            Ok(store) => self.store = Some(Arc::new(store)),
-            Err(error) => tracing::warn!(%error, "workspace reader cannot open the store"),
+            Ok(store) => {
+                self.store = Some(Arc::new(store));
+                self.refused = None;
+            }
+            Err(error) => {
+                let reason = format!("{error:#}");
+                if self.refused.as_ref() != Some(&reason) {
+                    tracing::warn!(%error, "workspace reader cannot open the store");
+                }
+                self.refused = Some(reason);
+            }
         }
     }
 
@@ -417,7 +428,13 @@ impl Reader {
 
     fn project(&self, part: Part) -> Result<WorkspaceContent> {
         let Some(store) = &self.store else {
-            return self.absent(part);
+            // A store that cannot be opened is not an empty one.
+            return match &self.refused {
+                Some(reason) if part != Part::Activity => {
+                    Err(anyhow!("Loopflow store cannot be read: {reason}"))
+                }
+                _ => self.absent(part),
+            };
         };
         self.runtime.block_on(async {
             Ok(match part {
@@ -538,6 +555,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
     let mut reader = Reader {
         database: database.clone(),
         store: None,
+        refused: None,
         scope: Scope::default(),
         parts: BTreeMap::new(),
         runtime: tokio::runtime::Runtime::new()?,

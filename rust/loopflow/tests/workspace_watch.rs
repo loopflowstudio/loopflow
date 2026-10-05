@@ -16,6 +16,8 @@ use loopflow::store::PmSnapshotRow;
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
+const TRANSCRIPT_LINE: &str = r#"{"evidence":{"schema_version":1,"type":"provider_output"}}"#;
+const INPUT: &str = "run_00000000000000000000000000000001";
 
 struct Watch {
     child: Child,
@@ -110,6 +112,23 @@ impl Home {
         conn
     }
 
+    /// An interactive conversation in the Wave's repository, with one captured
+    /// input: what `lf` writes before a provider starts.
+    fn conversation(&self) {
+        self.raw()
+            .execute_batch(&format!(
+                "BEGIN;
+                 INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,driver_generation)
+                 VALUES('conversation','Conversation','human',1,1,'{repo}','{repo}',1);
+                 INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                 VALUES('conversation','captured','{INPUT}',1,'{{}}');
+                 UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id='conversation';
+                 COMMIT;",
+                repo = self.wave.repo()
+            ))
+            .unwrap();
+    }
+
     fn execs(&self) -> i64 {
         self.raw()
             .query_row("SELECT COUNT(*) FROM execs", [], |row| row.get(0))
@@ -179,6 +198,28 @@ impl Watch {
                 let tasks = identifiers(&part.roadmap);
                 if accept(&tasks) {
                     return tasks;
+                }
+            }
+        }
+    }
+
+    /// The next Sessions frame in which the conversation satisfies `accept`.
+    /// `Null` stands for a frame that no longer lists it.
+    fn session(&self, accept: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let frame = self
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("no matching Sessions frame in time");
+            if let WorkspaceContent::Sessions(Some(part)) = frame.content {
+                let record = part
+                    .entries
+                    .iter()
+                    .map(|entry| serde_json::to_value(entry).unwrap())
+                    .find(|entry| entry["id"] == "conversation")
+                    .unwrap_or(serde_json::Value::Null);
+                if accept(&record) {
+                    return record;
                 }
             }
         }
@@ -271,22 +312,30 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
 #[test]
 fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
     let home = Home::new();
-    let watch = home.watch();
+    let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     let conn = home.raw();
-    conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('conversation','Conversation','human',1,0,?1)", [home.wave.repo()]).unwrap();
-    // The Session row itself is a displayed change; let it settle.
+    home.conversation();
+    // Select every scoped part, so a transcript line has all of them to wake.
+    watch.request(
+        serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
+        "headless": true, "task": null, "wave": home.wave.id().as_str(),
+        "activity": {"wave": home.wave.id().as_str(), "project": null, "task": null}}),
+    );
+    watch.session(|_| true);
     watch.parts(Duration::from_secs(1));
     let before = watch.heartbeat();
 
     for line in 0..2000 {
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,'{}')", [format!("input:events.jsonl:{line}")]).unwrap();
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,?2)", [format!("input:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
         if line % 100 == 0 {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
     watch.parts(Duration::from_millis(500));
     let after = watch.heartbeat();
+    // `activity` is absent: it observes this machine's processes on a 2 s
+    // clock and reads nothing a transcript line can change.
     for part in ["planning", "sessions", "task", "wave", "work_activity"] {
         assert_eq!(before.get(part), after.get(part), "{part} was read again");
     }
@@ -304,7 +353,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
         let conn = home.raw();
         move || {
             for line in 2000..3000 {
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,'{}')", [format!("input:events.jsonl:{line}")]).unwrap();
+                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,?2)", [format!("input:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
@@ -312,6 +361,154 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
     home.plan(1);
     watch.planning(Duration::from_secs(2), |tasks| tasks == ["FIX-1"]);
     writer.join().unwrap();
+}
+
+/// The only guard on the transcript exemption being too wide: a displayed
+/// fact that bumps nothing is never read again, by any clock.
+#[test]
+fn every_displayed_session_fact_committed_elsewhere_is_shown() {
+    let home = Home::new();
+    let mut watch = home.watch();
+    watch.planning(Duration::from_secs(30), |_| true);
+    watch.request(
+        serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
+        "headless": false, "task": null, "wave": null, "activity": null}),
+    );
+    home.conversation();
+    let first = watch.session(|record| !record.is_null());
+    assert_eq!(first["title"], "Conversation");
+    assert_eq!(first["flow_membership"]["kind"], "unknown");
+    assert_eq!(first["attention"], serde_json::Value::Null);
+
+    let conn = home.raw();
+    let write = |sql: &str| {
+        conn.execute_batch(sql).unwrap();
+    };
+    let event = |kind: &str, receipt: &str, turn: Option<&str>, payload: serde_json::Value| {
+        conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,?1,?1,?2,?3,2,?4,current_capture FROM agent_sessions WHERE id='conversation'",
+            rusqlite::params![turn, kind, receipt, payload.to_string()],
+        )
+        .unwrap();
+    };
+
+    write("UPDATE agent_sessions SET title='Renamed',title_source='generated' WHERE id='conversation'");
+    let record = watch.session(|record| record["title"] == "Renamed");
+    assert_eq!(record["title_source"], "generated");
+
+    write("UPDATE agent_sessions SET provider='claude',model='opus' WHERE id='conversation'");
+    watch.session(|record| record["detail"] == "claude:opus" && record["provider"] == "claude");
+
+    // Flow membership is an `observed` event, like a transcript line.
+    event(
+        "observed",
+        &format!("{INPUT}:manifest.json"),
+        None,
+        serde_json::json!({"source": "manifest.json", "input_id": INPUT, "evidence":
+            {"schema_version": 1, "artifact_key": INPUT, "flow": {"kind": "independent"}}}),
+    );
+    watch.session(|record| record["flow_membership"]["kind"] == "independent");
+
+    // A finished turn asks for a reply.
+    event("started", "", Some("turn"), serde_json::json!({}));
+    event(
+        "completed",
+        "",
+        Some("turn"),
+        serde_json::json!({"status": "completed"}),
+    );
+    watch.session(|record| record["attention"] == "reply");
+
+    event(
+        "observed",
+        "driver:0:exit",
+        None,
+        serde_json::json!({"outcome": "interrupted"}),
+    );
+    let record = watch.session(|record| record["state"] == "interrupted");
+    assert_eq!(record["attention"], serde_json::Value::Null);
+
+    write("UPDATE agent_sessions SET ready_summary='Ready for review' WHERE id='conversation'");
+    let record = watch.session(|record| record["state"] == "ready");
+    assert_eq!(record["ready_summary"], "Ready for review");
+    assert_eq!(record["attention"], "review");
+
+    // Transcript lines between those facts were never a reason to read.
+    let before = watch.heartbeat()["sessions"];
+    for line in 0..50 {
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,3,?2)", [format!("{INPUT}:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
+    }
+    watch.parts(Duration::from_millis(1500));
+    assert_eq!(watch.heartbeat()["sessions"], before);
+
+    write("UPDATE agent_sessions SET completed_at=4 WHERE id='conversation'");
+    watch.session(|record| record.is_null() || record["state"] == "closed");
+}
+
+#[test]
+fn a_store_created_after_the_reader_started_is_shown() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = lf(dir.path(), &["monitor", "workspace", "--watch", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut planning = |accept: &dyn Fn(&[String]) -> bool| loop {
+        let line = lines.next().expect("reader ended").unwrap();
+        let frame: WorkspaceFrame = serde_json::from_str(&line).unwrap();
+        if let WorkspaceContent::Planning(Some(part)) = frame.content {
+            let tasks = identifiers(&part.roadmap);
+            if accept(&tasks) {
+                return tasks;
+            }
+        }
+    };
+    assert!(planning(&|_| true).is_empty());
+
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
+    let wave = Wave::new(
+        WaveId::new(),
+        "product".into(),
+        repo.canonicalize().unwrap().display().to_string(),
+    );
+    store.create_wave(&wave).unwrap();
+    let home = Home { dir, store, wave };
+    home.plan(1);
+    assert_eq!(planning(&|tasks| !tasks.is_empty()), ["FIX-1"]);
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[test]
+fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    // Some other schema: this build must not adopt, upgrade or read it.
+    rusqlite::Connection::open(dir.path().join("loopflow.db"))
+        .unwrap()
+        .execute_batch("CREATE TABLE elsewhere(x)")
+        .unwrap();
+    let mut child = lf(dir.path(), &["monitor", "workspace", "--watch", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let frame = loop {
+        let line = lines.next().expect("reader ended").unwrap();
+        let frame: WorkspaceFrame = serde_json::from_str(&line).unwrap();
+        if matches!(frame.content, WorkspaceContent::Planning(_)) {
+            break frame;
+        }
+    };
+    assert!(matches!(frame.content, WorkspaceContent::Planning(None)));
+    assert!(frame.unavailable.is_some());
+    child.kill().unwrap();
+    child.wait().unwrap();
 }
 
 #[test]

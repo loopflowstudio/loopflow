@@ -1,6 +1,6 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **partly built, 2026-10-05.** Jack Heart requested the Task and made the
+Status: **built except what Remaining work lists, 2026-10-05.** Jack Heart requested the Task and made the
 decisions below in design review; the mechanism was proposed, not separately
 accepted. Product decisions in the Task brief are binding. Open choices are in
 [questions.md](questions.md).
@@ -14,13 +14,25 @@ unfinished-Exec completion-gate read, and the Desktop cutover with the
 planning, Session, process-activity, Wave-detail and registry timer loops
 deleted. Not yet done:
 
+0. **The demo's first step cannot pass as written.** `lf task create` with
+   no `--run` produces a Task the outline does not list: it shows started
+   Tasks and Tasks with open Sessions only, by Jack Heart's 2026-09-25
+   decision. The new Task appears in its Wave's Task list without a refresh,
+   and in the outline once a Run or Session is recorded. The Task's first
+   acceptance line and that decision conflict; Jack has not chosen
+   (question 22). Found by running the rendered benchmark, not by reading.
 1. **Planning reading is about 2 s on a copy of Jack's store, not 300 ms.**
    Inside the retained process it was about 7.5 s before two changes: Git
    answers are reused briefly, and Exec membership is reached from the 109
    unfinished Execs. Samples were taken with the machine at load 50–60, so
    they are rough. What is left is mostly per-Task Session membership SQL and
    Git content reads. The follow-up Task Jack asked for on a miss is **not
-   filed**.
+   filed**. Commit to frame on a fresh copy (2026-10-05, debug build, load
+   14–20, 2 samples each): a created or renamed Task 2.3–2.6 s once Git
+   answers are warm, 25 s before; a Session row 0.2 s alone and 2.1–2.3 s
+   when its commit lands behind a planning reading, because one loop reads
+   the parts in turn (question 19). The first planning reading after the
+   reader starts took 7 s on one start and 76 s on another.
 2. **`active` is still its own process.** `monitor active --watch` was not
    folded in (question 5's fallback, taken for now); a window runs two readers.
    Both share one Swift pipe reader, `LocalLineObservation`.
@@ -35,15 +47,24 @@ deleted. Not yet done:
    at most once a minute and only when planning is read; with no store commit
    that is every five minutes. The 15 s poll used to show a dirty checkout
    sooner. Nobody chose this trade.
-5. **No rendered measurement.** The write-to-visible scenario in
-   `desktop_performance.py` and the installed-app demo are not built or run.
-   The only latency observed is commit to frame in a debug build on a tiny
-   store: 309 ms and 718 ms, 250 ms of it the burst window.
+5. **No rendered measurement.** `desktop_performance.py write-visible` is
+   built and compiles: one window on a private Home copy through the real
+   reader, `sqlite3` commits, the interval from the writer's exit to the row
+   read back from a captured bitmap. It has not produced a sample: agent runs
+   have no desktop. Its writes and the frames they cause were checked without
+   a window (the numbers in 1). The 20 samples and the installed-app demo are
+   gate's and demo's. A development `lf` reads a Home copy only after the
+   draft migration is applied to the copy by hand; it took 0.19 s on the
+   1.4 GB store.
 6. **Swift coverage gaps.** A scripted feed proves in-place updates, an older
    sequence ignored, a pre-write frame ignored, another repository's rows
-   ignored, `refresh` waiting for its answer, and reader end then recovery. Not
-   covered: a frame from another Home, a completed Task leaving the working
-   set, and UI-test modes, which no longer re-read Sessions every 2 s.
+   ignored, `refresh` waiting for its answer, reader end then recovery,
+   another Home's frame dropping the previous Home's Sessions and selection,
+   and a Task completed elsewhere leaving the default Task list while staying
+   under Completed and selected. Not covered: UI-test modes, which no longer
+   re-read Sessions every 2 s. As built, another Home's frame is applied
+   after the drop, not ignored; the plan's "drop a frame whose home differs"
+   was never what the code did.
 7. **`WavesView`** (Portfolio and repository windows) now follows the stream
    through its own model; unexercised beyond compiling.
 8. **One timer loop still spawns `lf`.** While a Task's file comparison is
@@ -52,12 +73,24 @@ deleted. Not yet done:
    not a store read and was left alone, so "0 spawns from refresh paths" holds
    only for a window not showing a comparison. Nobody decided whether it
    belongs in this Task.
-9. **Rust coverage gaps against "Done when".** The transcript test writes its
-   2,000 lines in about a second, not ten, and does not count `activity`,
-   which reads on its clock. A truncating checkpoint is tested; a removed and
-   recreated `-wal` is not. No test walks each displayed Session field through
-   a second-process write, which is the only guard on the transcript predicate
-   being too wide (question 10).
+9. **Rust coverage against "Done when".** Covered now: each Session fact
+   read from `session_events` (Flow membership, a finished turn's reply
+   attention, an interrupted driver) plus rename, provider, ready and
+   completion, each shown after a second connection's write; a store created
+   after the reader started; a store that cannot be opened reported as
+   unavailable instead of empty; the change waiter re-arming on a removed and
+   recreated `-wal`. A reader holds the log open, so that last case is tested
+   on the waiter, not through the binary. Still short: the transcript test
+   writes its 2,000 lines in about a second, not ten. It leaves `activity`
+   out on purpose: that part observes this machine's processes every 2 s and
+   reads nothing a transcript line can change. Task binding is not walked; it
+   is an `agent_sessions` update, which has no predicate.
+10. **Token totals lag.** A Wave's Session history shows tokens, and usage
+    rows move no revision. The totals are read again at the next displayed
+    change (a turn finishing is one) or the Wave part's five-minute clock.
+    Counting usage would re-read planning about 10,700 more times a day
+    (7,710 usage lines and 3,021 usage events in the last 24 h). Nobody
+    chose this trade (question 18).
 
 ## Decisions (Jack Heart, 2026-10-05 design review)
 
@@ -139,6 +172,9 @@ Findings that shape the design:
 
 ## Demo
 
+As written below, the first step fails for a reason outside the stream
+(remaining work 0): the row appears in the Wave's Task list, not the outline.
+
 With Desktop open on the Loopflow repository, sidebar scrolled, a draft typed in
 a Session:
 
@@ -169,11 +205,16 @@ A domain follows what a write can change on screen, not which table it lands
 in. Provider transcript lines and `usage` events bump nothing (finding 7): no
 part of this stream displays them, and counting them would invalidate every
 part for ten hours a day. The `session_events` trigger therefore carries a
-`WHEN` predicate. As built it exempts kind `usage`, and kind `observed` whose
-receipt key contains `:events.jsonl:`. Nobody has checked that against every
-receipt key `session list` and the roadmap conditions read (question 10). Live
-transcript display is
-LOO-293's; it adds its own domain when it has a reader for one.
+`WHEN` predicate. As built it exempts kind `usage`, and kind `observed` with
+`:events.jsonl:` in the receipt key whose evidence type is one the summary
+readers already skip (`activity`, `handoff`, `user_input`, `conversation`,
+`text`, `tool_use`, `result`, `provider_output`) or `usage`. The first cut
+exempted every `:events.jsonl:` row. That also silenced provider attempts and
+identities, about 1,270 rows a day, which Work activity and a Wave's Session
+history read. `session list` and the roadmap conditions read only captured,
+manifest, driver-exit, started and completed events, none exempt. Live
+transcript display is LOO-293's; it adds its own domain when it has a reader
+for one.
 
 Triggers live in the schema, so every writer bumps them — any `lf` version,
 any future command — with no call-site discipline to forget. A rolled-back
@@ -300,6 +341,7 @@ files, diffs, usage).
 | Situation | Behavior |
 | --- | --- |
 | No store yet | Frames with empty bodies; the watch waits for the file to appear. |
+| Store exists and cannot be opened | Every store part is unavailable with the reason, retried each second. Found on a Home copy at another schema, which read as an empty workspace. |
 | Projection fails | Part frame carries the existing `Unavailable` evidence; Desktop keeps last good rows, marked. |
 | Stream ends or stalls past the heartbeat | Last good reading shown as unavailable; restart with backoff; no silent freeze. |
 | Missed event, checkpoint, sleep | 1 s revision re-read or `refresh` converges. |
@@ -357,7 +399,8 @@ liveness was not observed.
    requests; the Session and Wave-detail loops are gone.
 4. Partly built: `activity` is a part and its loop is gone; `active` is still
    the second watch process (remaining work 2).
-5. Not built: the rendered benchmark scenario and the installed-app demo.
+5. Built, not run: the rendered benchmark scenario. Not done: its samples
+   and the installed-app demo.
 
 Slices 1–4 land together (Jack's decision); they were ordered for building,
 not for separate delivery.
@@ -365,7 +408,8 @@ not for separate delivery.
 ## Done when
 
 The acceptance below is unchanged. Where the branch falls short of it, the
-gap is in Remaining work (5, 6 and 9), not removed here.
+gap is in Remaining work (5, 6 and 9), not removed here. The recreated
+`-wal` and wrong-Home cases are met in the forms those items describe.
 
 - `cargo test -p loopflow --test workspace_watch` passes, covering: a Task
   created by a second process appears exactly once in the next planning frame
@@ -406,38 +450,32 @@ costs seconds. This plan earns no KR by itself.
 - **The transcript predicate can be wrong in either direction.** Too wide and a
   displayed Session state stops updating, and the 1 s re-read reads the same
   revisions, so nothing catches it. Too narrow and the stream reprojects
-  continuously. A test per displayed Session field, written against a
-  second-process writer, is the guard for the first and is not written; the
-  heartbeat projection counts guard the second and are tested.
+  continuously. A second-process test per Session fact guards the first for
+  `sessions`; Work activity and Wave history have no such test, and their
+  first exemption was too wide. The heartbeat projection counts guard the
+  second and are tested. The trigger now parses each inserted payload's JSON;
+  its cost on large transcript lines is unmeasured.
 - **`execs` invalidates planning.** Cheap once Desktop's polls are gone (2,067
   a day). One landing means no interval in which a surviving poll loop bumps
   it. Desktop's remaining one-shot reads (file clicks, comments, the 10 s
   comparison loop) each still write an Exec and re-run it (question 9).
-- **Commit-to-frame latency is observed only on a tiny store**: 309 ms and
-  718 ms in a debug build. Nothing measures the waiter on Jack's store.
+- **Commit-to-frame latency** on a tiny store was 309 ms and 718 ms in a
+  debug build; on a copy of Jack's store it is the planning reading, about
+  2.3 s (remaining work 1). No release build has been timed.
 - **The 300 ms projection budget is missed** (about 2 s, remaining work 1).
   The Exec scan was most of the cost but not all of it.
 - **A long-lived process holds one binary** across an `lf` upgrade. It must
   exit on configuration change, as the active reader does.
-- **Migration on a 1.1 GB store** adds triggers only, no backfill; cost should
-  be schema-only but is unmeasured.
+- **Migration on the 1.4 GB store** took 0.19 s on a copy, applied with
+  `sqlite3`, not through `lf`'s upgrade path.
 
 ## Check results
 
-- 2026-10-05 probe: 20/20 cross-process commits observed, 1 delivery per
-  200-row transaction, 0 idle events, 3.5 µs check.
-- 2026-10-05 implement: `cargo test -p loopflow --test workspace_watch` 5/5;
-  `--test dto_fixtures` 19/19; `--lib store_revisions` 4/4; `--lib task_work`
-  pass; `cargo clippy --all-targets -- -D warnings` clean; `swift test --filter
-  "PodiumModel|SessionControls|SessionRename|ActiveSession|WorkspaceNavigation|RegistryQuery"`
-  pass after one wording fix; `check_migrations.py` and
-  `check_architecture.py` pass. `status_tests`
-  `previous_release_merge_request_migrates…` fails locally because it applies
-  published migrations only; it needs `materialize_rust_tests.py`, left to gate.
-- 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 5/5,
-  `--lib workspace_watch` 2/2, clippy clean; `swift test --filter
-  "PodiumModel|DTOFixture|ActiveRunsObservation"` 53/53.
-- 2026-10-05 realign: source inspection only, no test rerun; plan corrected to
-  the built 1 s revision re-read, the built transcript predicate, and the
-  surviving 10 s file-comparison loop. `status_tests` upgrade case still
-  deferred to gate.
+- 2026-10-05 implement, second pass: `cargo test -p loopflow --test
+  workspace_watch` 8/8; `--lib -- store_revisions store::changes` 6/6; clippy
+  `--all-targets -D warnings` clean; `swift test --filter
+  PodiumModelStreamTests` 6/6; `swift build --build-tests` compiles the
+  benchmark; `check_migrations.py` pass; `ruff check` clean. Earlier passes:
+  `dto_fixtures` 19/19, focused Swift 53/53. `status_tests`
+  `previous_release_merge_request_migrates…` needs
+  `materialize_rust_tests.py`, left to gate.

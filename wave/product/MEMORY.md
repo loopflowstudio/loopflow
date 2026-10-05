@@ -22,10 +22,16 @@ and a miss ships with numbers and a follow-up Task.
   without removing them sends a frame for every reading.
 - Git facts are not commits. The watch reuses Git answers, so a dirty
   checkout shows later than the 15 s poll showed it. Nobody chose that trade.
+- A receipt key does not say what a row is. Provider attempts share
+  `:events.jsonl:` with transcript lines; exempting the key silenced about
+  1,270 displayed rows a day. Exempt the types readers skip. Usage still
+  moves nothing, so token totals lag: nobody chose that either.
+- An unreadable store must not read as an empty workspace.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
   replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
-  A planning reading is about 2 s on a copy of Jack's store against a 300 ms
-  target; no rendered latency is measured.
+  On a copy of Jack's store (debug build) a created Task reaches a frame in
+  about 2.3 s against a 1 s target, a Session row in 0.2 s unless a planning
+  reading is in flight. The rendered benchmark is built and has no samples.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -1055,11 +1061,8 @@ to close during this reconciliation.
 
 ## Historical remote client
 
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
+Superseded June HTTP-to-lfd recipes: see the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
+and [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 
 ## Learnings
 
@@ -1069,10 +1072,8 @@ They explain the topology change; they are not current setup instructions.
   fresh `RepoSidebarWindow` re-derived the burgundy sidebar / create sheet /
   terminal panes and got each subtly wrong; the proven components already encode
   the right style + behavior — adapt them.
-- **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
-  branch checkout. Repository discovery collapses linked worktrees to the
-  canonical main checkout through the Git common directory; Task Work remains
-  the only surface that presents its worktree.
+- **`loopflow-dev.py` builds from the worktree it runs in.** Repository
+  discovery collapses linked worktrees to the canonical main checkout.
 - **Interactive provider clients resume natively.** Reuse `SessionRecord` and
   `lf session open`; do not restore lfd terminal attachment, a tmux presentation
   path, or Ask-specific Swift plumbing.

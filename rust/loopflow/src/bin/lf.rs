@@ -887,7 +887,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             Ok(())
         }
         TaskCommand::Reconcile { json } => {
-            let result = loopflow::ops::task_automation::reconcile(repo)?;
+            let result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             }

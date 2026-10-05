@@ -28,7 +28,6 @@ use super::land::LandOptions;
 use super::pr::{
     merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
 };
-use super::progress::Progress;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "status", content = "summary", rename_all = "snake_case")]
@@ -1484,30 +1483,35 @@ pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsRes
         .any(|exec| repair_live(store, Some(exec))))
 }
 
-pub fn reconcile_repository(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryCheck {
+    pub checked_at: i64,
+    pub errors: Vec<String>,
+}
+
+pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(async {
         let store = landing_store().await?;
-        let mut errors = Vec::new();
+        let mut report = DeliveryCheck {
+            checked_at: OffsetDateTime::now_utc().unix_timestamp(),
+            errors: Vec::new(),
+        };
         reconcile_repository_async(
             repo,
             &store,
             tokio::time::Instant::now() + Duration::from_secs(45),
-            &mut errors,
+            &mut report.errors,
         )
         .await?;
-        if errors.is_empty() {
-            progress.status("delivery check complete");
-            Ok(())
-        } else {
-            Err(OpsError::Message(errors.join("\n")))
-        }
+        Ok(report)
     });
+    // Timed-out observations retain their landing locks until the worker exits.
     runtime.shutdown_background();
     result
 }
 
-pub(crate) async fn reconcile_repository_async(
+async fn reconcile_repository_async(
     repo: &Path,
     store: &SharedStore,
     deadline: tokio::time::Instant,

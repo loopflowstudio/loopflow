@@ -1,9 +1,6 @@
 //! Delivery observation and CI repair settings. Repository checks never resume Flows.
-use std::fs::OpenOptions;
 use std::path::Path;
-use std::time::Duration;
 
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
@@ -18,12 +15,6 @@ pub struct TaskAutomation {
     pub task_id: String,
     pub issue: String,
     pub enabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AutomationCheck {
-    pub checked_at: i64,
-    pub errors: Vec<String>,
 }
 
 fn error(error: impl std::fmt::Display) -> OpsError {
@@ -144,39 +135,6 @@ async fn repository_tasks(
         }
     }
     Ok(tasks)
-}
-
-pub fn reconcile(repo: &Path) -> OpsResult<AutomationCheck> {
-    let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(crate::engine::git::absolute_git_dir(&root)?.join("lf-task-reconcile.lock"))?;
-    let mut report = AutomationCheck {
-        checked_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        errors: vec![],
-    };
-    if let Err(cause) = FileExt::try_lock_exclusive(&lock) {
-        if cause.kind() != std::io::ErrorKind::WouldBlock {
-            return Err(cause.into());
-        }
-        // The running check already covers this repository; overlap is not a failure.
-        eprintln!("another repository check is running");
-        return Ok(report);
-    }
-    let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(async {
-        let store = super::pr_landing::landing_store().await?;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
-        super::pr_landing::reconcile_repository_async(&root, &store, deadline, &mut report.errors)
-            .await?;
-        Ok(report)
-    });
-    // Timed-out network observations retain their effect locks until process exit.
-    runtime.shutdown_background();
-    result
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

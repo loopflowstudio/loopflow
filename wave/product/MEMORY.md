@@ -31,7 +31,17 @@ authored id/name fields are unnecessary. This supersedes the sleeping-runner and
 single-capture human-segment proposals preserved at
 `5090f672e:scratch/focus-on-your-own-work.md`.
 
-Design review is approved; runtime work remains. Saved pursue retains demo although
+Design review is approved; the complete runtime cut remains. Local source now
+removes automatic saved-Flow scheduling/enrollment and five scheduling columns.
+Task/PR delivery checks share one reconciliation owner with per-landing locks;
+CI repair retains its existing hold policy. The crash fixture proves inspection
+does not restart an ordinary Flow around a surviving effect receipt, not removal
+of Task-worker claims, saved resume or review settlement, which still exist.
+Preserve main's confirmed-dead completed-provider admission exemption and Session
+fencing outside async runtime waits while deleting those controllers. No live
+Home migration or configured acceptance follows from these local checks.
+
+Saved pursue retains demo although
 current source does not: templates cannot establish a saved invocation's shape.
 Main `16fa97425` adds native-human-input recency for `lf resume`; reuse that ranking
 for initial Task selection, with unfinished Task membership and explicit-primary
@@ -749,31 +759,13 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
+Detailed scheduler/server proposals and dated LOO-167/193/195/207 failures remain
+at `b908182f5:wave/product/MEMORY.md` under this heading. October 4 retires their
+automatic-recovery approach. Preserve the lessons: repeated missing-Flow failures
+must not silently retry; containment liveness proves neither provider ownership
+nor progress; unknown observation cannot authorize duplicate execution. Durable
+Steers must survive provider/app exit, with mid-turn delivery provider-dependent.
+The old resident topology is historical evidence, not a second runtime design.
 
 ## Model (design invariants)
 

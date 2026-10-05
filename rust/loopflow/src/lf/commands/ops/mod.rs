@@ -43,7 +43,11 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Reconcile) => {
             let repo = find_repo_root()?;
             crate::ops::task::reconcile_checkout_pr(&repo)?;
-            crate::ops::pr_landing::reconcile_repository(&repo, &progress)?;
+            let report = crate::ops::pr_landing::reconcile_repository(&repo)?;
+            if !report.errors.is_empty() {
+                anyhow::bail!(report.errors.join("\n"));
+            }
+            progress.status("delivery check complete");
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),

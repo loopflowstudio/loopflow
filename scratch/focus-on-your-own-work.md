@@ -48,10 +48,20 @@ without fetching, launching or migrating. Prior scratch is preserved at
 `6513477a5`; the superseded worker-start repair proposal is at
 `5090f672e:scratch/task-workspace-continuation.md`.
 
-The checkout includes local main `16fa97425` through merge `48d9eecd6`; the
-initial diff from local main contained planning/memory only. Local implementation
-now removes repository-driven Flow restart scheduling, its counters/columns and
-automatic enrollment. This is local source evidence, not a remote-tip claim.
+The checkout includes local main `464ac18f0` through merge `85f969785`. Local
+implementation removes repository-driven Flow restart scheduling, its five
+counters/columns and automatic enrollment. The pending consolidation makes Task
+and PR checks share delivery reconciliation and per-landing locks; it removes
+the redundant repository scheduler lock. This is local source evidence, not a
+remote-tip or complete worker-removal claim.
+
+Integrated main also carries Desktop launch/refresh timing and worktree-list
+performance changes. Preserve Session fencing outside async runtime waits and
+the confirmed-dead completed-provider exemption in Task admission; live or unknown
+providers still block. `b908182f5` adapts that exemption's test to the removed
+recovery mode. Infrastructure's older managed restart/review repairs explain
+retained process/effect evidence, not authority to restore those controllers.
+Product has no child Wave memory files in this checkout.
 
 Preserve main's repo/Wave primaries, Ask removal, native conversation lookup,
 Session working-set filtering, configurable New Session and Task history filters.
@@ -294,15 +304,20 @@ Review rejected handshake-like feedback receipts. Superseded proposals remain at
 One coherent runtime/UI change, with no intermediate release of two executors:
 
 1. **Runtime slice remains:** current local main is integrated. Repository checks
-   now reconcile deliveries only; automatic Flow scheduling, automatic enrollment,
-   five scheduling columns and their DTO/UI consumers are deleted. Review traced
+   now reconcile deliveries only; Task and PR checks share `pr_landing`'s finite
+   reconciliation entry point and per-landing locks. The Task scheduler lock,
+   automatic Flow scheduling/enrollment, five scheduling columns and their DTO/UI
+   consumers are deleted. Review traced
    CI enablement into implicit Flow creation and removed that side effect, plus
    the now-unreachable managed recovery exception in repair admission. CI repair keeps
    its existing per-Task hold and incident retry policy. Direct Task-worker claims,
    `exec_driver`, saved resume and the review handshake still exist. Remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
    history and cutting over the minimum DTO consumers. Build the changed Rust code
-   and run the focused ordinary-Flow crash/no-restart case in `flow_tests`.
+   and run the focused ordinary-Flow crash/no-restart case in `flow_tests`. The existing case proves
+   repository inspection does not restart a killed ordinary Flow before or after
+   its surviving effect receipt. It does not prove Task-worker removal, detached
+   admission, legacy review conversion or delivery-effect deduplication.
 2. Separate workflow source guidance from executable operational graphs; implement
    canonical autonomous loops/XOR composition and the loop-or-next catalog rename.
    Delete human-review launch/settlement APIs and their consumers together. Add
@@ -394,4 +409,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: Rust build, ordinary-Flow crash/no-repository-restart proof, Rust/Swift automation DTO checks, SwiftPM headless build, architecture and two website documentation checks passed; populated released-frontier scheduling migration passed; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` passed; full cut/gate and configured demo remain outstanding.
+Checks: realign `git diff --check` passed and `lf context` fits; no code changes or test reruns in this pass. Retained checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --test flow_tests ordinary_flow_crash_retains_effects_without_repository_restart`, `cargo test -p loopflow --lib overlapping_check_returns_while_canceled_repair_retains_its_lock`, architecture and formatting passed after consolidation; earlier Rust/Swift DTO, SwiftPM, website, populated scheduling migration and Clippy passes remain recorded at `9dacab35:scratch/focus-on-your-own-work.md`; full cut/gate and configured demo remain outstanding.

@@ -13,6 +13,7 @@ import subprocess
 import termios
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 
 
@@ -25,7 +26,7 @@ def _state(env: dict[str, str]) -> tuple | None:
     database = Path(env["LF_HOME"]) / "loopflow.db"
     if not database.exists():
         return None
-    with sqlite3.connect(database) as db:
+    with closing(sqlite3.connect(database)) as db:
         return db.execute(
             "SELECT id,provider_thread,provider_generation,provider_pid,"
             "provider_started_at,driver_exec_id FROM agent_sessions "
@@ -132,21 +133,21 @@ def measure(
                 os.close(slave)
                 slave = None
                 transcript = bytearray()
+                marker_bytes = marker.encode()
                 response = f"input-{uuid.uuid4().hex}"
-                sent = False
+                response_bytes = response.encode()
                 submit_at = None
-                released = False
                 with (output / f"terminal-{index}.bin").open("wb") as terminal:
                     while time.monotonic() - started < 45:
                         if submit_at is not None and time.monotonic() >= submit_at:
                             os.write(master, b"\r")
                             sample["input_sent_ms"] = (time.monotonic() - started) * 1000
                             submit_at = None
-                        state = _state(env)
-                        if state and state[5] != before[5] and not released:
-                            sample["driver_claim_ms"] = (time.monotonic() - started) * 1000
-                            server.release.set()
-                            released = True
+                        if "driver_claim_ms" not in sample:
+                            state = _state(env)
+                            if state and state[5] != before[5]:
+                                sample["driver_claim_ms"] = (time.monotonic() - started) * 1000
+                                server.release.set()
                         if select.select([master], [], [], 0.05)[0]:
                             try:
                                 chunk = os.read(master, 65536)
@@ -162,13 +163,12 @@ def measure(
                                 os.write(master, b"\x1b[1;1R")
                             if b"\x1b[c" in chunk:
                                 os.write(master, b"\x1b[?1;2c")
-                            if marker.encode() in transcript and not sent:
+                            if sample["output_ms"] is None and marker_bytes in transcript:
                                 sample["output_ms"] = (time.monotonic() - started) * 1000
                                 server.response_text = response
                                 os.write(master, b"Report the input probe result.")
                                 submit_at = time.monotonic() + 0.3
-                                sent = True
-                            if sent and response.encode() in transcript:
+                            if sample["output_ms"] is not None and response_bytes in transcript:
                                 sample["input_response_ms"] = (time.monotonic() - started) * 1000
                                 break
                         if client.poll() is not None:

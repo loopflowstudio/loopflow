@@ -104,6 +104,11 @@ No history-recovery deletion is justified. `recover_history` still awaits every
 page before UI startup; moving it requires proof of history ordering and readiness.
 Preserve ownership fences, review revalidation, historical data and failure evidence.
 
+The probe uses recorded endpoint timestamps instead of duplicate sent/released
+flags, closes each SQLite poll connection, and stops polling after driver claim.
+This reduces observer work; new timings are not directly comparable with the old
+polling loop and establish no production speedup.
+
 Review findings: protocol fixtures previously replaced the native UI and missed
 its rejected launch arguments. A successful socket/driver claim did not establish
 usable input. The failed native UI also exposed destructive cleanup; timing alone
@@ -112,3 +117,5 @@ responses are not provider service latency, and a single live seed turn is not
 representative retained history. Product has no child Wave memories in this checkout.
 
 Check: `cargo build -p loopflow --bin lf`, focused `preferred_name_resume_opens_every_provider_without_a_prompt`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, helper Ruff and `git diff --check` passed; native smoke passed with preserved engine birth stamp; full acceptance remains as listed above.
+
+Compression check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo378-compress-20261005a` passed (output 856 ms, response 1528 ms, same engine birth stamp); helper Ruff check/format passed; broader runner Ruff found eight pre-existing E501 lines; full acceptance remains with implementation/gate.

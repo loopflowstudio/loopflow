@@ -462,12 +462,9 @@ fn try_emit(
         }
     }
 
-    let recorded = ledger_insert(&context, &event, repo_root, exit_code);
+    ledger_insert(&context, &event, repo_root, exit_code);
 
     if terminal {
-        if recorded {
-            remove_exec_process_receipt(&context);
-        }
         if context.minted_trace_id {
             std::env::remove_var(LF_TRACE_ID_ENV);
         }
@@ -498,22 +495,15 @@ fn record_exec_interruption(context: &ExecContext) {
     };
     // ctrlc's termination hook does not identify which signal arrived.
     // Keep that unknown while recording the observed interrupted exit.
-    if ledger_insert(context, &event, &context.cwd, Some(130)) {
-        remove_exec_process_receipt(context);
-    }
+    ledger_insert(context, &event, &context.cwd, Some(130));
 }
 
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
 /// run: the first failure warns, and later failures log at debug. Local-only —
 /// the ledger never leaves the machine.
-fn ledger_insert(
-    context: &ExecContext,
-    event: &LfEvent,
-    repo_root: &Path,
-    exit_code: Option<i32>,
-) -> bool {
+fn ledger_insert(context: &ExecContext, event: &LfEvent, repo_root: &Path, exit_code: Option<i32>) {
     if event.node != LfNode::Exec {
-        return false;
+        return;
     }
     let outcome = match event.event {
         LfEventType::Completed => Some("succeeded"),
@@ -585,6 +575,10 @@ fn ledger_insert(
             false
         }
     };
+    // Both ordinary completion and interrupt cleanup retain identity until settlement.
+    if recorded && record.completed_at.is_some() {
+        remove_exec_process_receipt(context);
+    }
     let mut cost = context
         .receipts
         .lock()
@@ -593,7 +587,6 @@ fn ledger_insert(
     if !recorded {
         cost.unrecorded += 1;
     }
-    recorded
 }
 
 /// True exactly once per process. A ledger write must never fail a run, but a
@@ -1178,13 +1171,18 @@ fn read_exec_process_receipt_files_at(
 
 pub(crate) fn prune_exec_process_receipts_at(
     lf_home: &Path,
-    pid: u32,
+    pids: &[u32],
 ) -> Result<u32, std::io::Error> {
+    if pids.is_empty() {
+        return Ok(0);
+    }
     let store = SqliteStore::open_execs_read_only(&lf_home.join("loopflow.db"))
         .map_err(std::io::Error::other)?;
     let mut removed = 0;
     for (path, receipt) in read_exec_process_receipt_files_at(lf_home)? {
-        if receipt.pid != pid || receipt.process_evidence() != ProcessIdentityEvidence::Dead {
+        if !pids.contains(&receipt.pid)
+            || receipt.process_evidence() != ProcessIdentityEvidence::Dead
+        {
             continue;
         }
         let Ok(id) = ExecId::parse(&receipt.exec_id) else {
@@ -1895,7 +1893,7 @@ mod tests {
             super::write_exec_process_receipt(&replacement).unwrap();
             super::remove_exec_process_receipt(&replacement);
             assert_eq!(
-                super::prune_exec_process_receipts_at(guard.home(), std::process::id()).unwrap(),
+                super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
                 0
             );
             assert_eq!(
@@ -1907,7 +1905,7 @@ mod tests {
             let previous_path = std::env::var_os("PATH");
             std::env::set_var("PATH", guard.home().join("no-programs"));
             let unknown = super::exec_process_evidence(&store, &context.process_id);
-            let pruned = super::prune_exec_process_receipts_at(guard.home(), std::process::id());
+            let pruned = super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]);
             match previous_path {
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
@@ -1924,7 +1922,7 @@ mod tests {
                 ProcessIdentityEvidence::Dead
             );
             assert_eq!(
-                super::prune_exec_process_receipts_at(guard.home(), std::process::id()).unwrap(),
+                super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
                 0
             );
             assert_eq!(store.exec(&context.process_id).unwrap().unwrap(), before);

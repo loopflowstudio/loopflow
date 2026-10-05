@@ -360,13 +360,11 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         errors: 0,
     };
     if !dry_run {
-        for pid in &report.stale_exec_receipt_pids {
-            match prune_exec_process_receipts_at(&lf_home, *pid) {
-                Ok(removed) => report.removed_exec_receipts += removed,
-                Err(error) => {
-                    tracing::warn!(pid, error = %error, "failed to prune stale Exec receipt");
-                    report.errors += 1;
-                }
+        match prune_exec_process_receipts_at(&lf_home, &report.stale_exec_receipt_pids) {
+            Ok(removed) => report.removed_exec_receipts = removed,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to prune stale Exec receipts");
+                report.errors += 1;
             }
         }
         let selected = report

@@ -70,6 +70,12 @@ This source repair cannot recover the missing identity or complete LOO-326;
 focused journal/prune/Task-blocker checks and Clippy passed; installed behavior
 remains unproved.
 
+Release's October 5 recovery adds a separate download lesson: bounded retries
+cannot compensate for an overall deadline that kills healthy slow transfers.
+Its 76 MB transfer near 200 KiB/s exceeded five minutes and completed within
+fifteen. Keep deadline sizing separate from read retry policy; publication and
+installation still do not establish public smoke verification.
+
 PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
 Exec receipt can precede closure of inherited checkout descriptors. A delayed
 launcher reproduces the retained second checkout; cleanup and repair re-entry now

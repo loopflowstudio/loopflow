@@ -870,6 +870,24 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+Probe the proposed capture-conversion exclusion boundary separately:
+
+```bash
+uv run --no-project /fixture/capture_exclusion.py --released-sha256 "$released_sha256"
+```
+
+Copy `tests/e2e/capture_exclusion.py` and the published v0.13.3 Linux CLI to
+`/fixture/capture_exclusion.py` and `/fixture/prior/lf` in a disposable Ubuntu
+24.04 container. Supply its independently verified release checksum. Use root,
+Python, useradd and runuser, with no host mounts or credentials and no external
+network. The fixture creates its own account and Home. It attempts direct released
+preflight, doctor and screenshot commands before exclusion, while a privileged
+worker accesses that Home, and after worker death. It compares database/payload
+bytes and filesystem ownership, including a retained-descriptor counterexample.
+It intentionally leaves the fixture account's Home root-owned; discard the
+container afterward. This experiment does not exercise a candidate converter,
+populated Session preservation, macOS exclusion or recovery targeting.
+
 ## Nightly Package Tests
 
 `.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:

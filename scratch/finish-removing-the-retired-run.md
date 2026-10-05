@@ -72,7 +72,7 @@ Recorded compression checks passed 29 Session-record tests, Clippy and formattin
 the preceding 49-pass Session/controller evidence remains at
 `fc911bc18:scratch/finish-removing-the-retired-run.md`. Neither covers conversion.
 
-Check (realign, October 5): `git diff --check` and `lf context --skill realign` passed; memory/scratch fit their budgets; no behavioral rerun for prose-only reconciliation, conversion and full gate remain unproved.
+Check (implement, October 5): capture-exclusion fixture Ruff checks, CLI help and host-refusal smoke passed; `git diff --check` and `lf context --skill implement` passed; Docker exclusion execution unavailable (missing daemon socket), deferred to a disposable-container runner before dependent conversion; conversion and full gate remain unproved.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -130,6 +130,42 @@ designing this mechanism in isolation, but supplies no installed maintenance
 authority. No storage path, receipt version or schema is changed by this finding.
 
 Check: released-source entry/ledger inspection and `git diff --check` passed; no runtime check was run for this documentation-only finding; offline conversion and its released-Home proof remain unimplemented.
+
+### Privileged exclusion experiment — October 5
+
+The next candidate mechanism uses an external administrator, with the target
+account offline. Protect the **whole OS account Home**, under a non-writable,
+administrator-owned parent, with administrator ownership and mode 0700. Protecting
+only `.lf` is insufficient: the account can rename that directory and create a
+replacement through its writable parent. Permission changes survive converter
+death; old retained executables may start but cannot reach the frozen data.
+Open descriptors and existing provider connections survive permission changes,
+so account quiescence remains a prerequisite, not a consequence of this mechanism.
+
+`tests/e2e/capture_exclusion.py` encodes that Linux experiment against the exact
+checksum-verified v0.13.3 binary. Each bypass command must first demonstrably add
+an Exec to the released store. The fixture then compares the whole Home after
+direct commands during exclusion and after privileged worker death. A retained
+descriptor must still write before its owner exits. Synthetic capture bytes are
+explicitly not a populated Session fixture. No converter is exercised.
+
+This mechanism is **proposed, unproved**, not enabled installation behavior.
+`machine_install::account_home` uses `geteuid`; root recovery currently resolves
+root's installation. Production recovery would need an explicit target-account
+argument resolved through the OS account database, carried through candidate
+handoff, store selection, receipt lookup and promotion locking. A privileged
+receipt must preserve target UID/GID, canonical Home, original ownership/mode,
+candidate hash and backup location before changing access. No caller environment
+or changed `HOME` may impersonate that selection. Recovery must retain exclusion
+until forward validation completes; do not automatically unlock in error cleanup.
+macOS ACLs and retained open handles also require platform proof. None of this
+authorizes administrator changes on the configured machine.
+
+The container service is unavailable in this execution environment: `docker info`
+fails connecting to `/Users/jack/.orbstack/run/docker.sock` (no such file).
+The experiment therefore remains unexecuted. Candidate account targeting,
+crash-safe privilege restoration and complete quiescence detection remain source
+design/implementation work; layout deletion is still dependent on their proof.
 
 ## Problem and observable outcome
 

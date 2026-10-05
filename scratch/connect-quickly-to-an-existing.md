@@ -85,8 +85,11 @@ owner. A tmux-backed presentation needs explicit controller-bound query routing;
 a transparent relay needs terminal state/replay handling, input fencing and bounded
 backpressure. The comparison does not choose between those implementations.
 This is a substantial remaining architectural cut, not a latency optimization.
-Dependent production replacement remains stopped on these counterexamples.
-No new user authorization or manual demo is needed to implement the revised owner.
+The comparison is complete at the fixture boundary. The next implementation
+work is selecting and building an owner that resolves both counterexamples,
+then integrating first launch and attachment for conversations and Flow reviews.
+That engineering choice needs no new product decision or manual demo; no
+production transport has yet been selected or implemented.
 
 Preserve Infrastructure's LOO-377 launch-lock-before-driver-fence ordering and
 exact review revalidation (`c5dc238b0afb`). Attachment grants no review-completion
@@ -117,7 +120,10 @@ history intact; failed startup cannot settle a review.
   least 20 comparable samples. Then fix measured costs and compare on the same
   host/data, preserving failures, timeouts and observer limitations.
 - Verify per-invocation diagnostics on the revised review path, keeping unavailable
-  UI endpoints explicit. Complete acceptance before authorized delivery.
+  UI endpoints explicit. Current `attached` and `connection_prepared` events exist
+  only in `connect_live_codex`; the review's native-resume path has no equivalent
+  attachment event, so its attached lifetime cannot yet be derived. Complete
+  acceptance before authorized delivery.
 
 ## Existing safety and diagnostic evidence
 
@@ -172,4 +178,4 @@ so every view shares cleanup ownership. Review retained explicit controller-firs
 revocation and both clipboard counterexamples. The native replacement path and
 its failing regression remain untouched pending the retained-terminal cut.
 
-Check: `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-compress-20261005-01`, runner Ruff check/format and `git diff --check` passed; three reattachments and owned cleanup passed, clipboard/replay counterexamples retained; native acceptance remains with implementation/gate.
+Check: prior `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-compress-20261005-01` and Ruff passes retained; realign source/evidence review and `git diff --check` passed; native acceptance remains with implementation/gate.

@@ -22,10 +22,12 @@ SQLite-delayed exit. No baseline or speedup exists.
 The [terminal comparison](../../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
 preserves fixture drafts across tmux reattachment/transfer, but sends clipboard
 queries to recently active passive viewers. Raw replay repeats historical queries.
-Screen state, controller-owned replies and passive typing need separate
-handling. Native images/providers/review completion remain unproven. Reviews'
-tmux cradle does not prevent UI replacement. Retention remains unimplemented;
-preserve Infrastructure's launch-lock ordering and review fences.
+Native images/providers/review completion remain unproven. Reviews'
+tmux cradle does not prevent UI replacement. Retention remains unimplemented.
+Late views need screen state without historical queries; only the controller
+may supply input, query replies and PTY size. Control transfer must revoke the
+old writer first, without transferring the Session driver. Preserve
+Infrastructure's launch-lock ordering and review fences.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -861,6 +863,8 @@ no owning Task (LOO-375 owns `wt list` only).
   active elsewhere opens an explanation; only **Move here** requests replacement
   of the exact Loopflow-owned client whose PID and birth evidence match its Run.
   Native resume preserves conversation history, not unsent input in the old TUI.
+  October 5's live-connect requirement needs retained UI attachment;
+  replacement cannot prove continuity.
   `session open --json --replace` prepares the replacement argv without stopping
   that client. Closing a pane or provider exit resolves nothing. Complete applies
   only to interactive Sessions and ready Asks; Approve and Iterate apply only to
@@ -1029,24 +1033,20 @@ no owning Task (LOO-375 owns `wt list` only).
 
 ### Shared viewing boundary
 
-Native launch plus explicit Move here remains the main path. The requested behavior is
-optional simultaneous Warp/Loopflow viewing: second attachment view-only, then
-explicit **Take control**. Earlier research recommending default tmux presentation
-is superseded. `4d5e96383` shared raw resume argv, not a live PTY; `90c871805` and
-`7889d65bc` established native presentation. Separate feedback reported tmux
-color distortion and terminal bugs; those were not stated in the commit messages.
+Optional Warp/Loopflow viewing retains a passive second attachment and explicit
+**Take control**. October 5's fixture comparison rejects plain tmux/raw replay;
+production transport remains unselected. Move here replacement stays distinct.
 
-Compare an opt-in tmux configuration with a transparent PTY relay before changing
-that contract. Prove truecolor, keyboard/image input, independent sizes, late
-attachment, one provider PID/draft, clean takeover, and view-only enforcement at
-the owner. Client-local scroll/selection is separate from durable process state.
-Native concurrent resume cannot prove shared PTY continuity. The prior research
-reported clipboard-image failures inside tmux (anthropics/claude-code#25672);
-retest the exact stack. Control-mode integration requires its own protocol/render
-client; a broker also owns replay, flow control, resize, and failure recovery.
-App-quit survival and remote Home attachment remain separate scope decisions.
-Client provenance is absent today; keep ELSEWHERE generic until the shared API
-can name the recorded terminal/location.
+Remaining proof includes native keyboard/image input, history, late attachment,
+one provider/UI/draft, owner-enforced takeover and view sizing. A passive crop is
+not independent reflow. Client-local scroll/selection is separate from durable
+process state. Earlier tmux color/terminal complaints and reported clipboard-image
+failures (anthropics/claude-code#25672) remain unverified on this stack; text-query
+fixtures do not resolve them. A retained owner needs bounded replay/backpressure,
+controller-bound queries, resize and failure recovery. App-quit survival and
+remote Home attachment remain separate scope decisions. Keep ELSEWHERE generic
+until shared client provenance exists. Earlier implementation history remains at
+`e15a024564f7ec20679b2a7640284754a1b141b6:wave/product/MEMORY.md`.
 
 The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
 Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
@@ -1078,9 +1078,9 @@ They explain the topology change; they are not current setup instructions.
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
   the only surface that presents its worktree.
-- **Interactive provider clients resume natively.** Reuse `SessionRecord` and
-  `lf session open`; do not restore lfd terminal attachment, a tmux presentation
-  path, or Ask-specific Swift plumbing.
+- **Stopped clients resume natively; live continuity retains the UI.** Reuse shared
+  Session identity/actions. LOO-378's comparison supersedes the blanket rejection
+  of tmux presentation, without restoring lfd or Ask plumbing.
 - The high-value review move was catching invented fields that duplicate existing
   ones (e.g. `RunStatus`), not re-litigating the approach.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use

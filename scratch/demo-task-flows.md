@@ -130,6 +130,25 @@ Home `lf -b run proof` printed the op output and blocked, `--mode` is an
 unexpected argument. Clippy clean; `flow_tests` 23, `session_lifecycle_tests` 17, `task_flow_launch_tests` 1 passed; `swift build --build-tests` built. Direction 1 is done;
 2, 3 and 5 remain.
 
+7. **Jack (October 5), on PR preparation at launch:** "im not sure why we
+   need 2." Agent's reading: drop it from the launch. Reconcile, rotation and
+   armed-merge clearing have other callers (`lf pr reconcile`, `lf pr next`,
+   `ops/task.rs:1773`, `:2538`). Unproven: that `pr publish` copes when a Flow
+   commits in a worktree whose PR already merged. Test that before deleting.
+8. **Jack (October 5), on FlowSession:** "there shouldnt be anything extra on
+   top of what you get when you run `lf flow ...` in a taks worktree. we
+   should still have good records of whats flows are running and at what
+   stages just via normal logging from lf binary. I dont think we need the
+   FlowSession datatype." Not yet a scoped decision for this PR. What the
+   record does today, from source: holds the graph captured at launch, which
+   each step child (`lf __flow-step <flow> <n>`) reads instead of re-resolving
+   YAML; holds the cursor and per-edge loop counters; `flow_events` holds
+   operation receipts; the driver lock is keyed by its id; Desktop's Flow
+   graph, `task status`, the completion blockers and chapter "started work"
+   read it. 42 Rust/Swift files name it; `store/sqlite/flows.rs` is 1,996
+   lines. AGENTS.md and the architecture reference state "One started Flow is
+   one FlowSession" and would change with it.
+
 Unresolved, for Jack:
 
 - Where PR preparation (#2 above) goes once it leaves the launch: `lf task

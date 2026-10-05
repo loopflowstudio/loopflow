@@ -1,0 +1,121 @@
+# Demo: Task Flows without a Task worker — October 4–5, 2026
+
+LOO-353 delivery review of the local runtime cut at `e10e2add4`. Design:
+[focus-on-your-own-work.md](focus-on-your-own-work.md); open interpretations:
+[questions.md](questions.md); code walkthrough: [pr-review.html](pr-review.html). Jack Heart's feedback is quoted below; the rest is the agent's rehearsal and
+interpretation.
+
+## What was exercised
+
+The branch-built `lf` (0.13.2+e10e2add4) in a fresh private Home, with one
+fixture Task (`INF-123`, built by the `task_flow_launch_tests` support code)
+in a throwaway repository, real tmux, no provider and no Linear credential.
+Flows were `cmd:`-only. The live Home was not opened or migrated.
+
+A copy of the live store could not be used: the branch refuses it
+("canonical frontier changed before 0.13.1.001_release") and custom Homes are
+not upgraded. The draft migration therefore has no evidence against real data
+from this demo.
+
+## Observed (agent rehearsal)
+
+- `lf --task INF-123 flow start proof` returned at once; the Flow ran detached
+  and finished. A second start made a second FlowSession; neither continued
+  the other. `task status` and `flow list --sessions --for-task` list all of
+  them.
+- `task restart`, `flow start --retry`, `session ready`, `session complete`
+  are unrecognized commands.
+- A Flow whose first step failed reads, in `task status`: "process exited with
+  exit status: 1. Inspect its history and effects, then launch fresh work".
+  Nothing restarted it. A later `flow start` was admitted.
+
+## Observed by Jack Heart (October 5)
+
+Jack ran `flow start proof` and pasted its output without comment: the launch
+was admitted and printed the full Task status, with 4 Flow lines followed by
+38 Exec lines. `slow` read `Current` while its own driver and step Execs read
+`failed` further down.
+
+## Jack's feedback (October 5)
+
+- On seeing the command: "what does flow start proof even mean".
+- "i am for now mostly indifferent on things like task status API changes.
+  probably some good work available there, but not the current focus of the
+  task."
+- On learning main's #1356 removed `-b`: "Why the fuck did we do this lol".
+- "this task should have been DELETING the task worker APIs and routing more
+  things through the basic (e.g. flow -b) apis."
+
+The demo did not show what Jack asked for. The cut removed the worker's
+internals (claims, generations, `__worker`, restart, retry) but kept its front
+door, `lf --task ISSUE flow start [FLOW]`. The agent's earlier claim that `-b`
+was "unbuilt" was wrong; see direction 1.
+
+## Direction for the next implementation pass
+
+Agent's reading of Jack's feedback, not his wording:
+
+1. Restore `-b` on the ordinary command. It was not deleted by this branch:
+   main's #1356 (`a55818079`, October 1, LOO-338 CLI owner tree) replaced
+   `-i`, `-b` and their uppercase aliases with `--mode interactive|batch`; its
+   message gives no reason, so neither main, the installed 0.13.0 nor this branch accepts `-b`.
+   The headless path itself exists as `lf --mode batch --task <id> run <flow>`,
+   which is what `flow start` re-execs.
+   **Jack decided (October 5): "-b should continue to print the output and
+   block just like it used to."** So `-b` is the short form of `--mode batch`,
+   in the foreground. It does not detach. Agent's inference, not Jack's words:
+   a caller that wants background work backgrounds the command itself (shell
+   `&`, the conversation's own background-command tool), so `flow start`'s
+   tmux launch and ten-second wait are deleted without a replacement. Restore
+   `-i` the same way; global `-w` and `session open` are outside this Task.
+2. Delete `lf flow start` and its launcher (`ops/task.rs::launch_task_flow`,
+   `ops/run.rs::exec_task_flow`), with the
+   `LF_TASK_FLOW_OPTIONS` environment hop. `lf flow` keeps `list` and `show`.
+   Today it only validates planning and re-execs
+   `lf --mode batch --task <id> run <flow>` in tmux. The planning check
+   (terminal, moved or removed Task) moves to `--task` launch admission.
+3. Reroute every caller onto the ordinary launch, with no alias: `task create
+   --run/--flow`, Desktop Start (`MacLocalWaveAgentLauncher`, `RegistryQuery`),
+   builtin skills (`task_operate`, `advance`, `launch-plan`, `repo_operate`,
+   `repo_session`, `wave_operate`, `wave_session`, `s1`, `init`),
+   `skills/loopflow/SKILL.md`, `docs/`, README and tests. `git grep -lE "flow
+   start|LF_TASK_FLOW_OPTIONS"` lists 49 files at `e10e2add4`.
+4. Status presentation (items 1-3, 6 below) is out of scope for this Task by
+   Jack's statement. Leave it.
+
+Unresolved: whether `task create --run`, `task automate`/`automation`, `task
+interrupt` and `task wait` count as worker APIs to delete or are ordinary Task
+commands to keep.
+
+## Defects and stale surface found
+
+1. A failed Flow stays `Current` in `flow list --sessions` and `task status`,
+   beside the line saying its process exited. Only completed Flows change state.
+2. `task status` prints every Exec bound to the Task: its own earlier
+   inspections, `--help` calls and failed argument parses. After a dozen
+   commands the Flow lines are buried.
+3. With no Flow, `task status` says `action: resume`.
+4. Help text: `lf task status` still says "current worker evidence";
+   `lf feature` says "carry a change through its authored reviews".
+5. `session list --needs-me` still exists; `--waiting` does not (known,
+   unbuilt).
+6. `lf flow show --sessions <id>` prints raw JSON without `--json`; its graph
+   steps still carry `"human": false`.
+7. `lf flow end x` answers "flow not found: end. For a skill, use `lf skill
+   end`", which reads as a lookup miss, not a removed command.
+
+## Not demonstrable yet
+
+One Task conversation in Desktop, conversational feedback choosing the next
+operational Flow, Waiting, Task primary selection, workflow files,
+`loop-or-next`, taskless `-b`, all-Flow Desktop views, a real provider step, a
+driver killed mid-step, and the migration against a populated store. This
+review itself ran on installed `lf` 0.13.0 through the Ready/Complete handshake
+the branch deletes.
+
+## Next action
+
+Implement the direction above. Proof: `lf --task INF-123 -b proof` in a private
+Home prints the Flow's output and blocks until it ends; `lf flow start` is an
+unrecognized command; `git grep "flow start"` matches only released notes and
+the removed-command test.

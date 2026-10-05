@@ -45,6 +45,14 @@ result. Live or unknown execution since boot still blocks. Closing LOO-326 needs
 an installed release carrying this, then `lf flow end` and `lf task complete`
 from outside any `lf --task LOO-326` run, whose own Exec gates completion.
 
+PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
+Exec receipt can precede closure of inherited checkout descriptors. A delayed
+launcher reproduces the retained second checkout; cleanup and repair re-entry now
+wait up to five seconds for an independently acquired lease and preserve ownership
+if it stays held.
+The existing cleanup assertion stays intact. This is branch evidence, not an
+installed repair or Task settlement.
+
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
 Jack Heart retained one execution per wake for frozen missed dues. Completion

@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -843,6 +843,15 @@ pub(crate) fn acquire_worktree_lease(
     path: &Path,
     owner: &str,
 ) -> Result<WorktreeLease, GitError> {
+    acquire_worktree_lease_wait(repo, path, owner, Duration::ZERO)
+}
+
+pub(crate) fn acquire_worktree_lease_wait(
+    repo: &Path,
+    path: &Path,
+    owner: &str,
+    timeout: Duration,
+) -> Result<WorktreeLease, GitError> {
     let lock_path = worktree_lease_path(repo, path)?;
     let mut file = OpenOptions::new()
         .create(true)
@@ -850,8 +859,13 @@ pub(crate) fn acquire_worktree_lease(
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    if let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
+    let deadline = Instant::now() + timeout;
+    while let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
         if error.kind() == std::io::ErrorKind::WouldBlock {
+            if Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
             let active_owner = fs::read_to_string(&lock_path)
                 .ok()
                 .map(|value| value.trim().to_string())
@@ -1500,6 +1514,23 @@ mod tests {
         fs::write(&path, content).expect("write file");
         git_stdout(repo, &["add", name]).expect("git add");
         git_stdout(repo, &["commit", "-m", &format!("add {}", name)]).expect("git commit");
+    }
+
+    #[test]
+    fn waiting_for_worktree_lease_never_displaces_its_owner() {
+        let repo = init_repo();
+        let lease = acquire_worktree_lease(repo.path(), repo.path(), "active repair").unwrap();
+        let error = acquire_worktree_lease_wait(
+            repo.path(),
+            repo.path(),
+            "cleanup",
+            Duration::from_millis(50),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("owned by active repair"));
+        assert!(repo.path().exists());
+        drop(lease);
+        assert!(acquire_worktree_lease(repo.path(), repo.path(), "cleanup").is_ok());
     }
 
     #[test]

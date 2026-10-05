@@ -7,9 +7,8 @@ use loopflow::engine::git::{
     is_clean, origin_branch, worktree_add, worktree_move, worktree_remove, WorktreeBranch,
 };
 use loopflow::engine::worktrees::{
-    create_named_worktree, list_worktrees, list_worktrees_local, prune_worktrees,
-    push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
-    WorktreePrunePolicy,
+    create_named_worktree, list_worktrees, prune_worktrees, push_branch_with_upstream,
+    schedule_upstream_sync, sibling_worktree_name_with_main, WorktreePrunePolicy,
 };
 use loopflow_test_support::TestRepo;
 
@@ -176,7 +175,7 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
         &["branch", "--set-upstream-to", "origin/jack/parent"],
     );
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let child = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some("jack/child"))
@@ -518,7 +517,7 @@ fn branch_at_main_not_detected_as_squash_merged() {
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -539,7 +538,7 @@ fn fresh_worktree_is_identified() {
     let repo = TestRepo::new();
     let result = create_named_worktree(repo.path(), "newwave", None, &|_| {}).expect("create");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -555,7 +554,7 @@ fn fresh_dirty_worktree_is_identified() {
     let result = create_named_worktree(repo.path(), "wip", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -573,7 +572,7 @@ fn worktree_with_commits_is_active_not_fresh() {
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -607,7 +606,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     )
     .expect("create fresh from landed");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&fresh.branch))

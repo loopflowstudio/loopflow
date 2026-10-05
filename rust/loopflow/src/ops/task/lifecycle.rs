@@ -143,6 +143,38 @@ fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<boo
         }))
 }
 
+/// End one Flow by request. Its remaining steps never run and no result is
+/// invented; a recorded failure and every Session and Exec stay in history.
+pub(crate) async fn end_stopped_flow(store: &SharedStore, id: &str) -> OpsResult<()> {
+    let mut flow = store
+        .flow(id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error(format!("Flow {id} has no invocation row")))?;
+    if flow.finished {
+        return Ok(());
+    }
+    if execution_unsettled(store, &flow)? {
+        return Err(task_error(format!(
+            "Flow {id} has live or unresolved execution; interrupt it and wait for exit before ending it"
+        )));
+    }
+    if let Some(claim) = &flow.claim {
+        flow = store
+            .release_flow(id, flow.version, Some(claim))
+            .await
+            .map_err(task_error)?;
+    }
+    let reason = match &flow.failure {
+        Some(failure) => format!("ended by request after it failed: {}", failure.reason),
+        None => "ended by request".to_string(),
+    };
+    store
+        .retire_flow(id, flow.version, &reason)
+        .await
+        .map_err(task_error)
+}
+
 async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
     let blockers = associated_work_blockers(store, task)?;
     if !blockers.is_empty() {
@@ -569,6 +601,12 @@ fn execution_blockers(
     let mut blockers = Vec::new();
     let mut managed_execs = HashSet::new();
     let mut session_execs = HashSet::new();
+    let ended_flows: HashSet<&str> = work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state != crate::session::FlowSummaryState::Current)
+        .map(|flow| flow.summary.id.as_str())
+        .collect();
     // A missing historical receipt differs from an observed process whose
     // liveness query failed. Only the former can be unrelated history.
     let observed_execs: HashSet<String> = match check {
@@ -621,8 +659,14 @@ fn execution_blockers(
                 blockers.push(format!("Session {} has a reserved input", session.id));
             }
         }
+        // Nothing waits for a review whose Flow ended; its Execs and turns are
+        // still judged on their own evidence.
         if session.completed_at.is_none()
             && session.kind != crate::session::SessionKind::Conversation
+            && !session
+                .flow_session_id
+                .as_deref()
+                .is_some_and(|flow| ended_flows.contains(flow))
         {
             blockers.push(format!("Session {} awaits completion", session.id));
         }
@@ -630,6 +674,11 @@ fn execution_blockers(
             .sqlite
             .session_has_pending_turn(&session.id)
             .map_err(task_error)?
+            && (session.completed_at.is_none()
+                || crate::ops::task_automation::session_engine_unresolved(
+                    &store.sqlite,
+                    &session.id,
+                )?)
         {
             blockers.push(format!(
                 "Session {} has an unresolved provider turn",

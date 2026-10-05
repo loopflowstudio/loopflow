@@ -1,12 +1,19 @@
 # Desktop performance
 
 ```sh
+# Every real launch on this machine, already recorded: samples, median, p95, failures, by app version.
+uv run python scripts/benchmarks/desktop-performance/timings.py
+uv run python scripts/benchmarks/desktop-performance/timings.py --json
+
 # Real usage on this machine: record the running app for a minute, then read the report.
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process LoopflowMac   # dev build
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --no-xctrace           # signposts + RSS only
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --template 'Time Profiler'   # attribute main-thread hangs; open hitches.trace in Instruments
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-20260926-1200
+
+# Real launches of the release build against a private copy of your Home; nothing live is touched.
+uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/desktop-launch/run
 
 # Startup without a display: replay captured `lf` reads and their latency in-process.
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
@@ -15,6 +22,27 @@ uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /t
 # The older capture/OCR journeys and their hash-pinned baseline.
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
 ```
+
+The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
+`reads.ndjson` whenever it runs outside a test mode; `timings.py` only reads
+them. Each file keeps its newest half past 256 KB. Lines hold durations, `lf`
+subcommand words, the workspace part and the app version: no arguments, output
+or error text. Delete the directory to start over.
+
+| Row | Milliseconds from kernel process start to |
+|---|---|
+| `pre_main` | `LoopflowApp.init` |
+| `restored` | the saved workspace looked up (`saved workspace: hit/miss`) |
+| `first_frame` | the first window's content committed to the render server |
+| `usable_saved` / `usable_fresh` | outline rows observed, then the next main-queue callback; split by whether any part was saved text |
+| `fresh` | every part of the workspace read by this launch |
+
+`lf read` and `refresh` rows are durations of one subprocess read and one
+planning or Sessions refresh, with failures counted apart. Reads have no
+timeout, so a hung read shows as a launch that never reached `fresh`. A launch
+still running, or quit early, is counted the same way. `first_frame` is a
+commit, not on-glass presentation; CPU, memory and main-thread stalls are
+`record_live.py`'s.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes
@@ -56,6 +84,19 @@ LOO-300's work; it is not in this tree.
 `20260924-capture-input/` is the earlier bitmap-capture/OCR baseline for
 `scripts/desktop_performance.py`; its README explains why it is not comparable
 with signpost intervals.
+
+`launch.py run` copies the Home's database with SQLite's backup, builds the
+release binary into its own app bundle (`com.loopflow.mac.bench`), and opens it
+in the background: three launches with no saved workspace, twenty with one, and
+three whose planning and Sessions reads fail. The bundle's `lf` forwards the
+startup reads to the installed `lf` under the copy and refuses every other
+command, so no helper, Session or repair starts. Each sample is the app's own
+launch journal plus `ps` RSS and CPU time at the endpoint and the `lf` processes
+it started. `--built` reuses the bundle already in `--work`; `--home <other
+work>/home` copies another run's Home, so a baseline and a candidate read the
+same data. It needs a logged-in desktop; OS file caches stay warm, and
+main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
+a baseline and a candidate.
 
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads

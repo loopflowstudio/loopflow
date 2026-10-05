@@ -43,7 +43,9 @@ explicitly replaces the Task's workflow. A waiting review is retired with its
 history intact; its exact service, driver and provider execution must exit before
 the replacement starts. Retirement does not approve the review. If interruption
 leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
-unresolved process ownership still block admission.
+unresolved process ownership still block admission. `flow end ID` ends a stopped
+Flow without running its remaining steps; it lists as `replaced` and keeps its
+failure and history.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
@@ -97,6 +99,7 @@ lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
+lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
 The repository and each Wave have one ongoing conversation. `session ensure`

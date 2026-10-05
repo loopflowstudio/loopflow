@@ -509,6 +509,8 @@ pub enum FlowCommand {
         #[arg(long)]
         retry: bool,
     },
+    /// End a stopped Flow without running its remaining steps; its history stays
+    End { invocation: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -534,6 +536,11 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Resume a conversation by ID, or the last interactive Session in this worktree
+    Resume {
+        /// Loopflow Session ID or Claude/Codex conversation ID
+        id: Option<String>,
+    },
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID, one of its Run IDs, or the provider's own conversation ID
@@ -1650,6 +1657,11 @@ pub enum WtCommand {
         /// canonical checkout). Off by default so a list never touches it.
         #[arg(long)]
         sync: bool,
+    },
+    /// Report how long `lf wt list` has taken on this machine
+    Timing {
+        #[arg(long)]
+        json: bool,
     },
     /// Remove clean terminal or inactive worktrees
     Prune {

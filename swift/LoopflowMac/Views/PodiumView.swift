@@ -74,6 +74,7 @@ struct PodiumView: View {
         )) {
             TaskLinkView(model: model)
         }
+        .onAppear { LaunchJournal.home.markAfterCommit(.firstFrame) }
         .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
             Task { await model.rescanActiveSessions() }

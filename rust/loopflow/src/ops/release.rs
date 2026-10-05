@@ -18,8 +18,9 @@ use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
 use crate::engine::git::{
-    acquire_worktree_lease, current_branch, delete_local_branch_inheriting, fetch_inheriting,
-    get_default_branch, is_clean, ref_exists, rev_parse, worktree_remove_owned, WorktreeLease,
+    acquire_worktree_lease, acquire_worktree_lease_wait, current_branch,
+    delete_local_branch_inheriting, fetch_inheriting, get_default_branch, is_clean, ref_exists,
+    rev_parse, worktree_remove_owned, WorktreeLease,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::prompt::write_prompt_log;
@@ -2602,7 +2603,12 @@ fn finish_release_pr(
                     .into_iter()
                     .find(|(_, branch)| branch.as_deref() == Some(&release_branch))
                 {
-                    match acquire_worktree_lease(main_repo, &path, "settled release cleanup") {
+                    match acquire_worktree_lease_wait(
+                        main_repo,
+                        &path,
+                        "settled release cleanup",
+                        Duration::from_secs(5),
+                    ) {
                         Ok(lease) => {
                             let pr =
                                 crate::ops::pr::observe_pr_merge(&path, prepared.pr_number)?.pr;
@@ -2701,10 +2707,11 @@ fn finish_release_pr(
                     prepared.pr_number
                 ));
                 fetch_release_branch(main_repo, &release_branch, &prepared.head_sha, lock)?;
-                let lease = acquire_worktree_lease(
+                let lease = acquire_worktree_lease_wait(
                     main_repo,
                     &worktree_path(main_repo, worktree_name),
                     "release CI repair",
+                    Duration::from_secs(5),
                 )?;
                 let wt = materialize_exact_source_worktree(
                     main_repo,
@@ -3481,10 +3488,16 @@ fn cleanup_release_worktree(
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) {
-    // Reacquire independently: a descendant may still hold the old description.
+    // A repair's completion receipt can precede process exit. Reacquire
+    // independently and allow its inherited descriptors a bounded time to close.
     drop(lease);
     let removal = (|| {
-        let lease = acquire_worktree_lease(main_repo, wt_path, "release worktree cleanup")?;
+        let lease = acquire_worktree_lease_wait(
+            main_repo,
+            wt_path,
+            "release worktree cleanup",
+            Duration::from_secs(5),
+        )?;
         let inherit = |command: &mut Command| {
             lock.inherit(command);
             lease.inherit(command);

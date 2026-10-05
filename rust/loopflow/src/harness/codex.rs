@@ -1217,21 +1217,9 @@ impl CodexHarness {
                     .request(&payload);
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
-                    let runtime = tokio::runtime::Handle::current();
                     let dispatched = tokio::task::spawn_blocking(move || {
                         let outcome = store.with_session_driver(&session, &expected, || {
-                            runtime.block_on(async {
-                                tokio::time::timeout(Duration::from_secs(2), writer.send(message))
-                                    .await
-                                    .map_err(|_| {
-                                        crate::store::StoreError::InvalidData(
-                                            "Native dispatch timed out; outcome unknown".into(),
-                                        )
-                                    })?
-                                    .map_err(|error| {
-                                        crate::store::StoreError::InvalidData(error.to_string())
-                                    })
-                            })
+                            super::dispatch::send_fenced(&mut writer, message)
                         });
                         (writer, outcome)
                     })
@@ -1297,11 +1285,13 @@ impl CodexHarness {
                     continue;
                 };
                 if let Some((store, session, driver)) = &history {
-                    if let Err(error) = native_history
-                        .lock()
-                        .expect("codex history lock poisoned")
-                        .record(store, session, Some(driver), None, &value)
-                    {
+                    let recorded = super::dispatch::off_reactor(|| {
+                        native_history
+                            .lock()
+                            .expect("codex history lock poisoned")
+                            .record(store, session, Some(driver), None, &value)
+                    });
+                    if let Err(error) = recorded {
                         let _ = event_tx.send(ConversationEvent::Error {
                             code: "conversation_history_unavailable".into(),
                             message: error.to_string(),

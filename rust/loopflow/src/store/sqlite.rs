@@ -2109,6 +2109,27 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Record an Exec, waiting at most `wait` for another writer; a zero wait
+    /// is one attempt.
+    pub(crate) fn record_exec_within(
+        &self,
+        exec: &crate::exec::Exec,
+        wait: Duration,
+    ) -> StoreResult<()> {
+        let previous: u32 = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let previous = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+            conn.busy_timeout(wait)?;
+            previous
+        };
+        let result = self.record_exec(exec);
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .busy_timeout(Duration::from_millis(u64::from(previous)))?;
+        result
+    }
+
     pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare("SELECT 1 FROM execs WHERE id=?1")?;

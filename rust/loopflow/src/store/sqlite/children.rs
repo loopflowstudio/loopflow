@@ -750,21 +750,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn update_project(&self, project: &Project) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_fact_params(project);
-        let changed = transaction.execute(
-            PROJECT_FACT_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -1744,12 +1729,6 @@ pub(super) const PROJECT_SELECT: &str = "SELECT
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
     created_at, updated_at, iteration, flow, status
     FROM projects WHERE id=?1";
-const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
-    wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
-    project_prompt_context=?6, pm_snapshot_synced_at=?7,
-    abandon_requested_at=?8, abandon_reason=?9,
-    created_at=?10, updated_at=?11, flow=?12, status=?13
-    WHERE id=?1";
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
@@ -1777,12 +1756,6 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
         Box::new(project.plan.flow.clone()),
         Box::new(project.plan.status.as_str().to_string()),
     ]
-}
-
-fn project_fact_params(project: &Project) -> Vec<Box<dyn ToSql>> {
-    let mut parameters = project_params(project);
-    parameters.remove(11); // Planning refresh cannot overwrite completed judgment passes.
-    parameters
 }
 
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {

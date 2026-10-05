@@ -61,15 +61,12 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn select_project(store: &SqliteStore, wave: &Wave, project_id: &str) {
-    for mut project in store.list_projects(Some(wave.id())).unwrap() {
-        project.plan.status = if project.plan.id.as_str() == project_id {
-            loopflow::pm::ProjectStatus::Started
-        } else {
-            loopflow::pm::ProjectStatus::Completed
-        };
-        store.update_project(&project).unwrap();
-    }
+fn select_project(home: &Path, wave: &Wave, project_id: &str) {
+    let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    connection.execute(
+        "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
+        rusqlite::params![wave.id().as_str(), project_id],
+    ).unwrap();
 }
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
@@ -88,7 +85,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    select_project(&store, wave, project.plan.id.as_str());
+    select_project(home, wave, project.plan.id.as_str());
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -297,7 +294,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-    select_project(&store, &wave, current.plan.id.as_str());
+    select_project(home, &wave, current.plan.id.as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -414,7 +411,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    select_project(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    select_project(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -599,7 +596,7 @@ Count dispatched Task loops that settle without rescue.
             snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
-    select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
+    select_project(home.path(), &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");

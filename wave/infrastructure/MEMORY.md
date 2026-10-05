@@ -283,20 +283,24 @@ projection together, retaining each entity's acquisition time. Projection failur
 rolls back acceptance; disputed membership remains recorded before that transaction.
 Independent replay and generic Task planning updates are deleted. Restart changes
 execution without restoring captured planning; delayed public restart coverage
-retains accepted content and age. Rotation and reteam still bypass this owner:
-transfer, identifier and cached Team-relationship regressions remain failing.
+retains accepted content and age. Rotation now accepts confirmed Project and
+transfer readbacks atomically; its durable-only writers are deleted. A partial
+Project observation preserves the full-refresh age. Focused transfer/age and
+existing-successor recovery proofs pass; reteam identifiers and cached Team
+relationships remain unresolved.
 
-Uncommitted placement compression has focused proofs, not operation recovery.
-Full mutation readbacks and serialized, authorized relationship acceptance remain
-before membership fencing, shared selection, ensure and rotation. Desktop activation
+Created-successor recovery retains Task/PR/Flow identity, then rejects
+`A — next` and `A — previous` under the old selector. Its proof therefore belongs
+with shared binding and exact-ID transition replacement; do not restore stripping.
+Jack Heart's policy is unchanged. Relationship serialization and membership fencing
+remain before selection, ensure and rotation. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 Installed and configured acceptance remain unproved.
 
 Collection preserves issue-reported ownership; listing Project IDs cannot override
-it. October 5 removes that overwrite for moved/detached issues after a failing
-loopback regression. Three collection/adoption tests pass, proving no durable
-transfer or installed acceptance.
+it. October 5 removed that overwrite after a failing loopback regression; collection
+proofs establish no installed acceptance.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
 autonomous Intelligence repair without another review Session. The reported
@@ -319,15 +323,12 @@ recovery lesson applies; publication/installation prove no readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
-Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
-`drafts/<name>.sql`, and edits it in place until landing; unreleased drafts on
-main are edited rather than undone by a later draft. Draft ids, `-- name:`/`-- id:`
-headers and the `development_migrations` receipt ledger are removed, so the
-applied-draft names, IDs and checksums in the LOO-321 diagnostics below no longer
-exist. Custom Homes keep exact-schema validation and stay disposable.
-`-- depends_on:` still orders drafts across Tasks at the release cut. Mechanics
-live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
-evidence only; not shipped.
+Jack Heart selected one editable draft per Task and one client on September 30.
+Released SQL stays immutable; disposable custom Homes retain exact-schema validation.
+The draft receipt ledger is removed. Mechanics live in
+[MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md); earlier name/ID/checksum
+diagnostics are historical. Implementation evidence and the superseded draft headers
+remain at `b4bf3b3e5:wave/infrastructure/MEMORY.md` under this heading. Not shipped.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 

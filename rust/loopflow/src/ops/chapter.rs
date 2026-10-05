@@ -486,6 +486,7 @@ async fn apply_rotation(
     entry: &mut WaveRotation,
 ) -> OpsResult<()> {
     let linear_name = linear_project_name(repo, wave.slug(), name).await?;
+    let mut project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let mut successor = match ctx
         .client
         .find_project(&entry.successor_id)
@@ -518,6 +519,7 @@ async fn apply_rotation(
                 )
                 .await
                 .map_err(error)?;
+            project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             ctx.client
                 .project_ownership(&entry.successor_id)
                 .await
@@ -540,6 +542,7 @@ async fn apply_rotation(
             .attach_project(&ctx.initiative, &successor.id)
             .await
             .map_err(error)?;
+        project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
         successor = ctx
             .client
             .project_ownership(&successor.id)
@@ -560,6 +563,7 @@ async fn apply_rotation(
             .set_project_status(&successor.id, ProjectStatus::Started)
             .await
             .map_err(error)?;
+        project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
         successor = ctx
             .client
             .project_ownership(&successor.id)
@@ -569,17 +573,31 @@ async fn apply_rotation(
             return Err(error("successor activation is not confirmed"));
         }
     }
-    successor.name = name.to_string();
-    successor.slug = crate::pm::project_slug(name);
-    let local = super::project::record_project(store, wave, &successor).await?;
+    store
+        .put_pm_project(
+            wave.id(),
+            ctx.provider.as_str(),
+            &ctx.initiative,
+            successor.clone(),
+            project_observed_at,
+        )
+        .await
+        .map_err(error)?;
     // Reconcile a transfer that another Home or an interrupted caller already performed.
+    let items_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     for item in ctx.client.list_items(&successor.id).await.map_err(error)? {
-        if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
-            store
-                .move_chapter_task(&task.id, &local.id)
-                .await
-                .map_err(error)?;
-        }
+        store
+            .put_pm_task(
+                wave.repo(),
+                ctx.provider.as_str(),
+                crate::store::PmTaskRecord {
+                    item,
+                    project: None,
+                    observed_at: items_observed_at,
+                },
+            )
+            .await
+            .map_err(error)?;
     }
     entry.successor = Some(successor);
     let Some(predecessor) = entry.predecessor.as_ref() else {
@@ -602,7 +620,8 @@ async fn apply_rotation(
     }
     entry.tasks = rotation_tasks(store, wave, ctx, entry).await?;
     for decision in &entry.tasks {
-        let (item, _) = ctx
+        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (item, project) = ctx
             .client
             .issue_ownership(&decision.task.id)
             .await
@@ -610,12 +629,18 @@ async fn apply_rotation(
             .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
         let task = store.get_task_by_issue(&item.id).await.map_err(error)?;
         if item.project_id.as_deref() == Some(entry.successor_id.as_str()) {
-            if let Some(task) = task {
-                store
-                    .move_chapter_task(&task.id, &local.id)
-                    .await
-                    .map_err(error)?;
-            }
+            store
+                .put_pm_task(
+                    wave.repo(),
+                    ctx.provider.as_str(),
+                    crate::store::PmTaskRecord {
+                        item,
+                        project,
+                        observed_at,
+                    },
+                )
+                .await
+                .map_err(error)?;
             continue;
         }
         if item.project_id.as_deref() != Some(predecessor.id.as_str()) {
@@ -642,7 +667,8 @@ async fn apply_rotation(
                     .move_item_to_project(&decision.task.id, &entry.successor_id)
                     .await
                     .map_err(error)?;
-                let (confirmed, _) = ctx
+                let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+                let (confirmed, project) = ctx
                     .client
                     .issue_ownership(&decision.task.id)
                     .await
@@ -651,12 +677,18 @@ async fn apply_rotation(
                 if confirmed.project_id.as_deref() != Some(entry.successor_id.as_str()) {
                     return Err(error("Task transfer is not confirmed"));
                 }
-                if let Some(task) = task {
-                    store
-                        .move_chapter_task(&task.id, &local.id)
-                        .await
-                        .map_err(error)?;
-                }
+                store
+                    .put_pm_task(
+                        wave.repo(),
+                        ctx.provider.as_str(),
+                        crate::store::PmTaskRecord {
+                            item: confirmed,
+                            project,
+                            observed_at,
+                        },
+                    )
+                    .await
+                    .map_err(error)?;
             }
             TaskDisposition::Abandon => {
                 ctx.client
@@ -730,7 +762,8 @@ async fn apply_rotation(
             ));
         }
     }
-    let mut completed = ctx
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let completed = ctx
         .client
         .project_ownership(&predecessor.id)
         .await
@@ -738,9 +771,16 @@ async fn apply_rotation(
     if completed.status != ProjectStatus::Completed {
         return Err(error("predecessor completion is not confirmed"));
     }
-    completed.name = predecessor.name.clone();
-    completed.slug = predecessor.slug.clone();
-    super::project::record_project(store, wave, &completed).await?;
+    store
+        .put_pm_project(
+            wave.id(),
+            ctx.provider.as_str(),
+            &ctx.initiative,
+            completed,
+            observed_at,
+        )
+        .await
+        .map_err(error)?;
     Ok(())
 }
 

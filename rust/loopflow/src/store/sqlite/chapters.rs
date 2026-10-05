@@ -3,8 +3,7 @@ use rusqlite::{params, TransactionBehavior};
 use crate::durable::TaskId;
 use crate::id::WaveId;
 use crate::ops::chapter::TaskStartEvidence;
-use crate::store::{StoreError, StoreResult};
-use crate::work::project::ProjectId;
+use crate::store::StoreResult;
 
 use super::SqliteStore;
 
@@ -25,28 +24,6 @@ impl SqliteStore {
             "UPDATE projects SET legacy_current=NULL WHERE wave_id=?1 AND external_project_id=?2",
             params![wave.as_str(), project],
         )?;
-        Ok(())
-    }
-
-    pub fn move_chapter_task(&self, task: &TaskId, project: &ProjectId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
-            "UPDATE tasks SET project_id=?2,updated_at=?3 WHERE id=?1 AND
-             (SELECT wave_id FROM projects WHERE id=tasks.project_id) =
-             (SELECT wave_id FROM projects WHERE id=?2)",
-            params![
-                task.as_str(),
-                project.as_str(),
-                super::super::rows::now_unix()
-            ],
-        )?;
-        if changed != 1 {
-            return Err(StoreError::InvalidData(
-                "chapter transfer requires a Task and successor in the same Wave".into(),
-            ));
-        }
-        tx.commit()?;
         Ok(())
     }
 

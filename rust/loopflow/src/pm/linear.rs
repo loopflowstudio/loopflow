@@ -1198,7 +1198,7 @@ impl LinearClient {
             .graphql(
                 r#"query FindProject($id: ID!) {
                 projects(filter: { id: { eq: $id } }, first: 2, includeArchived: true) {
-                    nodes { id name archivedAt description content status { type }
+                    nodes { id name updatedAt archivedAt description content status { type }
                         initiatives(first: 50) { nodes { id } }
                         teams(first: 50) { nodes { id } }
                     }

@@ -810,11 +810,9 @@ mod tests {
                 .await
                 .unwrap();
         let mut project = project(&wave, "desktop", "project-desktop");
+        project.plan.slug = "desktop-renamed".into();
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // Input ancestry names its Task by id, so Project renaming preserves history.
-        project.plan.slug = "desktop-renamed".into();
-        store.update_project(&project).await.unwrap();
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
             crate::session::AgentSession {

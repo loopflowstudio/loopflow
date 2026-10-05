@@ -9,6 +9,60 @@ use crate::store::{
 use crate::work::project::ProjectId;
 
 impl SqliteStore {
+    /// Accept one confirmed Project without claiming a complete Wave refresh.
+    pub fn put_pm_project(
+        &self,
+        wave: &WaveId,
+        provider: &str,
+        initiative: &str,
+        project: &PmProject,
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let repo: String = conn.query_row(
+            "SELECT repo FROM waves WHERE id=?1",
+            [wave.as_str()],
+            |row| row.get(0),
+        )?;
+        if project.initiative_ids.as_slice() != [initiative] {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} does not belong to Initiative {initiative}",
+                project.id
+            )));
+        }
+        validate_project_membership(&conn, &repo, provider, project)?;
+        let tx = conn.transaction()?;
+        put_project(&tx, &repo, provider, observed_at, project)?;
+        let accepted: String = tx.query_row(
+            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, provider, project.id],
+            |row| row.get(0),
+        )?;
+        let accepted: PmProject = serde_json::from_str(&accepted)?;
+        if accepted.initiative_ids.as_slice() != [initiative] {
+            return Err(StoreError::InvalidData(format!(
+                "accepted Project {} does not belong to Initiative {initiative}",
+                project.id
+            )));
+        }
+        tx.execute(
+            "INSERT INTO pm_wave_projects(wave_id,project_id,position)
+             VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+             ON CONFLICT(wave_id,project_id) DO NOTHING",
+            params![wave,project.id],
+        )?;
+        project_accepted_planning(
+            &tx,
+            &repo,
+            provider,
+            std::slice::from_ref(project),
+            &[],
+            Some(wave),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn put_pm_task(
         &self,
         repo: &str,
@@ -44,6 +98,7 @@ impl SqliteStore {
             provider,
             record.project.as_slice(),
             std::slice::from_ref(&record.item),
+            None,
         )?;
         tx.commit()?;
         Ok(())
@@ -251,6 +306,7 @@ impl SqliteStore {
             &snapshot.provider,
             &snapshot.snapshot.projects,
             &snapshot.snapshot.items,
+            None,
         )?;
         tx.commit()?;
         Ok(())
@@ -327,6 +383,7 @@ fn project_accepted_planning(
     provider: &str,
     projects: &[PmProject],
     items: &[PmItem],
+    confirmed_wave: Option<&WaveId>,
 ) -> StoreResult<()> {
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
@@ -339,22 +396,25 @@ fn project_accepted_planning(
              )
              SELECT p.body,p.observed_at,m.wave_id FROM accepted p
              JOIN pm_wave_projects m ON m.project_id=p.id
-             JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+             LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
              JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
-             WHERE EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=sync.initiative)
+             WHERE m.wave_id=?4 OR EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=sync.initiative)
              UNION
              SELECT p.body,p.observed_at,existing.wave_id FROM accepted p
              JOIN projects existing ON existing.external_project_id=p.id
-             JOIN waves w ON w.id=existing.wave_id AND w.repo=p.repo"
+             JOIN waves w ON w.id=existing.wave_id AND w.repo=p.repo",
         )?;
         let rows = query
-            .query_map(params![repo, provider, project_ids], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, WaveId>(2)?,
-                ))
-            })?
+            .query_map(
+                params![repo, provider, project_ids, confirmed_wave],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, WaveId>(2)?,
+                    ))
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         rows
     };

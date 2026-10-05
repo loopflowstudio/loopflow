@@ -350,11 +350,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
     }
 
-    pub async fn update_project(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
-    }
-
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| store.project(&project_id)).await

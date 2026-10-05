@@ -1376,7 +1376,15 @@ mod durable_store_tests {
             "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
             rusqlite::params![successor.as_str(), task.wave_id.as_str()],
         ).unwrap();
-        store.move_chapter_task(&task_id, &successor).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET project_id=?2 WHERE id=?1",
+                rusqlite::params![task_id.as_str(), successor.as_str()],
+            )
+            .unwrap();
 
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, successor);

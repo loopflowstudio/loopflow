@@ -1,7 +1,6 @@
 use crate::durable::TaskId;
 use crate::id::WaveId;
 use crate::ops::chapter::TaskStartEvidence;
-use crate::work::project::ProjectId;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -22,15 +21,6 @@ impl Store {
         let project = project.to_owned();
         run_sqlite(&self.sqlite, move |store| {
             store.finish_project_adoption(&wave, &project)
-        })
-        .await
-    }
-
-    pub async fn move_chapter_task(&self, task: &TaskId, project: &ProjectId) -> StoreResult<()> {
-        let task = task.clone();
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.move_chapter_task(&task, &project)
         })
         .await
     }

@@ -136,8 +136,8 @@ Project synchronization and recording moved from `chapter` to `project`.
 Snapshot and detail ingestion now project accepted entity rows within their SQLite
 transaction. Each entity retains its own acquisition time. The separate
 `sync_projects` replay and `update_task_plan` API are removed; preservation tests
-use accepted observation ingestion. Rotation and reteam still bypass that owner; this is a
-partial implementation, not a completed atomic-planning cut.
+use accepted observation ingestion. Rotation now accepts confirmed Project and transfer readbacks. Reteam still bypasses
+that owner; acquisition serialization and its relationship reconciliation remain.
 
 Focused cutover tests cover the indistinguishable histories, already exact names,
 original body/time retention, rollback, older acquisitions, non-name conflict,
@@ -176,14 +176,14 @@ the returned issue. Project display names come from their separately accepted
 Project facts. If the reported destination was not among the listed Projects,
 retain that observation and resolve its ownership explicitly; never reattach it to
 the requested collection. Collection correction now has a partial atomic-projection
-replacement. Three of the six regressions still fail; operation recovery and the
-remaining independent writers must be replaced before selection changes.
+replacement. Two of the six original regressions still fail: reteam identifier and
+cached relationships. Created-successor recovery adds the sequencing failure below.
 
 The table retains the five original store counterexamples and their current status.
 Project age now passes. The removed replay path is covered by delayed-response
 rejection and Task/PR preservation; it no longer has an independently callable
-projection. Rotation and identifier recovery still fail; restart no longer writes
-planning. These store proofs establish no provider operation or installed repair. The first four
+projection. Rotation transfer and restart now preserve accepted planning; identifier
+and relationship recovery remain failing. Store proofs establish no installed repair. The first four
 reproductions and source findings remain at
 `a3eee25bee8ba189cbd1b68f56e763b3447a9b94:scratch/keep-every-wave-ready-for.md`.
 The later reteam evidence is retained below and in its unchanged test; the full
@@ -193,9 +193,9 @@ because `lf commit` excludes scratch.
 | Regression | Original failure and current coverage |
 | --- | --- |
 | `delayed_project_projection_preserves_a_newer_task_transfer` | Refresh A accepts and loads old planning; B accepts and projects a newer successor association; A resumes `sync_projects` and moves the durable Task back. Normalized planning still names the successor; PR identity survives. **Replay removed; replacement delayed-response rejection test passes.** |
-| `interrupted_rotation_transfer_survives_a_late_planning_response` | Rotation's durable transfer precedes its final refresh. A response acquired before the transfer is accepted afterward; even freshly read normalized planning reverses the transfer. Only Task `project_id` changes; PR identity survives. No concurrent writer is needed. **Still failing.** |
+| `interrupted_rotation_transfer_survives_a_late_planning_response` | Rotation's durable transfer precedes its final refresh. A response acquired before the transfer is accepted afterward; even freshly read normalized planning reverses the transfer. Only Task `project_id` changes; PR identity survives. No concurrent writer is needed. **Full confirmed readback ingestion replaces the writer; delayed-response preservation passes.** |
 | `delayed_restart_project_projection_preserves_completed_provider_status` | Restart captures a detail observation; refresh accepts/projects Completed; restart's load/replace/`update_project` sequence restores Started. Normalized planning remains Completed and PR identity survives. **Writer removed; replacement restart preservation coverage passes.** |
-| `project_projection_retains_accepted_entity_age` | Project acquired at 10 survives an older revision arriving at 20. Wave sync time advances to 20; `record_project` stamps the durable Project with the current clock instead of its retained acquisition time 10. **Ingestion projection now retains 10; test passes. Rotation still uses `record_project`.** |
+| `project_projection_retains_accepted_entity_age` | Project acquired at 10 survives an older revision arriving at 20. Wave sync time advances to 20; `record_project` stamps the durable Project with the current clock instead of its retained acquisition time 10. **Ingestion retains 10; `record_project` is deleted. Partial Project acceptance preserves full-refresh age and rolls back conflicting Wave association.** |
 | `interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh` | Reteam persists `NEXT-8` alone, then stops before refresh. An earlier detail response is accepted and atomically projected, restoring `INF-123`. All other Task fields and PR identity survive. **Still failing.** |
 
 The full cut has one owner: accepted normalized observations and their durable
@@ -220,15 +220,17 @@ Acquisition time does not order provider revisions.
 - Restart no longer copies `ResolvedTask` plans into durable Project/Task rows.
   The unused generic `update_task` API and `TASK_UPDATE` are deleted; restart
   retains its Flow retirement, timestamp and event writes. Agent choice and PM
-  writeback retain their existing owners. Generic `update_project` remains only
-  for rotation's `record_project` and fixture initialization; remove it with
-  confirmed rotation readbacks. Registration still needs to select accepted facts
+  writeback retain their existing owners. Generic `update_project`, its SQL and
+  `record_project` are deleted. Registration still needs to select accepted facts
   within its transaction.
-- Rotation checks and discards confirmed issue ownership before
-  `move_chapter_task`, with normalized refresh only after apply. Persist full
-  confirmed issue-transfer and Project-status readbacks, including provider
-  revision and original acquisition time, before durable projection. Remove the
-  old durable-only path with its replacement; do not temporarily repair it.
+- Rotation persists full confirmed transfer readbacks and Project status through
+  accepted ingestion. `move_chapter_task` is deleted. `put_pm_project` accepts one
+  Project, associates its confirmed Wave and projects it atomically without
+  claiming a complete Wave refresh. Acquisition time is captured before each read;
+  `find_project` now requests the previously omitted provider revision.
+  Existing-successor interruption/re-entry preserves Task/PR/Flow identity. Created
+  successor recovery still fails under the old name selector; see the sequencing
+  correction below. Cancellation/backlog policy remains a deletion target.
 - Reteam's reconciliation and issue-move paths both call
   `rebind_task_issue_identifier`. `move_item_to_team` returns only an identifier;
   refresh follows all issue moves and Project Team narrowing. Replace both
@@ -240,7 +242,7 @@ Acquisition time does not order provider revisions.
 
 Reuse an already-held Wave boundary: `pm_create_task_idempotent` holds
 `rotation_lock` while calling `refresh_pm_snapshot`, and chapter apply calls
-`record_project` under that lock. Unconditional reacquisition would deadlock.
+accepted ingestion under that lock. Unconditional reacquisition would deadlock.
 Locking alone cannot restore discarded readbacks or make old provider evidence
 current. Uncertain writes need exact provider readback, with no transfer ledger
 or second planning authority.
@@ -251,13 +253,32 @@ returns maximum Wave sync time while omitting entity row times;
 Preserve each accepted entity's own time through projection; substituting the
 snapshot or joined issue time for the current clock remains incorrect.
 
-**Required proofs before selection/admission changes:** retain all five cases;
+**Required proofs across the coherent cut:** retain all five cases;
 add operation-entry restart versus refresh/rotation, delayed Task-update content
 and age, reteam interruption/re-entry with cached planning, and rotation exits
 after provider confirmation but before persistence and before final refresh.
 Cover both full and partial ingestion, already-held locks, Task creation/update,
 independently aged detail entities and an older provider response after rotation.
 Store-level proofs alone cannot establish operation recovery.
+
+### Created-successor recovery changes the cut order — October 5
+
+`rotation_recovers_a_created_successor_after_confirmed_transfer` enters through
+`rotate`, creates the successor, and loses the connection immediately after the
+transfer readback. Accepted planning, Task checkout, PR and Flow survive. Retry
+fails with `competing current chapter names: A — next, A — previous`. The same
+fixture with an existing exactly named successor completes on retry.
+
+This invalidates requiring all rotation recovery proofs before replacing selection.
+Preserving provider names exposes `plan_rotation`'s name-based target/predecessor
+inference and the final name comparisons. Do not restore stripping, rename provider
+Projects or patch that deletion target. The accepted shared binding and exact-ID
+transition receipt must replace the selector before the creation proof can pass.
+Writer deletion can precede that replacement, but it is not an independently ready
+rotation cut. Finish independent reteam/read serialization and membership work;
+then implement binding, receipt and rotation together before judging recovery.
+No new product decision or reduction of acceptance is implied. The new regression
+remains failing; the two original reteam failures are unchanged.
 
 The attempted checkout/population fence was removed; its 31-test pass does not
 apply to this tree. The retained preservation reader reuses shared Session
@@ -574,9 +595,8 @@ Wave failure leaves earlier progress intact and reports where retry resumes.
 Pending global progress does not add a prerequisite to an unrelated Wave.
 
 Keep fresh Task classification, missing-membership exact lookup, Task-start
-reservation fencing and positive cancellation confirmation. Replace the direct
-`move_chapter_task` writer with accepted full provider readbacks and atomic
-projection, preserving its Task identity and transfer semantics.
+reservation fencing and positive cancellation confirmation. Retain accepted full provider readbacks and atomic projection for Task transfers;
+the direct `move_chapter_task` writer is deleted.
 Started/claimed/authored/published work moves with its Task ID,
 checkout, PR, managed Flow and independent Session/Exec association unchanged.
 Unknown evidence remains unresolved. Remove automatic backlog expiration on
@@ -675,9 +695,9 @@ Wave-scoped chapter creation is part of the requested higher-level design.
 One delivery, sequenced by dependency. The detailed contracts above and acceptance
 cases below own requirements; this list identifies each next cut:
 
-1. Finish rotation/reteam's full mutation readbacks and delete their independent
-   durable writers. Atomic ingestion, per-entity age and restart preservation now
-   have focused proofs; operation recovery remains incomplete. Include
+1. Finish reteam's full mutation readbacks and delete its identifier-only writer.
+   Rotation's durable-only writers are deleted; transfer preservation passes, while
+   created-successor recovery waits for steps 3–5's exact-ID replacement. Include
    explicit confirmed Team-relationship acceptance and the populated-cache reteam
    recovery proof above. Reuse held Wave locks; specify acquisition serialization
    for relationship reads, not just the SQLite projection boundary.
@@ -712,21 +732,20 @@ shared local configuration owner. The empty-Flow and name cuts are implemented l
 rotation remain. Keep this one delivery boundary.
 
 - `ops/chapter.rs::select_current`: replace status selection with the shared
-  configured-ID reader. `sync_projects` is deleted; `record_project` still needs
-  replacement with confirmed observation ingestion.
+  configured-ID reader. `sync_projects` and `record_project` are deleted.
 - `plan_rotation`'s `predecessor_names` and target-name lookup, plus `successor_id`:
   replace inferred predecessors and name-derived UUIDs with exact recorded IDs.
 - Deleted: `canonical_project_name`, Task-resolution projection, sync/reteam
   prefix rewrites, the unused `rename_project` API and reteam’s `target_name`
   field/rename display. Provider IDs establish ownership.
-- Rotation's direct durable-only `record_project`/`move_chapter_task` calls:
-  replace with accepted provider readbacks and atomic projection. Preserve exact
-  transfer identity and uncertain-response recovery.
+- Deleted: rotation's durable-only `record_project`/`move_chapter_task` writers.
+  Accepted readbacks preserve exact transfer identity; full recovery still needs
+  the selection/transition replacement.
 - Deleted: `update_task_plan`, generic `update_task`, their async wrappers,
   `TASK_UPDATE`, and restart's captured Project/Task plan writes. Preservation
   assertions use accepted ingestion; placement fixtures seed their own rows.
-  Remove generic runtime `update_project` with rotation's `record_project`;
-  preserve local execution choices, review replacement and fixture initialization.
+  Generic runtime `update_project` and its SQL are also deleted. Fixture setup
+  remains local; behavioral updates use accepted observations.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
   explicit disposition. Retain start fencing, unknown-work protection and
   confirmation for explicitly requested cancellation.
@@ -832,19 +851,12 @@ ownership onto each issue: preserve the returned issue's own association and
 revision. Earlier reduction details remain at
 `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
 
-The Session membership predicate uses its already joined row for primary-scope
-exclusion; Desktop summary projection passes that full row. Binding, checkout and
-Flow associations keep the same predicate. The two transfer regressions share a
-baseline fixture but retain their distinct interleavings and identity assertions.
-Neither reduction establishes projection ownership or admission exclusion.
-
-Compression retains the deletion/replacement boundary and all six original counterexamples;
-three now have replacement coverage and three remain failing.
-Collection now joins provider futures directly and converts the first error once.
-The name-cutover test reuses the migration suite's exact draft boundary and SQL
-slice, replacing its separate whole-batch setup. This preserves earlier drafts
-when release materialization combines them in one batch. No projection, selection
-or recovery repair is established by these reductions.
+Compression details remain at `b4bf3b3e5:scratch/keep-every-wave-ready-for.md` and
+`/tmp/loo366-before-readback-realign.md`. Shared membership predicates, fixture
+migration-slice boundaries and first-error collection semantics remain intact.
+Four original regressions have replacement coverage; reteam identifier/cached
+relationships and the new created-successor recovery regression remain failing.
+These reductions prove neither admission exclusion nor configured acceptance.
 
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
@@ -857,34 +869,20 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-October 5 realignment read the only immediate child Wave, Release's complete
-GOAL.md and MEMORY.md. Its newer evidence records v0.13.3 publication, installation
-and manual public verification including #1441; the earlier pending-shipment
-wording is superseded. Schedule repair retains the original hours and current
-Infrastructure owner. Neither manual recovery nor readback proves unattended
-settlements or Project readiness. #1451 (`c3e86c8ad`) is integrated source: failed
-preparation retains its pending version and appends any new migration batch without
-rewriting earlier bytes. The materialized name-cutover fixture must retain that
-same-batch boundary behavior; its earlier focused pass is not a release-tree gate.
+Release's October 5 publication/install evidence belongs in its memory and proves
+no Project readiness. Keep the materialized name-cutover fixture's same-batch
+boundary with #1451's pending-version behavior; no release-tree gate ran here.
 
-October 5 atomic-ingestion and restart changes are checkpointed at `ec5501f25`.
-Atomic ingestion replaces independent sync/Task-update projection; restart preserves
-accepted planning and returns its persisted age. Public restart coverage delays
-its Git checkpoint while a provider-detail update arrives, then reaches review
-with the newer plan. Store coverage retains Completed status and PR identity.
-Shared prompt rendering belongs to `PmProject`; projection selects supplied IDs
-and rejects conflicting Wave ownership transactionally.
+Atomic ingestion and restart preservation are checkpointed at `ec5501f25`.
+Review also found that a stale partial Project response could attach its newer
+accepted body to the wrong Wave. Partial association now checks the accepted
+Initiative set transactionally; its focused regression preserves the newer body
+and leaves the Wave without an invented Project.
 
-The subsequent, uncommitted compression removes `create_project_work`'s redundant
-identity lookup and insert.
-Both callers already inserted the Project in the same transaction; the surviving
-helper only inherits placement from that stored row. Projection no longer decodes
-a complete durable Project merely to place it. Existing placement survives a Wave
-placement change; newly projected Projects inherit the current Wave placement.
-Restart clears its invocation and updates its timestamp in one statement.
-Realign source inspection confirms three remaining regressions: rotation transfer,
-reteam identifier and cached Team relationships. Earlier feedback naming four
-predates restart repair. Selection, admission and configured acceptance remain
-unfinished. No installed Home or configured provider was changed.
+Placement compression is checkpointed at `b4bf3b3e5`; its seven focused checks
+remain recorded there. The pre-readback design is retained at
+`/tmp/loo366-before-readback-realign.md`. Release's immediate-child goal and complete
+memory were reread; their publication and operation-entry lessons add no Project
+readiness evidence. No configured provider or installed Home was changed.
 
-Checks: realign `git diff --check` passes; retained compression evidence (not rerun): `cargo fmt --all`, `cargo test -p loopflow --lib --no-run` and seven compiled planning/placement/restart tests via `scripts/test_network.py`, plus `cargo clippy --all-targets -- -D warnings`, pass. Earlier public restart/checkout passes remain at `ec5501f25`; gate owns broader/materialized/configured proofs, isolated CI owns prohibited installation proofs.
+Checks: `cargo fmt --all`, lib/PR/status test builds and all-target Clippy pass; network-isolated focused checks: seven store/existing-successor proofs and one PR reader pass, created-successor recovery fails on name inference; two status fixture checks pass. Gate owns broader/materialized/configured proofs; isolated CI owns prohibited installation proofs.

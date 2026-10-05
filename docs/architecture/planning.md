@@ -92,9 +92,11 @@ Task rows in the same SQLite transaction. Projection uses each stored entity's
 acquisition time, never the Wave's aggregate sync time. A projection failure rolls
 back observation acceptance. It preserves execution fields and retained identity;
 an unknown destination does not authorize a Task transfer. Restart changes
-execution without rewriting accepted planning. Rotation and reteam still have independent durable planning writes; atomic ingestion does not
-yet prevent those paths from restoring captured facts. Confirmed mutation
-readbacks and ordered relationship reconciliation remain unfinished.
+execution without rewriting accepted planning. Rotation accepts confirmed Project
+and transfer readbacks through the same owner. A single Project observation does
+not advance the Wave's full-refresh timestamp. Reteam still writes identifiers
+independently; its full readbacks and serialized relationship reconciliation remain
+unfinished. Rotation's name-based recovery still requires replacement.
 
 The `project_readiness` migration preserves original Linear Project bodies and
 acquisition evidence before a one-time name/slug correction from fresh provider

@@ -7,8 +7,10 @@ status and evidence; earlier review notes remain at
 
 - Preservation mechanics: follow the design's **Accepted planning must own durable
   projection**, **Reteam relationship acceptance** and **Preservation boundary**
-  sections in that order. They own the three remaining failures, replacement writers and
-  operation proofs; no new product decision is needed. Collection now preserves
+  sections in that order. They own the two original reteam failures and the new created-successor
+  recovery failure; no new product decision is needed. The design now places that
+  recovery proof with binding/transition replacement because name-based selection
+  cannot recover preserved provider names. Collection now preserves
   issue-reported ownership; its former listing-based rewrite is removed.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.

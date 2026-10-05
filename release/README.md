@@ -183,11 +183,12 @@ Manual tag and publication commands record intervention on pending scheduled
 releases. Nested publisher calls reusing the active lock preserve the owning
 execution's provenance.
 
-An invalid saved candidate can advance to a patch successor only after exact-source
+An invalid untagged candidate is corrected under the same version after exact-source
 inspection confirms that preparation remains and GitHub, crates.io, and the
-versioned DMG are all unpublished. Unknown or partial publication blocks
-replacement. Release history retains the rejected candidate and inspection on
-the same opportunity's attempt; earlier failures and original dues remain.
+versioned DMG are all unpublished. The corrected PR uses a retry branch derived
+from the rejected commit; earlier preparation commits remain in history.
+Unknown or partial publication blocks replacement. Release history retains the
+rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
 still pass installation preflight in a fresh Home before reuse or publication.
 
@@ -206,11 +207,10 @@ that exact source; published assets cannot substitute for the check.
 
 After integration, the publisher inspects the exact merged source before the
 controller builds or tags it. A migration arriving after preparation causes a
-new patch cut; canonical batches already on main stay immutable. For an invalid
-tagged candidate, replacement first requires confirmed absence of a GitHub
-Release (including drafts), crates.io version, and versioned R2 download.
-Provider errors leave publication state unresolved. Partial publication needs
-reconciliation; the controller never rewrites the old tag.
+corrected cut at the same version, appending a canonical migration batch while
+preserving earlier batches. A failed build or publisher preparation likewise
+keeps the version. Tagged releases must finish or report their recovery blocker;
+the controller neither rewrites their tags nor skips ahead to another version.
 
 The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
 with `preparation_required` (a list of reasons) and `publications` (null when

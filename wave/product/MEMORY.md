@@ -1097,8 +1097,8 @@ Wispr Flow owns dictation; configured UI execution requires a capable host.
   ones (e.g. `RunStatus`), not re-litigating the approach.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
-  `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
-  must clear it or full `cargo test -p loopflow` fails only under agent runs.
+  `LF_RUN_ID` and `LF_FLOW_STEP`; Rust tests that launch or assert journal ids
+  must clear both or `cargo test -p loopflow` fails only under agent runs.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and

@@ -99,10 +99,13 @@ unused waiting-review store queries. Open and rename use stored conversation ide
 native process fencing and captured history remain. Worker-exclusive controller tests are retired with the review
 path; ordinary Flow tests carry execution and crash/effect proof.
 
-Attention still projects Review/Reply and `--needs-me`; Task primaries, workflows,
-autonomous loop syntax and ordinary detached launch remain unimplemented. Current
-human-bearing templates must become conversation workflow guidance before release;
-they now fail operational launch. No live Home or saved invocation was changed.
+Attention still projects Review/Reply and `--needs-me`, which builtin
+`repo_operate` guidance still names; Task primaries, workflows, autonomous loop
+syntax (`loop-or-next` exists nowhere yet; `loop-decide` and `repeat.from` remain)
+and ordinary detached launch remain unimplemented. Builtin `feature`, `code`,
+`task-design` and `ship-demo` still carry a human step and now fail operational
+launch; `feature` is the chapter's Task Flow, so this branch cannot release before
+those become conversation workflow guidance. Builtin `pursue` has no human step. No live Home or saved invocation was changed.
 
 [Workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
 `bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` retain
@@ -465,4 +468,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Compression recheck: `cargo test -p loopflow --lib -- ops::human_session lf::discovery lf::commands::run` and `--test session_cli_tests` pass with inherited `LF_FLOW_STEP`/`LF_RUN_*` unset; inside a Flow step two `lf::commands::run` cases read the ambient step token and fail (hermeticity gap, owner: gate). Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.
+Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Reconciliation check: `cargo test -p loopflow --lib -- lf::commands::run` — 33 passed inside a Flow step, after two launch cases began clearing the inherited `LF_FLOW_STEP` they had read as their own Flow position. Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.

@@ -1519,8 +1519,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
+            crate::ops::flow_run::FLOW_STEP_ENV,
         ];
         let _environment = EnvironmentRestore::capture(&keys);
+        std::env::remove_var(crate::ops::flow_run::FLOW_STEP_ENV);
         let path = format!(
             "{}:{}",
             bin.display(),
@@ -1717,6 +1719,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
+            crate::ops::flow_run::FLOW_STEP_ENV,
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];

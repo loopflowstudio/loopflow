@@ -43,7 +43,9 @@ explicitly replaces the Task's workflow. A waiting review is retired with its
 history intact; its exact service, driver and provider execution must exit before
 the replacement starts. Retirement does not approve the review. If interruption
 leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
-unresolved process ownership still block admission.
+unresolved process ownership still block admission. `flow end ID` ends a stopped
+Flow without running its remaining steps; it lists as `replaced` and keeps its
+failure and history.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files

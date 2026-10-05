@@ -1,7 +1,9 @@
 mod directory;
 mod lifecycle;
 mod restart;
-pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub(crate) use lifecycle::{
+    cleanup_completed_task, end_stopped_flow, notice_retained_task, record_abandoned_pr,
+};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
@@ -5734,6 +5736,152 @@ mod tests {
     }
 
     #[test]
+    fn completion_settles_work_that_a_machine_restart_ended() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("RESTARTED", repo.path().into()));
+        let store = &fixture.store;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let flow = |id: &str, human: bool| {
+            let mut invocation = crate::durable::test_flow_invocation(
+                "code",
+                0,
+                "implement",
+                human.then_some("review"),
+                human,
+            );
+            invocation.id = id.into();
+            crate::durable::FlowSession {
+                task_id: Some(fixture.task.id.clone()),
+                wave_id: Some(fixture.task.wave_id.clone()),
+                cwd: fixture.task.worktree.clone(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                finished: false,
+                invocation,
+                pending_session_id: None,
+                ready_summary: None,
+                cursor: Default::default(),
+                version: 0,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                updated_at: time::OffsetDateTime::now_utc(),
+            }
+        };
+
+        // An earlier restart replaced a Flow without retiring its review.
+        let reviewed = runtime
+            .block_on(store.start_task_flow(&fixture.task.id, flow("reviewed", true)))
+            .unwrap();
+        let reviewed = runtime
+            .block_on(store.reserve_task_review(reviewed.id(), reviewed.version))
+            .unwrap();
+        let review = reviewed.pending_session_id.clone().unwrap();
+        // Restart now retires the review first; rows it stranded earlier remain.
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE id=?1",
+            rusqlite::params![reviewed.id(), now],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
+        // A second Flow stopped when its step failed.
+        let failed = runtime
+            .block_on(store.create_flow(flow("failed", false)))
+            .unwrap();
+        runtime
+            .block_on(store.fail_flow(
+                failed.id(),
+                failed.version,
+                None,
+                &crate::durable::TaskFlowBlocker::now("implement process exited"),
+            ))
+            .unwrap();
+        // Its step and provider turn never recorded an outcome.
+        let exec = crate::exec::Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: None,
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some("implement".into()),
+            repo: None,
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            started_at: now - 100,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        store.sqlite.record_exec(&exec).unwrap();
+        let session = store
+            .sqlite
+            .test_session("stalled", &crate::session_record::new_artifact_key());
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
+            rusqlite::params![repo.path().to_str().unwrap(), session.id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             VALUES(?1,'thread','turn','started','turn',?2,'{}')",
+            rusqlite::params![session.id, now - 100],
+        )
+        .unwrap();
+        let blockers = || super::lifecycle::associated_work_blockers(store, &fixture.task).unwrap();
+
+        // Work that began after the last boot may still be running.
+        crate::journal::set_test_machine_booted_at(Some(now - 200));
+        let unresolved = blockers();
+        assert_eq!(unresolved.len(), 3, "{unresolved:?}");
+        assert!(unresolved
+            .iter()
+            .any(|reason| reason.contains(exec.id.as_str())));
+        assert!(unresolved.iter().any(|reason| reason.contains("stalled")));
+
+        // A restart leaves only the Flow itself, which completion never ends.
+        crate::journal::set_test_machine_booted_at(Some(now - 50));
+        let unfinished = blockers();
+        assert_eq!(unfinished.len(), 1, "{unfinished:?}");
+        assert!(unfinished[0].contains("Flow failed is unfinished"));
+        runtime
+            .block_on(super::end_stopped_flow(store, failed.id()))
+            .unwrap();
+        assert_eq!(blockers(), Vec::<String>::new());
+        crate::journal::set_test_machine_booted_at(None);
+
+        // Ending keeps the failure in Task history and rewrites no evidence.
+        let ended = runtime.block_on(store.flow(failed.id())).unwrap().unwrap();
+        assert!(ended.finished);
+        assert_eq!(ended.failure.unwrap().reason, "implement process exited");
+        assert!(runtime
+            .block_on(store.task_events_after(&fixture.task.id, 0))
+            .unwrap()
+            .iter()
+            .any(
+                |event| matches!(&event.kind, TaskEventKind::Progress { summary }
+                if summary.contains("ended by request after it failed"))
+            ));
+        assert_eq!(store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+        assert!(store
+            .sqlite
+            .session(&review)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+    }
+
+    #[test]
     fn task_work_recovery_keeps_history_without_treating_it_as_execution_authority() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -5757,7 +5905,7 @@ mod tests {
             command: Some("historical diagnostic".into()),
             repo: None,
             cwd: Some(repo.path().to_string_lossy().into_owned()),
-            started_at: 1,
+            started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             completed_at: None,
             outcome: None,
             exit_code: None,

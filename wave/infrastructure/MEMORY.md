@@ -19,7 +19,7 @@ so an interruption before replacement otherwise destroys retry evidence. The
 public restart fixture reproduces that boundary with no Session provider PID;
 retry uses saved identities. Unknown ownership and independent reviews still block.
 
-## Transient recovery (LOO-326, branch evidence 2026-10-04)
+## Transient recovery (LOO-326, 2026-10-04)
 
 Jack Heart approved existing Tasks using valid cached planning regardless of age;
 known invalidation/removal/terminal state/ownership mismatch still blocks. Apply
@@ -31,13 +31,19 @@ Read retries belong only around the failing provider read. Artifact attempts use
 separate temporary directories and keep candidate identity fixed. Bound pipe
 collection as well as process exit: a descendant can retain stdout after its
 parent exits. Never retry publisher writes or turn missing checks into success.
-The release child's Swift cleanup finding remains owned by release memory; Jack's
-supplied steers establish its v0.12.24 shipment. The other changes here are branch
-evidence until delivery, with no live release or installation replacement.
+The Swift cleanup finding stays in release memory (shipped in v0.12.24).
+PR #1413 merged these as acd6654f9 after hosted CI passed, including Swift under
+combined headless and external-network restrictions. Merge is not installation.
 
-
-Hosted CI run 37186227700 passed all jobs, including Swift with combined headless
-and external-network restrictions. Publication is not merge or Task completion.
+The Task then could not complete: an earlier restart had stranded its review
+under a replaced Flow, an independent Flow had failed, and their Execs and one
+provider turn never settled before a machine restart removed the evidence.
+Branch repair (PR 2): an Exec or provider turn that began before the last boot
+has exited; a review whose Flow ended awaits no one; `lf flow end ID` retires one
+stopped Flow by request, keeping its failure and history and inventing no step
+result. Live or unknown execution since boot still blocks. Closing LOO-326 needs
+an installed release carrying this, then `lf flow end` and `lf task complete`
+from outside any `lf --task LOO-326` run, whose own Exec gates completion.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 

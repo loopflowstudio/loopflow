@@ -298,7 +298,8 @@ Frames apply with the existing equality checks, so unchanged rows do not
 re-render. Rules:
 
 - Drop a frame whose `sequence` is older than the part's last applied frame, or
-  whose `home` or scope differs from the current one.
+  whose scope differs from the current one. A frame from another Home drops
+  the previous Home's content and selection, then applies (question 21).
 - Never pass through `.loading` between frames; a stream failure shows the last
   good reading as unavailable and restarts with backoff, then `refresh`.
 - Selection clears only when a complete planning frame omits the selected Task
@@ -401,8 +402,8 @@ liveness was not observed.
    requests; the Session and Wave-detail loops are gone.
 4. Partly built: `activity` is a part and its loop is gone; `active` is still
    the second watch process (remaining work 2).
-5. Built, not run: the rendered benchmark scenario. Not done: its samples
-   and the installed-app demo.
+5. Built and run for 3 samples: the rendered benchmark scenario. Not done:
+   the 20-sample release run and the installed-app demo.
 
 Slices 1–4 land together (Jack's decision); they were ordered for building,
 not for separate delivery.
@@ -473,6 +474,8 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
+- 2026-10-05 realign, after merging main (#1447): `swift test --filter
+  PodiumModelStreamTests` 6/6. No code changed; Rust not rerun.
 - 2026-10-05 `desktop_performance.py write-visible --samples 3` on a Home
   copy: complete, 15/15.
 - 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 8/8;

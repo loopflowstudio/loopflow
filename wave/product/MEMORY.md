@@ -547,8 +547,7 @@ conversation context. Outstanding rename and delayed New-session feedback retain
 the originating identity. Neither navigation nor a matching cwd authorizes client
 transfer. Task/Session completion and closing a view remain different actions.
 
-Chapter ownership and active-Run streaming are implemented in this branch;
-Sessions still poll. The September 25 signed promotion reused the retained
+The September 25 signed promotion reused the retained
 chapter-bearing Home and preserved all six chapter receipts. Installed-app reads
 and a native capture showed real Loopflow/Etude planning; Kata's missing chapter
 remained explicit. See [the configured receipt](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-ready-evidence/README.md).

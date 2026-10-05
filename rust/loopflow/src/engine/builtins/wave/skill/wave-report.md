@@ -198,7 +198,7 @@ Use this ID-first form in operational lists. In prose, use
 references when unambiguous.
 
 Fill the link from `task.identifier` and `reference.issue_url`, and the readable
-title from `task.title`. Take status from `runtime.status` or the roadmap
+title from `task.name`. Take status from `runtime.status` or the roadmap
 `section`, and next owner from `next_move.owner`. State the next action only
 when supported by current evidence; leave unknown state unknown. Include an
 active PR/workspace slug only when navigating that workspace is the job. In

@@ -873,19 +873,23 @@ public release-channel demo. Discard the container afterward.
 Probe the proposed capture-conversion exclusion boundary separately:
 
 ```bash
-uv run --no-project /fixture/capture_exclusion.py --released-sha256 "$released_sha256"
+uv run python scripts/test_capture_exclusion.py
 ```
 
-Copy `tests/e2e/capture_exclusion.py` and the published v0.13.3 Linux CLI to
-`/fixture/capture_exclusion.py` and `/fixture/prior/lf` in a disposable Ubuntu
-24.04 container. Supply its independently verified release checksum. Use root,
-Python, useradd and runuser, with no host mounts or credentials and no external
-network. The fixture creates its own account and Home. It attempts direct released
+The runner builds a disposable Ubuntu 24.04 image containing only the fixture
+and the published v0.13.3 Linux CLI, verified against its pinned release checksum.
+Downloads finish before the experiment starts with `--network none`, no host
+mounts or credentials. It removes its named container and image afterward.
+`.github/workflows/capture-exclusion.yml` runs it for changes to the experiment,
+including PR checkpoints that retain scratch. A missing Docker service is an
+unavailable check, never a passing exclusion result.
+
+The fixture creates its own account and Home. It attempts direct released
 preflight, doctor and screenshot commands before exclusion, while a privileged
 worker accesses that Home, and after worker death. It compares database/payload
 bytes and filesystem ownership, including a retained-descriptor counterexample.
-It intentionally leaves the fixture account's Home root-owned; discard the
-container afterward. This experiment does not exercise a candidate converter,
+The fixture account's Home stays root-owned until container disposal.
+This experiment does not exercise a candidate converter,
 populated Session preservation, macOS exclusion or recovery targeting.
 
 ## Nightly Package Tests

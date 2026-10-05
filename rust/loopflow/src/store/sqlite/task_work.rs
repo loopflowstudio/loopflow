@@ -420,16 +420,25 @@ mod tests {
         let unfinished = ExecId::new();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)", params![unfinished, TraceId::new()]).unwrap();
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
+                params![unfinished, TraceId::new()],
+            )
+            .unwrap();
             conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
         }
         let open = store.task_open_work(&task).unwrap();
         assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
-        assert_eq!(open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(), [&unfinished]);
+        assert_eq!(
+            open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            [&unfinished]
+        );
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM session_events WHERE receipt_key='open'", []).unwrap();
-            conn.execute("DELETE FROM execs WHERE id=?1", [&unfinished]).unwrap();
+            conn.execute("DELETE FROM session_events WHERE receipt_key='open'", [])
+                .unwrap();
+            conn.execute("DELETE FROM execs WHERE id=?1", [&unfinished])
+                .unwrap();
         }
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
         assert!(work.execs.iter().any(|exec| exec.id == bound_exec));

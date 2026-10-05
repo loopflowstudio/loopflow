@@ -671,15 +671,14 @@ async fn roadmap_snapshot(
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
-        let task_snapshots =
-            wave_tasks(store, wave, false, task)
-                .await
-                .unwrap_or_else(|error| WaveTasks {
-                    tasks: Evidence::Unavailable {
-                        reason: error.to_string(),
-                    },
-                    unavailable_tasks: Vec::new(),
-                });
+        let task_snapshots = wave_tasks(store, wave, false, task)
+            .await
+            .unwrap_or_else(|error| WaveTasks {
+                tasks: Evidence::Unavailable {
+                    reason: error.to_string(),
+                },
+                unavailable_tasks: Vec::new(),
+            });
         if task.is_some()
             && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
         {
@@ -706,8 +705,7 @@ async fn roadmap_snapshot(
     }
     roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
     Ok(RoadmapSnapshot {
-        generated_at: format_time(evaluation_time)
-            .expect("current timestamp formats as RFC 3339"),
+        generated_at: format_time(evaluation_time).expect("current timestamp formats as RFC 3339"),
         waves: roadmaps,
     })
 }

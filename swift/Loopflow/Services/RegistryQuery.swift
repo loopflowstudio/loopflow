@@ -1,7 +1,8 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
-// Planning and history are one-shot queries. Active Sessions use one foreground
-// observation per window so native receipt discovery survives between samples.
+// History and explicit lookups are one-shot queries. What a window shows is kept
+// current by one foreground workspace reader per window; active Sessions use a
+// second so native receipt discovery survives between samples.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
 // readers with `--json` as subprocesses and decodes the wire

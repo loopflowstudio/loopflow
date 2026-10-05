@@ -147,7 +147,11 @@ mod tests {
                 [&wave],
             )
             .unwrap();
-            conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)", params![ExecId::new(), TraceId::new()]).unwrap();
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![ExecId::new(), TraceId::new()],
+            )
+            .unwrap();
         }
         assert_eq!(
             store.revisions().unwrap(),

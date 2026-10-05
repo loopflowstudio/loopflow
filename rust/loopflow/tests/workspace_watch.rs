@@ -232,9 +232,7 @@ fn stable(mut value: serde_json::Value) -> serde_json::Value {
 fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
     let home = Home::new();
     let watch = home.watch();
-    assert!(watch
-        .planning(Duration::from_secs(30), |_| true)
-        .is_empty());
+    assert!(watch.planning(Duration::from_secs(30), |_| true).is_empty());
 
     let committed = Instant::now();
     home.plan(1);
@@ -335,7 +333,10 @@ fn a_steady_writer_is_shown_while_it_writes() {
         }
     }
     let (count, elapsed) = shown.expect("no planning frame until the writer stopped");
-    assert!(count < 60, "first frame arrived only as the writer finished");
+    assert!(
+        count < 60,
+        "first frame arrived only as the writer finished"
+    );
     eprintln!("first frame after {elapsed:?}, at write {count}");
     if latest != 60 {
         watch.planning(Duration::from_secs(5), |tasks| tasks.len() == 60);
@@ -386,13 +387,20 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
             }
         }
     };
-    watch.request(serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
-        "headless": false, "task": null, "wave": null, "activity": null}));
+    watch.request(
+        serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
+        "headless": false, "task": null, "wave": null, "activity": null}),
+    );
     assert_eq!(sessions(&watch, 1).repo, home.wave.repo());
-    watch.request(serde_json::json!({"action": "scope", "id": 2, "repo": other,
-        "headless": true, "task": null, "wave": home.wave.id().as_str(), "activity": null}));
+    watch.request(
+        serde_json::json!({"action": "scope", "id": 2, "repo": other,
+        "headless": true, "task": null, "wave": home.wave.id().as_str(), "activity": null}),
+    );
     let part = sessions(&watch, 2);
-    assert_eq!((part.repo.as_str(), part.includes_headless), (other.as_str(), true));
+    assert_eq!(
+        (part.repo.as_str(), part.includes_headless),
+        (other.as_str(), true)
+    );
     // The first scope's repository is never read again.
     home.raw().execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('conversation','Conversation','human',1,0,?1)", [home.wave.repo()]).unwrap();
     for frame in watch.parts(Duration::from_secs(2)) {
@@ -412,7 +420,10 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         .map(|frame| serde_json::to_value(&frame).unwrap()["part"].clone())
         .collect();
     for part in ["planning", "sessions", "wave", "activity"] {
-        assert!(answered.iter().any(|name| name == part), "{part}: {answered:?}");
+        assert!(
+            answered.iter().any(|name| name == part),
+            "{part}: {answered:?}"
+        );
     }
 
     let execs = home.execs();

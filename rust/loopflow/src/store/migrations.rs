@@ -1238,6 +1238,44 @@ mod tests {
     }
 
     #[test]
+    fn store_revisions_upgrade_starts_counting_without_touching_released_rows() {
+        let conn = open();
+        apply_before_current_draft(&conn, "store_revisions");
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave-released','proof','/repo',1);",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("store_revisions"))
+            .unwrap();
+        let revision = |domain: &str| -> i64 {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain=?1",
+                [domain],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        // Rows written before the upgrade are not counted as changes.
+        assert_eq!(revision("planning"), 0);
+        conn.execute(
+            "UPDATE waves SET name='renamed' WHERE id='wave-released'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(revision("planning"), 1);
+        assert_eq!(revision("sessions"), 0);
+        let unfinished: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN
+                 ('execs_unfinished','session_events_exec','flow_events_exec')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unfinished, 3);
+    }
+
+    #[test]
     fn remove_ask_preserves_conversations_and_history() {
         let conn = open();
         apply_before_current_draft(&conn, "remove_ask");

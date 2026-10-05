@@ -145,14 +145,14 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
             bytes.append(contentsOf: buffer.prefix(count))
             while let end = bytes.dropFirst(searchedBytes).firstIndex(of: 10) {
                 guard bytes.distance(from: bytes.startIndex, to: end) <= frameLimit else {
-                    fail(RegistryQueryError("\(name) frame exceeds its size limit")); return
+                    fail(RegistryQueryError("\(name) frame exceeds \(frameLimit / (1024 * 1024)) MiB")); return
                 }
                 do {
                     let frame = try decode(Data(bytes[..<end]))
                     lastFrame = ProcessInfo.processInfo.systemUptime
                     continuation.yield(frame)
                 } catch {
-                    fail(RegistryQueryError("Invalid \(name) observation: \(error.localizedDescription)"))
+                    fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error.localizedDescription)"))
                     return
                 }
                 bytes.removeSubrange(...end)
@@ -160,7 +160,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
             }
             searchedBytes = bytes.count
             if bytes.count > frameLimit {
-                fail(RegistryQueryError("\(name) frame exceeds its size limit")); return
+                fail(RegistryQueryError("\(name) frame exceeds \(frameLimit / (1024 * 1024)) MiB")); return
             }
         }
     }

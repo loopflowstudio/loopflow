@@ -1,9 +1,50 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **draft plan, 2026-10-05, revised in design review the same day.** Jack
-Heart requested the Task; the mechanism below is proposed, not accepted. Product
-decisions in the Task brief are binding. Open choices are in
+Status: **partly built, 2026-10-05.** Jack Heart requested the Task and made the
+decisions below in design review; the mechanism was proposed, not separately
+accepted. Product decisions in the Task brief are binding. Open choices are in
 [questions.md](questions.md).
+
+## Remaining work
+
+Built on the branch: the `store_revisions` migration and coverage test, the
+change waiter, `lf monitor workspace --watch --json` with planning, Sessions,
+Task work, Wave detail, Work activity and process activity parts, the
+unfinished-Exec completion-gate read, and the Desktop cutover with every
+`lf`-spawning timer loop deleted. Not yet done:
+
+1. **Planning reading is about 2 s on a copy of Jack's store, not 300 ms.**
+   Inside the retained process it was about 7.5 s before two changes: Git
+   answers are reused briefly, and Exec membership is reached from the 109
+   unfinished Execs. Samples were taken with the machine at load 50–60, so
+   they are rough. What is left is mostly per-Task Session membership SQL and
+   Git content reads. The follow-up Task Jack asked for on a miss is **not
+   filed**.
+2. **`active` is still its own process.** `monitor active --watch` was not
+   folded in (question 5's fallback, taken for now); a window runs two readers.
+   Both share one Swift pipe reader, `LocalLineObservation`.
+3. **The explicit one-shot reads survive.** `PodiumModel.refresh`,
+   `refreshPlanning`, `refreshSessions`, `refreshProcessActivity` and
+   `refreshWorkActivity` still spawn `lf` when no reader is open: session
+   fixtures, and about sixty call sites in four test suites. With a reader open
+   they send a request instead. `roadmapGeneration` and `sessionsGeneration`
+   remain to guard those reads. Moving the suites onto scripted frames deletes
+   both.
+4. **Git-only changes are slower than before.** Checkout contents are re-read
+   at most once a minute and only when planning is read; with no store commit
+   that is every five minutes. The 15 s poll used to show a dirty checkout
+   sooner. Nobody chose this trade.
+5. **No rendered measurement.** The write-to-visible scenario in
+   `desktop_performance.py` and the installed-app demo are not built or run.
+   The only latency observed is commit to frame in a debug build on a tiny
+   store: 309 ms and 718 ms, 250 ms of it the burst window.
+6. **Swift coverage gaps.** A scripted feed proves in-place updates, an older
+   sequence ignored, a pre-write frame ignored, another repository's rows
+   ignored, `refresh` waiting for its answer, and reader end then recovery. Not
+   covered: a frame from another Home, a completed Task leaving the working
+   set, and UI-test modes, which no longer re-read Sessions every 2 s.
+7. **`WavesView`** (Portfolio and repository windows) now follows the stream
+   through its own model; unexercised beyond compiling.
 
 ## Decisions (Jack Heart, 2026-10-05 design review)
 
@@ -147,11 +188,13 @@ Parts and what invalidates them:
 
 | Part | Body (existing wire DTO) | Recomputed when |
 | --- | --- | --- |
-| `planning` | `RoadmapSnapshot` + Waves | `planning`, `flows`, `sessions`, `execs` |
+| `planning` | `RoadmapSnapshot` + Waves | `planning`, `flows`, `sessions`, `execs`; 5 min clock |
 | `sessions` | Session records for the scoped repository | `sessions`, `flows`, `planning` |
-| `task` | `TaskStatus`/`TaskWork` for the selected Task | any domain |
-| `activity` | `ActivitySnapshot` | `execs`, and a slow clock for liveness |
-| `active` | `ActiveSessionsSnapshot` | existing native-receipt events |
+| `task` | `TaskWork` for the selected Task | any domain |
+| `wave` | `WaveDetailSnapshot` for the shown Wave | any domain; 5 min clock |
+| `work_activity` | `WorkActivitySnapshot` for the selection | any domain |
+| `activity` | `ActivitySnapshot` | `execs`; 2 s clock for liveness |
+| `active` | `ActiveSessionsSnapshot` | not built: still `monitor active --watch` |
 
 Bodies are the existing DTOs unchanged, so Swift keeps its decoders and
 LOO-376's saved wire text keeps working. A part is emitted only when its bytes
@@ -160,6 +203,11 @@ nothing. Projections are coalesced: 100 ms trailing quiet capped at 250 ms from
 the first unhandled bump, so a steady writer cannot postpone a projection
 indefinitely; at most one projection per part in flight; newest frame replaces
 an unsent one.
+
+As built, "differs" ignores the fields that only restate when a reading was
+taken (`generated_at`, `evidence_age_secs`, a condition's `observed_at`, the
+activity window's bounds); revisions are re-read every second as the
+missed-event check; and a request forces its parts to answer even unchanged.
 
 Byte comparison hides wasted work: a projection that ran and produced the same
 bytes sends nothing and still cost its 300 ms. The heartbeat frame therefore
@@ -221,7 +269,7 @@ re-render. Rules:
 state appears in every open window scoped to it, without action, within the
 budget below.
 
-**Source of truth.** `loopflow.db` in the selected Home. `store_revisions` is
+**Source of truth.** Each Home's `loopflow.db`. `store_revisions` is
 derived inside the same transaction. Frames, `PodiumModel` state and the saved
 workspace are derived views; none is written back.
 
@@ -265,16 +313,17 @@ one-shot commands. iOS is unchanged.
 
 **Delete — do not maintain.**
 
-- `PodiumModel.keepPlanningCurrent`, `keepSessionsCurrent` and their
-  `Task.sleep` cadences; `roadmapGeneration` / `sessionsGeneration` as poll
-  guards (frame `sequence`/`answers` replaces them).
-- The 2 s `refreshProcessActivity` loop in `PodiumView`; the 30 s loop in
-  `WaveDetailPane`.
-- `WavesView.pollRegistry` if that view is still routed; if not, the view.
-- Final slice: the separate `monitor active --watch` process and
-  `LocalActiveSessionsObservation`'s own process management, once `active` is
-  a part of the workspace stream. Its native-receipt reader, bounded frames and
-  explicit-retry behavior survive.
+- Deleted: `PodiumModel.keepPlanningCurrent`, `keepSessionsCurrent` and their
+  `Task.sleep` cadences; the 2 s `refreshProcessActivity` loop in `PodiumView`;
+  the 30 s loop in `WaveDetailPane`; `WavesView.pollRegistry` (the view is
+  routed, so it stays and follows the stream).
+- Still to delete: `roadmapGeneration` / `sessionsGeneration` and the one-shot
+  bodies of `refresh`, `refreshPlanning`, `refreshSessions`,
+  `refreshProcessActivity`, `refreshWorkActivity` (remaining work 3). Do not
+  extend them.
+- Still to delete: the separate `monitor active --watch` process, once
+  `active` is a part of the workspace stream. Its native-receipt reader,
+  bounded frames and explicit-retry behavior survive.
 - Must survive: saved-workspace launch (LOO-376), page-wise Session history on
   request, `updateTaskDirective`'s "absent after accept" error, fixture mode.
 
@@ -317,7 +366,7 @@ not for separate delivery.
 - `cargo test -p loopflow store_revisions` passes: every table has a domain or
   an explicit exemption; rollback does not bump; upgrade from the released
   frontier creates the triggers.
-- `swift test --filter PodiumModelTests` passes with a scripted feed: selection,
+- `swift test --filter PodiumModel` passes with a scripted feed: selection,
   drafts and Session panes survive frames; an older `sequence` and a
   wrong-Home frame are ignored; no `.loading` appears between frames; a
   completed Task leaves the working set and remains under Completed; stream
@@ -362,6 +411,13 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
-- 2026-10-05 probe: `python3 /tmp/lf382/probe.py` — 20/20 cross-process commits
-  observed, 1 delivery per 200-row transaction, 0 idle events, 3.5 µs check;
-  no repository build or test run in kickoff.
+- 2026-10-05 probe: 20/20 cross-process commits observed, 1 delivery per
+  200-row transaction, 0 idle events, 3.5 µs check.
+- 2026-10-05 implement: `cargo test -p loopflow --test workspace_watch` 5/5;
+  `--test dto_fixtures` 19/19; `--lib store_revisions` 4/4; `--lib task_work`
+  pass; `cargo clippy --all-targets -- -D warnings` clean; `swift test --filter
+  "PodiumModel|SessionControls|SessionRename|ActiveSession|WorkspaceNavigation|RegistryQuery"`
+  pass after one wording fix; `check_migrations.py` and
+  `check_architecture.py` pass. `status_tests`
+  `previous_release_merge_request_migrates…` fails locally because it applies
+  published migrations only; it needs `materialize_rust_tests.py`, left to gate.

@@ -62,10 +62,10 @@ pub struct WorkspaceFrame {
 #[serde(tag = "part", content = "body", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum WorkspaceContent {
-    Planning(Option<PlanningPart>),
+    Planning(Option<Box<PlanningPart>>),
     Sessions(Option<SessionsPart>),
     Task(Option<TaskPart>),
-    Wave(Option<WavePart>),
+    Wave(Option<Box<WavePart>>),
     WorkActivity(Option<WorkActivityPart>),
     Activity(Option<ActivitySnapshot>),
     Heartbeat(Heartbeat),
@@ -429,10 +429,10 @@ impl Reader {
         };
         self.runtime.block_on(async {
             Ok(match part {
-                Part::Planning => WorkspaceContent::Planning(Some(PlanningPart {
+                Part::Planning => WorkspaceContent::Planning(Some(Box::new(PlanningPart {
                     roadmap: super::waves::roadmap_all(store).await?,
                     waves: super::waves::wave_snapshots(store, true, true).await?,
-                })),
+                }))),
                 Part::Sessions => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let filter = crate::session::SessionFilter {
@@ -469,10 +469,10 @@ impl Reader {
                         .get_wave(&crate::id::WaveId::parse(&id)?)
                         .await?
                         .ok_or_else(|| anyhow!("Wave {id} is not registered"))?;
-                    WorkspaceContent::Wave(Some(WavePart {
+                    WorkspaceContent::Wave(Some(Box::new(WavePart {
                         wave: id,
                         detail: super::waves::wave_detail(store, &wave).await?,
-                    }))
+                    })))
                 }
                 Part::WorkActivity => {
                     let scope = self.scope.activity.clone().context("no Work in scope")?;
@@ -498,14 +498,14 @@ impl Reader {
     /// Before a store exists there is nothing registered, which is a reading.
     fn absent(&self, part: Part) -> Result<WorkspaceContent> {
         Ok(match part {
-            Part::Planning => WorkspaceContent::Planning(Some(PlanningPart {
+            Part::Planning => WorkspaceContent::Planning(Some(Box::new(PlanningPart {
                 roadmap: RoadmapSnapshot {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
                     waves: Vec::new(),
                 },
                 waves: Vec::new(),
-            })),
+            }))),
             Part::Sessions => WorkspaceContent::Sessions(Some(SessionsPart {
                 repo: self.scope.repo.clone().context("no repository in scope")?,
                 includes_headless: self.scope.headless,
@@ -571,8 +571,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                         }
                     },
                     _ => {
-                        mailbox.error =
-                            Some("reader stdin failed or request exceeds 16 KiB".into())
+                        mailbox.error = Some("reader stdin failed or request exceeds 16 KiB".into())
                     }
                 }
                 let done = mailbox.closed || mailbox.error.is_some();

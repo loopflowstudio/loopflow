@@ -487,7 +487,10 @@ fn workspace_frames_keep_each_part_and_require_every_envelope_field() {
     let frames: Vec<WorkspaceFrame> = serde_json::from_str(json).unwrap();
     let source: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(&frames).unwrap(), source);
-    assert!(matches!(frames[0].content, WorkspaceContent::Planning(Some(_))));
+    assert!(matches!(
+        frames[0].content,
+        WorkspaceContent::Planning(Some(_))
+    ));
     assert_eq!(frames[0].answers, None);
     assert!(matches!(frames[2].content, WorkspaceContent::Task(None)));
     assert!(frames[2].unavailable.is_some());

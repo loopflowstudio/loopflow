@@ -5,6 +5,26 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Reactive workspace (2026-10-05)
+
+Jack Heart requested that the open workspace show committed changes without a
+refresh (LOO-382). In design review he decided: one landing; Desktop reacts to
+the store only, with Linear arriving through sync (he prefers webhooks for
+scheduling it, unowned); latency budgets are targets pursued for about an hour,
+and a miss ships with numbers and a follow-up Task.
+
+- Polling was the largest writer in the store: about 63,000 of 65,043 daily
+  Exec rows were Desktop's own reads, and that volume made the reads slow.
+- A domain follows what a write changes on screen, not its table. Transcript
+  lines were 164,192 of 168,336 daily Session events; counting them would
+  re-read everything for ten hours a day.
+- A reading restates when it was taken in several fields. Comparing bytes
+  without removing them sends a frame for every reading.
+- On the branch, unshipped: one `lf monitor workspace --watch` per window
+  replaces the 2–30 s loops. A planning reading is about 2 s on a copy of
+  Jack's store against a 300 ms target; no rendered latency is measured.
+  Remaining work and evidence limits are in the Task's scratch plan.
+
 ## Capture and configurable New Session (2026-10-03 UTC)
 
 Jack Heart accepted capture on October 1, then selected New Session and the
@@ -715,31 +735,9 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
+Retired 2026-10-05: these described residents, listeners and a Home server Jack
+deleted on 2026-09-27. The text is in
+[git history](https://github.com/loopflowstudio/loopflow/blob/105372850/wave/product/MEMORY.md).
 
 ## Model (design invariants)
 

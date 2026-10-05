@@ -40,3 +40,24 @@ Added 2026-10-05 in design review. Still unconfirmed.
 10. **The transcript predicate is a sketch.** See finding 7 and Risks in the
     design. Nobody has checked every `observed` receipt key that `session list`
     reads.
+
+Added 2026-10-05 in implementation. Nobody has confirmed these.
+
+11. **Three indexes joined the shared store** beside `store_revisions`:
+    `execs_unfinished`, `session_events_exec`, `flow_events_exec`. They serve
+    the completion gate. Infrastructure has not seen them (question 1).
+12. **The watch reuses Git answers**: repository layout for ten minutes,
+    checkout contents for one. Only the watch process does; one-shot commands
+    ask Git every time. This is what makes a planning reading 2 s instead of
+    7.5 s, and it is why Git-only changes show later than they did.
+13. **Planning is re-read every five minutes without a commit**, down from the
+    design's sketch of a slow clock. Shorter costs a 2 s reading each time.
+14. **Process activity is read every 2 s inside the watch**, as the deleted
+    loop did by spawning `lf`. It observes every provider process on the
+    machine, so its frames keep arriving while agents work. Idle CPU of the
+    watch is unmeasured.
+15. **The follow-up Task for the latency miss is not filed.** Jack asked for
+    one when the budget is missed; filing belongs with whoever lands this.
+16. **Session fixtures read once.** UI-test modes without a reader used to
+    re-read Sessions every 2 s; they now read at launch and after local
+    actions. No UI test was run.

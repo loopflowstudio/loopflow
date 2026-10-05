@@ -123,7 +123,8 @@ mod macos {
                     1,
                     &timeout,
                 );
-                count >= 0 && (count == 0 || event.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) == 0)
+                count >= 0
+                    && (count == 0 || event.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) == 0)
             }
         }
     }

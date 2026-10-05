@@ -154,7 +154,8 @@ still closes an exclusively owned engine. This is separate from native PTY proof
 
 ### Remaining implementation and acceptance
 
-- Implement the revised native/review first-launch ownership cut and prove Jack's
+- Resolve the native UI/PTY ownership revision below before the engine-first
+  launch cut; then prove Jack's
   exact Flow-review selector with real native UI, retained draft/history, failed
   startup and exact review completion/retirement fences. Resolve the successful
   takeover draft gap separately from engine reuse.
@@ -168,6 +169,50 @@ still closes an exclusively owned engine. This is separate from native PTY proof
   explicitly; external PTY endpoints still require the runner's spawn clock.
 - Only then optimize measured work, verify before/after results and complete
   acceptance and the caller's authorized delivery boundary.
+
+### Ordinary reconnect counterexample — October 5 UTC
+
+The new `--check-reconnect-draft` regression extends the disposable native runner.
+It observes a unique unsent draft in the original UI, performs a second ordinary
+`lf session connect` (no `--replace`), and appends a different input marker in
+that UI. The synthetic Responses request accepts the marker without the draft.
+Session/thread/generation/PID/birth remain unchanged while the driver changes.
+This disproves continuity on ordinary connect, not just explicit replacement.
+Retained evidence is under
+`scripts/benchmarks/session-connect/20261005-reconnect/`; early cleanup errors
+and the distinction between input acceptance and draft preservation remain visible.
+
+**Revised proposal; not implemented:** preserve the existing native UI and its
+PTY across connections. Publishing an app-server endpoint on first launch is
+insufficient and is no longer the next independent implementation slice.
+The ordinary Flow-review first launch already runs inside the existing tmux
+cradle (`launch_flow` → `start_durable_session`); `resume_native_session` abandons
+that native UI by stopping clients and starting another. Direct terminal launch
+has no retained attachment transport. Engine ownership alone cannot unify them.
+
+The next coherent cut must establish retained terminal ownership on first launch
+for direct conversations and reviews, then attach presentation to that terminal
+without another provider/UI or driver transfer. Keep the same Session authority,
+review token and lock ordering. Additional views remain passive until explicit
+control transfer; view closure and provider shutdown must be separate operations.
+Replay, resize, input fencing and failure cleanup belong to that terminal owner.
+No composer scraping, simulated typing of the old draft, or parallel draft store.
+Already-running native clients without a transport cannot be silently converted.
+
+Product memory requires comparing an opt-in tmux path with transparent PTY relay
+before changing native presentation. Reusing the cradle as default presentation
+without that comparison would contradict the current contract. The prior plan's
+engine-first approach therefore returns to architectural review; dependent
+optimization is stopped under implement's counterexample rule. This is a design
+gap, not missing account access, a rendering environment, or a request for Jack
+to repeat authorization. The exact review selector, repeated retained-UI
+attachments, representative history and baseline-derived targets remain open.
+
+Delete — do not maintain in that cut: the live-attachment route through
+`resume_native_session` that stops/recreates the native UI. Preserve stopped
+Session resume and explicit replacement as distinct operations, exact review
+revalidation, existing driver fences and all captured history. Do not remove
+`recover_history` merely to make a new-UI benchmark faster.
 
 Delete — do not maintain: remote resume no longer applies local launch overrides.
 No history-recovery deletion is justified. `recover_history` still awaits every
@@ -203,4 +248,4 @@ owned process/descriptor and retains cleanup errors alongside the original
 failure. Review found cleanup exceptions could previously escape with a passing
 sample still recorded. Production ownership and timing endpoints are unchanged.
 
-Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo-378-compress-20261005` passed; helper Ruff and injected failure/cleanup-result check passed (initial injection accidentally mocked platform discovery, corrected); prior Rust checks reused; realign `git diff --check` and `lf context --skill realign` passed; first-launch revision, draft continuity and full performance acceptance remain with implementation/gate.
+Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --check-reconnect-draft --output /tmp/loo-378-reconnect-final-20261005` reproduced accepted input without the original draft (exit 1; separate cleanup timeout retained); helper Ruff passed; whole-runner Ruff has pre-existing formatting/line-length failures; `git diff --check` and `lf context --skill implement` passed; retained native UI/PTY ownership returns to design review, full acceptance remains open.

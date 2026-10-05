@@ -143,6 +143,108 @@ def _check_attached_timings(
         raise AssertionError("attached lifetime was recorded before client exit")
 
 
+def _stop_reconnect(client: subprocess.Popen, sample: dict) -> None:
+    try:
+        _stop(client)
+    except Exception as error:
+        # Cleanup must not replace the behavioral failure that triggered it.
+        sample.update(status="failed", reconnect_cleanup_error=str(error))
+
+
+def _check_reconnect_draft(
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: object,
+    master: int,
+    output: Path,
+    sample: dict,
+) -> None:
+    draft = f"Retain across connect {uuid.uuid4().hex}"
+    sample["reconnect_draft"] = draft
+    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
+    transcript = bytearray()
+    deadline = time.monotonic() + 5
+    while draft.encode() not in transcript and time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            transcript.extend(os.read(master, 65536))
+    (output / "reconnect-original.bin").write_bytes(transcript)
+    if draft.encode() not in transcript:
+        raise AssertionError("original UI did not display reconnect draft")
+    before = _state(env)
+    if before is None:
+        raise AssertionError("original UI lost its engine before reconnect")
+    stamp = _process_stamp(before[3])
+    with ExitStack() as cleanup:
+        second_master, slave = pty.openpty()
+        cleanup.callback(os.close, second_master)
+        cleanup.callback(os.close, slave)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
+        second = subprocess.Popen(
+            [str(binary), "session", "connect", before[0]],
+            cwd=work,
+            env={**env, "TERM": "xterm-256color", "LF_PROBE_NATIVE_UI": "1"},
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            preexec_fn=_terminal,
+        )
+        cleanup.callback(_stop_reconnect, second, sample)
+        transcript = bytearray()
+        deadline = time.monotonic() + 15
+        with (output / "reconnect-terminal.bin").open("wb") as log:
+            while time.monotonic() < deadline:
+                if select.select([second_master], [], [], 0.05)[0]:
+                    chunk = os.read(second_master, 65536)
+                    log.write(chunk)
+                    transcript.extend(chunk)
+                    if b"\x1b[6n" in chunk:
+                        os.write(second_master, b"\x1b[1;1R")
+                    if b"\x1b[c" in chunk:
+                        os.write(second_master, b"\x1b[?1;2c")
+                if server.response_text.encode() in transcript:
+                    break
+                if second.poll() is not None:
+                    raise AssertionError("reconnect exited before retained output")
+            else:
+                raise AssertionError("reconnect did not display retained output")
+            after = _state(env)
+            sample["reconnect_same_engine"] = (
+                after is not None and before[:5] == after[:5] and stamp == _process_stamp(before[3])
+            )
+            sample["reconnect_driver_changed"] = after is not None and before[5] != after[5]
+            if not sample["reconnect_same_engine"]:
+                raise AssertionError("reconnect changed the existing engine")
+            # Append a fresh marker to prove input works without copying the old draft.
+            marker = f" reconnect-input-{uuid.uuid4().hex}"
+            os.write(second_master, b"\x1b[200~" + marker.encode() + b"\x1b[201~")
+            time.sleep(0.3)
+            os.write(second_master, b"\r")
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                for request in server.requests:
+                    submitted = json.dumps(request["input"])
+                    if marker.strip() in submitted:
+                        user_input = [
+                            item for item in request["input"] if item.get("role") == "user"
+                        ]
+                        (output / "reconnect-input.json").write_text(
+                            json.dumps(user_input[-1], indent=2)
+                        )
+                        sample["reconnect_input_accepted"] = True
+                        sample["reconnect_preserved_draft"] = draft in submitted
+                        if sample["reconnect_preserved_draft"]:
+                            return
+                        raise AssertionError(
+                            "successful reconnect accepted input but lost the draft"
+                        )
+                if select.select([second_master], [], [], 0.05)[0]:
+                    log.write(os.read(second_master, 65536))
+            raise AssertionError(
+                "reconnect did not accept the input marker; draft continuity unknown"
+            )
+
+
 def measure(
     binary: Path,
     work: Path,
@@ -151,6 +253,7 @@ def measure(
     results: dict,
     output: Path,
     samples: int,
+    check_reconnect_draft: bool = False,
 ) -> None:
     if samples < 1:
         raise ValueError("samples must be positive")
@@ -292,6 +395,8 @@ def measure(
                 sample["exit_before_cleanup"] = client.poll()
                 # This sample started with a held turn. It does not prove retained-history replay.
                 sample["history_population"] = "one in-flight seed turn"
+                if check_reconnect_draft:
+                    _check_reconnect_draft(binary, work, env, server, master, output, sample)
             except Exception as error:
                 sample.update(status="failed", error=str(error))
             finally:

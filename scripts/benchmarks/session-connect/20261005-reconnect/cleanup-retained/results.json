@@ -1,0 +1,61 @@
+{
+  "binary_sha256": "a3054adbe14b2cf11680bc59ac85489ff9bd71b6917c485e9d67c5e23936925e",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 679.546624996874,
+      "input_response_ms": 1128.0952919987612,
+      "before": [
+        "session_12516ebef8404166b68437f2640f535a",
+        "01a10a9b-4ec0-7a01-97cb-0315397c3816",
+        1,
+        91397,
+        1791179312,
+        "99ca11cf-8795-4294-9f66-402f57ed3e47"
+      ],
+      "engine_before": "Sun Oct  4 22:48:32 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 547.477791995334,
+      "input_sent_ms": 984.4590419961605,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_12516ebef8404166b68437f2640f535a",
+        "01a10a9b-4ec0-7a01-97cb-0315397c3816",
+        1,
+        91397,
+        1791179312,
+        "46b54182-e79a-4e40-b11f-503efaed6c6a"
+      ],
+      "diagnostic_while_attached": true,
+      "engine_after": "Sun Oct  4 22:48:32 2026",
+      "continuity": true,
+      "status": "failed",
+      "elapsed_ms": 1478.1752499984577,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn",
+      "reconnect_same_engine": true,
+      "reconnect_driver_changed": true,
+      "reconnect_input_accepted": true,
+      "reconnect_preserved_draft": false,
+      "reconnect_cleanup_error": "Command '['/tmp/lf-connect-vkimx616/bin/lf', 'session', 'connect', 'session_12516ebef8404166b68437f2640f535a']' timed out after 5 seconds",
+      "error": "successful reconnect accepted input but lost the draft"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:48:30Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No pagination, authenticated response, or Flow-review proof",
+    "Failed replacement preserves the original UI draft; successful takeover does not copy drafts"
+  ]
+}

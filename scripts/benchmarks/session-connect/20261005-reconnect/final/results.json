@@ -1,0 +1,62 @@
+{
+  "binary_sha256": "a3054adbe14b2cf11680bc59ac85489ff9bd71b6917c485e9d67c5e23936925e",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 1010.4014169992297,
+      "input_response_ms": 1562.9602919943864,
+      "before": [
+        "session_01493828069f40bea61504f24bba7453",
+        "01a10a9c-6903-7a62-ad96-df95c7ace8a6",
+        1,
+        28928,
+        1791179384,
+        "4697b749-a44b-4284-8894-093cacd449d2"
+      ],
+      "engine_before": "Sun Oct  4 22:49:44 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 840.8139579987619,
+      "input_sent_ms": 1325.733957994089,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_01493828069f40bea61504f24bba7453",
+        "01a10a9c-6903-7a62-ad96-df95c7ace8a6",
+        1,
+        28928,
+        1791179384,
+        "9783029e-5599-4413-9589-80358390ec70"
+      ],
+      "diagnostic_while_attached": true,
+      "engine_after": "Sun Oct  4 22:49:44 2026",
+      "continuity": true,
+      "status": "failed",
+      "elapsed_ms": 1957.5292079971405,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn",
+      "reconnect_draft": "Retain across connect e6fe12628ffc45c9af7bb18a0986ff7d",
+      "reconnect_same_engine": true,
+      "reconnect_driver_changed": true,
+      "reconnect_input_accepted": true,
+      "reconnect_preserved_draft": false,
+      "reconnect_cleanup_error": "Command '['/tmp/lf-connect-1ey6pvfx/bin/lf', 'session', 'connect', 'session_01493828069f40bea61504f24bba7453']' timed out after 5 seconds",
+      "error": "successful reconnect accepted input but lost the draft"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:49:42Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No pagination, authenticated response, or Flow-review proof",
+    "Failed replacement preserves the original UI draft; successful takeover does not copy drafts"
+  ]
+}

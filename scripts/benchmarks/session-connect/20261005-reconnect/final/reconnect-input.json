@@ -1,0 +1,11 @@
+{
+  "type": "message",
+  "id": "msg_01a10a9c-765b-7551-8a21-9b19ef63b1ce",
+  "role": "user",
+  "content": [
+    {
+      "type": "input_text",
+      "text": "reconnect-input-6b73273c2b18447091a5ff6b572ead02"
+    }
+  ]
+}

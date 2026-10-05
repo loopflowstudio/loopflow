@@ -541,6 +541,12 @@ checks attached lifetime after cleanup. It uses a held seed turn and synthetic
 responses; it does not establish paginated-history, Flow-review,
 authenticated-provider, or compositor performance. The input-response endpoint
 includes a deliberate 300 ms submission delay.
+Add `--check-reconnect-draft` with one sample to check a second ordinary live
+connection. The probe displays an unsent draft in the original native UI,
+connects again without `--replace`, and appends a unique input marker without
+copying the draft. The accepted request must contain both. This is currently a
+failing regression: engine continuity and accepted input do not preserve the
+old UI's composer. Reconnect cleanup errors remain separate from that failure.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.

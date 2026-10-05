@@ -219,11 +219,14 @@ def main() -> None:
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--connect-performance", type=int, metavar="SAMPLES")
+    parser.add_argument("--check-reconnect-draft", action="store_true")
     parser.add_argument("--flow-blocked", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--flow-driver-loss", choices=("running", "completed", "both"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
+    if args.check_reconnect_draft and args.connect_performance != 1:
+        parser.error("--check-reconnect-draft requires --connect-performance 1")
     if args.connect_performance is not None:
         if args.connect_performance < 1:
             parser.error("--connect-performance requires a positive sample count")
@@ -311,6 +314,7 @@ enabled = false
                             results,
                             args.output,
                             args.connect_performance,
+                            args.check_reconnect_draft,
                         )
                         if any(sample["status"] != "passed" for sample in results["samples"]):
                             raise SystemExit(1)

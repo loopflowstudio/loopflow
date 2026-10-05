@@ -1,0 +1,60 @@
+{
+  "binary_sha256": "a3054adbe14b2cf11680bc59ac85489ff9bd71b6917c485e9d67c5e23936925e",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 681.7127909962437,
+      "input_response_ms": 1162.1709159953753,
+      "before": [
+        "session_bd02dfa084c64a1696752e28ea79964f",
+        "01a10a9a-7c1f-7392-8a57-3c1f32aa851e",
+        1,
+        60214,
+        1791179258,
+        "b747f0e1-7f43-4f8e-9bcd-029b97130235"
+      ],
+      "engine_before": "Sun Oct  4 22:47:38 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 547.3829999973532,
+      "input_sent_ms": 981.7621659967699,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_bd02dfa084c64a1696752e28ea79964f",
+        "01a10a9a-7c1f-7392-8a57-3c1f32aa851e",
+        1,
+        60214,
+        1791179258,
+        "60ec1a12-2e76-40cb-b30b-0883c6bf09e4"
+      ],
+      "diagnostic_while_attached": true,
+      "engine_after": "Sun Oct  4 22:47:38 2026",
+      "continuity": true,
+      "status": "failed",
+      "elapsed_ms": 1613.1526659955853,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn",
+      "reconnect_same_engine": true,
+      "reconnect_driver_changed": true,
+      "reconnect_input_accepted": true,
+      "reconnect_preserved_draft": false,
+      "error": "Command '['/tmp/lf-connect-4oag624b/bin/lf', 'session', 'connect', 'session_bd02dfa084c64a1696752e28ea79964f']' timed out after 5 seconds"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:47:36Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No pagination, authenticated response, or Flow-review proof",
+    "Failed replacement preserves the original UI draft; successful takeover does not copy drafts"
+  ]
+}

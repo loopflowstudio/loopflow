@@ -2413,6 +2413,27 @@ mod frontier_tests {
             .expect("ordinary current binary opens after promotion");
     }
 
+    /// Opening the shared store reads its schema, never its rows: a dangling
+    /// reference is installation preflight's and `lf home doctor`'s to report.
+    #[test]
+    fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO projects(id, wave_id, external_project_id, created_at)
+             VALUES ('orphan', 'absent-wave', 'external', 100);",
+        )
+        .unwrap();
+
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("an ordinary open validates ledger and schema only");
+        crate::store::migrations::validate_sqlite(&conn)
+            .expect_err("full diagnosis still reports the dangling reference");
+    }
+
     /// A validation-only build never advances the shared store even at the
     /// nominal boundary, and a private/isolated DB stays freely initializable —
     /// the isolated dev escape the directive preserves.

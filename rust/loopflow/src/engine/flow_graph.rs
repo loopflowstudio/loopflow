@@ -1071,9 +1071,6 @@ mod tests {
 
     #[test]
     fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
-        struct Captured {
-            steps: Vec<ConcreteStep>,
-        }
         use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
 
         fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
@@ -1115,7 +1112,6 @@ mod tests {
             ]),
             check(),
         ];
-        let invocation = Captured { steps };
         let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
         ))
@@ -1123,7 +1119,7 @@ mod tests {
         let TaskFlowRecord::Latest(pinned) = fixture.record else {
             panic!("launched Flow fixture")
         };
-        let graph = FlowGraph::new("nested", &invocation.steps);
+        let graph = FlowGraph::new("nested", &steps);
         assert_eq!(graph, pinned.graph);
         // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.
         // Compare every cursor with the existing storage identity algorithm.
@@ -1152,8 +1148,8 @@ mod tests {
             result
         }
         let mut ids = Vec::new();
-        for cursor in cursors(&invocation.steps) {
-            let id = super::location(&invocation.steps, &cursor).unwrap().0;
+        for cursor in cursors(&steps) {
+            let id = super::location(&steps, &cursor).unwrap().0;
             ids.push(id);
             assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
             assert_eq!(graph.node_at(id).unwrap().key, id);
@@ -1190,10 +1186,7 @@ mod tests {
         assert_eq!(projection.current, pinned.current);
         assert_eq!(projection.completed, pinned.completed);
         assert_eq!(projection.returns, pinned.returns);
-        assert_eq!(
-            flow_iterations(&invocation.steps, &cursor),
-            pinned.iterations
-        );
+        assert_eq!(flow_iterations(&steps, &cursor), pinned.iterations);
         // Settled nested counts retain their runtime keys, including inactive paths.
         let settled = ExecutionCursor {
             index: 2,

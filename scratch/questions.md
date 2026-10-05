@@ -22,9 +22,9 @@ interpretations are at `6f246fda4:scratch/questions.md`.
 
 ## Choices this pass made without Jack
 
-- **Steps re-resolve their skill by name.** The driver no longer hands a step
-  captured skill text; a skill file edited mid-Flow takes effect at its next
-  step. This follows "nothing extra on top of `lf flow`".
+- **A step runs the skill its driver compiled.** It looks the skill up by
+  name; the driver puts its compiled skill on the step's argv only when that
+  lookup would differ (a step override, a router, a file edited mid-Flow).
 - **Claude steps without a required answer use the ordinary headless path.**
   Only deciding and routing steps use the stream-json harness. Before, every
   Flow step did.

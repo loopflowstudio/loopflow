@@ -217,21 +217,17 @@ fn read_summary(
                 let completed: Option<i64> = row.get(21)?;
                 let name = row
                     .get::<_, Option<String>>(19)?
-                    .and_then(|command| serde_json::from_str::<Vec<String>>(&command).ok())
-                    .and_then(|argv| {
-                        let marker = argv.iter().position(|arg| arg.contains("__flow-step"))?;
-                        crate::ops::flow_run::FlowStep::parse(argv.get(marker + 1)?).ok()
-                    })
+                    .as_deref()
+                    .and_then(crate::ops::flow_run::FlowStep::of_command)
                     .map(|step| step.flow)
                     .ok_or_else(|| invalid("Flow step Exec has no readable step"))?;
                 Some(crate::session::FlowSummary {
                     id: driver,
                     name,
-                    state: match (row.get::<_, Option<String>>(20)?.as_deref(), completed) {
-                        (Some("succeeded"), _) => crate::session::FlowSummaryState::Completed,
-                        (None, None) => crate::session::FlowSummaryState::Current,
-                        _ => crate::session::FlowSummaryState::Stopped,
-                    },
+                    state: crate::session::FlowSummaryState::of_driver(
+                        row.get::<_, Option<String>>(20)?.as_deref(),
+                        completed,
+                    ),
                     task_id: task_id.clone(),
                     wave_id: wave_id.clone(),
                     updated_at: match completed {

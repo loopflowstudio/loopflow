@@ -233,6 +233,17 @@ pub enum FlowSummaryState {
     Stopped,
 }
 
+impl FlowSummaryState {
+    /// What a driver Exec's recorded outcome and exit time say of its Flow.
+    pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
+        match (outcome, completed_at) {
+            (Some("succeeded"), _) => Self::Completed,
+            (None, None) => Self::Current,
+            _ => Self::Stopped,
+        }
+    }
+}
+
 /// Read-local admission context. Immutable observations override current-input
 /// fallback fields; attribution is selected from the input's original evidence.
 #[derive(Debug)]

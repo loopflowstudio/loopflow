@@ -439,28 +439,29 @@ impl Driver<'_> {
         }
     }
 
-    /// Events of the input a step's Exec captured; none for an operation.
-    fn turn_events(&self, step: &FlowStep) -> Result<Vec<serde_json::Value>> {
+    /// The conversation and input a step's Exec captured; none for an operation.
+    fn captured(&self, step: &FlowStep) -> Result<Option<(String, String)>> {
         let Some(child) = self.store.sqlite.flow_step_exec(&self.exec, step.seq)? else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
-        Ok(match self.store.sqlite.exec_input(&child.id)? {
-            Some((_, input, _)) => self.store.sqlite.input_events(&input)?,
+        Ok(self
+            .store
+            .sqlite
+            .exec_input(&child.id)?
+            .map(|(session, input, _)| (session, input)))
+    }
+
+    fn turn_events(&self, step: &FlowStep) -> Result<Vec<serde_json::Value>> {
+        Ok(match self.captured(step)? {
+            Some((_, input)) => self.store.sqlite.input_events(&input)?,
             None => Vec::new(),
         })
     }
 
     /// The Session a step's Exec opened and the answer its turn returned.
     fn answer(&self, step: &FlowStep) -> Result<(String, Option<String>)> {
-        let child = self
-            .store
-            .sqlite
-            .flow_step_exec(&self.exec, step.seq)?
-            .with_context(|| format!("{} left no Exec", step.label))?;
-        let (session, input, _) = self
-            .store
-            .sqlite
-            .exec_input(&child.id)?
+        let (session, input) = self
+            .captured(step)?
             .with_context(|| format!("{} captured no Session input", step.label))?;
         let answer = self.store.sqlite.input_final_answer(&input)?;
         Ok((session, answer.map(|answer| answer.text)))

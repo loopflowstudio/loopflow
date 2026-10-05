@@ -65,11 +65,7 @@ pub(super) fn flows_in(
 /// What the driver's Exec says of the Flow, and the Work its checkout names.
 pub(super) fn entry_in(conn: &Connection, flow: &FlowExecs) -> StoreResult<FlowInventoryEntry> {
     let driver = &flow.driver;
-    let state = match (driver.outcome.as_deref(), driver.completed_at) {
-        (Some("succeeded"), _) => FlowSummaryState::Completed,
-        (None, None) => FlowSummaryState::Current,
-        _ => FlowSummaryState::Stopped,
-    };
+    let state = FlowSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
     let task: Option<String> = match &driver.cwd {
         Some(cwd) => conn
             .query_row(
@@ -130,11 +126,7 @@ impl SqliteStore {
     ) -> StoreResult<FlowPage> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flows = match &filter.task_id {
-            Some(task) => flows_in(
-                &conn,
-                &format!("e.id IN ({})", super::task_work::exec_ids("?1")),
-                &[&task.as_str()],
-            )?,
+            Some(task) => super::task_work::flows_of_task(&conn, task)?,
             None => flows_in(&conn, "1", &[])?,
         };
         let search = filter.search.as_deref().map(str::to_lowercase);

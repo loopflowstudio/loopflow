@@ -41,14 +41,14 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-pub(super) fn exec_ids(selector: &str) -> String {
+fn exec_ids(selector: &str) -> String {
     format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL",
         tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector))
 }
 
-fn flows_of_task(
+pub(super) fn flows_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Vec<crate::ops::flow_run::FlowExecs>> {

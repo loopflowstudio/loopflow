@@ -56,7 +56,7 @@ on its argv, a decision is the final answer of the turn that step Exec captured,
 and an invalid answer is corrected in the same conversation. No table, cursor,
 lock or resume exists; readers and Desktop read Execs. Choices made without
 Jack are listed in `scratch/questions.md` until he reviews them, notably: steps
-re-resolve skills by name, callers background the blocking command themselves,
+run the driver's compiled skill, callers background the blocking command themselves,
 and Flow launch refusals do not apply to single skills or conversations.
 
 Lessons: the claim that `-b` was unbuilt was wrong (main #1356 had removed it);
@@ -1077,7 +1077,7 @@ They explain the topology change; they are not current setup instructions.
   ones (e.g. `RunStatus`), not re-litigating the approach.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
-  `LF_RUN_ID`, `LF_AS` and `LF_FLOW_STEP`; Rust tests that launch or assert journal ids
+  `LF_RUN_ID`, `LF_AS` and `LF_FLOW_ID`; Rust tests that launch or assert journal ids
   must clear both or `cargo test -p loopflow` fails only under agent runs.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left

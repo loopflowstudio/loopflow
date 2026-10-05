@@ -47,13 +47,8 @@ impl SqliteStore {
             for row in rows {
                 let (input, command) = row?;
                 let earlier = command
-                    .and_then(|command| serde_json::from_str::<Vec<String>>(&command).ok())
-                    .and_then(|argv| {
-                        let marker = argv
-                            .iter()
-                            .position(|arg| arg == crate::ops::flow_run::FLOW_STEP_ARG)?;
-                        crate::ops::flow_run::FlowStep::parse(argv.get(marker + 1)?).ok()
-                    });
+                    .as_deref()
+                    .and_then(crate::ops::flow_run::FlowStep::of_command);
                 if earlier.is_some_and(|earlier| earlier.key == step.key) {
                     inputs.push(input);
                 }

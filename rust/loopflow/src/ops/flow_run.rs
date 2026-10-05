@@ -60,7 +60,12 @@ impl FlowStep {
 
     /// The step an Exec was started as, read from its recorded argv.
     pub(crate) fn of_exec(exec: &Exec) -> Option<Self> {
-        let argv: Vec<String> = serde_json::from_str(exec.command.as_deref()?).ok()?;
+        Self::of_command(exec.command.as_deref()?)
+    }
+
+    /// The step a recorded argv names.
+    pub(crate) fn of_command(command: &str) -> Option<Self> {
+        let argv: Vec<String> = serde_json::from_str(command).ok()?;
         let marker = argv
             .iter()
             .position(|arg| arg == FLOW_STEP_ARG || arg == FLOW_STEP_COMMAND)?;
@@ -88,9 +93,7 @@ impl FlowExecs {
     pub(crate) fn latest(&self) -> &(FlowStep, Exec) {
         self.steps.last().expect("a recorded Flow has a step")
     }
-}
 
-impl FlowExecs {
     /// How far the Flow got, drawn on the authored graph while every recorded
     /// step still fits it, else on the sequence its steps recorded.
     pub(crate) fn detail(

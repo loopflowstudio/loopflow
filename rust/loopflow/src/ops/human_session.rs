@@ -24,6 +24,52 @@ pub(crate) mod primary;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 
+/// Choose by native human input, falling back to each Session's last opening.
+pub async fn latest_interactive_session(
+    store: &SharedStore,
+    cwd: &Path,
+) -> Result<Option<AgentSession>> {
+    fn checkout(path: &Path) -> Option<PathBuf> {
+        let path = fs::canonicalize(path).ok()?;
+        let root = crate::repo::discover_repo_root(&path).ok()?.unwrap_or(path);
+        fs::canonicalize(root).ok()
+    }
+    let Some(current) = checkout(cwd) else {
+        return Ok(None);
+    };
+    let mut roots = BTreeMap::new();
+    let candidates = store
+        .resume_candidates()
+        .await?
+        .into_iter()
+        .filter(|(session, _)| {
+            roots
+                .entry(session.cwd.clone())
+                .or_insert_with(|| checkout(&session.cwd))
+                .as_ref()
+                == Some(&current)
+        })
+        .collect::<Vec<_>>();
+    let human = provider_conversation::human_input_times(
+        store,
+        candidates.iter().map(|(session, _)| session),
+    )
+    .await?;
+    Ok(candidates
+        .into_iter()
+        .max_by_key(|(session, opened)| {
+            (
+                human
+                    .get(&session.id)
+                    .copied()
+                    .or(*opened)
+                    .unwrap_or(session.created_at.saturating_mul(1000)),
+                session.id.clone(),
+            )
+        })
+        .map(|(session, _)| session))
+}
+
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
 pub(crate) const REVIEW_CAPTURE_ENV: &str = "LF_REVIEW_RUN_RESERVATION";
@@ -697,7 +743,11 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
 /// Resolve a Session id, the Run id linked to it, or the provider's own id for
 /// its conversation. A conversation or Flow Run names its waiting boundary, so
 /// `$LF_RUN_ID` inside a review targets it.
-async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
+async fn find_session(
+    store: &SharedStore,
+    session_id: &str,
+    open_completed: bool,
+) -> Result<Option<SessionTarget>> {
     // Membership outlives a pending boundary. Never reinterpret a retained
     // attempt's manifest as an independent conversation or current actor.
     let owned = match crate::session_record::parse_artifact_key(session_id) {
@@ -705,7 +755,9 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
         Err(_) => store.session(session_id).await?,
     };
     if let Some(session) = owned {
-        return owned_target(store, session_id, session).await.map(Some);
+        return owned_target(store, session_id, session, open_completed)
+            .await
+            .map(Some);
     }
     let selected = match store.sqlite.resolve_history_input(session_id) {
         Ok(selected) => selected,
@@ -714,7 +766,9 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
                 return Ok(None);
             };
             let id = session.id.clone();
-            return owned_target(store, &id, session).await.map(Some);
+            return owned_target(store, &id, session, open_completed)
+                .await
+                .map(Some);
         }
         Err(error) => return Err(error.into()),
     };
@@ -722,13 +776,16 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     let Some(session) = store.session_for_artifact(&input).await? else {
         bail!("Input {input} does not belong to a Session");
     };
-    owned_target(store, input.as_str(), session).await.map(Some)
+    owned_target(store, input.as_str(), session, open_completed)
+        .await
+        .map(Some)
 }
 
 async fn owned_target(
     store: &SharedStore,
     selector: &str,
     session: crate::session::AgentSession,
+    open_completed: bool,
 ) -> Result<SessionTarget> {
     if selector != session.id && selector != session.artifact_key.as_str() {
         bail!(
@@ -737,7 +794,9 @@ async fn owned_target(
             session.artifact_key
         );
     }
-    if session.completed_at.is_some() {
+    if session.completed_at.is_some()
+        && !(open_completed && session.kind == crate::session::SessionKind::Conversation)
+    {
         bail!("Session {} is already complete", session.id);
     }
     let Some((task_id, position)) = managed_review(store, &session).await? else {
@@ -883,7 +942,7 @@ pub(crate) async fn completion_worktree(
     store: &SharedStore,
     session_id: &str,
 ) -> Result<Option<PathBuf>> {
-    match find_session(store, session_id)
+    match find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?
     {
@@ -1182,7 +1241,7 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
-    let target = match find_session(store, session_id).await? {
+    let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
         // Connecting is what brings a provider-started conversation in.
         None => SessionTarget::Row {
@@ -1275,7 +1334,7 @@ pub(crate) async fn open(
             let lock_id = id.clone();
             let launch_lock =
                 tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-            let current = find_session(store, session_id)
+            let current = find_session(store, session_id, false)
                 .await?
                 .ok_or_else(|| session_not_found(session_id))?;
             let SessionTarget::Flow {
@@ -1411,7 +1470,7 @@ async fn connect_live_codex(
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
-    let target = find_session(store, session_id)
+    let target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     #[cfg(test)]
@@ -1725,7 +1784,7 @@ pub(crate) async fn rename(
     title: &str,
     source: SessionTitleSource,
 ) -> Result<SessionRecord> {
-    let mut target = find_session(store, session_id)
+    let mut target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     let title = crate::session_record::validate_session_title(title)
@@ -1765,7 +1824,7 @@ pub(crate) async fn rename(
     #[cfg(test)]
     action_test::after_lookup("rename", session_id).await;
     let _launch_lock = pending_lock.await??;
-    target = find_session(store, session_id)
+    target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     if let SessionTarget::Flow { position, .. } = &target {

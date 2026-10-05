@@ -11,6 +11,7 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
+        | SessionCommand::Resume { .. }
         | SessionCommand::ServeConversation { .. }
         | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
         SessionCommand::Complete { id } => {
@@ -28,6 +29,22 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Resume { id } => {
+            let id = match id {
+                Some(id) => id.clone(),
+                None => {
+                    let store = open_shared_store().await?;
+                    crate::ops::human_session::latest_interactive_session(
+                        &store,
+                        &std::env::current_dir()?,
+                    )
+                    .await?
+                    .context("No interactive session found in this worktree")?
+                    .id
+                }
+            };
+            open(&id, false, OpenMode::Refuse).await
+        }
         SessionCommand::History {
             id,
             json,

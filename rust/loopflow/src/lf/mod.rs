@@ -534,6 +534,11 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Resume a conversation by ID, or the last interactive Session in this worktree
+    Resume {
+        /// Loopflow Session ID or Claude/Codex conversation ID
+        id: Option<String>,
+    },
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID, one of its Run IDs, or the provider's own conversation ID

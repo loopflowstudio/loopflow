@@ -1,7 +1,9 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **draft plan, 2026-10-05.** Jack Heart requested the Task; the mechanism
-below is proposed, not accepted. Product decisions in the Task brief are binding.
+Status: **draft plan, 2026-10-05, revised in design review the same day.** Jack
+Heart requested the Task; the mechanism below is proposed, not accepted. Product
+decisions in the Task brief are binding. Open choices are in
+[questions.md](questions.md).
 
 ## Problem
 
@@ -59,6 +61,15 @@ Findings that shape the design:
    probed.
 6. The roadmap projection also reads Git and the filesystem per Task
    (worktree blockers). Those are not store commits.
+7. **Table-level change domains would not filter anything while agents work.**
+   Last 24 h on Jack's Home (read-only count, 2026-10-05): 168,336
+   `session_events`, of which 164,192 are provider transcript lines
+   (`kind='observed'`, receipt key `…:events.jsonl:…`) and 3,021 are `usage`.
+   Transcript lines arrived in 610 of the day's 1,440 minutes, up to 2,095 in
+   one minute. Everything else in the table — lifecycle, manifest, terminal and
+   driver-exit facts — is 1,338 rows, at most 26 in a minute. `flow_events`:
+   214. Execs not written by Desktop's polls: 2,067. `kind` alone does not
+   separate the two: lifecycle facts are also `observed`.
 
 ## Demo
 
@@ -85,12 +96,23 @@ One long-lived reader per window, fed by store-owned change revisions.
 A `store_revisions(domain TEXT PRIMARY KEY, revision INTEGER NOT NULL)` table,
 bumped by SQLite triggers on insert/update/delete. Domains: `planning` (waves,
 projects, tasks, task PRs, PM snapshots, metrics), `sessions` (agent sessions and
-their events), `flows` (flow sessions and events), `execs`.
+the Session events that change a displayed row), `flows` (flow sessions and
+events), `execs`.
+
+A domain follows what a write can change on screen, not which table it lands
+in. Provider transcript lines and `usage` events bump nothing (finding 7): no
+part of this stream displays them, and counting them would invalidate every
+part for ten hours a day. The `session_events` trigger therefore carries a
+`WHEN` predicate. Its exact form is a sketch — receipt key not matching
+`:events.jsonl:` and kind not `usage` — to be settled against what
+`session list` and the roadmap conditions read. Live transcript display is
+LOO-293's; it adds its own domain when it has a reader for one.
 
 Triggers live in the schema, so every writer bumps them — any `lf` version,
 any future command — with no call-site discipline to forget. A rolled-back
 write bumps nothing. A store test enumerates every table and fails unless it
-is assigned a domain or listed as never displayed.
+is assigned a domain or listed as never displayed; the transcript exemption is
+listed there by predicate, not by table.
 
 A Rust `StoreChanges` reader holds one `query_only` connection and waits on
 filesystem events for `loopflow.db-wal` (generalizing the existing
@@ -122,8 +144,15 @@ Parts and what invalidates them:
 Bodies are the existing DTOs unchanged, so Swift keeps its decoders and
 LOO-376's saved wire text keeps working. A part is emitted only when its bytes
 differ from the last frame sent, so a write that changes nothing visible sends
-nothing. Projections are coalesced: 100 ms trailing quiet, at most one planning
-projection in flight, newest frame replaces an unsent one.
+nothing. Projections are coalesced: 100 ms trailing quiet capped at 250 ms from
+the first unhandled bump, so a steady writer cannot postpone a projection
+indefinitely; at most one projection per part in flight; newest frame replaces
+an unsent one.
+
+Byte comparison hides wasted work: a projection that ran and produced the same
+bytes sends nothing and still cost its 300 ms. The heartbeat frame therefore
+carries per-part projection counts, so "idle" and "busy producing nothing" are
+distinguishable in tests and in the field.
 
 Stdin requests: `scope` (repository, headless filter, selected Task),
 `refresh`, `rescan`. Each carries an id; every frame names the newest request
@@ -264,7 +293,11 @@ they are ordered for building, not for separate delivery.
   created by a second process appears exactly once in the next planning frame
   within 2 s; 200 writes across 20 transactions yield a final frame equal to a
   fresh one-shot read and no more than 5 frames; an Exec insert alone yields no
-  planning frame; a stopped-then-continued watch and a recreated `-wal` both
+  planning frame; 2,000 transcript-line inserts over 10 s run zero projections
+  of any part (heartbeat counts, not absence of frames); a Task created during
+  that transcript stream still appears within 2 s; a writer committing every
+  50 ms to `planning` gets a frame within 500 ms, not after it stops; a
+  stopped-then-continued watch and a recreated `-wal` both
   converge; after `scope` no frame for the previous repository is emitted;
   5 idle seconds emit no part frames and add no Exec rows.
 - `cargo test -p loopflow store_revisions` passes: every table has a domain or
@@ -291,6 +324,15 @@ costs seconds. This plan earns no KR by itself.
 
 - **Trigger coverage drifts** when a table is added. The coverage test is the
   guard; the 30 s check does not help, because it reads the same revisions.
+- **The transcript predicate can be wrong in either direction.** Too wide and a
+  displayed Session state stops updating, with nothing to catch it but the 30 s
+  check — which reads the same revisions and will not. Too narrow and the
+  stream reprojects continuously. A test per displayed Session field, written
+  against a second-process writer, is the guard for the first; the heartbeat
+  projection counts for the second.
+- **`execs` invalidates planning.** Cheap once Desktop's polls are gone (2,067
+  a day); until the last poll loop is deleted, every remaining poll bumps it.
+  This bears on how the slices are delivered (questions.md, 8).
 - **FSEvents latency on `-wal`** is unmeasured; the probe used kqueue. The
   integration test decides; kqueue on the file plus a directory watch is the
   alternative.

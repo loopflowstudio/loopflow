@@ -28,3 +28,27 @@ Recorded 2026-10-05 during kickoff. Nobody has confirmed these.
 7. **Desktop's Create button uses `task create --run`.** The row will appear
    from the commit regardless of the run. Whether Desktop should also offer
    create-without-run is a product choice outside this plan.
+
+Added 2026-10-05 in design review. Still unconfirmed.
+
+8. **One landing or three.** The plan lands slices 1–4 together, reasoning that
+   anything less leaves a polling fallback. A per-part cutover does not: each
+   landing replaces one loop with its stream part and deletes that loop, so no
+   part ever has both. Possible landings: (a) store revisions, the
+   completion-gate fix, the `planning` part and Desktop's planning cutover —
+   the create-to-sidebar demo; (b) `sessions` and `task`; (c) `activity`,
+   `active` and the benchmark. Cost of splitting: between (a) and (b) the 2 s
+   Session poll still writes ~25,800 Execs a day, each bumping `execs` and so
+   re-running the planning projection roughly every 2 s at ≤ 300 ms — about
+   15% of a core, idle. Cost of not splitting: one change spanning a migration,
+   a new command, a hot-path read and the window's refresh owner, reviewed and
+   reverted as a unit. Jack's call.
+9. **Should a one-shot read bump `execs` at all?** Clicking a file or loading
+   comments in Desktop runs `lf`, writes an Exec and, as designed, re-runs the
+   planning projection. Harmless at 2,067 a day; it is also the reason
+   question 8 has a cost. Narrowing the `execs` domain to Execs the planning
+   conditions can read (those inside a Task checkout, or unfinished) would
+   remove it. Not designed here.
+10. **The transcript predicate is a sketch.** See finding 7 and Risks in the
+    design. Nobody has checked every `observed` receipt key that `session list`
+    reads.

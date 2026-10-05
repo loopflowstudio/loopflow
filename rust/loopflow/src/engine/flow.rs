@@ -114,19 +114,30 @@ impl<'de> Deserialize<'de> for Command {
             #[serde(default)]
             args: Vec<String>,
         }
-        let mut saved = SavedCommand::deserialize(deserializer)?;
-        if saved.command == "rebase" {
-            saved.command = "sync".into();
+        let saved = SavedCommand::deserialize(deserializer)?;
+        Ok(Self {
+            command: saved.command,
+            args: saved.args,
         }
-        if saved.command == "task"
-            && saved
+        .current())
+    }
+}
+
+impl Command {
+    /// This command under the spelling the CLI accepts today.
+    pub fn current(mut self) -> Self {
+        if self.command == "rebase" {
+            self.command = "sync".into();
+        }
+        if self.command == "task"
+            && self
                 .args
                 .first()
                 .is_some_and(|name| matches!(name.as_str(), "pr" | "wt" | "sync" | "commit"))
         {
-            saved.command = saved.args.remove(0);
+            self.command = self.args.remove(0);
         }
-        let owner = match saved.command.as_str() {
+        let owner = match self.command.as_str() {
             "doctor" | "install" | "screenshot" | "ssh" | "desktop" => Some("home"),
             "usage" | "ps" | "top" | "activity" => Some("monitor"),
             "release" | "tokens" | "ci" => Some("repo"),
@@ -134,17 +145,12 @@ impl<'de> Deserialize<'de> for Command {
             _ => None,
         };
         if let Some(owner) = owner {
-            saved.args.insert(0, saved.command);
-            saved.command = owner.into();
+            self.args.insert(0, self.command);
+            self.command = owner.into();
         }
-        Ok(Self {
-            command: saved.command,
-            args: saved.args,
-        })
+        self
     }
-}
 
-impl Command {
     pub fn argv(&self) -> Vec<String> {
         std::iter::once("lf".to_string())
             .chain(std::iter::once(self.command.clone()))
@@ -928,17 +934,7 @@ fn compile_branch(
 ) -> Result<ResolvedFlowItem, LoadError> {
     let router = match &branch_def.router {
         Some(name) => load_skill(name, repo)?,
-        None => Skill {
-            name: "xor-route".to_string(),
-            agent: None,
-            default_agent: Some("claude:sonnet".to_string()),
-            action_style: None,
-            content: Some(
-                "Read the preceding findings and choose the right path forward. \
-                 Return the declared JSON object with `path` set to a listed path key."
-                    .to_string(),
-            ),
-        },
+        None => load_skill("xor-route", repo)?,
     };
     let paths = branch_def
         .paths

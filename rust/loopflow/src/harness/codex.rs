@@ -858,10 +858,7 @@ impl Harness for CodexHarness {
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let input = json!([{ "type": "text", "text": turn_text }]);
 
-        let mut params = json!({ "threadId": thread_id, "input": input });
-        if let Some(schema) = self.launch.as_ref().and_then(AgentConfig::output_schema) {
-            params["outputSchema"] = schema;
-        }
+        let params = json!({ "threadId": thread_id, "input": input });
         self.send_request("turn/start", params).await?;
         Ok(())
     }

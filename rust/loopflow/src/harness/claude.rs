@@ -678,7 +678,6 @@ mod tests {
         harness.config = Some(AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -735,7 +734,6 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

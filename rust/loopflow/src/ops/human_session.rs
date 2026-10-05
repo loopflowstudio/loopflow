@@ -1833,90 +1833,16 @@ mod tests {
     }
 
     #[test]
-    fn captured_nested_membership_retains_its_exact_graph_occurrence() {
-        use crate::engine::flow::{
-            ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
-        };
-        use crate::engine::{ExecutionCursor, NestedCursor};
+    fn old_captured_membership_keeps_its_provenance_without_a_fabricated_node() {
         use crate::session_record::SessionFlowStep;
-
-        let skill = |id: &str, from: Option<&str>| {
-            ConcreteStep::Skill(ConcreteSkill {
-                skill: Skill::named("review-design"),
-                id: Some(id.into()),
-                human: false,
-                repeat: from.map(|from| RepeatPolicy { from: from.into() }),
-                sources: Vec::new(),
-            })
-        };
-        let steps = vec![
-            skill("begin", None),
-            ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("route"),
-                paths: std::collections::HashMap::from([(
-                    "fix".into(),
-                    ConcretePath {
-                        description: "Revision".into(),
-                        steps: vec![skill("begin", None), skill("decide", Some("begin"))],
-                    },
-                )]),
-                sources: Vec::new(),
-            }),
-            skill("decide", Some("begin")),
-        ];
-        let mut cursor = ExecutionCursor {
-            index: 1,
-            iteration: 3,
-            ..Default::default()
-        };
-        cursor.progress.repeats.insert("decide".into(), 5);
-        cursor.child = Some(Box::new(NestedCursor::Xor {
-            selected: "fix".into(),
-            cursor: ExecutionCursor {
-                index: 1,
-                iteration: 99,
-                progress: crate::engine::transitions::FlowProgress {
-                    repeats: std::collections::BTreeMap::from([("decide".into(), 2)]),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        }));
-        let (key, iterations) = crate::engine::flow_graph::location(&steps, &cursor).unwrap();
-        let driver = crate::id::ExecId::new();
-        let captured = SessionFlowStep::of(
-            &crate::ops::flow_run::FlowStep {
-                flow: "review".into(),
-                seq: 4,
-                label: "review-design".into(),
-                cursor,
-                key,
-                iterations,
-                skill: None,
-                output: None,
-                session: None,
-            },
-            &driver,
-            None,
-        );
-        // The Session names its Flow by the driver Exec and keeps the step's
-        // structural path, graph key and per-edge returns.
-        assert_eq!(captured.invocation_id, driver.as_str());
-        assert_eq!(captured.node.as_deref(), Some("1/fix/1"));
-        assert_eq!(captured.key, Some(3));
-        assert_eq!(captured.iterations, Some(vec![vec![5], vec![2]]));
-
-        // Old captures keep their known Flow provenance without fabricating a
-        // structural node from the former leaf index.
-        let mut old = serde_json::to_value(&captured).unwrap();
-        for field in ["node", "key", "iterations"] {
-            old.as_object_mut().unwrap().remove(field);
-        }
-        old["iteration"] = serde_json::json!(3);
-        old["step_index"] = serde_json::json!(1);
-        let old: SessionFlowStep = serde_json::from_value(old).unwrap();
+        // Captures from before node keys carried a leaf index and scalar visit.
+        let old: SessionFlowStep = serde_json::from_value(serde_json::json!({
+            "task_id": null, "task_pr_id": null, "invocation_id": "exec_old",
+            "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
+        }))
+        .unwrap();
         assert_eq!((old.node, old.key, old.iterations), (None, None, None));
-        assert_eq!(old.invocation_id, captured.invocation_id);
+        assert_eq!(old.invocation_id, "exec_old");
     }
 
     #[test]

@@ -36,8 +36,8 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Actual lf command process, causal parent and observed command outcome | `execs` |
 | Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
 | Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Exec |
-| A Flow's identity, state and step sequence | Its driver Exec and child step Execs in `execs` |
-| A Flow's position at each step | The `--__flow-step` argument on that step Exec's argv |
+| A Flow's identity, state and step results | Its driver Exec and child step Execs in `execs` |
+| A Flow's name, launched graph and each step's node | FlowExec: `flow_execs` and `flow_exec_steps`, appended by the driver |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Home |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |
@@ -64,11 +64,12 @@ History retains the original Exec and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-A Flow has no table. It is one driver Exec and the step Execs it starts, and
-its ID is the driver Exec's. The driver keeps the compiled graph and cursor in
-memory; each step Exec's argv records the position it ran at. A Session reaches
-its Flow through the step Exec that captured its input, whose parent is the
-driver. Every Flow naming a Task, or run in its checkout, is equally that Task's
+A Flow is one driver Exec and the step Execs it starts, and its ID is the
+driver Exec's. The driver keeps the cursor in memory and appends FlowExec: the
+Flow's name and compiled graph at launch, then each step's Exec, node and
+iteration counts. Nothing updates those rows, and no step reads or writes them.
+A Session reaches its Flow through the step row of the Exec that captured its
+input. Every Flow naming a Task, or run in its checkout, is equally that Task's
 work. Taskless execution uses the same driver. A step's result is how its
 process exited; a deciding or routing step also answers through the Session turn
 its Exec captured. No generic attempt lifecycle sits between these owners.

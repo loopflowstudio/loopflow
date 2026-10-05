@@ -1689,6 +1689,31 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `repo release run` under a cron firing: the release is accounted to the
+/// receipt its launcher named.
+pub fn run_cron_release(
+    version_input: Option<&str>,
+    target_name: Option<&str>,
+    cli: &crate::lf::Cli,
+) -> Result<()> {
+    let cron = cli
+        .cron_receipt
+        .as_ref()
+        .zip(cli.cron_lock_fd)
+        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
+            receipt_id: id.clone(),
+            lock_fd: fd,
+        });
+    crate::ops::release_run_with_cron(
+        &find_repo_root()?,
+        version_input.unwrap_or("patch"),
+        target_name,
+        &CliProgress,
+        cron.as_ref(),
+    )?;
+    Ok(())
+}
+
 fn release_run_cmd(
     version_input: Option<&str>,
     target_name: Option<&str>,

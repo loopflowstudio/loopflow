@@ -70,7 +70,6 @@ Open Loopflow or run its CLI
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
 | `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
-| `--__flow-step` | Run this command as the Flow step its driver describes; recorded on this Exec's argv Internal. |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -440,6 +439,7 @@ Resume a conversation by ID, or the last interactive Session in this worktree
 | Argument | What it does |
 |---|---|
 | `<id>` | Loopflow Session ID or Claude/Codex conversation ID |
+| `<message>` | With `-b`: send this as the conversation's next headless turn |
 | `--help / -h` | Print help |
 
 ## lf session history
@@ -1476,18 +1476,6 @@ Launch the immutable provider request retained for a captured input
 | Argument | What it does |
 |---|---|
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
-| `--help / -h` | Print help |
-
-## lf __flow-step
-
-Run one Flow operation step in its own process
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<step>` | The step as its driver describes it; recorded on this Exec's argv |
-| `<command>` | command |
 | `--help / -h` | Print help |
 
 ## lf run

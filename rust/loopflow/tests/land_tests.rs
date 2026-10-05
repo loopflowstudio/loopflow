@@ -1941,7 +1941,7 @@ fi"#;
             String::from_utf8_lossy(&handed_off.stderr)
         );
         if flow {
-            assert!(String::from_utf8_lossy(&handed_off.stderr).contains("waiting on delivery"));
+            assert!(String::from_utf8_lossy(&handed_off.stderr).contains("still being watched"));
         }
         assert!(!repair_launches.exists());
         let conn = rusqlite::Connection::open(&database).unwrap();
@@ -2152,18 +2152,19 @@ fi"#;
             .unwrap();
         assert_eq!(state, "merged");
         if flow {
-            // The Flow stopped at its watched landing: its step handed off and
-            // its driver exited. The merge resumes nothing.
+            // The Flow stopped at its watched landing: the step's command
+            // handed off and returned, and its driver exited without running
+            // further steps. The merge resumes nothing.
             let (step, driver): (i64, String) = conn
                 .query_row(
                     "SELECT step.exit_code,driver.outcome FROM execs step
-                     JOIN execs driver ON driver.id=step.parent_exec_id
-                     WHERE instr(step.command,'__flow-step')>0",
+                     JOIN flow_exec_steps recorded ON recorded.exec_id=step.id
+                     JOIN execs driver ON driver.id=recorded.flow_exec_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, driver.as_str()), (75, "failed"));
+            assert_eq!((step, driver.as_str()), (0, "failed"));
         }
         assert!(!worktree.exists());
         assert!(!local_branch_exists(&repo, "watched-land"));

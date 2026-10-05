@@ -7,13 +7,12 @@ use crate::engine::{
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::ops::flow_run::{self, FlowStep};
-use crate::ops::{NullProgress, WorkBinding};
+use crate::ops::flow_run;
+use crate::ops::WorkBinding;
 use crate::store::SharedStore;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
@@ -128,8 +127,20 @@ fn execute(
             cwd: repo,
             launcher: cli,
             position: Mutex::new(ExecutionCursor::default()),
-            launched: AtomicU32::new(0),
         };
+        // The driver's one record of its Flow, written before any step runs.
+        driver.store.sqlite.record_flow_exec(
+            &driver.exec,
+            flow_name,
+            &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
+        )?;
+        // A conversation the Flow opens also starts its Task; a checkout the
+        // registry spells differently must not refuse the launch.
+        if let Some(task) = &task {
+            if let Err(error) = driver.store.sqlite.mark_task_started(task) {
+                tracing::warn!(%error, "Flow launch did not record its Task as started");
+            }
+        }
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
@@ -160,22 +171,6 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
         }
         FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
     }
-}
-
-fn block_on_store<F, Fut>(operation: F) -> Result<()>
-where
-    F: FnOnce(SharedStore) -> Fut,
-    Fut: std::future::Future<Output = Result<()>>,
-{
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_existing_store()
-                .await
-                .ok_or_else(|| anyhow!("no Loopflow registry on this Home"))?,
-        );
-        operation(store).await
-    })
 }
 
 /// Run every step from the first until the Flow completes, stops or blocks.
@@ -319,8 +314,9 @@ impl Drop for EnvVarGuard {
     }
 }
 
-/// The one Flow executor. It owns the cursor; each step is a child process
-/// told its position, and a step's result is read from that child's Exec.
+/// The one Flow executor. It owns the cursor and the Flow's record. Each step
+/// is an ordinary command run as a child process; its result is read from the
+/// Exec that child registered.
 struct Driver<'a> {
     store: SharedStore,
     exec: crate::id::ExecId,
@@ -331,41 +327,21 @@ struct Driver<'a> {
     launcher: &'a Cli,
     /// Where the engine stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
-    launched: AtomicU32,
 }
 
 /// How a step's process ended, before any answer is read.
 enum StepExit {
     Finished,
-    /// Interrupted, or its effect handed to a watcher: the Flow stops here.
+    /// Interrupted: the Flow stops here.
     Stopped,
 }
 
 impl Driver<'_> {
-    /// The next step at the engine's position, with candidates cleared.
-    fn step(&self, label: String, output: Option<FlowOutput>) -> FlowStep {
-        let mut cursor = self
-            .position
-            .lock()
-            .expect("Flow position mutex poisoned")
-            .clone();
-        let leaf = cursor.leaf_mut();
-        leaf.progress.verdict = None;
-        leaf.progress.direction = None;
-        leaf.route = None;
-        let (key, iterations) = crate::engine::flow_graph::location(self.steps, &cursor)
-            .expect("the engine's position selects a captured node");
-        FlowStep {
-            flow: self.flow.to_owned(),
-            seq: self.launched.fetch_add(1, Ordering::SeqCst) + 1,
-            label,
-            cursor,
-            key,
-            iterations,
-            skill: None,
-            output,
-            session: None,
-        }
+    /// The node the engine stands on and the returns taken to reach it.
+    fn location(&self) -> (u32, Vec<Vec<u32>>) {
+        let cursor = self.position.lock().expect("Flow position mutex poisoned");
+        crate::engine::flow_graph::location(self.steps, &cursor)
+            .expect("the engine's position selects a captured node")
     }
 
     /// The captured step the engine is about to run.
@@ -375,33 +351,64 @@ impl Driver<'_> {
         body.get(leaf.index).cloned()
     }
 
-    async fn spawn(&self, step: &FlowStep, args: &[String], cron: bool) -> Result<StepExit> {
+    /// Record the Exec this driver's newest child registered, once it has.
+    fn record_step(&self, mark: i64) -> Result<Option<crate::id::ExecId>> {
+        let Some(step) = self.store.sqlite.child_exec_after(&self.exec, mark)? else {
+            return Ok(None);
+        };
+        let (key, iterations) = self.location();
+        self.store
+            .sqlite
+            .record_flow_step(&self.exec, &step, key, &iterations)?;
+        Ok(Some(step))
+    }
+
+    /// Run `lf <args>` as a child and record its Exec as this Flow's next step.
+    async fn spawn(
+        &self,
+        label: &str,
+        args: &[String],
+    ) -> Result<(StepExit, Option<crate::id::ExecId>)> {
         // The absolute selected path becomes argv[0] in the child's Exec record.
         let mut command =
             tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
         command.current_dir(self.cwd);
-        if cron {
-            if let Some((id, fd)) = self
-                .launcher
-                .cron_receipt
-                .as_ref()
-                .zip(self.launcher.cron_lock_fd)
-            {
-                command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
-                // SAFETY: the cron launcher owns the descriptor throughout spawn;
-                // fcntl preserves that exact capability in the step child.
-                unsafe {
-                    command.pre_exec(move || {
-                        if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        Ok(())
-                    });
-                }
+        command.env(flow_run::FLOW_ID_ENV, self.exec.as_str());
+        if let Some((id, fd)) = self
+            .launcher
+            .cron_receipt
+            .as_ref()
+            .zip(self.launcher.cron_lock_fd)
+        {
+            command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
+            // SAFETY: the cron launcher owns the descriptor throughout spawn;
+            // fcntl preserves that exact capability in the step child.
+            unsafe {
+                command.pre_exec(move || {
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
             }
         }
         command.args(args);
-        let status = command.status().await;
+        let mark = self.store.sqlite.exec_mark()?;
+        let mut child = command.spawn().context("could not execute Flow step")?;
+        let mut step = None;
+        let status = loop {
+            tokio::select! {
+                status = child.wait() => break status,
+                // A read can fail while a newer child migrates; the exit retries it.
+                () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() => {
+                    step = self.record_step(mark).unwrap_or(None);
+                }
+            }
+        };
+        // The step ran whatever comes next, so its row is attempted first.
+        if step.is_none() {
+            step = self.record_step(mark).unwrap_or(None);
+        }
         // A new installation can select a newer child. Never read its result
         // through an older schema.
         self.store
@@ -409,49 +416,44 @@ impl Driver<'_> {
             .validate_current_schema()
             .with_context(|| {
                 format!(
-                    "this driver cannot read the result of {}; inspect its Exec and effects with a compatible lf before launching further work",
-                    step.label
+                    "this driver cannot read the result of {label}; inspect its Exec and effects with a compatible lf before launching further work"
                 )
             })?;
         let status = status.context("could not execute Flow step")?;
         match status.code() {
-            Some(0) => Ok(StepExit::Finished),
-            Some(130) => Ok(StepExit::Stopped),
-            Some(code) if code == i32::from(flow_run::HANDED_OFF_EXIT) => Ok(StepExit::Stopped),
+            Some(0) => Ok((StepExit::Finished, step)),
+            Some(130) => Ok((StepExit::Stopped, step)),
             _ => {
                 // The step's own conversation says how its turn ended.
-                for envelope in self.turn_events(step)?.iter().rev() {
+                for envelope in self.turn_events(step.as_ref())?.iter().rev() {
                     let event = &envelope["event"];
                     if event["type"] == "turn_completed" && event["status"] == "interrupted" {
-                        return Ok(StepExit::Stopped);
+                        return Ok((StepExit::Stopped, step));
                     }
                     if event["type"] == "error" {
                         anyhow::bail!(
-                            "{}: {}: {}",
-                            step.label,
+                            "{label}: {}: {}",
                             event["code"].as_str().unwrap_or("provider error"),
                             event["message"].as_str().unwrap_or("provider turn failed")
                         );
                     }
                 }
-                anyhow::bail!("{} process exited with {status}", step.label)
+                anyhow::bail!("{label} process exited with {status}")
             }
         }
     }
 
     /// The conversation and input a step's Exec captured; none for an operation.
-    fn captured(&self, step: &FlowStep) -> Result<Option<(String, String)>> {
-        let Some(child) = self.store.sqlite.flow_step_exec(&self.exec, step.seq)? else {
-            return Ok(None);
-        };
+    fn captured(&self, step: Option<&crate::id::ExecId>) -> Result<Option<(String, String)>> {
+        let Some(step) = step else { return Ok(None) };
         Ok(self
             .store
             .sqlite
-            .exec_input(&child.id)?
+            .exec_input(step)?
             .map(|(session, input, _)| (session, input)))
     }
 
-    fn turn_events(&self, step: &FlowStep) -> Result<Vec<serde_json::Value>> {
+    fn turn_events(&self, step: Option<&crate::id::ExecId>) -> Result<Vec<serde_json::Value>> {
         Ok(match self.captured(step)? {
             Some((_, input)) => self.store.sqlite.input_events(&input)?,
             None => Vec::new(),
@@ -459,13 +461,28 @@ impl Driver<'_> {
     }
 
     /// The Session a step's Exec opened and the answer its turn returned.
-    fn answer(&self, step: &FlowStep) -> Result<(String, Option<String>)> {
+    fn answer(
+        &self,
+        label: &str,
+        step: Option<&crate::id::ExecId>,
+    ) -> Result<(String, Option<String>)> {
         let (session, input) = self
             .captured(step)?
-            .with_context(|| format!("{} captured no Session input", step.label))?;
+            .with_context(|| format!("{label} captured no Session input"))?;
         let answer = self.store.sqlite.input_final_answer(&input)?;
         Ok((session, answer.map(|answer| answer.text)))
     }
+}
+
+/// The JSON value a final answer carries: the answer itself, or the object
+/// inside the prose or code fence a provider wrapped it in.
+fn answer_value(text: &str) -> Result<serde_json::Value, String> {
+    let invalid = || "final output must be JSON".to_owned();
+    serde_json::from_str(text.trim()).or_else(|_| {
+        let start = text.find('{').ok_or_else(invalid)?;
+        let end = text.rfind('}').ok_or_else(invalid)?;
+        serde_json::from_str(text.get(start..=end).ok_or_else(invalid)?).map_err(|_| invalid())
+    })
 }
 
 #[async_trait]
@@ -481,10 +498,11 @@ impl SkillExecutor for &Driver<'_> {
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         anyhow::ensure!(!skill.human, "Human review belongs in the Task conversation; operational Flows cannot launch review Sessions");
+        let name = &skill.skill.name;
         if let Some(progress) = ctx.progress {
-            print_skill_progress(progress, &skill.skill.name);
+            print_skill_progress(progress, name);
         } else {
-            print_nested_skill_progress(&skill.skill.name);
+            print_nested_skill_progress(name);
         }
         let current = self.current();
         let output = current.as_ref().and_then(FlowOutput::for_step);
@@ -516,46 +534,33 @@ impl SkillExecutor for &Driver<'_> {
         step_cli.only_account.clear();
         step_cli.isolate = false;
         step_cli.shared = false;
-        // The step runs the skill this driver compiled. Its argv carries that
-        // skill only when a lookup by name would find something else.
-        let compiled = (crate::engine::flow::load_skill(&skill.skill.name, self.cwd)
-            .ok()
-            .as_ref()
-            != Some(&skill.skill))
-        .then(|| skill.skill.clone());
-        let mut session = None;
+        // The step looks its skill up by name. An agent the Flow names for
+        // this occurrence is the one option that travels, as `--model`.
+        if step_cli.model.is_none() {
+            let authored = crate::engine::flow::load_skill(name, self.cwd).ok();
+            if authored.and_then(|authored| authored.agent) != skill.skill.agent {
+                step_cli.model = skill.skill.agent.clone();
+            }
+        }
+        // The step is the command a person would type: `lf -b skill <name> [message]`.
+        let mut args = step_cli.step_args();
+        args.extend(["skill".to_owned(), name.clone()]);
+        if !message.trim().is_empty() {
+            args.push(message);
+        }
         // An invalid answer is corrected in the same conversation, twice at most.
         for turn in 1.. {
-            let mut step = self.step(skill.skill.name.clone(), output.clone());
-            step.skill = compiled.clone();
-            step.session = session.take();
-            let mut args = step_cli.step_args();
-            args.extend([
-                "--__cwd".to_owned(),
-                self.cwd.to_string_lossy().into_owned(),
-            ]);
-            args.extend([
-                flow_run::FLOW_STEP_ARG.to_owned(),
-                step.arg()?,
-                "skill".to_owned(),
-                skill.skill.name.clone(),
-            ]);
-            if !message.trim().is_empty() {
-                args.push(message.clone());
-            }
-            if let StepExit::Stopped = self.spawn(&step, &args, false).await? {
+            let (exit, step) = self.spawn(name, &args).await?;
+            if let StepExit::Stopped = exit {
                 return Ok(SkillOutcome::Waiting);
             }
             let Some(output) = &output else {
                 return Ok(SkillOutcome::Completed);
             };
-            let (conversation, answer) = self.answer(&step)?;
+            let (conversation, answer) = self.answer(name, step.as_ref())?;
             let error = match answer {
                 None => "final output is absent".to_owned(),
-                Some(text) => match serde_json::from_str(&text)
-                    .map_err(|_| "final output must be JSON".to_owned())
-                    .and_then(|value| output.decode(&value))
-                {
+                Some(text) => match answer_value(&text).and_then(|value| output.decode(&value)) {
                     Ok(outcome) => return Ok(outcome),
                     Err(error) => error,
                 },
@@ -564,82 +569,46 @@ impl SkillExecutor for &Driver<'_> {
                 turn < 3,
                 "structured output validation exhausted after {turn} successful turns: {error}"
             );
-            session = Some(conversation);
-            message = format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work.{}", output.instructions());
+            args = vec![
+                "--batch".to_owned(),
+                "session".to_owned(),
+                "resume".to_owned(),
+                conversation,
+                format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work.{}", output.instructions()),
+            ];
         }
         unreachable!("the correction loop returns or fails")
     }
 
-    /// The child owns the effect; the driver reads only how it ended.
+    /// The operation is its own `lf` command; the driver reads how it ended.
     async fn run_command(
         &self,
         ops: &crate::engine::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
-        eprintln!("op: {}", ops.item.display_name());
-        let step = self.step(ops.item.display_name(), None);
-        let mut args = vec![flow_run::FLOW_STEP_COMMAND.to_owned(), step.arg()?];
-        args.extend(ops.item.argv().into_iter().skip(1));
-        Ok(match self.spawn(&step, &args, true).await? {
-            StepExit::Finished => SkillOutcome::Completed,
-            StepExit::Stopped => SkillOutcome::Waiting,
-        })
+        let label = ops.item.display_name();
+        eprintln!("op: {label}");
+        let started = crate::store::rows::now_unix();
+        // Authored spellings outlive the CLI's; the step runs today's.
+        let args: Vec<String> = ops
+            .item
+            .clone()
+            .current()
+            .argv()
+            .into_iter()
+            .skip(1)
+            .collect();
+        if let (StepExit::Stopped, _) = self.spawn(&label, &args).await? {
+            return Ok(SkillOutcome::Waiting);
+        }
+        // A landing the step left to its watcher has not delivered yet. Its
+        // effect is recorded; the Flow stops here and neither failed.
+        if let Some(landing) = self.store.sqlite.watched_landing_at(self.cwd, started)? {
+            eprintln!("Landing {landing} is still being watched; the Flow stops here.");
+            return Ok(SkillOutcome::Waiting);
+        }
+        Ok(SkillOutcome::Completed)
     }
-}
-
-/// Run one operation step in its own process. A landing still being watched
-/// leaves with `HANDED_OFF_EXIT`: its effect is recorded and the Flow stops.
-pub fn execute_step(command: &[String], cli: &Cli) -> Result<()> {
-    let cron = cli
-        .cron_receipt
-        .as_ref()
-        .zip(cli.cron_lock_fd)
-        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
-            receipt_id: id.clone(),
-            lock_fd: fd,
-        });
-    let (name, args) = command
-        .split_first()
-        .ok_or_else(|| anyhow!("Flow step names no operation"))?;
-    // Decoding applies the same command normalization a compiled Flow gets.
-    let item: crate::engine::flow::Command =
-        serde_json::from_value(serde_json::json!({"command": name, "args": args}))?;
-    let cwd = crate::repo::working_directory()?;
-    block_on_store(|store| async move {
-        if let Some(crate::ops::WorkBinding {
-            work: WorkRef::Task(task),
-            ..
-        }) = crate::ops::resolve_execution_binding(&store, &cwd).await?
-        {
-            store.sqlite.mark_task_started(&task)?;
-        }
-        let result = tokio::task::spawn_blocking(move || {
-            crate::ops::execute_flow_command_with_cron(&cwd, &item, &NullProgress, cron.as_ref())
-        })
-        .await
-        .context("Flow operation worker failed")?;
-        // Interrupt cleanup can kill the operation and wake this waiter. Its
-        // exit is not evidence that the external effect failed or completed.
-        crate::engine::agent::wait_for_interrupt_cleanup();
-        let Some(landing) = result? else {
-            return Ok(());
-        };
-        use crate::pr_landing::PrLandingState;
-        match store
-            .get_pr_landing(&landing)
-            .await?
-            .map(|landing| landing.state)
-        {
-            None | Some(PrLandingState::Merged) => Ok(()),
-            Some(PrLandingState::Closed) => anyhow::bail!("PR closed without merging"),
-            Some(
-                PrLandingState::Blocked | PrLandingState::Watching | PrLandingState::Repairing,
-            ) => {
-                eprintln!("Landing {landing} is still being watched; the Flow stops here.");
-                Err(crate::exec::CommandExit(flow_run::HANDED_OFF_EXIT).into())
-            }
-        }
-    })
 }
 
 fn print_skill_progress(progress: StepProgress, skill_name: &str) {

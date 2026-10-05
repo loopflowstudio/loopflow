@@ -1428,13 +1428,6 @@ async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
     }
 }
 
-pub(crate) fn guard_task_mutation(repo: &Path) -> OpsResult<()> {
-    block_on_task(async move {
-        let _ = resolve_managed_task(repo).await?;
-        Ok(())
-    })
-}
-
 pub(crate) fn record_task_pr_repair(
     repo: &Path,
     kind: crate::work::task::TaskPrRepairKind,

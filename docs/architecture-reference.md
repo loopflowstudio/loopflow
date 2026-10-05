@@ -44,7 +44,7 @@ external consumers before changing those references.
 | One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Public discovery and Rust/Swift wire fixtures cover the current shape; installed startup acceptance remains open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Home, stale-client exclusion and shared-engine preservation across every provider path. |
 | Flow reads each step's result from its Exec | A step's result is its process exit; a deciding or routing step answers through the Session turn its Exec captured. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
-| One started Flow is one driver Exec and its step Execs | Jack Heart's 2026-10-05 decision: a Flow adds nothing on top of running `lf flow ...` in a Task worktree, and its record is the lf binary's ordinary Exec logging. The schema has no Flow table. The driver holds one cursor and its return counters in memory; each step Exec's argv records its position. Configured acceptance remains open. |
+| One started Flow is one driver Exec and its step Execs | Jack Heart's 2026-10-05 decision: a Flow adds nothing on top of running `lf flow ...` in a Task worktree, and its record is the lf binary's ordinary logging. Jack's later 2026-10-05 statements put that logging in the Flow's driver: an append-only FlowExec row with the Flow's name and compiled graph, and one row per step it starts. The driver holds one cursor and its return counters in memory; steps are plain commands that know nothing of their Flow. Configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
 | Current-state cutover | Three direct migration groups retain current database state. Release conversion must also recover resumable native identities from a frozen filesystem snapshot. Finished history and intermediate branch schemas are discarded. |
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Flows and 100,000 Execs: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Exec search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
@@ -155,7 +155,7 @@ Wave --< Linear Project --< Task --< Flow (driver Exec)
 Exec --< Exec                 one row per actual lf process, causal edges
 AgentSession --> Exec         nullable current driver, with generation fence
 AgentSession --< history      immutable provider outcomes and usage
-driver Exec --< step Exec     each step's position on its argv; result is its exit
+driver Exec --< step Exec     FlowExec: the driver's graph and each step's node; result is the step's exit
 ```
 
 | Concept | Owns |
@@ -296,28 +296,33 @@ exited; live or unknown execution since then still blocks. Passive membership
 grants no control.
 Template composition compiles into the graph, which the driver holds in memory
 with its cursor. Loop passes are node/iteration positions and lenses over the
-step Execs. They have no separate lifecycle. A past Flow whose YAML changed is
-drawn from the sequence its step Execs recorded.
+step Execs. They have no separate lifecycle. A past Flow keeps the graph it
+launched with, whatever its YAML says now.
 
-The driver tells each step what it is through a hidden argument:
+Each step is the command a person would type, started as a child of the driver:
 
 ```text
-lf --batch ... --__flow-step '{...}' skill <name> [message]    # agent step
-lf __flow-step '{...}' <command> <args>                         # operation step
+lf --batch [options] skill <name> [message]       # agent step
+lf <command> <args>                               # operation step
+lf --batch session resume <session> <message>     # correction of an answer
 ```
 
-That JSON, on the step Exec's recorded argv, carries the Flow name, a launch
-sequence number, the step label, the cursor (index, selected XOR paths, per-edge
-return counts), the graph node key and per-edge iterations, and for a deciding
-or routing step the structured answer required. It is the only record of
-position. Nothing reads it back to resume.
+A step is told nothing about its Flow and writes nothing about it. The driver
+writes FlowExec, and only by appending: `flow_execs` holds one row per Flow run
+(driver Exec, Flow name, graph as compiled at launch) and `flow_exec_steps` one
+row per step it started (child Exec, graph node key, per-edge iterations). The
+driver finds a step's Exec as its own newest child. Running, finished and each
+step's result are read from the Execs. Nothing reads the record back to resume,
+and no command changes a running Flow; the control is ending its driver.
 
-A step's result is how its process exited. For a deciding or routing step the
-driver reads the final answer of the Session turn that step Exec captured. An
-invalid structured answer is corrected in the same conversation: at most two
-corrective turns, then the Flow fails. An operation step that hands its effect
-to a watcher, such as a landing still being watched, exits with status 75; the
-Flow stops there, and neither failed. Mechanical steps create no AgentSession.
+A step's result is how its process exited. A deciding or routing step gets its
+answer contract in its message, and the driver reads the final answer of the
+Session turn that step Exec captured, accepting a JSON value wrapped in prose
+or a code fence. An invalid answer is corrected by resuming the same
+conversation: at most two corrective turns, then the Flow fails. After an
+operation step the driver looks for a landing of its checkout that is still
+being watched; the Flow stops there, and neither failed. Mechanical steps create
+no AgentSession.
 A conversation driver handoff grants no Flow authority.
 
 A Flow is `current` while its driver has no recorded exit, `completed` when the
@@ -414,7 +419,7 @@ provider, and literal subprocess edge must appear exactly once.
 | --- | --- | --- | --- | --- | --- | --- |
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf home sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
-| **Flow** — template and one execution | The driver process compiles the template, including Xor paths, and holds the graph and cursor in memory. Each step Exec's argv records its position; a step's result is its process exit. | `Flow`, `FlowStep`, typed node ID | `.lf/flows/`; no table of its own: the driver Exec and its child step Execs are Exec rows | One CLI driver Exec per Flow; `lf __flow-step` owns each mechanical effect | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
+| **Flow** — template and one execution | The driver process compiles the template, including Xor paths, and holds the graph and cursor in memory. It records the graph and each step's node in FlowExec; a step's result is its process exit. | `Flow`, `FlowExec`, typed node ID | `.lf/flows/`; `flow_execs`, `flow_exec_steps` beside the driver and step Exec rows | One CLI driver Exec per Flow; each step is its own child process running the plain command | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Directory discovery reconciles names and parents without replacing IDs. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
 | **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
@@ -642,12 +647,11 @@ lf flow example                     # with or without Task attribution
 
 The driver compiles the graph, every router and Xor alternative, and holds it
 with the cursor and return counts in memory. Definition changes affect new
-Flows. A past Flow whose YAML changed is drawn from the sequence its step Execs
-recorded. Backward edges stay finite graph structure; future loop passes are
+Flows. A past Flow keeps the graph its driver recorded at launch. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
 Taking an Iterate edge updates the driver's cursor and return counters. The
-node key and per-edge iterations on each step Exec's argv identify the pass,
+node key and per-edge iterations on each FlowExec step row identify the pass,
 including overlapping backward edges. Neither loop passes nor authored subflows
 create Flows or lifecycles.
 
@@ -930,12 +934,12 @@ their deletion is finished.
 | --- | --- |
 | Wave-scoped Chapter / `wave_chapters` | Linear Project status; Chapter is the shared In Progress name, with no stored object |
 | Recommended Flow / `flows.recommended` | Project's `flow` template selection |
-| `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | The Flow driver's in-memory graph and cursor; each step Exec's argv records its position |
+| `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | The Flow driver's in-memory cursor; FlowExec records the graph and each step's node |
 | `FlowRun`, `flows/<id>/position.json` | The Flow's driver Exec and step Execs |
 | Subject selector list on a Run | Typed AgentSession/Exec ancestry and immutable event attribution |
 | Four Session projections, Ask files, composite boundary Session IDs | `agent_sessions`, keyed by stable Session ID, with driver Exec and native history |
 | Session name/resolution and provider attachment sidecars | AgentSession attributes, native identity and exact process evidence |
-| Step occurrence / path-string node key | Driver Exec ID, local node key, iteration tuple on the step Exec's argv |
+| Step occurrence / path-string node key | Driver Exec ID, local node key and iteration tuple on the FlowExec step row |
 
 Canonical migrations, migration fixtures, and release notes retain historical
 names because changing shipped evidence would rewrite history. Operational docs

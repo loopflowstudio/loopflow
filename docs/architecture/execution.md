@@ -114,15 +114,17 @@ provider can succeed before the command fails later, and a stopped Flow's histor
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
-The driver holds the cursor and starts each step as a child `lf` process. The
-step's `--__flow-step` argument, recorded on its Exec's argv, names the Flow,
-launch sequence, step label and position; it is the only record of position. A
-step's result is how its process exited. For a deciding or routing step the
-driver reads the final answer of the Session turn that step Exec captured; an
-invalid structured answer is corrected in the same conversation, at most twice,
-then the Flow fails. A mechanical step is its own child Exec and invents no
-AgentSession. An operation that hands its effect to a watcher exits with status
-75: the Flow stops there, and neither failed. A killed driver leaves its Execs
+The driver holds the cursor and starts each step as a child `lf` process: the
+plain command, `lf -b skill <name> [message]` or the operation's own. A step
+knows nothing of its Flow. The driver appends the step's Exec, graph node and
+iteration counts to FlowExec, beside the Flow's name and launched graph. A
+step's result is how its process exited. A deciding or routing step gets its
+answer contract in its message and the driver reads the final answer of the
+Session turn that step Exec captured; an invalid answer is corrected by
+resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
+twice, then the Flow fails. A mechanical step is its own child Exec and invents
+no AgentSession. After an operation the driver stops the Flow when a landing of
+its checkout is still being watched; neither failed. A killed driver leaves its Execs
 as history; nothing resumes it. The caller inspects them before launching fresh
 work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
 external effects.

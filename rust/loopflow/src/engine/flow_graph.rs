@@ -491,10 +491,10 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
     levels
 }
 
-/// Where a saved cursor stands inside its captured definition.
+/// Where a recorded step stands inside its Flow's graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CursorProjection {
-    /// Key of the current occurrence; `None` when the cursor selects no node.
+pub struct PositionProjection {
+    /// Key of the current occurrence; `None` once the Flow finished.
     pub current: Option<u32>,
     /// Occurrences already finished in the current pass, including the router of
     /// a selected XOR. Earlier passes' completions are not carried forward.
@@ -502,92 +502,75 @@ pub struct CursorProjection {
     pub returns: Vec<FlowReturn>,
 }
 
-pub fn project_cursor(graph: &FlowGraph, cursor: &ExecutionCursor) -> CursorProjection {
-    let mut projection = CursorProjection {
+/// Project the step at `key`, which recorded `iterations` (see
+/// `flow_iterations`), onto `graph`. Deciders outside the step's own path
+/// report no traversals.
+pub fn project_position(
+    graph: &FlowGraph,
+    key: u32,
+    iterations: &[Vec<u32>],
+    finished: bool,
+) -> PositionProjection {
+    fn contains(node: &FlowNode, key: u32) -> bool {
+        node.key == key
+            || node
+                .paths
+                .iter()
+                .any(|path| path.steps.iter().any(|node| contains(node, key)))
+    }
+    fn walk(
+        nodes: &[FlowNode],
+        key: u32,
+        levels: &[Vec<u32>],
+        active: bool,
+        projection: &mut PositionProjection,
+    ) {
+        let counts = levels.first().filter(|_| active);
+        let on_path = nodes.iter().position(|node| active && contains(node, key));
+        let mut decider = 0;
+        for (index, node) in nodes.iter().enumerate() {
+            if on_path.is_some_and(|current| index < current) {
+                projection.completed.push(node.key);
+            }
+            if node.id.is_some() && node.returns_to.is_some() {
+                projection.returns.push(FlowReturn {
+                    decider: node.key,
+                    traversals: counts
+                        .and_then(|counts| counts.get(decider))
+                        .copied()
+                        .unwrap_or(0),
+                });
+                decider += 1;
+            }
+            let here = on_path == Some(index);
+            if here && node.key == key {
+                projection.current = Some(key);
+            } else if here {
+                projection.completed.push(node.key);
+            }
+            for path in &node.paths {
+                let selected = here && path.steps.iter().any(|node| contains(node, key));
+                walk(
+                    &path.steps,
+                    key,
+                    levels.get(1..).unwrap_or_default(),
+                    selected,
+                    projection,
+                );
+            }
+        }
+    }
+    let mut projection = PositionProjection {
         current: None,
         completed: Vec::new(),
         returns: Vec::new(),
     };
-    walk_cursor(&graph.steps, Some(cursor), &mut projection);
-    collect_returns(
-        &graph.steps,
-        Some(cursor),
-        &cursor.progress.repeats,
-        &mut projection.returns,
-    );
-    projection
-}
-
-fn walk_cursor(
-    nodes: &[FlowNode],
-    cursor: Option<&ExecutionCursor>,
-    projection: &mut CursorProjection,
-) {
-    let Some(cursor) = cursor else { return };
-    projection
-        .completed
-        .extend(nodes.iter().take(cursor.index).map(|node| node.key));
-    let Some(node) = nodes.get(cursor.index) else {
-        return;
-    };
-    if let Some(NestedCursor::Xor {
-        selected,
-        cursor: child,
-    }) = cursor.child.as_deref()
-    {
-        if let Some(path) = node.paths.iter().find(|path| &path.name == selected) {
-            if child.index < path.steps.len() {
-                projection.completed.push(node.key);
-                walk_cursor(&path.steps, Some(child), projection);
-                return;
-            }
-        }
+    walk(&graph.steps, key, iterations, true, &mut projection);
+    if finished {
+        projection.current = None;
+        projection.completed = graph.steps.iter().map(|node| node.key).collect();
     }
-    // A completed or unrecorded child still waits on its XOR.
-    projection.current = Some(node.key);
-}
-
-fn collect_returns(
-    nodes: &[FlowNode],
-    cursor: Option<&ExecutionCursor>,
-    repeats: &BTreeMap<String, u32>,
-    out: &mut Vec<FlowReturn>,
-) {
-    for (index, node) in nodes.iter().enumerate() {
-        if let (Some(id), Some(_)) = (&node.id, node.returns_to) {
-            out.push(FlowReturn {
-                decider: node.key,
-                traversals: repeats.get(id).copied().unwrap_or(0),
-            });
-        }
-        for path in &node.paths {
-            let child =
-                cursor
-                    .filter(|cursor| cursor.index == index)
-                    .and_then(|cursor| match cursor.child.as_deref() {
-                        Some(NestedCursor::Xor { selected, cursor }) if selected == &path.name => {
-                            Some(cursor)
-                        }
-                        _ => None,
-                    });
-            // Runtime repeat storage keeps its own path convention. Only the
-            // public node reference changes; active counts still win.
-            let settled_prefix = format!("xor:{index}:{}/", path.name);
-            let settled: BTreeMap<String, u32> = repeats
-                .iter()
-                .filter_map(|(key, count)| {
-                    key.strip_prefix(&settled_prefix)
-                        .map(|key| (key.to_owned(), *count))
-                })
-                .collect();
-            collect_returns(
-                &path.steps,
-                child,
-                child.map_or(&settled, |child| &child.progress.repeats),
-                out,
-            );
-        }
-    }
+    projection
 }
 
 #[cfg(test)]
@@ -692,8 +675,16 @@ mod tests {
     use crate::engine::flow::{
         ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
     };
-    use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowNodeKind};
+    use crate::engine::flow_graph::{
+        flow_iterations, project_position, FlowGraph, FlowNodeKind, PositionProjection,
+    };
     use crate::engine::{compile_flow, load_flow};
+
+    /// The projection of the step `cursor` selects, as its driver records it.
+    fn project(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> PositionProjection {
+        let (key, iterations) = super::location(steps, cursor).unwrap();
+        project_position(&FlowGraph::new("", steps), key, &iterations, false)
+    }
 
     fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
@@ -979,7 +970,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, Some(1));
         // Only the opening step is complete; earlier passes' decisions are not.
         assert_eq!(projection.completed, [0]);
@@ -1061,7 +1052,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, Some(3));
         assert_eq!(projection.completed, [0, 1, 2]);
         // The active child's own count wins over an older settled visit.
@@ -1151,7 +1142,7 @@ mod tests {
         for cursor in cursors(&steps) {
             let id = super::location(&steps, &cursor).unwrap().0;
             ids.push(id);
-            assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
+            assert_eq!(project(&steps, &cursor).current, Some(id));
             assert_eq!(graph.node_at(id).unwrap().key, id);
         }
         ids.sort();
@@ -1182,24 +1173,17 @@ mod tests {
             })),
             ..Default::default()
         };
-        let projection = project_cursor(&graph, &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, pinned.current);
         assert_eq!(projection.completed, pinned.completed);
         assert_eq!(projection.returns, pinned.returns);
         assert_eq!(flow_iterations(&steps, &cursor), pinned.iterations);
-        // Settled nested counts retain their runtime keys, including inactive paths.
-        let settled = ExecutionCursor {
+        // A step outside the alternatives reports their deciders untraversed.
+        let last = ExecutionCursor {
             index: 2,
-            progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([
-                    ("xor:1:alpha/xor:1:fix/check".into(), 7),
-                    ("xor:1:zeta/check".into(), 4),
-                ]),
-                ..Default::default()
-            },
             ..Default::default()
         };
-        let projection = project_cursor(&graph, &settled);
+        let projection = project(&steps, &last);
         assert_eq!(projection.current, Some(9));
         assert_eq!(projection.completed, [0, 1]);
         assert_eq!(
@@ -1208,13 +1192,10 @@ mod tests {
                 .iter()
                 .map(|r| (r.decider, r.traversals))
                 .collect::<Vec<_>>(),
-            [(5, 7), (6, 0), (8, 4), (9, 0)]
+            [(5, 0), (6, 0), (8, 0), (9, 0)]
         );
-        let finished = ExecutionCursor {
-            index: 3,
-            ..Default::default()
-        };
-        assert_eq!(project_cursor(&graph, &finished).current, None);
-        assert_eq!(project_cursor(&graph, &finished).completed, [0, 1, 9]);
+        let finished = project_position(&graph, 9, &[vec![0]], true);
+        assert_eq!(finished.current, None);
+        assert_eq!(finished.completed, [0, 1, 9]);
     }
 }

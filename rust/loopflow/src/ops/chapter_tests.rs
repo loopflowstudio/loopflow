@@ -504,7 +504,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, Vec<crate::ops::flow_run::FlowExecs>) {
+) -> (Task, TaskPr, Vec<crate::ops::flow_run::FlowExec>) {
     let (task, _) = local_task(
         context,
         repo,
@@ -515,7 +515,7 @@ async fn local_started_task(
     )
     .await;
     assert!(!context.store.task_started(&task.id).await.unwrap());
-    // An operation step run in the checkout is the Task's first recorded work.
+    // A Flow run from the checkout is the Task's first recorded work.
     context.store.sqlite.test_flow(
         "captured",
         &repo.to_string_lossy(),

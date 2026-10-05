@@ -132,8 +132,10 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // However the Task was named, the Flow left the same Execs.
         let recorded = support::recorded_flows(home.path());
         assert_eq!(recorded[0].1.len(), 1);
-        assert_eq!(recorded[0].1[0][0], "__flow-step");
-        assert_eq!(recorded[0].1[0][2..], ["task", "sync", "--plan"]);
+        assert_eq!(
+            recorded[0].1[0]["argv"],
+            serde_json::json!(["sync", "--plan"])
+        );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // With no Flow named, the entry runs the Project's.
         let output = run(&["-b", "task", "run", "INF-123"]);
@@ -144,7 +146,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         );
         let recorded = support::recorded_flows(home.path());
         assert_eq!(recorded.len(), 4);
-        assert_eq!(support::flow_step(&recorded[3].1[0])["flow"], "feature");
+        assert_eq!(recorded[3].1[0]["flow"], "feature");
         let status = run(&["task", "status", "INF-123", "--json"]);
         assert!(
             status.status.success(),

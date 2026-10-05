@@ -17,13 +17,15 @@ Jack Heart's statements are quoted in [questions.md](questions.md) under
 
 Two different things were both being called a Flow:
 
-| | TaskWorkflow (outer, not built here) | One `lf` flow run (inner, this PR) |
+| | TaskWorkflow (outer, second pass) | One `lf` flow run (inner, first pass) |
 | --- | --- | --- |
 | Shape | a start node, conversation stages, an end; edges are `lf` flows | implement, compress, decide, publish |
 | Lifetime | the Task's; many processes and conversations | one driver process |
 | Record | mutable, own identity, replace/take over like a Session | **FlowExec**: append-only, written by its driver |
 
-**This PR builds the inner one only.**
+**Order of work.** FlowExec and oblivious steps first; then TaskWorkflow, from
+[task-workflow.md](task-workflow.md). Jack: "I think you own TaskWorkflow.
+We cant do this design correctly without it."
 
 - **FlowExec.** One row per Flow run, keyed by its driver Exec: Flow name and
   the graph as compiled at launch. One step row per step the driver starts:
@@ -47,16 +49,9 @@ Two different things were both being called a Flow:
   generations, automatic recovery, resume, the pending-review pointer, the
   `replaced` state, steps reading a cursor.
 
-**TaskWorkflow, for a later Task.** Jack: "i think maybe we call that like a
-TaskWorkflow or something ? might need to think about ones that dont end in
-land, multi-PR tasks or 0-PR tasks. (I am pretty confident we want 0 PR
-tasks; not sure we need multi-PR tasks)". It is the layer where a Task's
-standard protocol and takeover would live, and it supersedes the "workflow
-files carry no runtime record" line under Later slices as an open question.
-Agent's notes for that design: the end node is the Task being complete, with
-landing as one edge that may be absent (0 PRs) or repeated (several PRs)
-without the workflow counting PRs; a watched landing that outlives its
-`lf` process is an outer concern.
+**TaskWorkflow** is designed in [task-workflow.md](task-workflow.md) and
+belongs to LOO-353. It replaces the "Workflows" bullet under Later slices,
+including its "no runtime row" rule, and the Task-primary Flow idea.
 
 ## Outcome
 
@@ -107,64 +102,61 @@ October 5 (delivery review):
   I dont think we need the FlowSession datatype." Then: "fold it into this pr."
 - `lf commit`: "should always push i guess ... or else should accept -p."
 
-## Branch state after the October 5 pass
+## Branch state after the FlowExec pass
 
-Built on `67cd68157`, merged with main at v0.13.3 (`8ea0bec9c`, release files
-only, no conflicts); Jack Heart has not reviewed it.
+FlowExec and oblivious steps are built on `8535598ef`; Jack Heart has not
+reviewed them. TaskWorkflow, takeover and resume are not built.
 
 - **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
   `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
   as the Task's agent and `--reason` as a steer, then continues as
-  `lf --task ISSUE run FLOW`. It honors `-b`/`-i`, prints and blocks. Gone:
-  `flow start`, the tmux launcher, `LF_TASK_FLOW_OPTIONS`, launch-time PR
-  preparation and agent preflight, `task create --run/--flow`.
+  `lf --task ISSUE run FLOW`. It honors `-b`/`-i`, prints and blocks.
 - **One path.** Every Flow launch that resolves to a Task, by the entry,
   `--task` or its worktree, gets the same check: ready Work, matching
   planning, current chapter, not being abandoned.
-- **No FlowSession.** A Flow is its driver Exec and the step Execs it starts.
-  The driver holds graph and cursor in memory and tells each step what it is on
-  argv (`--__flow-step '<json>'`: Flow name, launch number, label, cursor,
-  graph key, per-edge iterations, required answer, Session to continue).
-  A step's result is its exit; a deciding or routing step's answer is the final
-  answer of the Session turn its Exec captured. An invalid answer is corrected
-  in the same conversation, three turns at most. Gone: `flow_sessions`,
-  `flow_events`, `agent_sessions.flow_session_id`, the cursor row, position
-  versions, attempts, turn selection, the driver lock, `LF_FLOW_STEP`.
-- **Readers.** `task status`, completion/cleanup/landing blockers, chapter
-  "started", `lf flow list/show --sessions`, `lf monitor`, Session Flow
-  membership and Desktop's Task work read Execs. A Flow is `current` (driver
-  has no recorded exit), `completed` or `stopped`; a failed Flow no longer
-  reads as current. A past Flow whose YAML changed is drawn from its step
-  sequence.
-- **Migration.** The one draft archives each Flow row's name, state and last
-  cursor as a `legacy_flow` observation on the Sessions it opened, keeps Task
-  Started evidence, drops both tables and the Session column, and rewrites the
-  ancestry and Started triggers.
-- **Callers.** Builtin skills, `skills/loopflow/SKILL.md`, docs and README name
-  `lf task run` and say it blocks; Desktop Start owns the command as a child
-  process and reports an immediate refusal.
+- **FlowExec.** `flow_execs` (driver Exec, Flow name, graph compiled at launch)
+  and `flow_exec_steps` (child Exec, graph node key, per-edge iterations), both
+  append-only by trigger; a step row must name an Exec its driver started. The
+  driver writes the Flow row before its first step, marks its Task started,
+  and appends each step once the child's Exec appears.
+- **Oblivious steps.** A skill step is `lf -b [options] skill <name>
+  [message]`; an operation is its own `lf` command through the ordinary CLI;
+  a correction is `lf -b session resume SESSION MESSAGE`. Gone: `FlowStep`,
+  `--__flow-step`, the `__flow-step` command, `--__cwd` on steps, exit status
+  75, the in-process operation interpreter and its allowlist, per-node steer
+  acknowledgement, the Session's captured Flow position, and provider
+  structured-output requests (`--json-schema`, `outputSchema`, OpenCode
+  `format`). The answer contract is in the step's message; the driver reads
+  the turn's final answer and accepts JSON inside prose or a code fence.
+- **Readers.** `lf flow list/show`, `task status`, completion blockers,
+  chapter "started", `lf monitor`, Session Flow membership and the Desktop
+  DTOs read FlowExec joined to Execs. Wire shapes are unchanged, so fixtures
+  and Swift decoders are untouched. A past Flow keeps its launched graph.
+- **Migration.** The one draft also creates the two tables and reads Started
+  evidence from a Flow run in the Task's checkout.
 
 ## Remaining from this pass
 
-- **Unproven.** A real provider step; a driver killed mid-agent-step (the
-  surviving provider turn is left to its Session, nothing settles it into the
-  Flow); the migration against a populated store; Desktop Start against a real
-  `lf`. The real-Codex e2e (`tests/e2e/codex_connect.py --flow-decision-retry`)
-  is ported but not run.
-- **Publish after an unobserved merge.** The proof covers a merge already
-  observed: publication refuses, names the merged PR and `lf pr next`. A merge
-  nobody has observed still reaches GitHub through `pr publish`; `lf pr
-  reconcile` remains its owner.
-- **History not archived.** A saved Flow that opened no Session (operations
-  only) leaves no observation; its Execs remain.
-- **Desktop.** Task work now decodes `execution.work`, where `lf task status
-  --json` has emitted it since #1379; before, the read failed on real output.
-  Desktop does not draw step Execs or why a Flow stopped.
-- **Leftovers.** `SessionKind::FlowReview` and `SessionAttention::Review` are
-  unreachable for new work and go with the Waiting slice. Task status still
-  lists every Exec (defect 2 in [the demo notes](demo-task-flows.md)).
-  `--needs-me` remains in the CLI, docs and `repo/operate` until `--waiting`
-  replaces it.
+- **Unproven.** A real provider step, in particular whether real providers
+  return the contract's JSON without a schema request; a driver killed
+  mid-agent-step; the migration against a populated store; Desktop Start
+  against a real `lf`; a cron-fired release Flow through the plain command.
+  The real-Codex e2e (`tests/e2e/codex_connect.py --flow-decision-retry`) is
+  ported to the message contract and FlowExec rows but not run.
+- **A step can go unrecorded.** The driver learns a child's Exec by polling
+  for its newest child every 10 ms. A driver killed between the child
+  registering and that poll leaves the step's Exec without a step row.
+- **Publish after an unobserved merge** still reaches GitHub through
+  `pr publish`; `lf pr reconcile` remains its owner.
+- **Leftovers.** `agent_sessions.node`/`iterations` are no longer written or
+  read; native history readers still parse `structured_output`;
+  `SessionFlowMembership::Step` remains for older manifests.
+  `SessionKind::FlowReview` and `SessionAttention::Review` go with the Waiting
+  slice. Task status still lists every Exec. `--needs-me` remains until
+  `--waiting` replaces it. Desktop does not draw step Execs.
+- **Failing before this pass, unchanged** (reproduced on `8535598ef`):
+  `session_cli_tests resume_selects_human_input_in_the_physical_worktree_and_records_opening`
+  and `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
 
 ## Later slices (approved October 4, unbuilt)
 
@@ -220,16 +212,15 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 
 | Command | Proves |
 | --- | --- |
-| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical Execs and get identical refusals; the default Flow; removed commands. |
-| `cargo test -p loopflow --test session_lifecycle_tests` | Against a fake provider: decisions, same-conversation correction bounded at three turns, routing, three loop passes under one driver, a blocked decision. |
-| `cargo test -p loopflow --test flow_tests --test flow_discovery_tests` | Flows read back from Execs; a Flow whose definition is gone. |
-| `cargo test -p loopflow --test pr_tests publishing_after` | Publish after an observed merge names the PR and `lf pr next`. |
-| `cargo test -p loopflow --lib store::migrations` | Released frontier converts through the one draft. |
-| `cargo test -p loopflow --test dto_fixtures`, `swift build --build-tests` | Wire shapes agree across Rust and Swift. |
-| `git grep -E "FlowSession\|flow_sessions\|flow_events\|flow start\|LF_TASK_FLOW_OPTIONS"` | Outside scratch and Wave memory: migrations and their tests, two dated reviews under `docs/reviews/`, and old release notes. No executable path. |
+| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical step commands and get identical refusals; a refused launch records no Flow. |
+| `cargo test -p loopflow --test session_lifecycle_tests` | Against a fake provider answering in prose: decisions from the message contract, correction by `session resume` bounded at three turns, routing, three loop passes under one driver, a blocked decision. |
+| `cargo test -p loopflow --test flow_tests --test flow_discovery_tests` | Flows read back from FlowExec; a killed driver's step stays recorded; a past Flow keeps its launched graph. |
+| `cargo test -p loopflow --test land_tests lf_pr_land_returns` | A Flow stops at a landing its plain `pr land` step left watched. |
+| `cargo test -p loopflow --lib store::` | Released frontier converts through the one draft; the record is append-only; a step must be its driver's child. |
+| `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
+| `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 
-Last run, October 5 after the merge: `cargo test -p loopflow --lib
-store::migrations`, 83 passed; the rest wait for gate.
+CHECKS_PLACEHOLDER
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

@@ -210,10 +210,14 @@ is equally its work; a stopped Flow is history its caller inspects, never a
 position to resume. The Project's Flow supplies the default for a fresh launch;
 explicit Flow selection is allowed.
 Taskless execution uses the same driver. A Flow is one driver Exec and the step
-Execs it starts; its id is the driver Exec id. The driver holds the compiled
-graph, cursor and return counts in memory and gives each step its position on
-the step Exec's argv, the only record of position. Template composition expands
-the graph; loop passes are node/iteration positions on step Execs, not child Flows.
+Execs it starts; its id is the driver Exec id. The driver holds the cursor and
+return counts in memory and writes FlowExec, append-only: the Flow's name and
+compiled graph at launch, then each step's Exec, node and iteration counts.
+Every Flow run gets one; none is primary for a Task. A step is the plain command
+(`lf -b skill <name> [message]` or the operation's own) and neither reads nor
+writes it. Running, finished and results are read from Execs, never stored
+twice. Template composition expands the graph; loop passes are node/iteration
+positions on step rows, not child Flows.
 
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated

@@ -8,11 +8,17 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-/// The Flow whose step captured session `s`'s current input: that step Exec's
-/// parent. Sessions carry no Flow column of their own.
+/// The Flow whose driver recorded, as a step, the Exec that captured session
+/// `s`'s current input. Sessions carry no Flow column of their own.
 macro_rules! session_flow {
     () => {
-        "(SELECT step.parent_exec_id FROM session_events captured JOIN execs step ON step.id=captured.exec_id WHERE captured.seq=s.current_capture AND instr(step.command,'__flow-step')>0)"
+        "(SELECT fs.flow_exec_id FROM session_events captured JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id WHERE captured.seq=s.current_capture)"
+    };
+}
+/// That step's node and loop counts, as its driver recorded them.
+macro_rules! session_step {
+    ($column:literal) => {
+        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id WHERE captured.seq=s.current_capture)")
     };
 }
 pub(super) const SESSION_FLOW: &str = session_flow!();
@@ -20,7 +26,7 @@ pub(super) const SESSION_FLOW: &str = session_flow!();
 const SESSION_SELECT: &str = concat!("SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
+    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
     Ok((|| {
@@ -163,7 +169,7 @@ fn inventory_query(
 // before joining Flow/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
-    ", session_flow!(), ",s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture
+    ", session_flow!(), ",s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
@@ -172,9 +178,8 @@ fn summary_query(page: &str, by_id: bool) -> String {
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Flow is the driver Exec above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.*,driver.id,step.command,driver.outcome,driver.completed_at,step.started_at,
-        (step.rowid=(SELECT MAX(later.rowid) FROM execs later WHERE later.parent_exec_id=driver.id
-            AND instr(later.command,'__flow-step')>0)),
+        SELECT s.*,driver.id,flow.flow,driver.outcome,driver.completed_at,step.started_at,
+        (fs.seq=(SELECT MAX(later.seq) FROM flow_exec_steps later WHERE later.flow_exec_id=fs.flow_exec_id)),
         w.slug,t.issue_identifier,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
@@ -191,8 +196,10 @@ fn summary_query(page: &str, by_id: bool) -> String {
         COALESCE(t.work_state IN ('done','abandoned'),0)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
-        LEFT JOIN execs step ON step.id=captured.exec_id AND instr(step.command,'__flow-step')>0
-        LEFT JOIN execs driver ON driver.id=step.parent_exec_id
+        LEFT JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id
+        LEFT JOIN flow_execs flow ON flow.exec_id=fs.flow_exec_id
+        LEFT JOIN execs step ON step.id=fs.exec_id
+        LEFT JOIN execs driver ON driver.id=fs.flow_exec_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("s"))
@@ -215,12 +222,7 @@ fn read_summary(
         let flow = match row.get::<_, Option<String>>(18)? {
             Some(driver) => {
                 let completed: Option<i64> = row.get(21)?;
-                let name = row
-                    .get::<_, Option<String>>(19)?
-                    .as_deref()
-                    .and_then(crate::ops::flow_run::FlowStep::of_command)
-                    .map(|step| step.flow)
-                    .ok_or_else(|| invalid("Flow step Exec has no readable step"))?;
+                let name: String = row.get(19)?;
                 Some(crate::session::FlowSummary {
                     id: driver,
                     name,

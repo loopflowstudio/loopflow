@@ -131,25 +131,25 @@ complete Task Work.
 
 ## Read each step's result
 
-Each executed skill or operation runs in its own child lf Exec through the
-ordinary command path. The driver passes the step a hidden `--__flow-step`
-JSON argument: the Flow name, a launch sequence number, the step label, the
-cursor (index, selected XOR paths, per-edge return counts), the graph node key
-and per-edge iterations, and for a deciding or routing step the structured
-answer required. Recorded on the step Exec's argv, it is the only record of
-position; nothing reads it back to resume. The driver owns navigation. A step's
-result is how its process exited; a deciding or routing step also answers
-through the final answer of the Session turn its Exec captured. An operation
-that hands its effect to a watcher, such as a landing still being watched,
-exits with status 75: the Flow stops there, and neither failed.
+Each executed skill or operation runs in its own child lf Exec as the plain
+command: `lf -b skill <name> [message]`, or the operation's own command. The
+step is told nothing about its Flow. The driver owns navigation and the Flow's
+record, FlowExec: the Flow's name and graph as compiled at launch, then one
+appended row per step with its Exec, graph node key and per-edge iterations.
+Nothing reads it back to resume. A step's result is how its process exited; a
+deciding or routing step also answers through the final answer of the Session
+turn its Exec captured. After an operation the driver stops the Flow when a
+landing of its checkout is still being watched: neither failed.
 
-A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
-`summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
-keys are required in the provider schema. A router returns a JSON object containing
-`path`, constrained to the branch's path names. Each provider receives
-the schema before generation. Session history retains the native output and
-completion separately. Invalid output receives at most two corrective turns in
-the same conversation, then the Flow fails; provider failure remains distinct.
+A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
+with a nonempty `summary`, or `blocked` with a nonempty `reason`; the unused
+field is null. A router's message asks for a JSON object containing `path`, one
+of the branch's path names. The contract travels in the message, not as a
+provider schema, and the driver accepts the value inside prose or a code fence.
+Session history retains the native output and completion separately. An invalid
+answer is corrected by `lf -b session resume ID MESSAGE` in the same
+conversation, at most twice, then the Flow fails; provider failure remains
+distinct.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
@@ -165,8 +165,8 @@ lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A killed driver leaves its Execs as history; the last step Exec's argv shows
-where it stood. Nothing restarts or resumes it. A Flow is `current` while its
+A killed driver leaves its Execs and FlowExec rows as history; the last step
+row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
 driver has no recorded exit, `completed` when the driver succeeded and `stopped`
 when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,

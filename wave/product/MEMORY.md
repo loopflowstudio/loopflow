@@ -49,15 +49,15 @@ need the FlowSession datatype", folded into the same PR. Task status
 presentation is "not the current focus".
 
 The branch implements that. `lf task run ISSUE [FLOW]` places, defaults and
-continues as `lf --task ISSUE run FLOW`; `flow start`, its tmux launcher and
-`task create --run` are gone. A Flow is its driver Exec and the step Execs it
-starts: the driver holds graph and cursor in memory, each step's position rides
-on its argv, a decision is the final answer of the turn that step Exec captured,
-and an invalid answer is corrected in the same conversation. No table, cursor,
-lock or resume exists; readers and Desktop read Execs. Choices made without
-Jack are listed in `scratch/questions.md` until he reviews them, notably: steps
-run the driver's compiled skill, callers background the blocking command themselves,
-and Flow launch refusals do not apply to single skills or conversations.
+continues as `lf --task ISSUE run FLOW`. Jack then rejected the hidden step
+argument ("I hate __ and hidden arguments") and settled the record: each step
+is the plain command and "doesnt need to know its part of a flow"; the Flow's
+driver keeps an append-only FlowExec (name, launched graph, each step's Exec and
+node) for every run, none primary for a Task. The mutable outer record is
+TaskWorkflow, designed in LOO-353 but unbuilt. Built so: operations run through
+the ordinary CLI, the answer contract rides in the message with no provider
+schema, and a correction is `lf -b session resume ID MESSAGE`. The agent's
+unreviewed choices are in `scratch/questions.md`.
 
 Lessons: the claim that `-b` was unbuilt was wrong (main #1356 had removed it);
 check main's history before calling a flag missing. Deleting a record exposed

@@ -5,11 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::engine::flow::Command as FlowCommand;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
-    arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_command,
-    present_pr_review, CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
+    arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
+    CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
 use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
@@ -149,8 +148,8 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
 }
 
 #[test]
-fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
-    for headless in [false, true] {
+fn draft_open_stays_draft_until_publish() {
+    {
         let home = tempfile::TempDir::new().unwrap();
         let state = home.path().join("pr-state");
         let gh = draft_pr_script(&state);
@@ -179,17 +178,7 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 "--body",
                 "Current work.",
             ];
-            if headless {
-                execute_flow_command(
-                    repo.path(),
-                    &FlowCommand {
-                        command: "pr".to_string(),
-                        args: args.iter().map(|arg| (*arg).to_string()).collect(),
-                    },
-                    &NullProgress,
-                )
-                .unwrap();
-            } else {
+            {
                 let output = Command::new(env!("CARGO_BIN_EXE_lf"))
                     .args(["pr"])
                     .args(args)
@@ -217,7 +206,7 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
             }));
             assert_eq!(publication.presentation.unwrap().body, body);
         }
-        assert_eq!(presentation_attempts(&marker), if headless { 0 } else { 3 });
+        assert_eq!(presentation_attempts(&marker), 3);
     }
 }
 

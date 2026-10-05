@@ -1581,6 +1581,15 @@ fn execute_command(
             cmd: loopflow::lf::HomeCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
+        Some(Commands::Session {
+            cmd:
+                loopflow::lf::SessionCommand::Resume {
+                    id: Some(id),
+                    message: Some(message),
+                },
+        }) if cli.batch => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::run::resume(id, message, cli)
+        }),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
         Some(Commands::Account {
             cmd,
@@ -1592,6 +1601,15 @@ fn execute_command(
             loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
         }
         Some(Commands::Repo { cmd }) => match cmd {
+            loopflow::lf::RepoCommand::Release {
+                cmd: loopflow::lf::ReleaseCommand::Run { version, target },
+            } if cli.cron_receipt.is_some() => in_repo_runtime(args, |_| {
+                loopflow::lf::commands::ops::run_cron_release(
+                    version.as_deref(),
+                    target.as_deref(),
+                    cli,
+                )
+            }),
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
@@ -1712,17 +1730,7 @@ fn execute_command(
             skill,
         }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
-            let item = loopflow::engine::flow::Command {
-                command: "__telemetry-scorecard".to_string(),
-                args: if *json {
-                    vec!["--json".to_string()]
-                } else {
-                    Vec::new()
-                },
-            };
-            loopflow::ops::execute_flow_command(repo, &item, &loopflow::ops::NullProgress)
-                .map(|_| ())
-                .map_err(Into::into)
+            loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Doctor { json, planning },
@@ -1743,9 +1751,6 @@ fn execute_command(
             json,
             all,
         }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
-        Some(Commands::FlowStep { command, .. }) => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::flow::execute_step(command, cli)
-        }),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),

@@ -201,14 +201,9 @@ pub struct AgentConfig {
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
     pub session_driver: Option<(String, crate::exec::SessionDriver)>,
-    /// The structured final answer this turn must return.
-    pub output: Option<crate::engine::flow_output::FlowOutput>,
 }
 
 impl AgentConfig {
-    pub fn output_schema(&self) -> Option<serde_json::Value> {
-        self.output.as_ref().map(|output| output.schema())
-    }
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -642,7 +637,6 @@ pub struct ClaudeArgs {
     pub chrome: bool,
     /// Resume an existing Claude Code session.
     pub resume_id: Option<String>,
-    pub output_schema: Option<serde_json::Value>,
 }
 
 impl ClaudeArgs {
@@ -728,11 +722,6 @@ impl ClaudeArgs {
             args.push(id.clone());
         }
 
-        if let Some(schema) = &self.output_schema {
-            args.push("--json-schema".into());
-            args.push(schema.to_string());
-        }
-
         args
     }
 }
@@ -756,7 +745,6 @@ fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs 
         stream: true,
         chrome: false,
         resume_id: resume_id.map(str::to_string),
-        output_schema: config.output_schema(),
     }
 }
 
@@ -973,7 +961,6 @@ pub fn build_claude_command(
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
-        output_schema: launch.output_schema(),
     };
     cmd.extend(claude_args.to_args());
 
@@ -1800,10 +1787,7 @@ fn _exec_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if (matches!(harness.as_str(), "codex" | "opencode")
-        || (harness == "claude" && launch.output.is_some()))
-        && process.auto
-    {
+    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
         return _exec_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
@@ -2954,7 +2938,6 @@ trust_level = "trusted"
             stream: true,
             chrome: true,
             resume_id: Some("sess_abc".to_string()),
-            output_schema: None,
         }
         .to_args();
         assert!(args.contains(&"--chrome".to_string()));
@@ -3061,7 +3044,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -3094,7 +3076,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -3127,7 +3108,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
             agent: None,

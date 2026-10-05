@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::flow_run::{FlowExecs, HANDED_OFF_EXIT};
+use crate::ops::flow_run::FlowExec;
 use crate::ops::task_flow::{LatestTaskFlow, TaskFlowRecord};
 use crate::session::FlowSummaryState;
 use crate::session_record::activity::{self, Activity};
@@ -61,13 +61,16 @@ pub(crate) async fn task_execution_and_flow(
         Some(_) => ProcessIdentityEvidence::Dead,
         None => crate::journal::exec_process_evidence(&store.sqlite, &exec.id),
     };
-    let (_, step) = flow.latest();
-    let input = store.sqlite.exec_input(&step.id)?;
+    let step = flow.latest().map(|step| &step.exec);
+    let input = match step {
+        Some(step) => store.sqlite.exec_input(&step.id)?,
+        None => None,
+    };
     let mut snapshot = project_execution(
         &flow,
         entry.summary.state,
         evidence(&flow.driver),
-        evidence(step),
+        step.map_or(ProcessIdentityEvidence::Dead, evidence),
     );
     snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Running {
@@ -109,21 +112,25 @@ pub(crate) async fn task_execution_and_flow(
 /// A Flow runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
-    flow: &FlowExecs,
+    flow: &FlowExec,
     state: FlowSummaryState,
     driver: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
-    let (latest, exec) = flow.latest();
-    let label = &latest.label;
     if state == FlowSummaryState::Completed {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
-            reason: format!("Flow {} finished; nothing further is launched", flow.name()),
+            reason: format!("Flow {} finished; nothing further is launched", flow.name),
             step: None,
             captured: None,
         };
     }
+    // A driver that has started no step is the Flow's only Exec so far.
+    let (label, exec) = match flow.latest() {
+        Some(latest) => (flow.label(latest), &latest.exec),
+        None => (flow.name.clone(), &flow.driver),
+    };
+    let label = &label;
     let (state, reason) = match (driver, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
@@ -138,12 +145,7 @@ fn project_execution(
             format!("Flow Execs at {label} have unknown process identity; inspect their effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            if exec.exit_code == Some(i32::from(HANDED_OFF_EXIT)) {
-                (
-                    TaskExecutionState::Idle,
-                    format!("Flow stopped at {label}; its landing is watched separately"),
-                )
-            } else if exec.outcome.as_deref() == Some("succeeded") {
+            if exec.outcome.as_deref() == Some("succeeded") {
                 (
                     TaskExecutionState::Idle,
                     format!("Flow stopped after {label}; inspect its history and effects before launching fresh work"),
@@ -182,7 +184,7 @@ mod tests {
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
         let flow = |outcome| {
             let driver = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
-            store.flow_execs(driver.as_str()).unwrap().unwrap().0
+            store.flow_exec(driver.as_str()).unwrap().unwrap().0
         };
         let state =
             |flow, driver, step| project_execution(flow, FlowSummaryState::Current, driver, step);

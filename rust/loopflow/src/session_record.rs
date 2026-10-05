@@ -57,7 +57,8 @@ pub(crate) struct SessionCaptureSpec {
     pub work: Option<crate::session::SessionWork>,
 }
 
-/// The managed Task or standalone Flow position captured for a conversation.
+/// A Flow position older manifests captured. New captures record none: a step
+/// is an ordinary command, and its Flow is read from the driver's record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
@@ -72,27 +73,6 @@ pub struct SessionFlowStep {
     pub key: Option<u32>,
     /// Older captures have no tuple; never derive it from their scalar visit token.
     pub iterations: Option<Vec<Vec<u32>>>,
-}
-
-impl SessionFlowStep {
-    /// A step as its Session records it. `driver` is the Exec that started
-    /// the step's process and names the Flow.
-    pub(crate) fn of(
-        step: &crate::ops::flow_run::FlowStep,
-        driver: &crate::id::ExecId,
-        task_id: Option<crate::work::task::TaskId>,
-    ) -> Self {
-        Self {
-            task_id,
-            task_pr_id: None,
-            invocation_id: driver.to_string(),
-            flow: step.flow.clone(),
-            step: step.label.clone(),
-            node: Some(step.cursor.node_key()),
-            key: Some(step.key),
-            iterations: Some(step.iterations.clone()),
-        }
-    }
 }
 
 /// Membership at capture time; absence in historical manifests remains unknown.

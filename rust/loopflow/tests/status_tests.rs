@@ -880,7 +880,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     conn.execute("DELETE FROM task_prs", []).unwrap();
     let before: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs WHERE instr(command,'__flow-step')>0)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -927,7 +927,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     }
     let after: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs WHERE instr(command,'__flow-step')>0)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

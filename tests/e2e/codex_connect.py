@@ -26,6 +26,8 @@ from pathlib import Path
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import unix_connect
 
+ANSWER_CONTRACT = "Return the final answer as the declared JSON value"
+
 
 def _database(env: dict[str, str]) -> str:
     return str(Path(env["LF_HOME"]) / "loopflow.db")
@@ -100,17 +102,15 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             text = "Fixture complete."
-            if output_format := request.get("text", {}).get("format"):
-                if output_format.get("type") == "json_schema":
-                    schema = output_format["schema"]
-                    assert schema["additionalProperties"] is False
-                    text = json.dumps(
-                        self.server.decision_outputs.pop(0)
-                        if self.server.decision_outputs
-                        else {"decision": "unknown"}
-                        if self.server.invalid_decision_output
-                        else {"decision": "advance", "summary": "Native output proof"}
-                    )
+            # A Flow's driver writes the answer contract into the message.
+            if ANSWER_CONTRACT in json.dumps(request["input"]):
+                text = json.dumps(
+                    self.server.decision_outputs.pop(0)
+                    if self.server.decision_outputs
+                    else {"decision": "unknown"}
+                    if self.server.invalid_decision_output
+                    else {"decision": "advance", "summary": "Native output proof", "reason": None}
+                )
             item = {
                 "type": "message",
                 "id": "msg_done",
@@ -1143,16 +1143,15 @@ def _flow_decision_retry_contract(
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(_database(env)) as db:
-        # A Flow is its driver Exec and the step Execs it started.
+        # A Flow is its driver Exec and the step Execs that driver recorded.
         results["flow"] = db.execute(
-            "SELECT d.outcome FROM execs d WHERE EXISTS(SELECT 1 FROM execs s "
-            "WHERE s.parent_exec_id=d.id AND instr(s.command,'__flow-step')>0)"
+            "SELECT d.outcome FROM flow_execs f JOIN execs d ON d.id=f.exec_id"
         ).fetchone()
         results["history"] = db.execute(
             "SELECT seq,kind,provider_turn,payload FROM session_events ORDER BY seq"
         ).fetchall()
         results["steps"] = db.execute(
-            "SELECT command FROM execs WHERE instr(command,'__flow-step')>0 ORDER BY rowid"
+            "SELECT e.command FROM flow_exec_steps s JOIN execs e ON e.id=s.exec_id ORDER BY s.seq"
         ).fetchall()
     outputs = [
         item["output"]
@@ -1161,8 +1160,7 @@ def _flow_decision_retry_contract(
         if item.get("type") == "function_call_output"
     ]
     results["tool_outputs"] = outputs
-    schemas = [request.get("text", {}).get("format") for request in server.requests]
-    assert any(schema and schema.get("type") == "json_schema" for schema in schemas), schemas
+    assert any(ANSWER_CONTRACT in json.dumps(request["input"]) for request in server.requests)
     completed = [
         (seq, json.loads(payload)["status"])
         for seq, kind, _, payload in results["history"]
@@ -1174,8 +1172,8 @@ def _flow_decision_retry_contract(
         else ["completed", "failed", "completed", "completed", "completed"]
     )
     # The failed turn decided nothing. Each correction is another step Exec
-    # continuing the conversation that gave the invalid answer.
-    corrections = [command for (command,) in results["steps"] if '\\"session\\"' in command]
+    # resuming the conversation that gave the invalid answer.
+    corrections = [command for (command,) in results["steps"] if '"session","resume"' in command]
     if replace:
         assert command.returncode == 0 and results["flow"][0] == "succeeded", results
         assert len(results["steps"]) == 2 and not corrections, results["steps"]

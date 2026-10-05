@@ -44,7 +44,19 @@ def _record_launch():
         )
 
 
-def _launch(session, request, prompt, output_format):
+CONTRACT = "Return the final answer as the declared JSON value: "
+
+
+def _contract(parts):
+    """The answer schema a Flow's driver wrote into the message, if any."""
+    text = "".join(part.get("text", "") for part in parts)
+    start = text.rfind(CONTRACT)
+    if start < 0:
+        return None
+    return json.JSONDecoder().raw_decode(text[start + len(CONTRACT):])[0]
+
+
+def _launch(session, request, prompt):
     _record_launch()
     assistant = "msg_" + uuid.uuid4().hex
     info = {"id": assistant, "sessionID": session, "role": "assistant", "parentID": request,
@@ -55,13 +67,16 @@ def _launch(session, request, prompt, output_format):
         sessions[session].append(message)
         _save(sessions)
     _event("message.updated", info=info)
+    answer = "Fixture completed."
+    # A retried turn carries no contract of its own; the conversation does.
+    saved = HOME / f"contract-{session}.json"
+    if schema := _contract(prompt):
+        saved.write_text(json.dumps(schema))
     fail = HOME / "fail-once"
     transient = HOME / "transient-once"
     if transient.exists() and "Decide the fixture." in str(prompt):
         transient.unlink()
-        info["structured_output"] = {
-            "decision": "iterate", "summary": "Failed turn cannot navigate"
-        }
+        answer = json.dumps({"decision": "iterate", "summary": "Failed turn cannot navigate"})
         info["error"] = {"name": "APIError", "data": {"message": "fixture status 502"}}
     elif fail.exists():
         fail.unlink()
@@ -77,29 +92,31 @@ def _launch(session, request, prompt, output_format):
                 "name": "APIError", "data": {"message": "fixture permission unanswered"}
             }
         else:
-            if output_format:
-                assert output_format["type"] == "json_schema"
-                schema = output_format["schema"]
+            schema = json.loads(saved.read_text()) if saved.exists() else None
+            if schema:
                 assert schema["additionalProperties"] is False
                 repeats = HOME / "remaining-passes"
                 remaining = int(repeats.read_text()) if repeats.exists() else 0
                 if "decision" in schema["properties"]:
                     decision = "iterate" if remaining else "advance"
-                    info["structured_output"] = {"decision": decision, "summary": "Proof observed"}
+                    value = {"decision": decision, "summary": "Proof observed", "reason": None}
                     blocked = HOME / "blocked-once"
                     if blocked.exists():
                         blocked.unlink()
-                        info["structured_output"] = {"decision": "blocked", "reason": "Release target is missing"}
+                        value = {"decision": "blocked", "summary": None,
+                                 "reason": "Release target is missing"}
                     invalid = HOME / "invalid-output-once"
                     if invalid.exists() or (HOME / "invalid-output-always").exists():
                         invalid.unlink(missing_ok=True)
-                        info["structured_output"] = {"decision": "unknown"}
+                        value = {"decision": "unknown"}
                     elif remaining:
                         repeats.write_text(str(remaining - 1))
                 else:
-                    info["structured_output"] = {"path": schema["properties"]["path"]["enum"][0]}
+                    value = {"path": schema["properties"]["path"]["enum"][0]}
                 with (HOME / "decide.log").open("a") as log:
-                    log.write(json.dumps(info["structured_output"]) + "\n")
+                    log.write(json.dumps(value) + "\n")
+                # A provider answers in prose; the driver finds the value in it.
+                answer = "Decision:\n```json\n" + json.dumps(value) + "\n```"
             if (HOME / "disconnect-after-tool").exists():
                 (HOME / "tool-effect").write_text("completed")
                 EVENTS.put(None)
@@ -108,7 +125,7 @@ def _launch(session, request, prompt, output_format):
                                       "cache": {"read": 0, "write": 0}}, cost=0)
     info["time"]["completed"] = int(time.time() * 1000)
     message["parts"] = [{"id": "part_" + assistant, "sessionID": session,
-                         "messageID": assistant, "type": "text", "text": "Fixture completed."}]
+                         "messageID": assistant, "type": "text", "text": answer}]
     with LOCK:
         _save(sessions)
     _event("message.updated", info=info)
@@ -173,8 +190,7 @@ class Server(BaseHTTPRequestHandler):
             self._json({})
             threading.Thread(
                 target=_launch,
-                args=(self.path.split("/")[2], body["messageID"], body["parts"],
-                      body.get("format")),
+                args=(self.path.split("/")[2], body["messageID"], body["parts"]),
                 daemon=True,
             ).start()
         elif self.path.startswith("/permission/"):

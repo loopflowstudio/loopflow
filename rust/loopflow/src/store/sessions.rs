@@ -158,7 +158,7 @@ impl Store {
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
             Ok(store
-                .flow_execs(&selector)?
+                .flow_exec(&selector)?
                 .map(|(flow, entry)| flow.detail(entry)))
         })
         .await

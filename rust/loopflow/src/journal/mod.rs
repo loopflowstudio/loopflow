@@ -933,11 +933,6 @@ pub(crate) fn current_exec_id() -> Option<ExecId> {
     current_context().map(|context| context.process_id)
 }
 
-/// The Exec that started this process, when lf did.
-pub(crate) fn current_parent_exec_id() -> Option<ExecId> {
-    current_context().and_then(|context| context.parent_process_id)
-}
-
 pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
     match process_started_at(pid) {
         Ok(Some(observed)) if observed.abs_diff(started_at) <= 3 => ProcessIdentityEvidence::Live,

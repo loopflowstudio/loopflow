@@ -192,8 +192,8 @@ Repository
 Exec                          one actual lf process; immutable causal parent
 AgentSession                  one conversation; nullable current driver Exec
   `-- history                 provider starts, outcomes, retries and usage
-Flow                          one driver Exec; graph and cursor in its memory
-  `-- step Execs              each carries its position on its argv
+Flow                          one driver Exec; cursor in its memory, graph in FlowExec
+  `-- step Execs              plain commands; the driver records each one's node
 ```
 
 | Model | Represents | Primary truth |

@@ -1960,6 +1960,15 @@ mod tests {
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(control, 0);
+        // No saved Flow becomes a Flow run: the driver-written record starts empty.
+        let flows: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM flow_execs)+(SELECT count(*) FROM flow_exec_steps)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(flows, 0);
         // A conversation still cannot leave its Task, and Started is still set once.
         assert!(conn
             .execute(

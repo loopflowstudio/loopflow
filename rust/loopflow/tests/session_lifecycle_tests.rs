@@ -939,7 +939,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     let observed: (String, String) = fixture.db().query_row(
         "SELECT step.cwd,s.task_id FROM execs step JOIN execs driver ON driver.id=step.parent_exec_id
          JOIN agent_sessions s ON s.id=driver.caller_session_id
-         WHERE instr(step.command,'\"__flow-step\"')>0",
+         JOIN flow_exec_steps recorded ON recorded.exec_id=step.id",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).unwrap();
@@ -1198,10 +1198,23 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             Some(if exhausted { "failed" } else { "succeeded" })
         );
         assert_eq!(steps.len(), if exhausted { 4 } else { 3 });
-        let decision = support::flow_step(&steps[1]);
-        assert_eq!(decision["output"], "decision");
-        assert!(decision.get("session").is_none());
-        // Every correction continues the conversation that gave the answer.
+        // The decision is the plain skill command; its contract is in the message.
+        let decision = &steps[1];
+        assert_eq!(decision["argv"][0], "--batch");
+        assert!(decision["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "decide-proof"));
+        assert!(decision["argv"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("Return the final answer as the declared JSON value"));
+        // Every correction resumes the conversation that gave the answer.
         let conversation: String = fixture
             .db()
             .query_row(
@@ -1211,9 +1224,12 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             )
             .unwrap();
         for correction in &steps[2..] {
-            let correction = support::flow_step(correction);
-            assert_eq!(correction["session"], conversation.as_str());
-            assert_eq!(correction["cursor"], decision["cursor"]);
+            assert_eq!(
+                correction["argv"].as_array().unwrap()[..4],
+                ["--batch", "session", "resume", conversation.as_str()]
+            );
+            assert_eq!(correction["key"], decision["key"]);
+            assert_eq!(correction["iterations"], decision["iterations"]);
         }
         if exhausted {
             assert!(String::from_utf8_lossy(&output.stderr).contains("exhausted after 3"));
@@ -1258,15 +1274,14 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let (outcome, steps) = &flows[0];
     assert_eq!(outcome.as_deref(), Some("failed"));
     assert_eq!(steps.len(), 2);
-    let stopped = support::flow_step(&steps[1]);
+    let stopped = &steps[1];
     assert_eq!(stopped["label"], "decide-proof");
-    assert_eq!(stopped["cursor"]["index"], 1);
+    assert_eq!(stopped["key"], 1);
     assert_eq!(stopped["iterations"], serde_json::json!([[0]]));
     let error: String = fixture
         .db()
         .query_row(
-            "SELECT d.error FROM execs d WHERE EXISTS(SELECT 1 FROM execs s
-                WHERE s.parent_exec_id=d.id AND instr(s.command,'__flow-step')>0)",
+            "SELECT d.error FROM execs d JOIN flow_execs f ON f.exec_id=d.id",
             [],
             |row| row.get(0),
         )
@@ -1323,14 +1338,11 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     let (outcome, steps) = &flows[0];
     assert_eq!(outcome.as_deref(), Some("succeeded"));
     assert_eq!(steps.len(), 2);
-    let router = support::flow_step(&steps[0]);
-    assert_eq!(
-        router["output"],
-        serde_json::json!({"route": ["alpha", "zeta"]})
-    );
-    let selected = support::flow_step(&steps[1]);
-    assert_eq!(selected["label"], "work-proof");
-    assert_eq!(selected["cursor"]["child"]["selected"], "alpha");
+    // The router is the XOR's own node; the selected path's step lies inside it.
+    assert_eq!(steps[0]["label"], "decide-proof");
+    assert_eq!(steps[0]["key"], 0);
+    assert_eq!(steps[1]["label"], "work-proof");
+    assert_eq!(steps[1]["key"], 1);
 }
 
 #[test]
@@ -1359,7 +1371,6 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
     let passes: Vec<(String, serde_json::Value)> = steps
         .iter()
         .map(|step| {
-            let step = support::flow_step(step);
             (
                 step["label"].as_str().unwrap().to_owned(),
                 step["iterations"].clone(),
@@ -1476,8 +1487,9 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         &launches[1],
         "--final",
     ]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
-        "advance"
+    // The answer is the provider's own text; the driver read the value in it.
+    assert!(
+        String::from_utf8_lossy(&answer.stdout).contains(r#""decision": "advance""#),
+        "{answer:?}"
     );
 }

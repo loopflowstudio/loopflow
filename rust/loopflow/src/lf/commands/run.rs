@@ -1,8 +1,8 @@
 use crate::engine::{
     check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
-    StreamFormat, Surface,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, SkillSyncOptions, StreamFormat,
+    Surface,
 };
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -48,6 +48,24 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
 
     print_context_header(&built, cli);
     exec_prompt(&built, cli).map(|_| ())
+}
+
+/// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
+/// run as its skill with `message` and the provider's own history.
+pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session(id)?
+        .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    let mut turn = cli.exec_options();
+    if turn.model.is_none() {
+        turn.model = match (&session.provider, &session.model) {
+            (Some(provider), Some(model)) => Some(format!("{provider}:{model}")),
+            (provider, _) => provider.clone(),
+        };
+    }
+    turn.resume = Some(session.id);
+    run(session.skill.as_deref(), Some(message), &turn)
 }
 
 #[doc(hidden)]
@@ -195,16 +213,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    let step = crate::ops::flow_run::current_step(cli)?;
-    build_prompt_at(
-        skill,
-        message,
-        cli,
-        repo_root,
-        step.is_none(),
-        None,
-        step.and_then(|step| step.skill),
-    )
+    build_prompt_at(skill, message, cli, repo_root, true, None)
 }
 
 fn build_bound_prompt_at(
@@ -226,7 +235,6 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        crate::ops::flow_run::current_step(cli)?.and_then(|step| step.skill),
     )
 }
 
@@ -257,9 +265,7 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let step = crate::ops::flow_run::current_step(cli)?;
-        let seed =
-            crate::ops::task_input::prepare(&store, &task, wave.slug(), step.as_ref()).await?;
+        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug(), 0).await?;
         Ok(Some((store, seed)))
     })
 }
@@ -271,7 +277,6 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_exec: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
@@ -303,13 +308,9 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = match (resolved_skill, skill) {
-        (Some(skill), _) => Some(skill),
-        (None, Some(skill_name)) => Some(crate::lf::discovery::discover_skill(
-            &repo_root, skill_name,
-        )?),
-        (None, None) => None,
-    };
+    let discovered_skill = skill
+        .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+        .transpose()?;
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -655,19 +656,11 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     );
 
     let mut agent_config = built.agent_config.clone();
-    let step = crate::ops::flow_run::current_step(cli)?;
-    agent_config.output = step.as_ref().and_then(|step| step.output.clone());
-    let _flow = step
-        .as_ref()
-        .and_then(|_| crate::journal::current_parent_exec_id())
-        .map(|driver| {
-            super::flow::EnvVarGuard::set(crate::ops::flow_run::FLOW_ID_ENV, driver.as_str())
-        });
     crate::engine::agent::pin_provider_account_id_blocking(&mut agent_config)
         .map_err(anyhow::Error::from)?;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    let capture = begin_run_capture(built, "headless", &agent_config, step.as_ref())?;
+    let capture = begin_run_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
     let result = exec_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -767,7 +760,7 @@ fn begin_run_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
-    step: Option<&crate::ops::flow_run::FlowStep>,
+    resume: Option<&str>,
 ) -> Result<CaptureHandle> {
     let cwd = built
         .agent_config
@@ -780,17 +773,7 @@ fn begin_run_capture(
         .cloned()
         .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
-    let flow = match step {
-        Some(step) => crate::session_record::SessionFlowMembership::Step(
-            crate::session_record::SessionFlowStep::of(
-                step,
-                &crate::journal::current_parent_exec_id()
-                    .ok_or_else(|| anyhow!("a Flow step requires its driver's Exec"))?,
-                built.work.as_ref().and_then(|work| work.task_id.clone()),
-            ),
-        ),
-        None => crate::session_record::SessionFlowMembership::Independent,
-    };
+    let flow = crate::session_record::SessionFlowMembership::Independent;
     let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -803,8 +786,8 @@ fn begin_run_capture(
         flow: flow.clone(),
         work: built.work.clone(),
     };
-    let capture = if let Some(session) = step.and_then(|step| step.session.as_deref()) {
-        // A correction is another turn of the conversation that gave the answer.
+    let capture = if let Some(session) = resume {
+        // A headless resume is another turn of the same conversation.
         let input = crate::ops::human_session::continue_conversation(session, flow)?;
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
@@ -1155,7 +1138,7 @@ mod tests {
 
     use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, ExecTarget, Skill, Surface};
+    use crate::engine::{Config, ExecTarget, Surface};
     use crate::lf::Cli;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
@@ -1816,7 +1799,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             true,
             None,
-            None,
         )
         .unwrap();
 
@@ -1852,7 +1834,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             true,
             None,
-            None,
         )
         .unwrap();
 
@@ -1864,43 +1845,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .assets
             .iter()
             .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
-    }
-
-    #[test]
-    fn persisted_skill_spec_is_the_prompt_authority() {
-        let repo = loopflow_test_support::TestRepo::new();
-        repo.create_file(
-            ".lf/skills/proof.md",
-            "# Mutated\n\nThis source was edited after the Flow started.",
-        );
-        let skill = Skill {
-            name: "proof".to_string(),
-            agent: None,
-            default_agent: None,
-            action_style: None,
-            content: Some(
-                "# Persisted\n\nThese are the instructions captured at Flow start.".to_string(),
-            ),
-        };
-
-        let built = build_prompt_at(
-            Some("proof"),
-            Some("prove it"),
-            &Cli::default(),
-            repo.path().to_path_buf(),
-            false,
-            None,
-            Some(skill),
-        )
-        .unwrap();
-        assert!(built
-            .agent_config
-            .task_prompt
-            .contains("captured at Flow start"));
-        assert!(!built
-            .agent_config
-            .task_prompt
-            .contains("edited after the Flow started"));
     }
 
     #[test]

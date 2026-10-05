@@ -99,7 +99,24 @@ step reads or writes it.
     (I am pretty confident we want 0 PR tasks; not sure we need multi-PR
     tasks)".
 
-Agent's resolution, unconfirmed by Jack: the outer thing is TaskWorkflow and
+12. On the outer/inner two-record table: "your table looks great. lets start
+    to center on tat".
+
+13. On keeping this PR to the inner record and leaving the outer one as the
+    next Task: "Yeah i think so." On the name: "FlowExec works fine".
+
+Where the outer model already appears (searched October 5): the September 30
+design (`bc78c27c0:scratch/growth-thoughts.md`: "interactive skills are
+nodes; background Flows are the edges"), the October 4 kickoff
+(`5090f672e:scratch/focus-on-your-own-work.md`), and open Tasks LOO-317 (Mac
+shows a flow as only the steps that need you), LOO-297 (design or prototype
+review paths), LOO-322 (reach demo and landing unattended) and LOO-367. No
+Task owns TaskWorkflow. Conflict to resolve there: the September 30 design
+and LOO-367 both record Jack saying there is no separate "Task workflow"
+concept.
+
+Resolution, centered on that table (the names TaskWorkflow, from Jack, and
+FlowExec, the agent's, postdate it): the outer thing is TaskWorkflow and
 is not built in this PR; one `lf` flow run gets an append-only driver record
 named FlowExec.
 
@@ -143,26 +160,65 @@ source:
 - **A past Flow after its YAML changed** is drawn from its Exec sequence.
 - **`lf commit`:** `-p` pushes; plain commit stays local.
 
-## Choices this pass made without Jack
+## Choices the FlowExec pass made without Jack
 
-- **A step runs the skill its driver compiled.** It looks the skill up by
-  name; the driver puts its compiled skill on the step's argv only when that
-  lookup would differ (a step override, a router, a file edited mid-Flow).
-- **Claude steps without a required answer use the ordinary headless path.**
-  Only deciding and routing steps use the stream-json harness. Before, every
-  Flow step did.
+The agent's, October 5, while building FlowExec and oblivious steps. None is
+confirmed by Jack Heart.
+
+- **Shape.** `flow_execs(exec_id, flow, graph)` and
+  `flow_exec_steps(seq, flow_exec_id, exec_id, node, iterations)`. Triggers
+  refuse updates and refuse a step that is not its driver's child Exec. The
+  step label is read from the graph, not stored.
+- **Finding the child.** The driver polls for its newest child Exec every
+  10 ms and then appends the step row. A driver killed in that gap leaves the
+  step's Exec without a row. No Exec id is assigned by the parent.
+- **Operations go through the ordinary CLI.** The in-process interpreter and
+  its allowlist are deleted, so any `lf` command can be a `cmd:` step.
+  `cmd: pr open` now opens the browser page, as the command does; `commit` no
+  longer applies the managed-Task guard the interpreter added; `repo release
+  run` under a cron firing reads the receipt from the existing hidden
+  `--__cron-receipt`/`--__cron-lock-fd` globals, which stay. Old spellings in
+  a Flow file (`task sync`, `rebase`) are translated by the driver.
+- **Watched landing.** After an operation the driver stops the Flow when a
+  landing of its checkout, touched since the step began, still awaits its
+  merge. Exit status 75 is gone; Task status says "Flow stopped after …"
+  instead of naming the watched landing.
+- **The answer contract is message text only.** Provider structured-output
+  requests are deleted for every provider, and Claude steps all use the
+  ordinary headless path. The driver accepts the JSON value alone, in prose
+  or in a code fence. How reliably real providers comply is unproven.
+- **Correction command.** `lf -b session resume ID MESSAGE`, a new optional
+  argument on the existing command. It reruns the conversation's skill prompt
+  with the message under the provider's own history, as the old correction
+  did. Without `-b` a message is refused.
+- **A step looks its skill up by name.** A skill file edited mid-Flow applies
+  to later steps. Of a step's authored overrides only `agent` travels, as
+  `--model`, and only when the launch named none; `action_style` on a step is
+  dropped. The default XOR router is now the builtin skill `xor-route`, which
+  a repository can override.
+- **Steers.** Every step receives all of its Task's steers, like any skill run
+  in the checkout. Per-node acknowledgement, which spared a repeated node
+  steers it had already seen, is gone.
+- **`LF_FLOW_ID` stays,** set by the driver in the step's environment so the
+  S1–S5 skills can share a note. `lf` reads it nowhere.
+- **Started.** The driver marks its Task started when it writes the Flow row;
+  the trigger accepts a Flow run from the Task's checkout as evidence.
+- **Performed work.** The Exec filter counts every Flow step Exec in the
+  Task's checkout; before, only operation steps.
+- **Past Flows keep their launched graph.** The redraw from the Exec sequence
+  is deleted. Loop counts for deciders outside the latest step's own path read
+  zero; settled counts inside a finished XOR path are no longer shown.
+- **Session position.** A Session's node and iterations are read from its
+  step row. `agent_sessions.node`/`iterations` stay in the schema, unwritten.
+
+## Choices the earlier pass made without Jack
+
 - **A killed driver leaves a running agent turn to its Session.** Nothing reads
   that turn back into the Flow.
-- **A watched landing ends the step with exit status 75** and the driver exits
-  non-zero; Task status reads that as stopped at a watched landing, not failed.
 - **Agent preflight before placement is gone.** An unavailable provider or
   account now fails at the first step, in the foreground.
 - **Launch-time PR preparation is gone.** Publication refuses a settled PR and
   names `lf pr next`.
-- **`LF_FLOW_ID`** (the driver Exec id) replaces `LF_FLOW_STEP` in a step
-  agent's environment so the S1–S5 skills can still share one note per Flow.
-- **Task Started for an operation-only Flow** is its operation step Exec in the
-  Task checkout.
 - **Flow states** are `current`, `completed`, `stopped`; `replaced` is gone.
 
 ## Interpretations still awaiting Jack's review

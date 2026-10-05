@@ -19,20 +19,6 @@ pub(crate) struct TaskSeed {
     pub interrupt: i64,
 }
 
-/// `step` is the Flow step this process runs, when its driver named one.
-pub(crate) async fn prepare(
-    store: &SharedStore,
-    task: &Task,
-    wave: &str,
-    step: Option<&crate::ops::flow_run::FlowStep>,
-) -> Result<TaskSeed> {
-    let consumed = match (step, crate::journal::current_parent_exec_id()) {
-        (Some(step), Some(driver)) => store.sqlite.completed_step_steer_id(&driver, step)?,
-        _ => 0,
-    };
-    read_seed(store, task, wave, consumed).await
-}
-
 /// Read a Task snapshot without refreshing providers or advancing a control cursor.
 pub(crate) async fn read_seed(
     store: &SharedStore,

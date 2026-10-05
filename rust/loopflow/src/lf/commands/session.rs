@@ -24,7 +24,11 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Resume { id } => {
+        SessionCommand::Resume { id, message } => {
+            anyhow::ensure!(
+                message.is_none(),
+                "a resume message is a headless turn: lf -b session resume ID MESSAGE"
+            );
             let id = match id {
                 Some(id) => id.clone(),
                 None => {

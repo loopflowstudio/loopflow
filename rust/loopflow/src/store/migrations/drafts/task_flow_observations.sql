@@ -23,9 +23,8 @@ SELECT s.id,'observed','legacy_flow_review',s.task_id,s.wave_id,unixepoch(),
 FROM agent_sessions s WHERE s.kind='flow_review';
 UPDATE agent_sessions SET kind='conversation' WHERE kind='flow_review';
 
--- A Flow is its driver Exec and the step Execs it starts; nothing stores a
--- cursor. Each saved Flow's name, state and last position stay as an observation
--- on every conversation it opened. None of it is resumable state.
+-- Each saved Flow's name, state and last position stay as an observation on
+-- every conversation it opened. None of it is resumable state.
 DROP TRIGGER validate_task_invocation;
 ALTER TABLE tasks DROP COLUMN current_invocation_id;
 INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
@@ -71,16 +70,48 @@ BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
         THEN RAISE(ABORT,'AgentSession Wave is permanent') END;
 END;
 
+-- One row per Flow run, written once by its driver: the Flow's name and its
+-- graph as compiled at launch. Running, finished and failed are the driver
+-- Exec's; nothing here is updated.
+CREATE TABLE flow_execs (
+    exec_id TEXT PRIMARY KEY REFERENCES execs(id),
+    flow TEXT NOT NULL,
+    graph TEXT NOT NULL CHECK (json_valid(graph))
+) STRICT;
+
+-- One row per step the driver started, in launch order. The step's result is
+-- its own Exec's exit.
+CREATE TABLE flow_exec_steps (
+    seq INTEGER PRIMARY KEY,
+    flow_exec_id TEXT NOT NULL REFERENCES flow_execs(exec_id),
+    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id),
+    node INTEGER NOT NULL,
+    iterations TEXT NOT NULL CHECK (json_valid(iterations))
+) STRICT;
+CREATE INDEX flow_exec_steps_flow ON flow_exec_steps(flow_exec_id, seq);
+
+CREATE TRIGGER flow_execs_are_append_only BEFORE UPDATE ON flow_execs BEGIN
+    SELECT RAISE(ABORT,'A Flow record is append-only');
+END;
+CREATE TRIGGER flow_exec_steps_are_append_only BEFORE UPDATE ON flow_exec_steps BEGIN
+    SELECT RAISE(ABORT,'A Flow record is append-only');
+END;
+CREATE TRIGGER validate_flow_exec_step BEFORE INSERT ON flow_exec_steps BEGIN
+    SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM execs step
+        WHERE step.id=NEW.exec_id AND step.parent_exec_id=NEW.flow_exec_id
+    ) THEN RAISE(ABORT,'A Flow step is an Exec its driver started') END;
+END;
+
 -- Started is set once, by recorded work: a conversation, a native turn, a Flow
--- operation step run in the Task's checkout, or an imported start.
+-- run from the Task's checkout, or an imported start.
 CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks BEGIN
     SELECT CASE WHEN OLD.started_at IS NOT NULL AND NEW.started_at IS NOT OLD.started_at
         THEN RAISE(ABORT,'Task first assignment time cannot change') END;
     SELECT CASE WHEN NEW.started_at IS NOT NULL AND NOT (
         EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=NEW.id) OR
         EXISTS(SELECT 1 FROM session_events WHERE kind='started' AND task_id=NEW.id) OR
-        EXISTS(SELECT 1 FROM execs op WHERE instr(op.command,'"__flow-step"')>0 AND NEW.worktree!=''
-            AND (op.cwd=rtrim(NEW.worktree,'/') OR instr(op.cwd,rtrim(NEW.worktree,'/')||'/')=1)) OR
+        EXISTS(SELECT 1 FROM flow_execs f JOIN execs driver ON driver.id=f.exec_id WHERE NEW.worktree!=''
+            AND (driver.cwd=rtrim(NEW.worktree,'/') OR instr(driver.cwd,rtrim(NEW.worktree,'/')||'/')=1)) OR
         EXISTS(SELECT 1 FROM task_events e WHERE e.task_id=NEW.id
             AND json_extract(e.kind_json,'$.kind')='started')
     ) THEN RAISE(ABORT,'Started requires recorded Task work') END;

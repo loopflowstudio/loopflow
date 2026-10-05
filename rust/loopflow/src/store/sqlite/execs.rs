@@ -105,16 +105,17 @@ fn exec_query(
             ),
         };
         let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. A Flow's operation
-        // steps ran in their Task's checkout. Neither a current Session bind
-        // nor another Exec's command context establishes performed work.
+        // Native starts retain their original assignment. A Flow's steps ran
+        // in their Task's checkout. Neither a current Session bind nor
+        // another Exec's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
             SELECT exec_id FROM session_events
             WHERE kind='started' AND {column}={value} AND exec_id IS NOT NULL
             UNION
-            SELECT op.id FROM execs op JOIN tasks tw ON {tasks}{value}{close}
-            WHERE instr(op.command,'\"__flow-step\"')>0 AND tw.worktree!=''
+            SELECT op.id FROM flow_exec_steps fs JOIN execs op ON op.id=fs.exec_id
+            JOIN tasks tw ON {tasks}{value}{close}
+            WHERE tw.worktree!=''
               AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
         )"
         ));
@@ -1048,16 +1049,26 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            // Both Execs ran a Flow operation step in the first Task's checkout.
+            // A Flow's driver recorded both Execs as steps in the first Task's checkout.
             conn.execute(
                 "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
                 [first.as_str()],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,'proof','{}')",
+                [&observer],
+            )
+            .unwrap();
             for exec in [&shared, &mechanical] {
                 conn.execute(
-                    "UPDATE execs SET cwd='/repo.first',command=?2 WHERE id=?1",
-                    params![exec, r#"["lf","__flow-step","{}","commit"]"#],
+                    "UPDATE execs SET cwd='/repo.first',parent_exec_id=?2 WHERE id=?1",
+                    params![exec, observer],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?2,?1,0,'[]')",
+                    params![exec, observer],
                 )
                 .unwrap();
             }

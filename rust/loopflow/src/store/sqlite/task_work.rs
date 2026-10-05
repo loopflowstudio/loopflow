@@ -51,7 +51,7 @@ fn exec_ids(selector: &str) -> String {
 pub(super) fn flows_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::ops::flow_run::FlowExecs>> {
+) -> StoreResult<Vec<crate::ops::flow_run::FlowExec>> {
     super::flow_inventory::flows_in(
         conn,
         &format!("e.id IN ({})", exec_ids("?1")),
@@ -120,7 +120,7 @@ impl SqliteStore {
     pub(crate) fn task_flows(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::ops::flow_run::FlowExecs>> {
+    ) -> StoreResult<Vec<crate::ops::flow_run::FlowExec>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flows_of_task(&conn, task)
     }
@@ -396,18 +396,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!(flows.entries, work.flows);
-        assert!(store
+        // The Flow's step is the only work performed in the checkout.
+        let performed = store
             .execs(
                 &ExecFilter {
                     performed_work: Some(ExecWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
-                NonZeroU32::new(100).unwrap()
+                NonZeroU32::new(100).unwrap(),
             )
-            .unwrap()
-            .entries
-            .is_empty());
+            .unwrap();
+        let (flow, _) = store.flow_exec(independent.as_str()).unwrap().unwrap();
+        assert_eq!(
+            performed
+                .entries
+                .iter()
+                .map(|exec| &exec.id)
+                .collect::<Vec<_>>(),
+            [&flow.steps[0].exec.id]
+        );
 
         let child = TaskId::new();
         {

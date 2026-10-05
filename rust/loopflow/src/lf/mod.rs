@@ -140,9 +140,9 @@ pub struct Cli {
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 
-    /// Run this command as the Flow step its driver describes; recorded on this Exec's argv.
-    #[arg(long = "__flow-step", hide = true)]
-    pub flow_step: Option<String>,
+    /// The conversation `lf -b session resume ID MESSAGE` continues.
+    #[arg(skip)]
+    pub resume: Option<String>,
 }
 
 impl Cli {
@@ -243,7 +243,7 @@ impl Cli {
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,
-            flow_step: self.flow_step.clone(),
+            resume: self.resume.clone(),
         }
     }
 
@@ -443,14 +443,6 @@ pub enum Commands {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
-    /// Run one Flow operation step in its own process.
-    #[command(name = "__flow-step", hide = true)]
-    FlowStep {
-        /// The step as its driver describes it; recorded on this Exec's argv.
-        step: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
     /// Run a definition, preferring a flow over a same-named skill
     Run {
         name: String,
@@ -524,6 +516,8 @@ pub enum SessionCommand {
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID
         id: Option<String>,
+        /// With `-b`: send this as the conversation's next headless turn
+        message: Option<String>,
     },
     /// Read this conversation's native start, usage and completion receipts
     History {

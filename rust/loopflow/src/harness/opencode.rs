@@ -874,9 +874,6 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
             { "type": "text", "text": content }
         ]
     });
-    if let Some(schema) = config.output_schema() {
-        payload["format"] = json!({"type":"json_schema", "schema":schema, "retryCount":2});
-    }
 
     if first_turn && !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
@@ -1202,7 +1199,6 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            output: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: Some("opencode".to_string()),

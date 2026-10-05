@@ -143,8 +143,8 @@ PYTHON
         assert_eq!(steps.len(), if upgrade { 1 } else { 2 });
         let executables: Vec<String> = conn
             .prepare(
-                "SELECT json_extract(command,'$[0]') FROM execs
-                 WHERE instr(command,'__flow-step')>0 AND outcome='succeeded'",
+                "SELECT json_extract(e.command,'$[0]') FROM execs e
+                 JOIN flow_exec_steps s ON s.exec_id=e.id WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -175,11 +175,7 @@ PYTHON
             String::from_utf8_lossy(&output.stderr)
         );
         let driver: String = conn
-            .query_row(
-                "SELECT parent_exec_id FROM execs WHERE instr(command,'__flow-step')>0",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT exec_id FROM flow_execs", [], |row| row.get(0))
             .unwrap();
         let inspection = run_lf(
             repo.path(),
@@ -1476,10 +1472,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     assert_eq!(flows.len(), 6);
     for (outcome, steps) in &flows[1..] {
         assert_eq!(outcome.as_deref(), Some("succeeded"));
-        let labels: Vec<_> = steps
-            .iter()
-            .map(|step| support::flow_step(step)["label"].clone())
-            .collect();
+        let labels: Vec<_> = steps.iter().map(|step| step["label"].clone()).collect();
         assert_eq!(labels, ["first", "second"]);
     }
     let output = run_lf(
@@ -1973,7 +1966,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         "{status}"
     );
 
-    // Its YAML changed since: the past Flow is drawn from the steps it recorded.
+    // Its YAML changed since: the past Flow keeps the graph it launched with.
     write_flow(
         repo.path(),
         "two-loops",
@@ -1984,27 +1977,16 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         home.path(),
         &["flow", "show", id, "--sessions", "--json"],
     );
-    assert_eq!(
-        labels(&redrawn["graph"]),
-        [
-            "sync --plan",
-            "implement-proof",
-            "decide-proof",
-            "route-proof",
-            "sync --plan",
-            "decide-proof",
-            "__telemetry-scorecard"
-        ]
-    );
-    assert_eq!(redrawn["current"], 6);
-    assert_eq!(redrawn["completed"], serde_json::json!([0, 1, 2, 3, 4, 5]));
+    assert_eq!(redrawn["graph"], shown["graph"]);
+    assert_eq!(redrawn["current"], shown["current"]);
+    assert_eq!(redrawn["completed"], shown["completed"]);
     assert_eq!(
         redrawn["steps"], shown["steps"],
         "nothing ran or was rewritten"
     );
     assert_eq!(
         roadmap_flow(repo.path(), home.path())["record"]["current"],
-        6
+        7
     );
 }
 

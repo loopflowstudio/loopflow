@@ -2,8 +2,8 @@
 
 Status: implemented on the branch and approved by Jack Heart in demo review on
 2026-10-05 ("once youre done, this is approved"); the demo fixes he asked for
-are committed. Gate, the installed demo and reconciliation with PR #1439
-remain. The demo notes are folded into this file and the review; there is no
+are committed and gate passed. The installed demo and reconciliation with
+PR #1439 remain. The demo notes are folded into this file and the review; there is no
 separate demo file. The full design, audit and both dry-run
 records are at
 [commit 831b979ec](https://github.com/loopflowstudio/loopflow/tree/831b979ec/scratch);
@@ -85,16 +85,6 @@ sync-skills --yes`.
 
 ## Remaining
 
-- **Gate**, once:
-
-  ```bash
-  cargo fmt --check && cargo clippy --all-targets -- -D warnings
-  cargo test -p loopflow --lib -- engine::prompt engine::skills engine::builtins ops::task_automation
-  cargo test -p loopflow --test discovery_tests --test documented_commands --test golden_prompt --test default_conversation_tests
-  ```
-
-  `default_conversation_tests` passes only with the launching agent's `LF_*`
-  variables cleared.
 - **Installed demo** (post-merge, not a gate): install, `lf session replace`
   the Product Wave conversation, say nothing, and watch its first turn give
   every started Task a disposition; then ask "what's running?" and file an idea.
@@ -132,3 +122,9 @@ Check result (compress, 2026-10-05): prose reduction after the demo commit;
 `cargo test -p loopflow --lib -- engine::prompt engine::builtins` (90 passed)
 and `--test golden_prompt --test documented_commands` pass. Gate owns the full
 plan.
+
+Check result (gate, 2026-10-05, HEAD 61b95c5ab): `cargo fmt --check`, `cargo
+clippy --all-targets -- -D warnings`, the focused lib tests (94 passed) and
+`discovery_tests`, `documented_commands`, `golden_prompt`,
+`default_conversation_tests` (23 passed, `LF_*` cleared) all pass. No code
+changed in gate. CI owns the full matrix; the installed demo is post-merge.

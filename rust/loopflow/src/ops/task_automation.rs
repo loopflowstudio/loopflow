@@ -113,8 +113,9 @@ pub(crate) fn admission_blocker(
                 }
             }
         }
+        let allow_exited = session.completed_at.is_some() || (recovery && session.managed);
         if store.session_has_pending_turn(&session.id).map_err(error)?
-            && (!recovery || !session.managed || session_engine_unresolved(store, &session.id)?)
+            && (!allow_exited || session_engine_unresolved(store, &session.id)?)
         {
             return Ok(Some(format!(
                 "Session {} has an unresolved provider turn",

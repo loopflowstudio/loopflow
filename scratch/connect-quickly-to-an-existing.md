@@ -23,7 +23,7 @@ boundaries. This authorization does not establish completed verification or deli
 
 <!-- loopflow-task-start:ed73e6ad58500f1f690a1c45ff358f5d916c72f4e435c109abae9be4c6a8f84b -->
 
-Jack supplied this reproduction: lf session connect task_7c24c806bfaa464a877352b568384fff:6430c57b-02e4-4ca9-9021-afb5e68c9003:feature:review_kickoff:0. Recorded connect Exec 360dfe3c-8962-47cf-aab8-c4936ddde21a began October 4 at 10:46:14 America/Los_Angeles (1791135974). Jack observed many seconds of delay. The command remains attached; the inspected command record has no separate connected/usable timestamp, so exact latency is unknown. Include this Flow-review Session selector path in reproduction, even if it resolves or launches rather than attaching to an existing provider. Preserve the live Session; reproduce with isolated equivalents.
+Jack supplied this reproduction: lf session connect task_7c24c806bfaa464a877352b568384fff:6430c57b-02e4-4ca9-9021-afb5e68c9003:feature:review_kickoff:0. Recorded connect Exec 360dfe3c-8962-47cf-aab8-c4936ddde21a began October 4 at 10:46:14 America/Los_Angeles (1791135974). Jack observed many seconds of delay. At the recorded inspection the command remained attached; its command record has no separate connected/usable timestamp, so exact latency is unknown. Include this Flow-review Session selector path in reproduction, even if it resolves or launches rather than attaching to an existing provider. Preserve the live Session; reproduce with isolated equivalents.
 
 Additional acceptance: retain connect phase timings keyed to the exact invocation and Session, and expose them through a supported diagnostic command/log view so Product can answer how long a specific connect took afterward. Separate lookup, preparation/connection, first output and verified input readiness from total attached lifetime; record unavailable readiness evidence explicitly.
 
@@ -56,9 +56,13 @@ falls back to that replacement; the attempted adaptation was removed.
 Compare opt-in tmux presentation with a transparent PTY relay before selecting
 this owner, as Product's shared-viewing contract requires. The earlier engine-first
 proposal is superseded: an app-server endpoint alone cannot retain a UI-local
-draft. Dependent optimization remains stopped at architectural review under
-implement's counterexample rule. This requires no new authorization, account
-repair or manual performance demo.
+draft. The comparison remains authorized local work; transport selection is
+unresolved, and dependent latency optimization awaits continuity proof. Compare
+truecolor, keyboard/image input, independent view sizes, late replay, one native
+UI/provider/draft, passive-view enforcement and explicit control transfer. Detach
+must preserve the terminal; exact review completion must retain its existing
+owner. Existing tmux launch ownership is not acceptance of tmux presentation.
+No new authorization, account repair or manual performance demo is required.
 
 Preserve Infrastructure's LOO-377 launch-lock-before-driver-fence ordering and
 exact review revalidation (`c5dc238b0afb`). Attachment grants no review-completion
@@ -142,8 +146,4 @@ Earlier design chronology and observer notes are preserved at
 Compression removes the superseded engine-first sequence and duplicate evidence;
 production code and the failing regression remain unchanged.
 
-Check: prior native `--connect-performance 1 --check-reconnect-draft` exited 1 on
-accepted input without the original draft, with cleanup timeout retained; helper
-Ruff passed, whole-runner Ruff had pre-existing failures. Documentation-only
-compression: `git diff --check` and `lf context --skill compress` passed; no
-build or native rerun required. Full acceptance remains open.
+Check: `git diff --check` and `lf context --skill realign` passed; documentation-only reconciliation reused the recorded failing reconnect probe; no build or native rerun.

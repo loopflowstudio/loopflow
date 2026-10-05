@@ -13,21 +13,18 @@ input readiness and attached lifetime. Resume/replacement earns no live-attachme
 proof. Jack authorized autonomous landing October 4 without a manual demo;
 no Desktop KR credit follows.
 
-Native rejection exposed destructive cleanup. Driver transfer now follows
-successful thread resume; failed attachment preserves the engine and old UI's
-draft. Successful takeover starts another UI and does not copy drafts; engine
-reuse alone cannot satisfy continuity. Owner exit still closes its engine.
-`lf session timings EXEC` records phases and unavailable UI endpoints despite
-SQLite contention; accounting may delay exit.
-[Attachment evidence](../../scripts/benchmarks/session-connect/20261005-attachment/README.md)
-retains failures. Response timing bounds readiness, not onset.
-No representative baseline, targets or speedup exists.
+Driver transfer follows successful resume; failed attachment preserves engine
+and draft. Reconnect without `--replace` starts another UI: the
+[reconnect probe](../../scripts/benchmarks/session-connect/20261005-reconnect/README.md)
+accepted a fresh marker without the original draft despite unchanged engine
+identity. Engine reuse is insufficient. Cleanup remains unreliable; owner exit still closes the engine.
+`lf session timings EXEC` records phases, unavailable readiness and lifetime;
+SQLite may delay exit. No baseline or speedup exists.
 
-Flow reviews launch native TUI without a relay.
-Resume cannot preserve that provider/draft. Revise first-launch
-ownership before optimization; preserve Infrastructure's launch-lock ordering
-and exact review fences. Conversation proof excludes reviews.
-Pagination, repeated native connects and authenticated providers remain unproven.
+Flow reviews already have a tmux cradle, but native resume replaces their UI.
+Retaining the UI/PTY is the unimplemented proposal; compare opt-in tmux with a
+transparent relay before choosing presentation. Preserve Infrastructure's launch-lock ordering and review fences. Conversation proof excludes reviews; repeated retained attachment,
+pagination and authenticated providers remain unproven.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

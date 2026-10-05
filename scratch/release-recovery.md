@@ -1,1 +1,1 @@
-cargo fmt --check; cargo test -p loopflow --lib ops::read_retry::tests; cargo clippy --all-targets -- -D warnings — passed (3 tests); installed release acceptance pending.
+cargo fmt --check; cargo test -p loopflow --lib ops::read_retry::tests; cargo clippy --all-targets -- -D warnings; uv run pytest python/tests/test_release_publisher.py -q; uv run ruff check scripts/publish_release.py python/tests/test_release_publisher.py — passed (3 Rust, 33 Python); publication/install pending.

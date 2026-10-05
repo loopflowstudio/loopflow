@@ -29,3 +29,4 @@ one connection is not worth a new owner.
 
 `cargo test -p loopflow --lib store::` 215 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Affected suites belong to gate.
 Realign 2026-10-05: validator call sites read against the plan (open paths schema-only; doctor, install preflight and migrations keep the scan); no rerun, one doc comment corrected.
+Compress 2026-10-05: scan rationale moved onto `validate_foreign_keys`; `cargo test -p loopflow --lib store::migrations` 82 passed, `cargo fmt --check` clean.

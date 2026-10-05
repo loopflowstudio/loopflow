@@ -183,11 +183,6 @@ fn _initialize_experiment_in(
 }
 
 /// Validate an experiment's history and schema, as every open does.
-///
-/// Opening never scans rows: `PRAGMA foreign_key_check` reads the whole
-/// database, and every connection enforces foreign keys, so only a migration
-/// can violate them. Migrations check before they commit; diagnosis uses
-/// [`validate_experimental_sqlite`].
 pub(crate) fn validate_experimental_schema(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
@@ -289,9 +284,7 @@ pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
 /// Validate the schema this binary already understands without advancing it.
 /// Branch builds use this against the release-owned database: they can reuse
 /// compatible state, but an unpublished migration never becomes durable there.
-///
-/// This is the check every ordinary open of the release database runs, so it
-/// reads the schema and the migration ledger and never scans rows.
+/// Every ordinary open of the release database runs this.
 pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
@@ -311,8 +304,7 @@ pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult
     })
 }
 
-/// Diagnose the release database in full: its schema and every stored foreign
-/// key. Installation preflight and `lf home doctor` pay for the row scan.
+/// Diagnose the release database in full: its schema and every stored foreign key.
 pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_sqlite_schema(conn)?;
@@ -624,6 +616,10 @@ fn hash_text(digest: &mut Sha256, value: &str) {
     digest.update(value.as_bytes());
 }
 
+/// Scan every stored row for a dangling reference. This reads the whole
+/// database, so opening a store never runs it: every connection enforces
+/// foreign keys and only a migration can violate them. Migrations check before
+/// they commit; `lf home doctor` and installation preflight diagnose in full.
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
     let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
     if statement.query([])?.next()?.is_some() {
@@ -1217,9 +1213,9 @@ mod tests {
         apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_experimental_schema, validate_experimental_sqlite, validate_foreign_keys,
-        validate_persisted_json, validate_schema, validate_set, validate_sqlite, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_experimental_sqlite, validate_foreign_keys, validate_persisted_json,
+        validate_schema, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
@@ -1470,7 +1466,6 @@ mod tests {
         // Opening reads the schema only; the row scan belongs to diagnosis.
         conn.execute_batch("INSERT INTO schema_child VALUES ('child', 'absent-parent');")
             .unwrap();
-        validate_experimental_schema(&conn, drafts).unwrap();
         initialize_experimental_sqlite(&conn, drafts).unwrap();
         validate_experimental_sqlite(&conn, drafts).unwrap_err();
     }

@@ -1313,6 +1313,29 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn chapter_evidence_retains_taskless_mechanical_work_without_marking_started() {
+        let (_dir, store, task_id) = store_with_task();
+        let mut flow = autonomous_position(&task_id);
+        flow.task_id = None;
+        flow.invocation.steps = vec![crate::engine::flow::ConcreteStep::Command(
+            crate::engine::flow::ConcreteCommand {
+                item: crate::engine::flow::Command {
+                    command: "sync".into(),
+                    args: vec!["--plan".into()],
+                },
+                sources: vec![],
+            },
+        )];
+        let flow = store.create_flow(&flow).unwrap();
+        assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
+        store
+            .begin_flow_operation(flow.id(), flow.version, None, None)
+            .unwrap();
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+        assert!(!store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
     fn task_registration_retains_earlier_checkout_conversations_without_binding() {
         let (dir, store, existing) = store_with_task();
         let mut task = store.task(&existing).unwrap().unwrap();
@@ -1344,6 +1367,7 @@ mod durable_store_tests {
         assert_eq!(work.sessions[0].id, session.id);
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         assert!(!store.task_started(&task.id).unwrap());
+        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
 
     #[test]
@@ -1358,6 +1382,8 @@ mod durable_store_tests {
         assert_eq!(before.sessions.len(), 1);
         assert_eq!(before.sessions[0].id, session.id);
         assert_eq!(session.task_id, None);
+        assert!(!store.task_started(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
 
         let successor = ProjectId::new();
         store.conn.lock().unwrap().execute(

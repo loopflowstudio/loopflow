@@ -190,7 +190,7 @@ fn summary_query(page: &str, by_id: bool) -> String {
         LEFT JOIN tasks t ON t.id=s.task_id
         LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
-        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
+        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("a"))
 }
 
 fn read_summary(

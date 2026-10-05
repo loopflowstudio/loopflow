@@ -64,11 +64,18 @@ impl SqliteStore {
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let begun: bool = conn.query_row(
-            // Legacy Starts have not all been imported as Runs. They remain
-            // retirement evidence, never a second definition of current Started.
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
+            // Checkout membership is preservation evidence even when a
+            // conversation has no explicit Task binding or Started timestamp.
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
-                    AND json_extract(kind_json,'$.kind')='started')",
+                    AND json_extract(kind_json,'$.kind')='started')
+                 OR EXISTS({})
+                 OR EXISTS(SELECT 1 FROM flow_events WHERE flow_id IN ({})
+                    AND kind='operation_started')",
+                super::task_work::session_ids("?1"),
+                super::task_work::flow_ids("?1"),
+            ),
             [task.as_str()],
             |row| row.get(0),
         )?;

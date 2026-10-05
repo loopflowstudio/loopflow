@@ -232,21 +232,24 @@ receipts cannot select it; Git publication is no opening prerequisite. The desig
 uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
-October 5 source permits empty Flow and preserves provider names in inspection,
-sync and reteam. Jack Heart's comment `5419b87c-bfec-4f42-8914-021483249895`
-authorizes one historical name-only correction with original bodies and
-acquisition/revision evidence retained. Non-name checks and subsequent
-same-revision rejection stay strict. Planning acceptance and conversion markers
-are atomic; durable Project synchronization follows separately. Shared selection,
-ensure, rotation and Desktop remain unfinished, with no installed acceptance.
+October 5 source permits empty Flow and preserves provider names. Jack Heart's
+comment `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only
+correction, preserving original evidence and strict subsequent conflicts.
+Planning/markers are atomic; durable projection is not. Four public-store
+regressions retain transfer, restart-status and acquisition-age failures. Persist
+confirmed mutation facts before projection; locking cannot recover discarded
+readbacks. Accepted observations must exclusively own planning fields, including
+restart and Task-update reconciliation's separate content writer. Preserve each
+entity's age. These fixtures do not prove operation recovery, as Release's
+entry-point findings reinforce. Selection, ensure, rotation and Desktop remain
+unfinished and uninstalled.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
 autonomous Intelligence repair without another review Session. The reported
 Backlog/empty-Flow Project is `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`; preserve its
 KRs, Tasks and identity, with no competing creation or repository rotation.
 This explicit ID supplies bootstrap selection, not a candidate heuristic.
-The source adoption test starts with an active Project; it does not prove
-Backlog activation. Supported binding and ensure remain to build and ship.
+The active-Project adoption test proves no Backlog activation or installed repair.
 
 Preservation requires complete Task-work membership, not Started/worker claims
 alone. Unbound checkout Sessions can lack Started; shared membership includes
@@ -948,7 +951,7 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
+- The resolved dotted-root naming incident is retained at `7d836d59d:wave/infrastructure/MEMORY.md`; its Run-era representation is historical.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.

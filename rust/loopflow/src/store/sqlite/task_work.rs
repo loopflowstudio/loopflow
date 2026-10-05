@@ -30,8 +30,7 @@ pub(super) fn flow_ids(selector: &str) -> String {
 
 fn session_membership(session: &str) -> String {
     format!(
-        "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
-         AND scoped.primary_scope IS NOT NULL)
+        "{session}.primary_scope IS NULL
          AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
          WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
         checkout(&format!("{session}.cwd")),

@@ -132,12 +132,12 @@ Task inspection/resolution and Wave snapshots now keep provider names. Sync and
 reteam no longer plan or apply prefix renames; the unused rename API and reteam
 wrapper are deleted. Creation's explicit naming remains distinct. Ordinary
 Project synchronization and recording moved from `chapter` to `project`.
-Snapshot ingestion now validates before updating durable Project rows, then uses
-the accepted snapshot, so rejected or older observations cannot overwrite those
-rows. The regression retains their original identity and facts after rejection.
-Snapshot acceptance and durable Project synchronization remain separate operations;
-the atomic cutover claim covers normalized planning and its conversion marker,
-not every downstream Project write.
+Snapshot ingestion validates before updating durable Project rows and loads the
+accepted snapshot. The rejection regression retains original identity and facts;
+it does not prove concurrent projection. The delayed-projection regression below
+shows an already accepted older snapshot can overwrite a newer durable transfer.
+Snapshot acceptance and durable synchronization remain separate operations; the
+atomic cutover claim covers normalized planning and its conversion marker only.
 
 Focused cutover tests cover the indistinguishable histories, already exact names,
 original body/time retention, rollback, older acquisitions, non-name conflict,
@@ -147,21 +147,168 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-Shared Wave-ID binding and exact-ID ensure are still unimplemented. The old
-status/name selector and rotation remain in place; this branch is not a completed
-or releasable Project-readiness cut. In particular, chapter rotation's comparison
-of provider names must be replaced alongside shared configured selection before
-its provider-name inputs can work across differently named Waves.
+The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
+KR-first rotation, backlog preservation, Desktop activation and configured
+acceptance remain. The implementation order below owns their sequencing. Both
+`require_current_task_chapter` callers (worker claim and managed Flow admission)
+and `resolve_project_for_task` still select through Started status. Replace them
+with configured selection alongside rotation's provider-name comparisons. The
+preservation findings below identify additional writers outside those callers.
+No further cached-name policy decision is needed.
 
-Both callers of `store/sqlite/durable.rs::require_current_task_chapter` still
-require the old Started/unique-Started condition: worker claim admission and
-`store/sqlite/flows.rs` managed Flow admission. These are not all Task-start
-owners; the October 5 preservation finding below changes the implementation cut.
-`ops/project.rs::resolve_project_for_task` also delegates selection to
-`chapter::current_project`. Their replacement must preserve Task-start/rotation
-fencing while selecting by the shared binding. Transition
-recovery, KRs-before-chapter creation, preserved backlog, Desktop activation and
-configured acceptance remain. No further cached-name policy decision is needed.
+### Delayed planning projection — October 5 counterexample
+
+The public-store regression
+`delayed_project_projection_preserves_a_newer_task_transfer` fails: refresh A
+accepts and loads an old snapshot; refresh B accepts and projects a newer issue
+revision into the successor; A resumes `ops/project.rs::sync_projects` with its
+already loaded snapshot. Normalized planning still names the successor, and PR
+identity is unchanged, but the durable Task returns to the predecessor. This is
+an executed synthetic interleaving, not a configured-provider observation.
+
+`store_pm_snapshot` accepts planning, reads the accepted snapshot and projects it
+in separate operations. Reading the accepted snapshot once does not authorize a
+later write. `sync_projects` updates Project facts and calls `move_chapter_task`
+without the Wave planning lock. That writer can undo a completed transfer after
+checkout/population exclusion ends. The earlier preservation cut is insufficient:
+registration, relocation and Session admission are not the complete writer set.
+
+Revise the boundary before implementing shared selection. Serialize planning
+acceptance, selection of the accepted projection, durable Project/Task updates,
+registration and rotation through the same Wave planning owner. Re-read accepted
+facts inside that boundary; never replay a snapshot captured before acquiring it.
+Reshape callers already holding the Wave lock rather than reacquiring it. Keep
+provider calls outside SQLite transactions. Cover both delayed snapshot projection
+and an older provider response arriving after rotation; locking alone cannot make
+old provider evidence current. No new planning authority or product decision is
+required. The exact store/operation API cut remains implementation work.
+
+October 5 caller audit adds two constraints to that cut. Task-update reconciliation
+in `ops/pm.rs` calls `sync_projects` directly with a partial snapshot from task
+resolution; fencing only `store_pm_snapshot` leaves that writer outside the
+boundary. `pm_create_task_idempotent` already holds `rotation_lock` when calling
+`refresh_pm_snapshot`, so unconditional lock acquisition inside snapshot ingestion
+would wait on its caller's lock. Chapter apply also calls `record_project` under
+its existing lock. These are source observations, not new concurrency proofs.
+The shared projection API must cover both full refresh and partial Task updates,
+with explicit reuse of an already-held planning boundary. Operation-entry tests
+must retain Task creation and update as well as rotation; the direct-store failing
+regression alone cannot prove those callers compose safely.
+
+`record_project` stamps `pm_snapshot_synced_at` with projection time. Replacing
+that with the enclosing snapshot's time is insufficient: `pm_snapshot` returns
+the maximum Wave sync time while selecting independently accepted Project/issue
+bodies without their row timestamps. `pm_task_observation` likewise joins a
+Project body to the issue's `observed_at`. The revised transaction must project
+each accepted entity with its own stored acquisition time, not the enclosing
+refresh or joined issue time. Source-derived counterexample: a newer request
+containing an older Project revision advances Wave sync time while `put_project`
+retains the newer cached revision and its earlier acquisition. Add a regression
+that preserves both that Project body and its original age through projection,
+including a detail response with independently aged Project and issue facts.
+The freshness repair remains unimplemented. The public-store regression
+`project_projection_retains_accepted_entity_age` now reproduces it: acquisition 10
+survives normalized acceptance of an older Project revision in a response acquired
+at 20, but durable projection records the current clock. Independently aged
+Project/issue detail coverage remains to add.
+
+The attempted checkout/population fence was removed after this counterexample;
+its 31-test pass is not evidence for the retained tree or rotation safety. The
+independent preservation reader now reuses shared Session membership and started
+mechanical Flow history. It counts work associated through a checkout without
+setting Started or rewriting attribution. Registration/transfer regressions and
+the taskless mechanical-work test exercise that narrower behavior. Inspection
+Execs and an unexecuted Flow alone still do not count as begun work.
+
+The failing transfer regression remains enabled. Shared binding, exact-ID ensure,
+KR-first rotation, backlog preservation and Desktop activation remain unfinished;
+no installed Intelligence repair occurred. The next implementation cut includes
+projection ownership as well as the previously identified population/admission
+boundary. Do not treat the reader correction as completed exclusion.
+
+### Interrupted transfer evidence — October 5 counterexample
+
+`interrupted_rotation_transfer_survives_a_late_planning_response` fails at
+Task equality: only `project_id` changes back to the predecessor; PR identity
+survives. This public-store reproduction is sequential. It saves old planning,
+performs the durable transfer, then accepts a response acquired before that
+transfer and freshly reads normalized planning before projection. It does not
+simulate provider execution or prove the rotation entry point.
+
+Source inspection connects the sequence to `apply_rotation`: confirmed issue
+ownership is checked and discarded before `move_chapter_task`; normalized
+planning is refreshed only after apply returns. An interruption between those
+calls leaves the old association as the latest accepted planning. Re-reading it
+under the Wave lock still reverses the transfer. This is distinct from the earlier
+race, where normalized planning already held the newer association.
+
+Revise the first cut to persist each confirmed mutation observation, including
+its provider revision and original acquisition time, before projecting durable
+Project/Task state. Normalized acceptance and its durable projection need one
+SQLite transaction inside the Wave planning boundary; provider calls remain
+outside that transaction. Cover rotation's issue transfers and Project status
+readbacks as well as full refresh and partial Task updates. Do not manufacture
+a revision from an acknowledgement or use local write time as acquisition time.
+An uncertain write requires exact provider readback through the existing owner.
+
+Remove rotation's direct durable-only projection path with its replacement; the
+obsolete rotation implementation must not gain a temporary repair. Retain both
+regressions as acceptance targets. Add operation-entry interruption coverage after
+provider confirmation and before local persistence, and before final refresh.
+The revised path must preserve confirmed facts across retry without a transfer
+ledger or another planning authority. Detail ingestion in
+`inspect_task_planning_async` also writes normalized planning independently of
+Task-update reconciliation; its acceptance must participate in the same boundary.
+Dependent selection/admission implementation stopped at this counterexample;
+no product decision changed and no production repair is claimed.
+
+### Restart remains a planning writer — October 5 counterexample
+
+`delayed_restart_project_projection_preserves_completed_provider_status` fails:
+normalized planning retains Completed while the durable Project returns to Started.
+The fixture captures a Task detail observation, accepts and projects a newer
+Completed Project, then executes the same load/replace/update sequence used by
+`ops/task.rs::restart_task_async`. PR identity survives. This is an executed
+public-store interleaving, not a real restart, provider mutation or installation
+proof. No worker or native provider is launched.
+
+The first cut's writer inventory was incomplete. Restart resolves cached planning,
+reloads the durable Project, replaces its entire plan with the earlier
+`ResolvedTask.project`, and calls `Store::update_project`. An atomic ingestion
+transaction cannot prevent that later independent overwrite. The joined issue's
+`observed_at` also becomes the Project's age. `update_project` writes provider
+identity/status/content and Wave ownership without consulting normalized evidence.
+`TASK_UPDATE`, used by generic Task updates and `restart_task_flow`, similarly
+writes captured title/description/age. That Task-content path is source evidence;
+this new regression proves only the Project overwrite.
+
+The replacement boundary therefore includes execution consumers, not only refresh,
+detail, Task-update reconciliation and rotation. Normalized acceptance and durable
+projection must own provider-derived fields exclusively. Remove restart's Project
+fact write and captured Task-plan writes from execution-only updates; keep local
+execution choices, writeback state, judgment, abandonment and placement with their
+existing owners. Registration must select accepted facts inside its transaction.
+Initial fixture construction remains distinct from runtime observation ingestion.
+Do not add timestamp comparisons to generic updates: acquisition age does not
+order provider revisions, and the current resolved type has already lost the
+Project's independent age.
+
+October 5 realignment identifies another independent writer in the same Task-update
+path: after partial `sync_projects`, `pm_update_async` calls `update_task_plan`
+with its captured resolved item. That method writes title, description, identifier
+and acquisition time directly, outside normalized acceptance. Removing generic
+`TASK_UPDATE` planning fields alone leaves this path able to replay stale content.
+Fold this write into accepted-observation projection too; retain writeback state
+with its existing owner. This is source evidence, not a fifth executed regression.
+Operation-entry Task-update coverage must delay an older resolved item behind a
+newer accepted detail and assert both content and acquisition age survive.
+
+Before selection/admission changes, migrate these consumers along with the
+transactional projection cut. Add operation-entry restart versus refresh/rotation
+coverage and preserve selected Flow, checkpoint, review replacement and explicit
+agent choices. Existing operation-entry interruption obligations remain. The new
+counterexample stops dependent implementation under the implement contract; it
+requires no new product decision and changes none of Jack Heart's accepted scope.
 
 ### Preservation boundary — October 5
 
@@ -270,49 +417,32 @@ This directly supports the supplied KR about creating and advancing Tasks withou
 plumbing blockers. No numeric metric targets were supplied; do not claim a KR
 from synthetic tests or readiness alone.
 
-## Findings that determine the design
+## Implementation anchors
 
-- `work/wave/config.rs` currently reads Wave policy and Initiative binding from
-  `GOAL.md` frontmatter; no per-Wave `config.yaml` reader exists. Add the selected
-  Project field once, with no duplicate copy in frontmatter. Moving other Wave
-  settings is outside this change unless separately selected.
-- `ops/chapter.rs::select_current` currently infers selection from Started status.
-  Replace that inference with configured-ID resolution in `ops/project.rs`, and
-  move `sync_projects`/`record_project` there. Audit every current-Project consumer,
-  including Task routing; changing ensure alone leaves competing selection rules.
-- `pm/linear.rs::{create_project,adopt_project}` and
-  `ops/chapter.rs::{update_plan,rotate,apply_rotation}` independently reject empty
-  Flow strings in the base implementation. This branch removes those refusals
-  and the invented rotation default, and omits an empty `flow:` line on render.
-  `ProjectContent` retains its existing empty-string representation. Explicit
-  Flow launch validation remains with LOO-367.
-- `ops/pm.rs::checked_projects_with_store` retrieves retained IDs missing from
-  membership, validates ownership and projects migration adoption. Name-prefix
-  normalization and rejection are now deleted. Ordinary names remain exact;
-  ownership comes from provider IDs.
-- `plan_rotation` infers a shared predecessor name across Waves and can recover
-  a Completed predecessor only using that common name. Its module explicitly has
-  no partial-operation record. Different ordinary names invalidate this recovery
-  strategy. It also cannot distinguish a genuine competing current Project from
-  the intended two-current-Projects interval without target context.
-- `create_project` already accepts a chosen UUID, but creation and Initiative
-  attachment are separate mutations. Failure after creation can leave an unattached
-  Project. `find_project` supports exact-ID recovery and reports archived records
-  rather than pretending they are absent. Retain this distinction.
-- LOO-364's `ops/human_session/primary.rs` serializes a scope, admits a durable
-  identity, then retries launch using that identity. Reuse those principles, not
-  Session storage or provider startup as a Project prerequisite. Existing
-  `chapter::rotation_lock` is a per-Wave OS lock with a 30-second bound.
-- Linear's published [GraphQL schema](https://raw.githubusercontent.com/linear/linear/master/packages/sdk/src/schema.graphql)
-  was inspected October 3: `ProjectCreateInput` accepts a caller UUID and optional
-  content/status; `ProjectUpdateInput` supports status-only updates and exposes
-  no revision precondition. This supports exact-ID reconciliation, not a claim
-  of cross-mutation atomicity. The repository already uses these mechanisms.
-  Provider duplicate-ID/error and attachment behavior still need configured proof.
-- Desktop's `WaveDetailPane` refreshes status every 30 seconds and calls its
-  ordinary plan `chapterAndTasks`/`WaveChapterView`. Ensure belongs at explicit
-  Wave selection/opening, outside this polling loop. `RegistryQuery` remains
-  the shared CLI transport and decoded snapshot owner.
+Selection and writer replacements are listed under **Delete — do not maintain**;
+existing failure sequences and lock requirements are in **Remaining coherent cut**.
+The following surviving capabilities constrain their replacements:
+
+- `work/wave/config.rs` reads authored policy from `GOAL.md`; only the Project
+  binding moves to the Home-local file described above.
+- `ProjectContent` retains its empty-string Flow representation. LOO-367 owns
+  validation when launching an explicitly selected or configured Flow.
+- `ops/pm.rs::checked_projects_with_store` retrieves retained IDs omitted from
+  membership and validates ownership; keep those checks while preserving names.
+- `create_project` accepts a chosen UUID, but Initiative attachment is a separate
+  mutation. `find_project` distinguishes archived records from absence. Recovery
+  must handle an unattached Project without creating another identity.
+- LOO-364's `ops/human_session/primary.rs` reserves identity before launch and
+  reuses it on retry. Reuse that principle without Session storage or startup.
+  `chapter::rotation_lock` supplies a per-Wave OS lock with a 30-second bound.
+- Linear's [GraphQL schema](https://raw.githubusercontent.com/linear/linear/master/packages/sdk/src/schema.graphql),
+  inspected October 3, accepts a caller UUID and optional content/status on create,
+  and status-only updates without a revision precondition. This supports exact-ID
+  reconciliation, not cross-mutation atomicity. Duplicate-ID and attachment
+  behavior still need configured proof.
+- Desktop's `WaveDetailPane` polls every 30 seconds and names its ordinary plan
+  `chapterAndTasks`/`WaveChapterView`. Activate outside polling through
+  `RegistryQuery`, the shared CLI transport and decoded snapshot owner.
 
 ## Chosen operation and authoritative state
 
@@ -537,44 +667,31 @@ Wave-scoped chapter creation is part of the requested higher-level design.
 
 ## Implementation order
 
-This is one coherent delivery; internal slices are implementation order:
+One delivery, sequenced by dependency. The detailed contracts above and acceptance
+cases below own requirements; this list identifies each next cut:
 
-1. Establish a stable Task/checkout population across registration and relocation,
-   then preservation using shared Task-work membership and checkout admission
-   before switching selection or rotation. Explicit first-start fields alone
-   omit checkout-associated Sessions/Flows. Session creation/binding, review
-   reservation and mechanical Flow starts must share the revised lock order above,
-   including taskless and out-of-checkout entry points. Historical binding stays
-   allowed. Prove starts on both sides of rotation and failed-reset re-entry
-   through operation entry points; a pending receipt alone cannot deny starts.
-   The approved name transition is implemented in this Task's one migration draft. Add the Home-local per-Wave Project file and shared configured-ID reader;
-   expose supported exact-ID binding setup, including the selected Intelligence ID, without provider mutations on reads. Ordinary Project recording and name-prefix deletion across readers, sync and
-   reteam are implemented; shared selection remains. Preserve provider bytes on ordinary adoption; the
-   optional-Flow removal is already implemented. Cut CLI/status/DTO consumers
-   over with it, including `ops/pm.rs` current-Project callers and
-   `ops/project.rs::resolve_project_for_task`. Focused test: `cargo test -p loopflow --lib project_ensure` with
-   new regression cases proving an existing no-Flow Project survives adoption.
-2. Add transition persistence and explicit ensure, with concurrent/crash/uncertain
-   response tests through real operation entry points and a stateful fake provider.
-   Missing binding must not create synthetic local plans. Keep schema migration preservation
-   tests at the released frontier, not successive draft versions.
-3. Expose Wave-scoped chapter rotation and compose it for repository reset.
-   Replace reset name inference with receipt recovery. Keep existing preservation
-   tests, replacing tests whose sole assertion is a required shared name/Flow
-   or automatic untouched-backlog expiration. Require KRs for chapter creation
-   without introducing that prerequisite into ordinary ensure.
-4. Add Desktop selection activation through `RegistryQuery`, separate Project and
-   primary-conversation outcomes, and explicit reset preview/apply/retry. A Project
-   error does not hide its conversation or preserved last-good Task history.
-   Rename ordinary “Chapter” labels to “Project”; metrics belong to the Project.
-   Add required-or-optional Rust/Swift JSON fields and fixture updates together.
-5. Update `docs/lf.md`, command reference, planning architecture, repo guide and
+1. Close all four projection counterexamples through atomic accepted-observation
+   projection, persisted mutation readbacks, per-entity age and removal of captured
+   planning writes from execution consumers. Reuse held Wave locks.
+2. Establish stable Task/checkout membership across registration, relocation and
+   every admission path under **Preservation boundary**. Prove both rotation/start
+   orderings and failed-reset re-entry before changing selection.
+3. Add the shared Wave-ID configuration reader/writer and explicit binding setup,
+   then replace every current-Project selector, including Task routing and
+   CLI/status/DTO consumers. Preserve the designated Intelligence Project.
+4. Add transition persistence and ensure, exercising concurrency and uncertain
+   responses through operations with a stateful fake provider. Test this Task's
+   single migration draft from the released frontier.
+5. Replace rotation through Wave-scoped KR-first creation and repository
+   composition, retaining preservation coverage with the new recovery semantics.
+6. Add Desktop activation and explicit reset preview/apply/retry per **Outcome and
+   demo**. Rename ordinary Chapter labels to Project; keep metrics with Project.
+   Change Rust/Swift DTO fields and fixtures together, without defaults.
+7. Update `docs/lf.md`, command reference, planning architecture, repo guide and
    builtin `review-chapter`, `wave/review-chapter`, `start-chapter`,
-   `wave/start-chapter`, `repo/session`, `wave/session` instructions at their
-   actual owners. Compose review/planning → chapter creation with KRs → separate
-   Task admission, retaining candidate output across that boundary. Ordinary workflows call ensure only at
-   activation, not observation. Reconcile the LOO-367 call site without importing
-   its lifecycle changes into this Task.
+   `wave/start-chapter`, `repo/session`, `wave/session` at their owners. Implement
+   the separate KR planning → chapter creation → Task admission sequence, retaining
+   candidate output. Reconcile LOO-367's call site without its lifecycle changes.
 
 ## Delete — do not maintain
 
@@ -589,6 +706,15 @@ rotation remain. Keep this one delivery boundary.
 - Deleted: `canonical_project_name`, Task-resolution projection, sync/reteam
   prefix rewrites, the unused `rename_project` API and reteam’s `target_name`
   field/rename display. Provider IDs establish ownership.
+- Rotation's direct durable-only `record_project`/`move_chapter_task` calls:
+  replace with accepted provider readbacks and atomic projection. Preserve exact
+  transfer identity and uncertain-response recovery.
+- Restart's `project_plan`/`update_project` write and provider-derived fields in
+  execution-only `TASK_UPDATE`, plus Task-update reconciliation’s separate
+  `update_task_plan`: move planning to atomic accepted projection;
+  preserve local execution choices and review replacement. Remove generic runtime
+  Project fact updates with their consumers, retaining separate local metadata
+  writes and fixture initialization. Cover delayed restart as well as ingestion.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
   explicit disposition. Retain start fencing, unknown-work protection and
   confirmation for explicitly requested cancellation.
@@ -656,6 +782,16 @@ native providers and configured accounts from being launched by synthetic tests.
   Use app/view builds/tests; no screenshot, display or permission dialog required.
 - Gate runs affected migration/architecture checks, formatting and all-target
   Clippy once under TESTING.md. Implement only builds and runs its focused cases.
+- Jack Heart's October 5 comment `74eee6f5-055f-4be1-914f-9272d63cbf47`
+  prohibits three installation proofs on this host:
+  `global_commands::installation_uses_candidate_authority_from_any_checkout`,
+  `global_commands::installation_reaches_candidate_verdict_with_an_unreadable_task_registry`
+  and `exec_ownership_tests::early_observation_records_preflight_and_screenshot_child_ancestry`.
+  Installation preflight/promotion resolves the OS account Home through `getpwuid`;
+  changing HOME/LF_HOME still copies the live database. PR #1444 moves the unchanged
+  assertions to `scripts/test_task_installation.py` under a disposable OS account.
+  Reuse that repair after integration; until then these proofs belong to isolated
+  CI. Preserve the checks and production Home authority. None ran in this pass.
 - Configured acceptance remains required after implementation: use explicitly
   designated fixture Waves for absent, ordinary Backlog/current and reopening
   scenarios, record provider UUID/status plus Task identities, and demonstrate
@@ -679,7 +815,26 @@ Project fields; normalized planning projects the accepted slug. Snapshot collect
 retains each list result's selected Project association because migration adoption
 can change those facts. Earlier reduction details remain at
 `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
-Reconciliation retains the preservation design and incorporates the Intelligence steer; no runtime code changed.
+Reconciliation retains the Intelligence steer and expands preservation to delayed
+planning projection. The evidence-reader correction is independent of the unfinished
+admission and selection changes.
+Compression uses the already joined Session row for primary-scope exclusion in
+Task membership, removing a correlated self-lookup. Desktop summary projection
+passes its full row instead of its narrower page. Binding, checkout and Flow
+associations retain the same predicate; no projection or admission fence is added.
+The remaining deletion targets above require their replacement consumers and are
+not repaired in this compression pass.
+
+Compression consolidates repeated design requirements into their owning sections;
+the implementation order records dependencies and the deletion list retains the
+required consumer cutovers. Production code and failing evidence are unchanged.
+
+Compression shares the baseline planning fixture between the two transfer
+regressions; each interleaving and its identity assertions remain inline. Review
+keeps the remaining deletion targets coupled to their replacement consumers;
+removing the old selection/projection APIs alone would break current callers.
+No production behavior changed.
+
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
@@ -691,4 +846,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no behavioral rerun; prior code checks remain at `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`; gate retains affected suites, output-handle investigation and configured acceptance.
+Checks: realignment `git diff --check` passes and `lf context --skill realign --json` fits all budgets; no behavioral rerun; retained `cargo test -p loopflow --lib --no-run` passes; network-isolated lib tests `delayed_restart_project_projection_preserves_completed_provider_status` and `project_projection_retains_accepted_entity_age` both fail at the intended assertions; prior two transfer failures remain unrepaired and unrerun; gate owns affected suites/Clippy/configured acceptance and isolated CI owns the prohibited installation proofs.

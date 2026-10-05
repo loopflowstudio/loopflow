@@ -37,7 +37,9 @@ and per-landing locks, preserving CI repair holds. Ready/Complete CLI/store/Desk
 controls, `exec_driver` and review-completion restart are now deleted. The draft archives feedback
 in Session observations before dropping its live column; historical feedback and
 completion remain readable without readiness or navigation authority. Task-worker
-claims, managed selection, saved resume and new review launch still exist.
+claims, managed selection, internal recovery and new review launch still exist.
+Public saved Flow resume is deleted; inspection retains native child completion
+and mechanical effects without restarting or consuming them.
 Compression removes duplicate Flow feedback plumbing; Session observations retain
 the history. It does not remove those controllers. Ordinary detached launch, Task
 primary selection, Waiting and workflow/loop authoring remain unimplemented.

@@ -1883,7 +1883,7 @@ fn execute_command(
                 json,
                 sessions: true,
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
-            _ => loopflow::lf::commands::flow::control(cmd, cli),
+            _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },
         Some(Commands::Skill { .. } | Commands::Run { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")

@@ -6,7 +6,7 @@ use crate::engine::{
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
-use crate::lf::{Cli, FlowCommand};
+use crate::lf::Cli;
 use crate::ops::{flow_run, NullProgress, WorkBinding};
 use crate::store::SharedStore;
 use anyhow::{anyhow, Context, Result};
@@ -113,11 +113,7 @@ fn execute(
         let flow = store.create_flow(flow).await?;
         Ok::<_, anyhow::Error>((store, flow))
     })?;
-    eprintln!(
-        "Flow invocation {} — resume with lf flow resume {}",
-        flow.id(),
-        flow.id()
-    );
+    eprintln!("Flow invocation {}", flow.id());
     report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
 }
 
@@ -137,60 +133,6 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
             )
         }
         FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
-    }
-}
-
-pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
-    match command {
-        FlowCommand::Resume { invocation, retry } => {
-            let id = invocation.as_str();
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            let store = runtime.block_on(open_flow_store())?;
-            let flow = runtime
-                .block_on(store.flow(id))?
-                .ok_or_else(|| anyhow!("Flow {id} has no invocation row"))?;
-            if let Some(task_id) = &flow.task_id {
-                if runtime
-                    .block_on(store.task_flow(task_id))?
-                    .is_some_and(|managed| managed.id() == id)
-                {
-                    // A managed Flow resumes through its Task's worker claim.
-                    // The worker enters the same shared driver.
-                    let task = runtime
-                        .block_on(store.get_task(task_id))?
-                        .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;
-                    crate::ops::task::task_run(
-                        &task.worktree,
-                        &task.plan.identifier,
-                        crate::ops::task::TaskExecOptions {
-                            retry: *retry,
-                            agent: cli.model.clone(),
-                            ..Default::default()
-                        },
-                    )?;
-                    return Ok(());
-                }
-            }
-            let flow = if *retry {
-                runtime.block_on(prepare_native_retry(&store, flow))?
-            } else {
-                flow
-            };
-            let flow = if *retry && flow.failure.is_some() {
-                let _driver = flow_run::driver_lock(id)?;
-                runtime.block_on(store.retry_flow(id, None))?
-            } else {
-                flow
-            };
-            let argv = std::env::args().collect::<Vec<_>>();
-            let cwd = flow.cwd.clone();
-            journal::with_runtime(&cwd, &argv, || {
-                report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
-            })
-        }
-        _ => anyhow::bail!("not a Flow control: {command:?}"),
     }
 }
 
@@ -467,7 +409,7 @@ async fn drive_loop(
         }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
-                "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
+                "Flow {id} is blocked: {}; inspect its history and effects before launching further work",
                 failure.reason
             );
         }
@@ -527,7 +469,7 @@ async fn drive_loop(
                     .fail_flow(&id, version, claim.as_ref(), &TaskFlowBlocker::now(&reason))
                     .await?;
                 anyhow::bail!(
-                    "Flow {id} blocked: {reason}; resume with `lf flow resume {id} --retry`"
+                    "Flow {id} blocked: {reason}; inspect its history and effects before launching further work"
                 )
             }
             // A step's failure is what the caller hears; a write the row no longer
@@ -550,7 +492,7 @@ async fn drive_loop(
                             .await,
                     );
                     anyhow::bail!(
-                        "Flow {id} blocked: {error:#}; resume with `lf flow resume {id} --retry`"
+                        "Flow {id} blocked: {error:#}; inspect its history and effects before launching further work"
                     )
                 }
             },
@@ -941,8 +883,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
     // schema, including recording a failure which would discard that selection.
     store.sqlite.validate_current_schema().map_err(|error| {
         StepEnd::StoreChanged(format!(
-            "{error}; this driver cannot settle Flow {}. Resume with a compatible lf using `lf flow resume {}`; the selected step result is retained",
-            flow.id(), flow.id()
+            "{error}; this driver cannot settle Flow {}. Inspect its retained step result and effects with a compatible lf before launching further work",
+            flow.id()
         ))
     })?;
     let status = status.context("could not execute captured Flow step")?;

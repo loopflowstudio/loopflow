@@ -132,7 +132,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
             .await?
             .context("FlowSession was not found")?;
         if !json {
-            println!("Resume with lf flow resume {}", detail.entry.summary.id);
+            println!("Flow invocation {}", detail.entry.summary.id);
         }
         println!("{}", serde_json::to_string_pretty(&detail)?);
         Ok(())

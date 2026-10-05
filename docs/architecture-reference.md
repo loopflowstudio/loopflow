@@ -630,7 +630,6 @@ to Loopflow without separate UI evidence.
 lf --task INF-123 flow start                  # Project's Flow
 lf --task INF-124 flow start incident  # explicit override
 lf flow example                     # with or without Task attribution
-lf flow resume FLOW_SESSION          # captured progress
 ```
 
 FlowSession captures the compiled graph, every Skill/router/Xor alternative,

@@ -1370,8 +1370,7 @@ impl SqliteStore {
         Ok(saved)
     }
 
-    /// Block the Flow at its position; `lf flow resume --retry` or
-    /// `lf task resume` clears it.
+    /// Retain the failed position and selected effect for caller inspection.
     pub fn fail_flow(
         &self,
         id: &str,

@@ -84,8 +84,13 @@ Batch selects provider behavior; detachment is separate. Delete the worker path.
 
 October 4 source reconciliation corrects stale iteration feedback: Ready/Complete
 handlers and `exec_driver` no longer execute. `TaskWorkerClaim`, Task `__worker`,
-saved `flow resume`, `serve-flow` and managed selection still do. The compression
-diff removes redundant feedback plumbing, not these controllers. Attention still
+`serve-flow` and managed selection still do.
+The public saved `flow resume` command and its managed dispatch branch are now
+deleted; Flow inventory and error messages direct callers to retained evidence.
+The surviving-agent crash proof retains exact native completion without consuming
+it or creating a replacement driver. Ordinary mixed-provider account selection
+now has direct execution coverage independent of the deleted resume behavior.
+Compression removes redundant feedback plumbing, not these controllers. Attention still
 projects Review/Reply and `--needs-me`; Task primaries, workflows and autonomous
 loop syntax remain unimplemented. The draft migration only removes scheduling
 columns and live readiness; it does not yet convert legacy review boundaries or
@@ -272,7 +277,7 @@ modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
   `reserve_task_review`. `complete_task_review` is deleted. Replace mixed history writes at
   their owner, rather than deleting their retained data.
 - `ops/run.rs::TaskWorkerExec`, `controller/task` worker/review progression,
-  Task `__worker`, saved `flow resume`, and managed
+  Task `__worker` and managed
   branches in `lf/commands/flow.rs`. Keep shared engine graph/cursor traversal.
 - New `FlowReview` Session creation in `ops/flow_session.rs`; review-complete-to-driver
   restart and `exec_driver` are deleted. `serve-flow` and managed review launch/token branches
@@ -306,6 +311,10 @@ admission/completion policy while adapting its evidence readers; policy redesign
 stays LOO-367. Update builtin Task-operation/session guidance and architecture/docs
 so they no longer prescribe the deleted worker or retry APIs.
 
+Saved `flow resume` and its exclusive recovery assertions are deleted. Internal
+Task retry, worker claims, store recovery and managed driver paths remain removal
+targets; deleting the public command does not remove their authority.
+
 One draft migration, generated with `uv run python scripts/new_migration.py task_flow_observations`
 converts the released schema directly; it removes five scheduling columns and
 archives review feedback before dropping the live readiness column. Extend that same draft for the remaining cut. Preserve every invocation,
@@ -333,7 +342,8 @@ One coherent runtime/UI change, with no intermediate release of two executors:
    CI enablement into implicit Flow creation and removed that side effect, plus
    the now-unreachable managed recovery exception in repair admission. CI repair keeps
    its existing per-Task hold and incident retry policy. Direct Task-worker claims
-   and saved resume still exist. Ready/Complete store/CLI/UI paths, `exec_driver`,
+   and internal Task recovery still exist; public saved Flow resume is deleted.
+   Ready/Complete store/CLI/UI paths, `exec_driver`,
    review-completion restart and feedback-to-Flow-result consumption are deleted;
    new review creation/serve-flow and legacy conversion remain. Remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
@@ -434,4 +444,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: realign `git diff --check` passed; `lf context --skill realign` reports memory 15,904/16,000 and scratch below budget (stored Task goal over budget and excerpted; no submitted-input overage). No code changed or tests rerun in realign. Recorded prior checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow` focused engine/store/builtin/Session projection and native-resume/crash cases (55 tests), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `uv run python scripts/check_architecture.py` and `git diff --check` passed. Prior migration/CLI/Desktop evidence remains at `62e534140:scratch/focus-on-your-own-work.md`; full runtime cut, materialized gate and configured demo remain outstanding. Authored Task steers remain unchanged.
+Checks: `cargo build -p loopflow --bin lf`, four focused `cargo test -p loopflow --test flow_tests <case> -- --exact` cases (native-child and mechanical-effect crash/no-restart, multi-provider accounts, schema-change effect retention), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed; the initial native assertion used the wrong Exec, corrected to exact Session/turn correlation. `lf context --skill implement`: memory 15,926/16,000, scratch below budget; stored Task goal excerpted, submitted input within budget. Prior checks remain at `cbf04180a:scratch/focus-on-your-own-work.md`; store/driver worker removal, final migration, full gate and configured demo remain outstanding. Authored Task steers remain unchanged.

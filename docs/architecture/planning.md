@@ -112,7 +112,7 @@ across the combined migration frontier remain unfinished.
 
 ```bash
 lf flow build
-lf flow resume FLOW_SESSION
+lf flow show FLOW_SESSION --sessions --json
 ```
 
 Starting a Flow compiles its definition into one FlowSession's captured graph,
@@ -153,12 +153,16 @@ and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 
-## Recover without inventing an outcome
+## Inspect before further work
+
+Saved Flow invocations are history, not a public resume entry point. Inspect the
+selected Session, process and effect receipts before launching a fresh ordinary
+Flow. Observation does not replay work or consume a surviving child's result.
+
+The remaining managed Task controls below are part of the pending worker removal.
 
 ```bash
 lf --task INF-124 flow start
-lf flow resume FLOW_SESSION
-lf flow resume FLOW_SESSION --retry
 lf --task INF-124 flow start --retry
 ```
 

@@ -32,13 +32,12 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 
 ```bash
 lf --task EXP-12 flow start
-lf flow resume FLOW_ID --retry
 lf task restart EXP-12 --flow feature
 ```
 
-Resume retains the captured graph. Retry retains its position. Restart
-deliberately captures a replacement. Completing a review returns feedback;
-the authored Flow decides what follows.
+Ordinary saved Flows remain inspectable through `lf flow show ID --sessions --json`.
+Inspect their execution and effect history before launching fresh work. Remaining
+managed Task controls retain their captured position or explicitly replace it.
 
 ## lf
 
@@ -1553,16 +1552,6 @@ Inspect an authored flow or a saved FlowSession
 | `<name>` | name |
 | `--json` | json Default: false. |
 | `--sessions` | sessions Default: false. |
-| `--help / -h` | Print help |
-
-## lf flow resume
-
-Continue a saved Flow invocation
-
-| Argument | What it does |
-|---|---|
-| `<invocation>` | invocation |
-| `--retry` | retry Default: false. |
 | `--help / -h` | Print help |
 
 ## lf skill

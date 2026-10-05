@@ -503,12 +503,6 @@ pub enum FlowCommand {
         #[arg(long)]
         sessions: bool,
     },
-    /// Continue a saved Flow invocation
-    Resume {
-        invocation: String,
-        #[arg(long)]
-        retry: bool,
-    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }

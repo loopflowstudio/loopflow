@@ -3,7 +3,7 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf flow resume FLOW_SESSION
+lf flow show FLOW_SESSION --sessions --json
 lf ps --json
 ```
 

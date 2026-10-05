@@ -114,7 +114,8 @@ PYTHON
         assert_eq!(state, if upgrade { "current" } else { "completed" });
         if upgrade {
             assert!(
-                String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"),
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("Inspect its retained step result and effects"),
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -130,9 +131,14 @@ PYTHON
             let id: String = conn
                 .query_row("SELECT id FROM flow_sessions", [], |r| r.get(0))
                 .unwrap();
-            let retry = run_lf(repo.path(), home.path(), &["flow", "resume", &id], None);
+            let inspection = run_lf(
+                repo.path(),
+                home.path(),
+                &["flow", "show", &id, "--sessions", "--json"],
+                None,
+            );
             assert!(
-                !retry.status.success(),
+                !inspection.status.success(),
                 "an older executable must still refuse the new store"
             );
         }
@@ -1228,35 +1234,15 @@ fn agent_step_survives_driver_death_without_another_turn() {
     assert!(String::from_utf8_lossy(&duplicate.stderr).contains("another or unknown step Exec"));
     driver.kill().unwrap();
     driver.wait().unwrap();
-    let mut resume = lf_command(
+    let refused = run_lf(
         repo.path(),
         home.path(),
         &["flow", "resume", &id],
         Some(&path),
-    )
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .spawn()
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        let roots: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM execs WHERE parent_exec_id IS NULL",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        if roots >= 3 {
-            break;
-        } // Original driver, rejected independent child, resume.
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    std::thread::sleep(Duration::from_millis(200));
+    );
     assert!(
-        resume.try_wait().unwrap().is_none(),
-        "resume must wait for the surviving step"
+        !refused.status.success(),
+        "a saved invocation cannot be resumed"
     );
     assert_eq!(
         fs::read_to_string(home.path().join("turns")).unwrap(),
@@ -1274,48 +1260,46 @@ fn agent_step_survives_driver_death_without_another_turn() {
     fs::write(home.path().join("release"), "").unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        if let Some(status) = resume.try_wait().unwrap() {
-            assert!(status.success(), "resume failed: {status}");
+        let completed: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events done JOIN session_events start ON done.session_id=start.session_id AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn WHERE start.captured_event=?1 AND start.kind='started' AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed')",
+                [capture],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if completed {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "resume did not consume the step completion"
+            "surviving step did not record completion"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    let again = run_lf(
+    let inspected = run_lf(
         repo.path(),
         home.path(),
-        &["flow", "resume", &id],
+        &["flow", "show", &id, "--sessions", "--json"],
         Some(&path),
     );
     assert!(
-        again.status.success(),
+        inspected.status.success(),
         "{}",
-        String::from_utf8_lossy(&again.stderr)
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let retained: (String, i64, i64) = conn.query_row(
+        "SELECT state,current_capture,(SELECT count(*) FROM flow_events WHERE flow_id=?1 AND kind='consumed') FROM flow_sessions WHERE id=?1",
+        [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).unwrap();
+    assert_eq!(
+        retained,
+        ("current".into(), capture, 0),
+        "inspection preserves unsettled history"
     );
     assert_eq!(
         fs::read_to_string(home.path().join("turns")).unwrap(),
         "turn\n"
     );
-    let consumed: (i64, String, String) = conn.query_row(
-        "SELECT count(*), start.exec_id, f.state FROM flow_events used
-         JOIN session_events done ON done.seq=used.session_event
-         JOIN session_events start ON start.session_id=done.session_id AND start.provider_thread=done.provider_thread
-           AND start.provider_turn=done.provider_turn AND start.kind='started'
-         JOIN flow_sessions f ON f.id=used.flow_id
-         WHERE used.kind='consumed' AND done.kind='completed'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
-    ).unwrap();
-    assert_eq!(consumed, (1, step.clone(), "completed".into()));
-    let resumed: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM execs WHERE command LIKE '%resume%' AND outcome='succeeded'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(resumed, 2);
 
     assert_eq!(
         conn.query_row(
@@ -1904,50 +1888,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     assert!(runtime
         .block_on(task.store.task_started(&task.task.id))
         .unwrap());
-    // Invocation-addressed resume retains the Task's recovery policy, even
-    // with --retry: a restart-only failure must not reach a provider.
-    let retry = runtime
-        .block_on(task.store.start_task_flow(
-            &task.task.id,
-            FlowSession {
-                invocation:
-                    QueuedInvocation::new("restart-proof", flow.invocation.steps.clone()).unwrap(),
-                ..flow.clone()
-            },
-        ))
-        .unwrap();
-    let blocked = runtime
-        .block_on(task.store.fail_flow(
-            retry.id(),
-            retry.version,
-            None,
-            &loopflow::durable::TaskFlowBlocker {
-                captured: None,
-                reason: "explicit restart required".into(),
-                restart_required: true,
-                observed_at: time::OffsetDateTime::now_utc(),
-            },
-        ))
-        .unwrap();
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &["flow", "resume", retry.id(), "--retry"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("lf task restart INF-123"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        runtime
-            .block_on(task.store.flow(retry.id()))
-            .unwrap()
-            .unwrap(),
-        blocked
-    );
 }
 
 #[test]
@@ -2634,7 +2574,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
 }
 
 #[test]
-fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
+fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
     use base64::Engine;
     use loopflow::store::{
         CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
@@ -2710,7 +2650,6 @@ fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
         ("d1", "codex"),
         ("c2", "claude"),
         ("d2", "codex"),
-        ("d-review", "codex"),
     ] {
         write_skill(
             repo.path(),
@@ -2718,11 +2657,7 @@ fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
             &format!("---\nagent: {provider}\n---\nRun {skill}."),
         );
     }
-    write_flow(
-        repo.path(),
-        "pair",
-        "- c1\n- d1\n- c2\n- d2\n- step:\n    id: review\n    name: d-review\n    human: true\n",
-    );
+    write_flow(repo.path(), "pair", "- c1\n- d1\n- c2\n- d2\n");
     run_git(repo.path(), &["add", "."]);
     run_git(repo.path(), &["commit", "-m", "mixed provider fixture"]);
     let bin = TempDir::new().unwrap();
@@ -2731,8 +2666,6 @@ fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
         r#"#!/bin/sh
 case "$1" in --version) exit 0;; esac
 printf 'claude:%s\n' "$CLAUDE_CONFIG_DIR" >> "$LF_HOME/selected"
-if [ -f "$LF_HOME/first-claude" ] && [ ! -f "$LF_HOME/retry" ]; then exit 23; fi
-touch "$LF_HOME/first-claude"
 read -r input
 echo '{"type":"system","subtype":"init","session_id":"account-fixture"}'
 echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"account-fixture"}'
@@ -2744,9 +2677,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
             "done",
             r#"if [ "$1" = --version ]; then exit 0; fi
 printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
-case "$*" in *app-server*) ;; *)
-  printf '%s' '{"schema_version":1,"provider_session_id":"review-fixture","account_id":null}' > "$LF_RUN_DIR/provider-session.json"
-  exit 0;; esac"#,
+"#,
         ),
     );
     let path = format!(
@@ -2771,66 +2702,12 @@ case "$*" in *app-server*) ;; *)
         Some(&path),
     );
     assert!(
-        !output.status.success(),
-        "fixture pauses on second Claude step"
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (id, cursor): (String, u32) = db
-        .query_row("SELECT id,step_index FROM flow_sessions", [], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
-        .unwrap();
-    assert_eq!(cursor, 2, "{}", String::from_utf8_lossy(&output.stderr));
-    fs::write(home.path().join("retry"), "").unwrap();
-    // A new CLI has no broker. New flags must not replace saved invocation intent.
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "--isolate",
-            "--account",
-            "claude=claude-other@",
-            "--account",
-            "codex=codex-other@",
-            "--mode",
-            "batch",
-            "flow",
-            "resume",
-            &id,
-            "--retry",
-        ],
-        Some(&path),
-    );
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("waiting for human input"),
+        output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let sessions = run_lf(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--json"],
-        Some(&path),
-    );
-    let sessions: serde_json::Value = serde_json::from_slice(&sessions.stdout).unwrap();
-    let session = sessions
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|session| session["kind"] == "flow")
-        .unwrap_or(&sessions[0]);
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &["session", "connect", session["id"].as_str().unwrap()],
-        Some(&path),
-    );
-    // The TUI fixture exits immediately; it proves account delivery, not native resume.
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("before becoming resumable"));
     let selected = fs::read_to_string(home.path().join("selected")).unwrap();
-    let expected = ["claude", "codex", "claude", "claude", "codex", "codex"].map(|provider| {
+    let expected = ["claude", "codex", "claude", "codex"].map(|provider| {
         format!(
             "{provider}:{}",
             home.path()

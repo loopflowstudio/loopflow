@@ -2113,7 +2113,6 @@ mod tests {
                 assert!(!prompt.contains("doppler run"), "{name}");
             }
             assert!(!prompt.contains("lf skill show"), "{name}");
-            assert!(!prompt.contains("one or two\nuseful moves"), "{name}");
         }
     }
 

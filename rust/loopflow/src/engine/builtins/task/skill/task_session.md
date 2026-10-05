@@ -19,9 +19,7 @@ is the whole method; this section only says when to apply it.
 - Answer the user first. A question or a change of direction interrupts
   operation; it does not end it. Resume afterwards and finish before the turn
   ends.
-- End a turn only when the Task has its disposition: moving, acted on and
-  verified, waiting on a named person or dependency, paused, or unknown with
-  the missing evidence named.
+- End a turn only when the Task has its disposition.
 - Record direction the user gives in the Task's brief or scratch so its workers
   receive it. An idea that is other work belongs in its own Task: read
   `lf help capture-tasks`.

@@ -327,26 +327,24 @@ fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
     let composed_dir = out_dir.join("composed_skills");
     fs::create_dir_all(&composed_dir).expect("create composed skill directory");
     for (session, operate) in SESSION_OPERATE_PAIRS {
-        let source = |name: &str| {
-            let path = entries
+        let index = |name: &str| {
+            entries
                 .iter()
-                .find(|(entry, _)| entry == name)
-                .map(|(_, path)| path)
-                .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"));
+                .position(|(entry, _)| entry == name)
+                .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"))
+        };
+        let read = |path: &Path| {
             fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
         };
+        let session_index = index(session);
         let composed = format!(
             "{}\n# Operating procedure: `{operate}`\n\n{}",
-            source(session),
-            skill_body(&source(operate))
+            read(&entries[session_index].1),
+            skill_body(&read(&entries[index(operate)].1))
         );
         let path = composed_dir.join(format!("{}.md", session.replace('/', "_")));
         fs::write(&path, composed).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-        let entry = entries
-            .iter_mut()
-            .find(|(entry, _)| entry == session)
-            .expect("session entry was read above");
-        entry.1 = path;
+        entries[session_index].1 = path;
     }
 }
 

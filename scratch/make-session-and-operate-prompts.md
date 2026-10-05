@@ -365,6 +365,8 @@ the post-install conversation behavior; it is not a gate.
 
 Check result (implement, 2026-10-05): `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- engine::prompt engine::builtins engine::skills ops::task_automation` and `--test discovery_tests --test documented_commands --test golden_prompt` pass. `default_conversation_tests` passes only with the launching agent's `LF_*` variables cleared; gate owns the full run.
 
+Check result (compress, 2026-10-05): clippy clean; `cargo test -p loopflow --lib -- engine::prompt engine::builtins` and `--test discovery_tests --test golden_prompt` pass after the reduction. Gate still owns the full plan.
+
 ## Remaining
 
 Implemented in one change: the action contract in all three operate skills,

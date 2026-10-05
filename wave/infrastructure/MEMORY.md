@@ -28,8 +28,9 @@ parallel layout, compatibility alias or privileged offline migration is required
 Capture keys select history; Session IDs select mutations; Session/Exec provenance
 supplies authority. Missing payload cannot erase resumable SQLite identity.
 Keep historical paths, payloads, feedback, native identity and usage unchanged.
-Checksum-pinned released-Home runtime preservation passed with stub providers;
-final affected gate remains open.
+Checksum-pinned v0.13.3 capture preservation passed with stub providers, including
+native resume, independent replay, review feedback and nested Exec ancestry.
+Final affected gate remains open; fixtures prove neither installation nor conversion.
 
 The abandoned permission probes demonstrated writable hard-link aliases and a
 recovery check/write race that altered unrelated replacement metadata. Those
@@ -343,8 +344,8 @@ the other names nothing read. One list of Exec-context names drives both the
 session shell's `unset` and the tmux client's environment, because a tmux server
 copies its first client's environment into every later session. Fixtures open
 their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
-LOO-370 removes those presence-based decisions in its runtime slice; conversion
-and complete source delivery remain unfinished.
+LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
+conversion; source gate and delivery remain unfinished.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
@@ -954,7 +955,7 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   marker through `migration_sql_for_test`; an `include_str!` pointing directly
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
-- **Ordinary-PR integration tests inherit Task authority inside a worker.** Scrub `LF_RUN_CONTEXT` (plus its lease/invocation companions) when a fixture deliberately represents a non-Task repository. A missing registry while Run context is present is the intended fail-closed behavior, not a commit/push regression.
+- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.

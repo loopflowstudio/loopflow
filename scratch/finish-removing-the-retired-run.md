@@ -35,9 +35,9 @@ fields name Trace/Exec while their released serialized receipt names remain.
 Removed `.github/workflows/capture-exclusion.yml`, `scripts/test_capture_exclusion.py`
 and `tests/e2e/capture_exclusion.{py,Dockerfile}` with their TESTING.md instructions.
 Their negative evidence survives at 6fcdbe9da0b47ef95f1f92ebdb259401a327cd46; they are not runtime acceptance.
-Delete obsolete commands/identity names in current help, tools and docs. Keep
-historical cohort decoding only where an actual reader consumes it. Preserve
-legacy environment names solely in scrubbing and rejection tests.
+Current help, tools and docs use owner-specific names. Historical cohort decoding
+remains only in actual readers; legacy environment names remain in scrubbing,
+rejection tests and the released-CLI fixture.
 
 Already removed: unused engine events/errors and worktree helpers, duplicate replay
 readers, mutation capture aliases and unused provider-fill wrappers. Earlier focused
@@ -89,12 +89,13 @@ of fixture ordering, not a reason to change production timing.
 
 ## Adjacent evidence
 
-Release child GOAL.md and MEMORY.md were read October 5. LOO-292's installed
-acceptance does not prove this cleanup; LOO-285 still lacks two qualifying automatic
-settlements. Upstream #1441 removes the retired UI receipt prerequisite and repairs
-CLI smoke. Preserve its actual headless/public checks and release schedule.
+Release is the only immediate child Wave; its full GOAL.md and MEMORY.md were
+read October 5. LOO-292's installed acceptance does not prove this cleanup; LOO-285
+still lacks two qualifying automatic settlements. The active base includes #1441,
+removing the retired UI receipt prerequisite and repairing CLI smoke. Required
+headless/public checks and the release schedule remain unchanged.
 Configured installation/provider/Desktop acceptance remains separate from fixtures.
 
 Prior implementation checks remain at `c2f464b5a4333b50dd67823585d236b63115223d:scratch/finish-removing-the-retired-run.md`; their focused runtime and headless Desktop evidence remains applicable, with the same acceptance limits.
 
-Check (October 5, compression): `cargo test -p loopflow --test dto_fixtures --test active_runs_watch` passed (19); `uv run python tests/e2e/capture_history.py --released-archive /tmp/loo370-release-fixture/lf-aarch64-apple-darwin.tar.gz --candidate target/debug/lf` passed after the fixture-ordering repair; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Ruff and `git diff --check` passed; full affected gate and isolated installation checks remain gate/CI-owned.
+Check (October 5, compression): `cargo test -p loopflow --test dto_fixtures --test active_runs_watch` passed (19); `uv run python tests/e2e/capture_history.py --released-archive /tmp/loo370-release-fixture/lf-aarch64-apple-darwin.tar.gz --candidate target/debug/lf` passed after the fixture-ordering repair; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Ruff and `git diff --check` passed; full affected gate and isolated installation checks remain gate/CI-owned. Realign: `git diff --check` passed; behavioral results reused from `ff506ff1f` without rerunning.

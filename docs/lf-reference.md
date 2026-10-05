@@ -33,6 +33,7 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 ```bash
 lf --task EXP-12 flow start
 lf flow resume FLOW_ID --retry
+lf flow end FLOW_ID
 lf task restart EXP-12 --flow feature
 ```
 
@@ -1581,6 +1582,15 @@ Continue a saved Flow invocation
 |---|---|
 | `<invocation>` | invocation |
 | `--retry` | retry Default: false. |
+| `--help / -h` | Print help |
+
+## lf flow end
+
+End a stopped Flow without running its remaining steps; its history stays
+
+| Argument | What it does |
+|---|---|
+| `<invocation>` | invocation |
 | `--help / -h` | Print help |
 
 ## lf skill

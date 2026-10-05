@@ -29,8 +29,8 @@ struct WorkspaceNavigator: View {
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
     }
 
-    private var rows: [WorkspaceOutlineRow] {
-        model.visibleWorkspace.outline(
+    private func rows(_ workspace: WorkspaceProjection) -> [WorkspaceOutlineRow] {
+        workspace.outline(
             presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
             search: model.navigation.search,
             planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
@@ -87,14 +87,17 @@ struct WorkspaceNavigator: View {
 
     var body: some View {
         @Bindable var navigation = model.navigation
-        let rows = rows
+        // One projection per render: rows and every row's menu share it.
+        let workspace = model.visibleWorkspace
+        let rows = rows(workspace)
+        let orphans = workspace.orphanSessions(search: model.navigation.search)
         VStack(spacing: 0) {
-            header
+            header(orphans)
             sessionComposer
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
-                    ForEach(rows) { row in outlineRow(row) }
+                    ForEach(rows) { row in outlineRow(row, orphans) }
                     if model.repoPath != nil, rows.isEmpty, model.workspaceStatus == .current {
                         Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
@@ -129,7 +132,7 @@ struct WorkspaceNavigator: View {
         .tint(palette.text)
         .buttonStyle(.plain)
         .background(palette.surfaceMuted)
-        .contextMenu { repositoryActions }
+        .contextMenu { repositoryActions(orphans) }
         .accessibilityIdentifier("workspace-navigator")
         .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
         .onChange(of: rows.isEmpty, initial: true) { _, empty in
@@ -144,7 +147,7 @@ struct WorkspaceNavigator: View {
     }
 
     /// The repository heads its own outline: one scope, switched in place.
-    private var header: some View {
+    private func header(_ orphans: [SessionRecord]) -> some View {
         @Bindable var navigation = model.navigation
         return HStack(spacing: Spacing.sm) {
             Menu {
@@ -153,7 +156,7 @@ struct WorkspaceNavigator: View {
                         .accessibilityIdentifier("workspace-repository-\(repo)")
                 }
                 Divider()
-                repositoryActions
+                repositoryActions(orphans)
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
@@ -235,7 +238,7 @@ struct WorkspaceNavigator: View {
     /// One row component at two levels. A Wave is a sans section head with a
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
     /// (running, blocked, waiting on you) and a count only while Sessions exist.
-    private func outlineRow(_ row: WorkspaceOutlineRow) -> some View {
+    private func outlineRow(_ row: WorkspaceOutlineRow, _ orphans: [SessionRecord]) -> some View {
         let isWave = row.workKey?.work.kind == .wave
         return HStack(spacing: 6) {
             if case .work(let subject, true, _) = row.content {
@@ -314,7 +317,7 @@ struct WorkspaceNavigator: View {
                 subjectActions(ancestor.key.work, title: ancestor.title)
             }
             Divider()
-            repositoryActions
+            repositoryActions(orphans)
         }
     }
 
@@ -336,10 +339,6 @@ struct WorkspaceNavigator: View {
         .accessibilityIdentifier("workspace-session-count-\(work.id)")
     }
 
-    // MARK: - Orphan Sessions
-
-    private var orphans: [SessionRecord] { model.visibleWorkspace.orphanSessions(search: model.navigation.search) }
-
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
         if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
             Button("New Session · \(title)") { onNewSession(launch) }
@@ -349,7 +348,7 @@ struct WorkspaceNavigator: View {
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    @ViewBuilder private var repositoryActions: some View {
+    @ViewBuilder private func repositoryActions(_ orphans: [SessionRecord]) -> some View {
         Menu("Debug") {
             Menu("Sessions") {
                 Menu("Orphan Sessions") {

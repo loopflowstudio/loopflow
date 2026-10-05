@@ -66,6 +66,11 @@ SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
 
+That is the only place stored rows are scanned for dangling references during
+ordinary use. Opening a store validates its migration ledger and schema and
+relies on per-connection enforcement; `lf home doctor` and installation
+preflight run the full `PRAGMA foreign_key_check`, which reads the whole database.
+
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
 shape in a DTO stored by the database requires a repair in the Task's draft and
 a typed upgrade test seeded with the released shape. Before commit, the runner

@@ -158,7 +158,7 @@ pub(crate) fn initialize_experimental_sqlite(
         if user_tables(conn)?.is_empty() {
             return Ok(false);
         }
-        validate_experimental_sqlite(conn, drafts)?;
+        validate_experimental_schema(conn, drafts)?;
         Ok(true)
     })? {
         return Ok(());
@@ -171,7 +171,7 @@ fn _initialize_experiment_in(
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     if !user_tables(conn)?.is_empty() {
-        return validate_experimental_sqlite(conn, drafts);
+        return validate_experimental_schema(conn, drafts);
     }
     apply_set(conn, MIGRATIONS)?;
     for draft in drafts {
@@ -182,13 +182,29 @@ fn _initialize_experiment_in(
     _validate_development_schema(conn, drafts)
 }
 
-pub(crate) fn validate_experimental_sqlite(
+/// Validate an experiment's history and schema, as every open does.
+///
+/// Opening never scans rows: `PRAGMA foreign_key_check` reads the whole
+/// database, and every connection enforces foreign keys, so only a migration
+/// can violate them. Migrations check before they commit; diagnosis uses
+/// [`validate_experimental_sqlite`].
+pub(crate) fn validate_experimental_schema(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         _validate_canonical_history_for_development(conn)?;
-        _validate_development_schema(conn, drafts)?;
+        _validate_development_schema(conn, drafts)
+    })
+}
+
+/// Diagnose an experiment in full: its schema and every stored foreign key.
+pub(crate) fn validate_experimental_sqlite(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    _read_snapshot(conn, |conn| {
+        validate_experimental_schema(conn, drafts)?;
         validate_foreign_keys(conn)
     })
 }
@@ -273,7 +289,10 @@ pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
 /// Validate the schema this binary already understands without advancing it.
 /// Branch builds use this against the release-owned database: they can reuse
 /// compatible state, but an unpublished migration never becomes durable there.
-pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+///
+/// This is the check every ordinary open of the release database runs, so it
+/// reads the schema and the migration ledger and never scans rows.
+pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
         if !user_tables(conn)?
@@ -288,7 +307,15 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         let applied = applied_versions(conn)?;
         pending_migrations(&applied, MIGRATIONS)?;
         validate_applied_checksums(conn, MIGRATIONS)?;
-        validate_schema(conn, &MIGRATIONS[..applied.len()])?;
+        validate_schema(conn, &MIGRATIONS[..applied.len()])
+    })
+}
+
+/// Diagnose the release database in full: its schema and every stored foreign
+/// key. Installation preflight and `lf home doctor` pay for the row scan.
+pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+    _read_snapshot(conn, |conn| {
+        validate_sqlite_schema(conn)?;
         validate_foreign_keys(conn)
     })
 }
@@ -1190,9 +1217,9 @@ mod tests {
         apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_experimental_sqlite, validate_foreign_keys, validate_persisted_json,
-        validate_schema, validate_set, validate_sqlite, Migration, MigrationId,
-        DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_experimental_schema, validate_experimental_sqlite, validate_foreign_keys,
+        validate_persisted_json, validate_schema, validate_set, validate_sqlite, Migration,
+        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
@@ -1439,6 +1466,13 @@ mod tests {
             validate_experimental_sqlite(&conn, drafts).unwrap();
         }
         validate_experimental_sqlite(&valid, drafts).unwrap();
+
+        // Opening reads the schema only; the row scan belongs to diagnosis.
+        conn.execute_batch("INSERT INTO schema_child VALUES ('child', 'absent-parent');")
+            .unwrap();
+        validate_experimental_schema(&conn, drafts).unwrap();
+        initialize_experimental_sqlite(&conn, drafts).unwrap();
+        validate_experimental_sqlite(&conn, drafts).unwrap_err();
     }
 
     struct WaitingMigration {

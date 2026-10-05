@@ -391,7 +391,7 @@ impl SqliteStore {
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_experimental_sqlite(
+        super::migrations::validate_experimental_schema(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )
@@ -495,7 +495,7 @@ impl SqliteStore {
             // the store has not applied. An ordinary open must not hand back a store
             // whose schema is older than this binary's code, which may query the
             // columns that pending migration adds.
-            super::migrations::validate_sqlite(&conn)?;
+            super::migrations::validate_sqlite_schema(&conn)?;
             if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \

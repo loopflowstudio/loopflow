@@ -276,39 +276,38 @@ LOO-342 was already marked done in the October 4 status read. This retirement
 supersedes the pending-store findings above and closes the remaining acceptance
 gap after the October 2 installed routing checks.
 
-## Worktree listing and fenced dispatch (LOO-375, branch evidence 2026-10-04)
+## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. Two separate causes, both measured on this branch; neither is shipped.
+killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
+[report](../../scripts/benchmarks/wt-list/README.md).
 
-- **Process count, not Git work, was the listing cost.** About 370 Git processes
-  ran mostly one after another at 25–45 ms each to start. Batched ref reads,
-  concurrent `status`, one GitHub call and answers remembered per commit pair in
-  `.git/lf-commit-facts` leave about 66. The remaining floor is one GitHub round
-  trip (about 1 s here), not local work. Numbers and method:
-  [report](../../scripts/benchmarks/wt-list/README.md).
+- **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
+  Git processes became about 70 through batched ref reads, concurrent `status`,
+  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`. One
+  GitHub round trip (1–1.8 s) is the remaining online floor.
+- **Every store open scanned the whole database** (PR 2). The first installed
+  sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
+  `PRAGMA foreign_key_check`, and one command opens the store five times, so
+  `lf home id` took 2.6–4.0 s on the 1.1 GB main Home. Opening now validates
+  ledger and schema only; migrations, doctor and install preflight keep the
+  scan. On a clone of that store: 1.40 s → 0.04 s. An empty Home hides any cost
+  that grows with the store; profile with `--store`.
 - **Never hold the Session fence while waiting on the runtime.** A fenced write
-  held the store mutex and SQLite's write lock inside `block_on`; the reader task
-  waited for that mutex on a runtime worker, so nothing drove the socket or the
-  timeout. The write is now timed on its own thread and store work leaves the
-  worker first (`harness/dispatch.rs`). OpenCode's fenced HTTP post still holds
-  the fence up to 10 s on its own client; that is bounded, not a cycle.
-- **An Exec waits once for a contended store, not once per receipt.** A held
-  write lock now costs one 15 s wait (17.4 s measured, was 33.2 s) and a warned,
-  unrecorded Exec; the start receipt still precedes the command, because a child
-  must find its parent's row. Timing therefore lives beside the store, in
-  `<Home>/perf/wt-list.jsonl`: Exec rows lose exactly the slowest samples.
+  held the store mutex and SQLite's write lock inside `block_on` while the
+  reader waited for that mutex on a runtime worker. The write is now timed on
+  its own thread (`harness/dispatch.rs`). OpenCode's fenced HTTP post still
+  holds the fence up to 10 s: bounded, not a cycle.
+- **An Exec waits once for a contended store** (15 s), then runs warned and
+  unrecorded; the start receipt still precedes the command. Timing lives beside
+  the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
-  benchmarks; on-machine experience is post-merge validation. `lf wt timing`
-  reports count, median/p95, failures and version from real invocations. It has
-  no ordinary-use samples until a release carrying it is installed; staged
-  numbers came from a host at load 30–90. Reading it after install is what
-  remains before completion, so landing this PR must leave the Task open: a
-  Flow ending in `land -c` contradicts a contract with post-merge evidence.
+  benchmarks; on-machine experience is post-merge validation, so landing leaves
+  the Task open. One installed sample is not a p95; ≤1 s warm p95 online is
+  unmet, and every staged run was on a host at load 30–80.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
-  admission or completion** when its turn lacks a completion receipt (Jack
-  authorized this in the same PR). Closure alone is not enough: live or unknown
-  providers still block.
+  admission or completion** without a completion receipt (Jack authorized).
+  Live or unknown providers still block.
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 

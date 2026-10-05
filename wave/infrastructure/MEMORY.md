@@ -24,12 +24,13 @@ interruption. Capture keys name subordinate history; durable Session IDs select
 conversation mutations, and current Session/Exec provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove filesystem compatibility. Both installer
-advancement and recovery must honor layout completion, with candidate recovery
-established before moving bytes. A promotion lock or empty process sample cannot
-exclude released writers that reopen paths; retained binaries require an external
-launch boundary. `runs/` remains in use pending this indivisible conversion.
-Runtime checks do not establish populated released-Home preservation or installation.
+Exact SQLite compatibility does not prove layout completion; both installer paths
+must retain candidate recovery before moving bytes. Released v0.13.3 bypass commands
+can journal before installation checks; a receipt version cannot fence them.
+Neither installer locks, empty process samples nor a controlled launcher excludes
+direct retained binaries after converter death. The external exclusion owner and
+target-account recovery access remain undesigned. `runs/` remains in use; source
+inspection and runtime tests prove neither conversion nor installed preservation.
 
 ## Review replacement (2026-10-04)
 

@@ -68,7 +68,11 @@ Remaining indivisible source work:
 - Finish current-reference and native callback/Flow consumer audits, Desktop
   validation, populated released-Home fault matrix, final inventory/delta and gate.
 
-Check: realign `git diff --check` and `lf context --skill realign` passed (memory/scratch within budget); reused October 5 isolated `cargo test -p loopflow --lib controller::task::planning_tests` and `cargo test -p loopflow --test session_cli_tests --test session_lifecycle_tests` passed 49 tests (one disposable-Linux-account skip); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` and `uv run python scripts/check_architecture.py` passed; conversion/installed proof and full gate remain with implementation/gate.
+Recorded compression checks passed 29 Session-record tests, Clippy and formatting;
+the preceding 49-pass Session/controller evidence remains at
+`fc911bc18:scratch/finish-removing-the-retired-run.md`. Neither covers conversion.
+
+Check (realign, October 5): `git diff --check` and `lf context --skill realign` passed; memory/scratch fit their budgets; no behavioral rerun for prose-only reconciliation, conversion and full gate remain unproved.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -257,12 +261,13 @@ creating `captures/`. New empty disposable Homes use `captures/` immediately.
 The authorized installer owns conversion, using its existing pinned candidate and
 switch recovery receipt. Ordinary history/status/replay reads never initiate it.
 The window must exclude old CLI/app/provider launch sources at the OS/installation
-boundary, including retained executable invocations. This cannot be proved merely
-by checking for no current PIDs. In disposable acceptance the isolated account's
-launcher is controlled. For the configured machine, an explicit operational freeze
-and proof of writer quiescence are required before conversion is authorized. If
-that cannot be established, stop before mutation; do not silently substitute a live
-migration or call a fixture proof installed acceptance.
+boundary, including retained executable invocations. Neither an empty PID sample
+nor a controlled fixture launcher establishes this. The external exclusion owner,
+target-account access and crash-persistent recovery mechanism remain undesigned;
+the sequence below is conditional on that proof. Isolated acceptance must attempt
+direct released commands after converter death as well as during conversion.
+Configured deployment additionally requires authorization for the operational
+freeze; fixture success cannot establish installed acceptance.
 
 1. With external launch admission stopped, inspect all exact selected-Home Exec,
    provider and client evidence. Any live writer, unresolved process identity or
@@ -314,9 +319,26 @@ loses late recorder writes or downgrades into the old layout after partial conve
 Isolated acceptance must prove the offline boundary; source-delivery authorization
 does not establish configured launch exclusion or installed preservation.
 
+## Delete — do not maintain
+
+Removed `CaptureHandle::begin_with_key_and_caller`: both callers always supplied
+a fresh key, inherited caller and present context. `begin_with_request` now uses
+`begin_with_context` directly; replay retains its explicit historical input path.
+The current build also exposed three stale `current_attempt` fixture fields in
+`ops/task.rs` and `tests/task_restart_tests.rs`; use `selected_capture` throughout.
+Keep rename's distinct managed-review lock/relookup and ordinary Session paths.
+
+Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
+watch classification and `context_ablation.py`'s old layout/`--runs` interface
+together with recoverable conversion and surviving-path preservation tests.
+Do not polish those predecessor paths or remove immutable keys/receipt fields.
+The released-writer exclusion finding above still prevents that dependent cut.
+
 ## Remaining implementation sequence
 
-1. Implement offline conversion/recovery through the installation boundary,
+1. Specify and prove crash-persistent external launch exclusion, including direct
+   retained binaries and candidate access to the correct OS account's installation.
+   Then implement offline conversion/recovery through the installation boundary,
    including exact-schema advancement and recovery. Inventory mutable absolute
    references before choosing their rewrite and validation rules. Preserve frozen
    SQLite/payload/executable evidence and prove exclusion of released writers.

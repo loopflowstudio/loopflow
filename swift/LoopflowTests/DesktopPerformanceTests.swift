@@ -508,9 +508,10 @@ extension DesktopPerformanceTests {
         let issue = try #require(env["LF_DESKTOP_TASK_ISSUE"])
         let samples = Int(env["LF_DESKTOP_PERF_SAMPLES"] ?? "21") ?? 21
         let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
+        let scenarios = ["cold_workspace", "warm_task", "reopen_task"]
         try journal.write(["event": "plan", "population_version": "home-snapshot-v2",
                            "populations": ["snapshot": 1], "samples": samples,
-                           "scenarios": ["cold_workspace", "warm_task", "reopen_task"],
+                           "scenarios": scenarios,
                            "endpoint": "native_capture_ocr", "poll_interval_ms": 5,
                            "gaps": ["A new Podium and native window measure cold workspace construction, not OS application launch.",
                                     "Bitmap capture is not compositor presentation; OCR adds observer cost.",
@@ -548,7 +549,7 @@ extension DesktopPerformanceTests {
             window.isReleasedWhenClosed = false
             defer { window.contentView = nil; window.close() }
             var model: PodiumModel?
-            for scenario in ["cold_workspace", "warm_task", "reopen_task"] {
+            for scenario in scenarios {
                 let start = DispatchTime.now().uptimeNanoseconds
                 var record: [String: Any] = ["event": "begin", "id": "snapshot-\(scenario)-\(attempt)",
                     "metric": "task_workspace_ready_ms", "scenario": scenario,

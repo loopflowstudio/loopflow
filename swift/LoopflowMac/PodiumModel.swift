@@ -106,18 +106,16 @@ final class PodiumModel {
         showsTaskLink = false
         do {
             let link = try TaskLink(url: url)
-            // Navigation can use already observed planning, just like the outline
-            // and palette. Unscoped links still resolve globally for ambiguity.
-            let cached = cachedTaskDestination(link)
-            taskLinkReading = .loading
-            let result: RoadmapSnapshot
-            if let cached { result = cached }
-            else { result = try await query.taskDestination(issue: link.issue, repo: link.repo) }
-            guard destinationGeneration == generation else { return }
-            let candidates = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
-            let matches = cached == nil ? candidates : candidates.filter {
-                $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath && $0.1.task.identifier == link.issue
+            // Already observed planning opens directly, like the outline and palette.
+            // Unscoped links and identity mismatches still resolve through a read.
+            if let loaded = loadedTask(link), expectedTaskID == nil || loaded.task.id == expectedTaskID {
+                try await openLinkedTask(wave: loaded.wave, task: loaded.task, link: link, generation: generation)
+                return
             }
+            taskLinkReading = .loading
+            let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
+            guard destinationGeneration == generation else { return }
+            let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
             let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
             if let expectedTaskID {
                 guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
@@ -158,16 +156,14 @@ final class PodiumModel {
         }
     }
 
-    private func cachedTaskDestination(_ link: TaskLink) -> RoadmapSnapshot? {
+    /// The one Task a repository-qualified link names in planning this window holds.
+    private func loadedTask(_ link: TaskLink) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         guard let repo = link.repo?.normalizedFilePath else { return nil }
         for snapshot in [roadmap.value, taskLinkReading.value].compactMap({ $0 }) {
-            let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }
-                .flatMap { $0.tasks.items }.filter { $0.task.identifier == link.issue }
-            if matches.count == 1 {
-                // Keep the shared reader's envelope, but restrict the destination
-                // below to the exact requested issue/repository.
-                return snapshot
+            let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }.flatMap { wave in
+                wave.tasks.items.filter { $0.task.identifier == link.issue }.map { (wave, $0) }
             }
+            if matches.count == 1 { return matches[0] }
         }
         return nil
     }

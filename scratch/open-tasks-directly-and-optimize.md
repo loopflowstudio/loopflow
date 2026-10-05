@@ -70,4 +70,4 @@ always `-1`, so focus is unproven.
 Sheet removal, single window and the warm/reopen budgets hold in sampled attempts.
 The cold budget, Session readiness and every KR remain unmet or unscored.
 
-Checks: `swift test --filter WorkspaceDestinationTests` 16 passed; `cargo fmt --check` clean; `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed (reused, content unchanged); `cargo clippy --all-targets -- -D warnings` clean.
+Checks (after compression: loaded links open through one match lookup instead of re-filtering a snapshot; runner sources changed, so new runs do not compare against the October 5 reports): `swift test --filter WorkspaceDestinationTests` 16 passed; `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed; ruff clean. Rust unchanged (`cargo fmt --check`, Clippy reused). Snapshot sweep not rerun; gate owns affected suites.

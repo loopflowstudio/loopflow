@@ -158,10 +158,7 @@ def _summarize(events: list[dict]) -> dict:
 def _comparison(current: dict, baseline: dict) -> dict:
     # Different source builds are the purpose of comparison; different measurement
     # contracts, host or population would make the latency delta misleading.
-    for key in ["host", "build_mode", "command", "measurement_source"]:
-        if current["metadata"][key] != baseline["metadata"][key]:
-            return {"available": False, "reason": f"Different {key}"}
-    for key in ["snapshot", "repo", "issue"]:
+    for key in ["host", "build_mode", "command", "measurement_source", "snapshot", "repo", "issue"]:
         if current["metadata"].get(key) != baseline["metadata"].get(key):
             return {"available": False, "reason": f"Different {key}"}
     for key in ["population_version", "populations", "scenarios", "endpoint", "poll_interval_ms"]:

@@ -50,6 +50,23 @@ The prompts ship inside the `lf` binary. Nothing changes until a release is
 installed; install refreshes the exported skills. A conversation opened before
 the install keeps its old text until `lf session replace <id>`.
 
+## Read-only model runs (2026-10-05)
+
+A fresh model was given the composed `wave/session` text and Jack's live
+Product status, twice, with mutations forbidden. Neither run handed work to
+another role; each started Task got one disposition with evidence. The first
+run exposed defects the text now fixes: `lf wave status` recommended
+`lf flow start` on a Task with a live direct Flow, the text claimed nobody else
+operates the Wave while a second operator was running, `lf pr next` was cited
+as a read, and `task.title` does not exist. Jack Heart asked for the report
+grouped as waiting on him, moving and stuck, with PR links; the second run
+produced that shape. These runs show a model following the text on reads. They
+do not show the installed conversation acting.
+
+Known rough edges from the second run: an unfinished Exec list is mostly stale
+read commands, 116 unattributed provider processes keep some liveness unknown,
+and `lf` offers no read for why a CI check failed.
+
 ## Not yet shown
 
 - An installed Wave conversation ending its first turn with every started

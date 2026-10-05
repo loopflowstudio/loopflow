@@ -17,8 +17,8 @@ is the whole method; this section only says when to apply it.
 - Answer the user first. A question, a change of direction or a new idea
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
-- End a turn only when every started Task has its disposition. Say briefly what
-  moved, what you did, what waits on the user and what is unknown.
+- End a turn only when every started Task has its disposition. Report in the
+  procedure's order: waiting on the user, moving, stuck.
 
 ## What happens between turns
 

@@ -93,9 +93,9 @@ as success.
 
 ## Summarize current activity
 
-Give a concise update: what finished, what is running, what is waiting, what is
-blocked, and what needs a decision. Include cleanup results and useful next
-moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
+Give a concise update grouped in this order: what waits on the participant,
+what is moving, and what is stuck, then what finished. Include cleanup results
+and useful next moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
 for shared state; inspect PRs and branches where they explain a gap.
 
 Refresh relevant facts after actions and when an update is needed. Link Tasks
@@ -123,8 +123,9 @@ read its result. Operate started Tasks outside any Wave with
 operating. The repository view connects outcomes and dependencies across
 Waves; the Wave pass owns the detailed judgment within each Wave.
 
-A started Task whose selected Flow has steps left and no live driver is
-continued with `lf --task <issue> flow start` and verified from
+A started Task whose selected Flow has steps left and no live driver on any
+of its Flows, managed or direct, is continued with
+`lf --task <issue> flow start` and verified from
 `lf task status <issue> --json`. A Flow ends where it is authored to end: a
 finished Flow or a published PR is evidence to inspect, not Task completion,
 and work that has not landed after its Flow finished waits on a person. Read a

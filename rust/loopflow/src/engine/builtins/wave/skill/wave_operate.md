@@ -3,9 +3,11 @@ description: Operate one Wave; keep every started Task moving and judge delivery
 action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, verify, and exit. You are this
-Wave's operator. Nobody else continues its started Tasks, so a pass is finished
-when each of them has a disposition, not after a number of moves.
-No chat or schedule is required.
+Wave's operator: a started Task with no live driver has nobody else to take its
+next step. A pass is finished when each started Task has a disposition, not
+after a number of moves. No chat or schedule is required. Another conversation
+or scheduled pass may be operating this Wave at the same time; work it is
+driving is moving, and you leave it alone.
 
 ## Scope and evidence
 
@@ -30,27 +32,39 @@ waiting indefinitely.
 ## Keep started work moving
 
 Give every started, unfinished Task in the Wave exactly one disposition, with
-its evidence. Started is the recorded fact, whether or not a worker is alive
-now. Unstarted backlog is listed as backlog and left alone: starting it is the
-person's selection.
+its evidence: the first row below that fits. Started is the recorded fact,
+whether or not a worker is alive now. Include Tasks status lists under
+`unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
+as backlog and left alone: starting it is the person's selection.
 
 | Disposition | Evidence and action |
 | --- | --- |
-| moving | A live worker or driver was observed. Leave it alone. |
+| moving | A live worker or driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
 | waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
-| paused | An explicit hold (`lf task automate <issue> off`) or instruction. |
+| paused | The person's instruction to stop, or an explicit hold (`lf task automate <issue> off`) on work nothing else is moving. |
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second driver. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
-When status gives `next_move.owner` as `wave`, that owner is you: act, then
-report what happened. No action is a valid result only when every started Task
-already holds a disposition above.
+When status gives `next_move.owner` as `wave`, that owner is you: the Task's
+disposition is yours to establish, never a handoff. Its recommended action is
+a suggestion to check against the rules below, not an instruction. No action is
+a valid result only when every started Task already holds a disposition above.
 
+- **Look for a live driver first.** `lf wave status` describes only the Task's
+  managed Flow. Before continuing or retrying anything, read
+  `lf task status <issue> --json` and check every Flow in
+  `execution.work.flows`, including those with `managed: false`, and every Exec
+  in `execution.work.execs` without a `completed_at`, against `lf ps --json`.
+  A live process on any of them makes the Task moving, whoever launched it.
 - **A defined Flow proceeds.** A started Task whose selected Flow has steps
-  left and no live driver is continued with `lf --task <issue-id> flow start`,
-  then verified with `lf task status <issue> --json`. This needs no permission.
+  left is continued with `lf --task <issue-id> flow start`, then verified with
+  `lf task status <issue> --json`. This needs no permission. It applies only
+  when the Task has no live driver, no pending review on any of its Flows and
+  no hold in `lf task automation`; each of those is its own disposition.
+  If the command refuses, its message is the evidence: the Task waits on a
+  person or is unknown, and you do not work around the refusal.
 - **Recover before reporting a blocker.** Read `lf task status`, the failed
   step's log and `lf top` or `lf ps --json`. Repair what supported controls can
   repair, then retry with
@@ -59,10 +73,12 @@ already holds a disposition above.
   instead of trying it again.
 - **A Flow ends where it is authored to end.** An accepted launch, a finished
   Flow and a published PR are evidence to inspect, not Task completion. Report
-  publication, review, landing, Task completion and remaining scope
-  (`lf pr next`) as separate facts. When the Flow finished and the work has not
-  landed, the Task waits on a person: name the PR and what remains. Do not
-  select another Flow for it.
+  publication, review, landing, Task completion and remaining scope as separate
+  facts. When the Flow finished and the work has not landed, the Task waits on
+  a person: name the PR and what remains. That holds when status recommends
+  `lf pr land` or a next PR: a merge nobody armed, and `lf pr next`, which
+  rotates the Task to a new PR, are the person's to choose. A started Task with
+  no selected Flow waits on a person too. Do not select a Flow for either.
 - **Reviews belong to their Sessions.** Surface a pending review with its
   Session from `lf session list --needs-me --json`. Complete that exact Session
   with `lf session complete <id>` only when the participant decides that review
@@ -70,7 +86,7 @@ already holds a disposition above.
   navigation. Headless, a pending review is a waiting disposition.
 
 Start and continue selected Flows without asking. Do not approve reviews,
-choose a merge the person reserved, cancel or abandon Tasks, or change direction.
+arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Exercise all five functions within the Wave
 
@@ -155,25 +171,34 @@ reconstructed starting membership. Do not introduce competing current Projects.
 
 ## Finish
 
-Reply in this conversation with each started Task's disposition, the decisive
-source, judgment, action/result and unresolved decisions or evidence gaps.
-List unstarted backlog separately. If nothing needed action, say why briefly.
+Reply in this conversation with each started Task once, grouped under these
+headings in this order, omitting an empty group:
+
+1. **Waiting on you** — each review, decision or merge, with what to open.
+2. **Moving** — live work left alone, and what this pass acted on with its result.
+3. **Stuck** — waiting on a dependency or capacity, paused, or unknown, with
+   the named cause or missing evidence.
+
+Then list unstarted backlog, and after it any judgment, unresolved decisions
+and evidence gaps. Keep each row to its disposition and decisive evidence. If
+nothing needed action, say why briefly.
 Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;
 this skill does not automatically send the reply to a channel.
 
 When reporting more than one Task, use the status/roadmap reads above and render
 operational rows as
-`[identifier · Task title](provider URL) — status; next action/owner`.
+`[identifier · Task title](provider URL) — status; next action/owner · [PR #n](PR URL)`.
 
 Use this ID-first form in operational lists. In prose, use
 `[Task title · identifier](provider URL)` on first mention; shorten later
 references when unambiguous.
 
 Fill the link from `task.identifier` and `reference.issue_url`, and the readable
-title from `task.title`. Take status from `runtime.status` or the roadmap
-`section`, and next owner from `next_move.owner`. An owner of `wave` names work
-this pass acts on, not a handoff: report its result. State the next action only
+title from `task.name`. Give the Task's disposition as its status, not
+`runtime.status` alone, and take the next owner from `next_move.owner`. An owner of `wave` names work
+this pass acts on, not a handoff: report its result. Link each published PR
+from that Task's `prs[].publication.github` `number` and `url`. State the next action only
 when supported by current evidence; leave unknown state unknown. Include an
 active PR/workspace slug only when navigating that workspace is the job. In
 roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and

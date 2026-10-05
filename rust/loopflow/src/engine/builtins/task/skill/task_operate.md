@@ -26,6 +26,10 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    from drafts and superseded plans. Inspect `lf session list --json` and the
    Task's captured Flow, cursor, driver, and pending review. Other conversations
    in the checkout are evidence, not automatically the managed Flow's Session.
+   Look for a live driver before acting: check every Flow in
+   `execution.work.flows`, including those with `managed: false`, and every
+   unfinished Exec in `execution.work.execs`, against `lf ps --json`. A live
+   process on any of them makes the Task moving, whoever launched it.
    If Task identity is missing or ambiguous, ask for it; do not file duplicate work.
 
    Keep the current design in the Task checkout. If required material lives
@@ -73,8 +77,9 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    its intended outcome is otherwise complete, or a concrete blocker remains.
    A finished Flow alone does not prove the Task is complete: inspect its outcome
    and remaining work, and report publication, review, landing, Task completion
-   and remaining scope (`lf pr next`) as separate facts. Repeated calls
-   must preserve existing work without duplicating Flows or conversations.
+   and remaining scope as separate facts. Arming a merge the Flow did not, and
+   rotating to a next PR with `lf pr next`, are the person's to choose. Repeated
+   calls must preserve existing work without duplicating Flows or conversations.
 
 5. **Report the outcome or blocker.** For landed or completed work, state the
    observed outcome. For blocked work, name what prevents progress and the exact

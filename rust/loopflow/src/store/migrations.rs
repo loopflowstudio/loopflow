@@ -1145,7 +1145,7 @@ pub fn latest_known_version() -> String {
 /// The next migration this binary knows that the store has not applied, or
 /// `None` when the store is exactly at this binary's frontier.
 ///
-/// Call only after [`validate_sqlite`] has confirmed the applied history is a
+/// Call only after [`validate_sqlite_schema`] has confirmed the applied history is a
 /// clean recognized prefix; then `pending_migrations` cannot error and this is a
 /// pure "is the store behind me?" question. An ordinary open of the shared store
 /// refuses when this is `Some`: the running binary's code may query columns that

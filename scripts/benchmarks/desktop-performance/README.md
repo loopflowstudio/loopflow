@@ -49,8 +49,11 @@ commit, not on-glass presentation; CPU, memory and main-thread stalls are
 one directory: `signposts.ndjson` (the app's own `studio.loopflow`/`perf` intervals
 from the unified log), `hitches.trace` plus exported `hitches.xml` and
 `potential-hangs.xml` (Instruments' Animation Hitches template attached to the pid),
-`rss.jsonl` (one `ps` sample per second), and `report.md`/`report.json` with
-per-interval p50/p95/max, superseded counts, hitch ms/s, hangs and RSS growth.
+`rss.jsonl` (one `ps` RSS/CPU sample per second), and `report.md`/`report.json` with
+per-interval p50/p95/max, superseded counts, hitch ms/s, hangs, RSS growth and
+sampled CPU percentage. p95 requires twenty samples; older RSS-only receipts
+report CPU as unmeasured. CPU is the app process's `ps` percentage, excluding
+children, rather than CPU time accumulated over the recording interval.
 Nothing is sent anywhere; delete the directory when done. Use the app normally
 while it records — the intervals are named after what you did.
 

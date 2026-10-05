@@ -79,10 +79,13 @@ def _export(trace: Path, table: str) -> str:
 def _sample_rss(pid: int, seconds: int, path: Path) -> None:
     with path.open("w", encoding="utf-8") as out:
         for _ in range(seconds):
-            rss = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
-            if not rss:
+            reading = subprocess.run(
+                ["ps", "-o", "rss=,%cpu=", "-p", str(pid)], capture_output=True, text=True,
+            ).stdout.split()
+            if len(reading) != 2:
                 break
-            out.write(json.dumps({"t": time.time(), "rss_kib": int(rss)}) + "\n")
+            out.write(json.dumps({"t": time.time(), "rss_kib": int(reading[0]),
+                                  "cpu_percent": float(reading[1])}) + "\n")
             out.flush()
             time.sleep(1)
 
@@ -238,7 +241,7 @@ def summarize(output: Path) -> dict:
     rows = [
         {"name": name, "scenario": scenario, "n": len(values),
          "p50_ms": round(statistics.median(values), 2) if values else None,
-         "p95_ms": round(_percentile(values, 0.95), 2) if values else None,
+         "p95_ms": round(_percentile(values, 0.95), 2) if len(values) >= 20 else None,
          "max_ms": round(max(values), 2) if values else None,
          "superseded": superseded.get((name, scenario), 0)}
         for (name, scenario), values in sorted(groups.items())
@@ -251,6 +254,13 @@ def summarize(output: Path) -> dict:
         "end_mib": round(rss[-1]["rss_kib"] / 1024, 1) if rss else None,
         "max_mib": round(max(sample["rss_kib"] for sample in rss) / 1024, 1) if rss else None,
         "growth_mib": round((rss[-1]["rss_kib"] - rss[0]["rss_kib"]) / 1024, 1) if len(rss) > 1 else None,
+    }
+    cpu_values = [sample["cpu_percent"] for sample in rss if "cpu_percent" in sample]
+    cpu = {
+        "samples": len(cpu_values),
+        "p50_percent": statistics.median(cpu_values) if cpu_values else None,
+        "p95_percent": _percentile(cpu_values, 0.95) if len(cpu_values) >= 20 else None,
+        "max_percent": max(cpu_values) if cpu_values else None,
     }
     seconds = float(run["seconds"])
     recorded = run.get("xctrace") == "recorded"
@@ -267,7 +277,7 @@ def summarize(output: Path) -> dict:
         "worst_hang_ms": round(max((hang["duration_ms"] for hang in hangs), default=0.0), 2)
         if hangs is not None else None,
     }
-    report = {"run": run, "intervals": rows, "memory": memory, "hitches": hitch_summary}
+    report = {"run": run, "intervals": rows, "memory": memory, "cpu": cpu, "hitches": hitch_summary}
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (output / "report.md").write_text(_markdown(report), encoding="utf-8")
     return report
@@ -284,6 +294,8 @@ def _markdown(report: dict) -> str:
         "end at a queued main-thread callback, not a render or presentation fence. "
         "Hitch time is Apple's Animation Hitches "
         "table for this process: ≤5 ms/s good, 5–10 warning, >10 critical.",
+        "p95 requires 20 samples. CPU is ps's sampled process percentage; "
+        "it excludes child processes and is not an interval CPU-time measurement.",
         "",
         "| Interval | Scenario | n | p50 ms | p95 ms | max ms | superseded |",
         "|---|---|---:|---:|---:|---:|---:|",
@@ -295,6 +307,7 @@ def _markdown(report: dict) -> str:
         lines.append("| — | no signposts in the window | 0 | | | | |")
     hitch = report["hitches"]
     memory = report["memory"]
+    cpu = report["cpu"]
     lines += [
         "",
         f"Hitches: {hitch['count']} ({hitch['hitch_ms_per_second']} ms/s, worst {hitch['worst_ms']} ms)."
@@ -303,6 +316,8 @@ def _markdown(report: dict) -> str:
         if hitch["hangs"] is not None else "Potential hangs: not recorded.",
         f"RSS: start {memory['start_mib']} MiB, end {memory['end_mib']} MiB, max {memory['max_mib']} MiB, "
         f"growth {memory['growth_mib']} MiB over {memory['samples']} samples.",
+        f"CPU: p50 {cpu['p50_percent']}%, p95 {cpu['p95_percent']}%, max {cpu['max_percent']}% "
+        f"over {cpu['samples']} samples." if cpu["samples"] else "CPU: not recorded.",
         "",
     ]
     return "\n".join(lines)

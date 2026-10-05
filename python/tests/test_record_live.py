@@ -53,7 +53,7 @@ def test_summarize_pairs_signposts_and_scores_hitches(tmp_path: Path) -> None:
     by_key = {(row["name"], row["scenario"]): row for row in report["intervals"]}
     assert by_key[("task_workspace_ready", "task")]["n"] == 2
     assert by_key[("task_workspace_ready", "task")]["p50_ms"] == 80.0
-    assert by_key[("task_workspace_ready", "task")]["p95_ms"] == 120.0
+    assert by_key[("task_workspace_ready", "task")]["p95_ms"] is None
     assert by_key[("task_workspace_ready", "task")]["superseded"] == 0
     assert by_key[("task_workspace_ready", "session")] == {
         "name": "task_workspace_ready", "scenario": "session", "n": 0,
@@ -66,7 +66,33 @@ def test_summarize_pairs_signposts_and_scores_hitches(tmp_path: Path) -> None:
         "hangs": None, "worst_hang_ms": None,
     }
     assert report["memory"]["growth_mib"] == 4.0
-    assert "| task_workspace_ready | task | 2 | 80.0 | 120.0 |" in (tmp_path / "report.md").read_text()
+    assert report["cpu"]["samples"] == 0
+    assert report["cpu"]["p50_percent"] is None
+    assert "| task_workspace_ready | task | 2 | 80.0 | None |" in (tmp_path / "report.md").read_text()
+
+
+@pytest.mark.parametrize("count", [19, 20])
+def test_cpu_and_latency_percentiles_require_twenty_samples(tmp_path: Path, count: int) -> None:
+    (tmp_path / "run.json").write_text(json.dumps({
+        "process": "Loopflow", "pid": 1, "seconds": count, "started_at": "2026-10-05T10:00:00",
+        "xctrace": "skipped", "host": {"macos": "26", "cpu": "test"},
+    }))
+    (tmp_path / "rss.jsonl").write_text("\n".join(
+        json.dumps({"t": i, "rss_kib": 200_000, "cpu_percent": float(i)}) for i in range(count)
+    ))
+    (tmp_path / "signposts.ndjson").write_text("\n".join(
+        _signpost(kind, "lf", i, f"2026-10-05 10:00:{i:02d}.{micros}-0700", message)
+        for i in range(count)
+        for kind, micros, message in [("begin", "000000", "session list"), ("end", "100000", "ready")]
+    ))
+
+    report = record_live.summarize(tmp_path)
+
+    assert report["cpu"] == {
+        "samples": count, "p50_percent": (count - 1) / 2,
+        "p95_percent": 18.0 if count == 20 else None, "max_percent": count - 1,
+    }
+    assert report["intervals"][0]["p95_ms"] == (100.0 if count == 20 else None)
 
 
 @pytest.mark.parametrize("xml", [None, "", "<trace-query-result/>", "not XML"])

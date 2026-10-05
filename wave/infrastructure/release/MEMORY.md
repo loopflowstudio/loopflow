@@ -1,5 +1,28 @@
 # Release memory
 
+## Release completion responsibility (2026-10-04)
+
+Jack Heart directed Infrastructure to ensure releases finish through verified
+publication and installed acceptance. Release retains its execution and evidence;
+Infrastructure follows interruptions through recovery and reports actual stages
+in the ongoing conversation. A merged release PR is unfinished until the public
+artifacts and configured completion checks pass.
+
+The v0.13.1 version PR #1426 merged without a candidate workflow or published
+release. Supported re-entry with installed v0.13.0 found an unprepared migration
+in that source and selected v0.13.2. PR #1434 merged as
+`2a35f54a43df54ea1ea4aa219dd04bea4c05fa50`; candidate workflow
+[37266713001](https://github.com/loopflowstudio/loopflow/actions/runs/37266713001)
+passed every package build. Publisher preparation then rejected the old CLI's
+missing `LF_RELEASE_LOCK_FD` handoff. No publication resulted from that attempt.
+
+Release bootstrap compatibility is part of acceptance: changes to publisher
+authority must work from the installed previous release, or provide a supported
+recovery path. Never remove the lock requirement to make publication pass.
+The current recovery builds the CLI in the supplied checkout and uses a disposable
+Home to resume the exact candidate without migrating the live Home. Publication
+and installed acceptance remain pending until fresh receipts establish them.
+
 ## Retained landing incident and minor recovery (2026-10-04)
 
 Jack Heart authorized autonomous recovery and delivery under Infrastructure;

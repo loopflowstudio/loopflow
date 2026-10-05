@@ -15,16 +15,15 @@ stopped resume and automatic replacement cannot count as a live attachment.
 Jack authorized autonomous publication/landing on October 4; no manual performance
 demo is required. This grants no Desktop sustained-use KR credit.
 
-Native Codex smoke probes now reproduce a startup rejection: remote resume
-rejects local permission overrides. The branch removes those overrides and
-proves one input exchange with the same engine birth stamp. Failed startup also
-closed the prior engine: driver transfer/cleanup needs a lifecycle revision
-before optimization. Flow-review still replaces native clients without the relay.
-The [dated evidence](../../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
-retains failures and synthetic-response limits. No representative baseline,
-target, durable diagnostic or speedup exists. SQLite-independent timing must
-separate usable endpoints from attached lifetime. Protocol fixtures alone missed
-the native rejection.
+Codex rejected remote resume's permission overrides. Removing them proved input
+with the same engine birth stamp; failed startup closed the engine.
+Driver transfer/cleanup needs repair. Flow-review
+still replaces clients without the relay; preserve Infrastructure's launch-lock
+ordering and exact review fences. The [dated evidence](../../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
+retains failures and synthetic-response limits. Response timing bounds input
+readiness, not its onset; continuity before cleanup proves no detach behavior.
+Observer changes need a fresh baseline. No representative baseline, target,
+durable diagnostic or speedup exists. Protocol fixtures missed the native rejection.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

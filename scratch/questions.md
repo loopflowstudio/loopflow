@@ -1,12 +1,12 @@
-# Open assumptions — LOO-378
+# Assumptions and dated evidence — LOO-378
 
-- The isolated benchmark signs in by pointing `CODEX_HOME` at the managed
-  manabot-eng account home, the same variable `--isolate` sets. Assumed
-  acceptable as "existing supported authentication": nothing is copied and no
-  login changes. It spends that account's weekly window outside the installed
-  store's usage record.
-- `lf account codex` was run to refresh stale capacity evidence. It changed
-  which Codex account the repository route prefers (now manabot-eng).
+The current native smoke runner uses disposable provider storage and synthetic
+Responses, with no account dependency. The earlier authenticated probe below
+resolved a feasibility question; its account route and capacity observations
+are historical, not prerequisites or permission to change installed routing.
+Failed-attachment preservation remains an implementation problem within Jack
+Heart's accepted scope. Delayed driver transfer is a proposed mechanism; no
+change to takeover or review-completion semantics has been accepted.
 
 ## Dated probe evidence — October 5 UTC
 

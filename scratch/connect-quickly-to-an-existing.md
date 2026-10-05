@@ -67,7 +67,15 @@ then transferring at a provider-confirmed boundary; that is a proposal, not an
 accepted change to takeover semantics. It must retain driver fences and survive
 failure without restoring stale authority. Merely skipping all driver cleanup
 would abandon current exit semantics and is not an adequate repair. Dependent
-latency optimization and delivery are paused for this lifecycle revision.
+latency optimization and delivery depend on this lifecycle revision; local
+implementation remains authorized.
+
+Infrastructure's October 4 review-replacement evidence (LOO-377, merged
+`c5dc238b0afb`) separates review service, driver and provider ownership. Its
+launch-lock-before-driver-fence ordering and exact Flow revalidation apply to
+the Flow-review repair. Attachment must not acquire review-completion authority
+or turn failed startup into successful settlement. A substantial lifecycle
+change remains implementation work, not a bounded reconciliation edit.
 
 Flow-review selectors have another unresolved path: lock, repeated position
 validation, projection, then `resume_native_session`, which stops native clients
@@ -108,6 +116,11 @@ The probe uses recorded endpoint timestamps instead of duplicate sent/released
 flags, closes each SQLite poll connection, and stops polling after driver claim.
 This reduces observer work; new timings are not directly comparable with the old
 polling loop and establish no production speedup.
+The subsequent smoke sample reached output at 856 ms and a response at 1528 ms
+with the same engine birth stamp. The response is an upper bound on input
+readiness, including 300 ms before Enter and synthetic response work; it is not
+the instant the UI first accepted input. Continuity is checked before cleanup,
+so this success establishes neither attached lifetime nor detach preservation.
 
 Review findings: protocol fixtures previously replaced the native UI and missed
 its rejected launch arguments. A successful socket/driver claim did not establish
@@ -116,6 +129,4 @@ would hide that regression. PTY bytes are not compositor presentation, synthetic
 responses are not provider service latency, and a single live seed turn is not
 representative retained history. Product has no child Wave memories in this checkout.
 
-Check: `cargo build -p loopflow --bin lf`, focused `preferred_name_resume_opens_every_provider_without_a_prompt`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, helper Ruff and `git diff --check` passed; native smoke passed with preserved engine birth stamp; full acceptance remains as listed above.
-
-Compression check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo378-compress-20261005a` passed (output 856 ms, response 1528 ms, same engine birth stamp); helper Ruff check/format passed; broader runner Ruff found eight pre-existing E501 lines; full acceptance remains with implementation/gate.
+Check: prior build/focused Rust test/fmt/Clippy/helper Ruff passed; compression's `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo378-compress-20261005a` passed (856/1528 ms); broader runner Ruff reported eight pre-existing E501 lines; reconciliation `git diff --check` passed; full acceptance remains with implementation/gate.

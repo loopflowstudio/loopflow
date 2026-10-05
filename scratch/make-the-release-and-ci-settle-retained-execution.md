@@ -19,6 +19,11 @@ closure, trace completion and elapsed time do not establish child death.
 
 ## Remaining work
 
+The prior iteration's “prevention remains unimplemented” finding is superseded
+by the implementation and focused proofs below. Remaining work is affected gate
+verification, delivery and installed acceptance, plus the independent retained
+Exec recovery. Prevention alone does not satisfy Task completion.
+
 Recover an independently retained PID/start-time receipt for the existing
 liveness reader, or observe a subsequent machine boot: `exec_process_evidence`
 in `rust/loopflow/src/journal/mod.rs` recognizes pre-boot execution as dead
@@ -35,9 +40,14 @@ terminal record; missing records and failed reads retain identity. Existing
 receipt filenames remain readable. No schema change or historical outcome repair
 is involved. These loss paths are not proved causes of the original incident.
 
-Delete — do not maintain: unconditional terminal/interrupt receipt removal and
-PID-keyed receipt replacement. Current process observations, terminal history
-and operation-specific lease checks remain authoritative.
+Unconditional terminal/interrupt receipt removal and PID-keyed replacement are
+removed. Current process observations, terminal history and operation-specific
+lease checks remain authoritative.
+
+Compression keeps terminal receipt removal beside the successful ledger write,
+so ordinary completion and interruption share one retention rule. Prune opens
+the ledger and scans receipt files once for all selected PIDs, then independently
+checks each receipt’s exact identity and terminal record.
 
 The regression begins with a recorded unfinished Exec, fails its terminal write,
 then exercises interruption, another Exec using the same PID, failed process
@@ -57,4 +67,9 @@ Review finding: prune previews previously promised removal for all stale PIDs.
 They now identify candidates and explicitly retain unfinished receipts; actual
 removal counts remain separate.
 
-Check: `cargo test -p loopflow --lib journal::tests` (20), `cargo test -p loopflow --test exec_ownership_tests monitor_prune` (1), `cargo test -p loopflow --lib task_work_recovery_keeps_history_without_treating_it_as_execution_authority` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; broader affected verification deferred to gate/CI.
+October 5 reconciliation inspected Release's complete child memory and objective.
+Its slow-transfer recovery distinguishes the total artifact deadline from retry
+policy; that release-owned fix does not change this receipt repair's scope.
+No implementation mismatch was found; existing focused results remain applicable.
+
+Check: `cargo test -p loopflow --lib journal::tests` (20), `cargo test -p loopflow --test exec_ownership_tests monitor_prune` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed after compression with inherited execution authority cleared for tests; prior Task-blocker check unchanged; broader affected verification deferred to gate/CI.

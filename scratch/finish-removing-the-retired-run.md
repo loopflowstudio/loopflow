@@ -67,8 +67,10 @@ Remaining indivisible source work:
   validation, populated released-Home fault matrix, final inventory/delta and gate.
 
 The exclusion runner's pinned checksums were verified against published v0.13.3
-SHA256SUMS. Docker was unavailable; no container or hosted exclusion result exists.
-The executed macOS alias counterexample below remains contrary evidence.
+SHA256SUMS. Docker was unavailable; no container or hosted result is recorded.
+The executed macOS alias counterexample below remains contrary evidence. A green
+`capture-exclusion.yml` job would confirm pathname denial and the alias bypass,
+not prove the replacement boundary required for conversion.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -383,11 +385,19 @@ The released-writer and retained-alias counterexamples above prevent that depend
 
 ## Remaining implementation sequence
 
+The earlier iteration feedback to implement target-account selection next predates
+`71a784cdf`'s alias counterexample. That implementation order is superseded:
+exclusion design is unresolved, not merely awaiting a hosted check. Explicit
+account targeting is conditional on the replacement design needing it; adding
+privilege machinery alone cannot repair the demonstrated bypass. Jack Heart's
+autonomous source authorization still permits selecting and proving a replacement
+in isolation, without another product approval.
+
 1. Replace the contradicted whole-account-Home boundary with an offline exclusion
    design covering all access paths, not only original pathnames. Retain both
    released-writer and newly opened alias counterexamples. Select and prove that
    boundary before dependent privilege/recovery implementation; no replacement is
-   currently selected. Then implement explicit OS-account targeting, durable
+   currently selected. Then implement any required OS-account targeting, durable
    recovery/restoration, and candidate-owned conversion through exact-schema
    advancement and recovery. Inventory mutable absolute references, preserve the
    frozen SQLite/payload/executable pair and prove released writers stay excluded.
@@ -467,4 +477,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5 compression): `cargo test -p loopflow --lib --no-run --message-format=json` built; its executable under `scripts/test_network.py` with `lf::commands::run::tests:: --test-threads=1` passed 31/31; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. Conversion/affected gate remain outstanding; hosted exclusion belongs to CI.
+Check (October 5 realign): `git diff --check` passed; unchanged code reuses compression's 31/31 direct-skill tests, build, formatting and Clippy at `8a46c8675996aa0114504b2015b55e7d91557ee1`. Hosted pathname experiment belongs to CI; replacement exclusion, conversion and affected gate remain outstanding.

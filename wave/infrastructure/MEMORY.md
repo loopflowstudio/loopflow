@@ -24,16 +24,16 @@ interruption. Capture keys name subordinate history; durable Session IDs select
 conversation mutations, and current Session/Exec provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove layout completion. Retain candidate
-recovery before moving bytes and exclusion until validation succeeds. Released
-v0.13.3 journals before installation checks; receipts and installer locks cannot
-exclude it. Home permissions also fail as a sole boundary: an isolated macOS
-probe opened outside hard links after denying traversal and changed the original
-payload and SQLite database. No descriptor survived the freeze. Directory
-ownership cannot revoke an outside alias to a child inode. The Linux released-writer
-fixture remains unexecuted; pathname denial proves neither alias exclusion nor
-populated conversion. Replace the boundary before privileged recovery or layout
-mutation. `runs/` remains; conversion and installed preservation are unproved.
+Exact SQLite compatibility does not prove layout completion. Candidate recovery
+must precede mutation; exclusion must survive until validation. Released v0.13.3
+journals before installation checks. An isolated macOS probe opened outside hard
+links after denying Home traversal and changed original payload and SQLite bytes;
+no descriptor survived the freeze. Directory ownership cannot revoke child-inode
+aliases. The hosted fixture tests pathname denial and reproduces that bypass;
+even a green job cannot prove complete exclusion. No Linux result is recorded.
+This is a design gap before privileged recovery or layout mutation, not just an
+unavailable check. Account targeting depends on the replacement design. `runs/`
+remains; conversion and installed preservation are unproved.
 
 ## Review replacement (2026-10-04)
 

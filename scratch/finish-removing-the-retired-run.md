@@ -162,25 +162,6 @@ The metadata-open fixture must drain output while waiting for provider exit: its
 former pipe backpressure looked like a provider hang. File-backed output preserves
 the bounded assertion.
 
-October 5 reconciliation inspected the compression diff and the sole child Wave,
-Release (both top-level Markdown files). The subsequent October 5 steer selects an offline recovery investigation.
-The unresolved choice is a concrete external storage/boot owner that survives
-recovery death and excludes the original OS through restart. Autonomous source authorization covers selecting and proving
-that design in isolation; it supplies no configured maintenance authority.
-
-Remaining indivisible source work:
-
-- Implement offline conversion and candidate-owned recovery, including launch
-  exclusion, frozen backup and operational-reference inventory. Installer
-  advancement and recovery both have exact-SQLite shortcuts; neither proves
-  filesystem conversion. Candidate recovery must become effective before the
-  first layout mutation, rather than at later entry-gate activation.
-- Move capture storage, watch classification, replay and ablation/tooling together
-  to `captures/`. No payload root has moved. Keep the old layout until this cut
-  can preserve populated history and interrupted conversion.
-- Finish current-reference and native callback/Flow consumer audits, Desktop
-  validation, populated released-Home fault matrix, final inventory/delta and gate.
-
 Source readback confirms `advance_switch_store` skips candidate execution at an
 exact schema and `recover_switch` can record advancement without layout work.
 `record_dir`, active-reader watch classification and ablation staging still use
@@ -199,15 +180,10 @@ placements or production quiescence.
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
 
-## Deployment boundary
+## Binding counterexamples
 
-The October 5 offline recovery decision above supersedes same-account ownership
-and inode sealing as the deployment mechanism. The original OS and processes must
-be absent, and an external owner must withhold affected storage through reboot.
-No such Mac deployment mechanism is proved. The alias, partial-sealing and
-restoration-race experiments below remain binding counterexamples; they are not
-steps toward implementing the newly selected boundary. Source-only work remains
-authorized; configured interruption, conversion, installation and release do not.
+These findings reject the former permission boundary. Preserve the probes as
+negative evidence; do not refine them into the offline recovery implementation.
 
 ### Released writer bypass — October 5 source counterexample
 
@@ -444,8 +420,8 @@ migration states without changing its owner. Payload files remain history of the
 captured event, not a new lifecycle record.
 
 Use a narrow serialized capture context (key only; derive directory from the resolved
-Home) where tooling genuinely needs the selected input. Proposed name:
-`LF_CAPTURE_KEY`. Resolve it against SQLite's captured event and owning Session;
+Home) where tooling needs the selected input: `LF_CAPTURE_KEY`. Resolve it against
+SQLite's captured event and owning Session;
 validate the manifest when payload access needs it. Do not create `LF_SESSION_ID`
 by relabeling an artifact key. Existing typed AgentCaller/current Exec supplies
 Session identity and causal provenance. Expose a small resolved caller accessor
@@ -471,30 +447,19 @@ The candidate never falls back to or dual-writes `runs/` during ordinary operati
 A candidate seeing an old-only populated layout reports conversion required without
 creating `captures/`. New empty disposable Homes use `captures/` immediately.
 
-The authorized installer owns conversion, using its existing pinned candidate and
-switch recovery receipt. Ordinary history/status/replay reads never initiate it.
-The window must use the external storage/boot boundary specified in the October 5
-decision, including all aliases and external volumes. Neither an empty PID sample
-nor a controlled fixture launcher establishes this. Offline target mapping and
-recovery depend on that boundary, not on running as another local account. The sequence below remains conditional on that design and
-proof. Isolated acceptance must attempt
-direct released commands after converter death as well as during conversion.
-Configured deployment additionally requires authorization for the operational
-freeze; fixture success cannot establish installed acceptance.
+The installer owns conversion through its pinned candidate and existing switch
+recovery receipt; ordinary reads never initiate it. This sequence depends on the
+[owner, backup and restart contract](#owner-backup-and-restart-contract):
 
-1. The external owner durably withholds every affected volume from the stopped
-   original OS, including after owner/recovery reboot. Candidate recovery and
-   original target-volume mapping are available before opening storage writable.
-   Validate exclusive custody again on recovery; a PID from the previous OS is
-   historical evidence, not a process to signal in the recovery OS. Preserve
-   unresolved Session/review and sequencer evidence without inventing completion.
-   Any still-running original OS, remote writer or unresolved volume ownership
-   keeps conversion unstarted. No ownership/ACL sealing is part of this boundary.
-2. Preserve a consistent SQLite backup, complete payload tree and matching prior
-   executable after quiescence. Record source/target, candidate identity and backup
-   in the existing switch recovery domain. No secrets or payload content in logs.
-   Validate captures/references before mutation; missing historical payload remains
-   explicitly unavailable, not fabricated or pruned. Unknown files move intact.
+1. Establish and revalidate external custody with original target-volume mapping
+   before writable access. Previous-OS PIDs remain history, not signal targets.
+   Preserve unresolved Session/review and sequencer evidence without inventing
+   completion. A running original OS, remote writer or unresolved volume ownership
+   keeps conversion unstarted.
+2. Verify the frozen backup and record source/target, candidate identity and backup
+   in the switch receipt. Validate present captures/references; missing historical
+   payload stays unavailable without pruning SQLite identity. Unknown files move
+   intact. Keep secrets and payload content out of logs.
 3. Fsync prepared conversion evidence, rename the complete root within the Home
    (`runs` → `captures`), fsync its parent. No copy/delete merge and no symlink.
    Update only operational absolute references that must route to moved bytes;
@@ -538,44 +503,19 @@ does not establish configured launch exclusion or installed preservation.
 
 ## Delete — do not maintain
 
-Completed cuts and their detailed rationale are preserved at
-`71a784cdf5135fad8b26a21ddd6ea1ab354c4a93:scratch/finish-removing-the-retired-run.md`:
-unused capture constructors/provider helpers, replay's duplicate selector and
-manifest readers, request clones, mutation aliases and runner orchestration.
-Retain `resolve_manifest` as replay's selector owner, `inherited_capture_key` for
+Completed reductions and their focused evidence are preserved at
+`b6cfe0521:scratch/finish-removing-the-retired-run.md`. They removed unused
+capture constructors/provider helpers, the engine event/error wrappers, replay's
+duplicate readers, capture mutation aliases, forwarding helpers and private
+fixture environment guards. They are runtime work, not conversion acceptance.
+
+Keep `resolve_manifest` as replay's selector owner, `inherited_capture_key` for
 subordinate history and `journal::agent_caller` for Session/Exec provenance.
-Rename still needs its distinct managed-review lock/relookup path.
-
-Compression also removes the unused `engine::error::StoreError`, its public
-re-export, conversion and exclusive `CoreError` variant; repository consumers use
-the actual store's error type. History formatting drops impossible missing-provider
-branches. Flow recovery borrows the native-turn outcome from the selected-capture
-projection and names the capture in diagnostics, retaining missing-completion
-errors and failed-turn retry behavior. Its comments now match the SQL selection.
-The negative exclusion probes remain evidence, not a recovery implementation.
-
-Compression folds the single-caller `owned_target` into
-`find_session`, now that capture-selector dispatch is gone, and inlines
-readiness's `active_capture_key`. The same missing/completed Session checks,
-managed-review relookup and current-input comparison remain in the lookup;
-SQLite still owns mutation fencing. These remove forwarding helpers only.
-
-Direct-skill tests now use the shared `test_ambient::EnvGuard`; their private
-`EnvironmentRestore`, manual identity clearing and temporary key vector are
-removed. Save PATH before clearing it, and keep the guard inside the environment
-lock. The shared guard also clears agent caller and Task authority for the paired
-research fixture. This changes fixture isolation, not production behavior.
-
-The exclusion fixture shares one retained-writer lifetime across pathname denial
-and inode sealing. Each exit verifies the exact appended bytes: a suffix check
-could mistake the first writer's text for the second writer's success. SQLite
-count readers close explicitly before the next phase, and snapshots classify
-entries from their existing `lstat` result. Linux execution remains with CI.
-
-The exclusion probe now separates command dispatch from the released-writer
-scenario, reuses one fsync helper and one bounded metadata-worker launcher.
-Recovery still runs in fresh processes from the durable receipt; the full-sealing
-probe retains its distinct in-memory metadata and unproved recovery boundary.
+SQLite owns mutation fencing; rename retains its managed-review lock/relookup.
+Fixture environment guards stay inside the environment lock, with PATH saved
+before clearing. Preserve the exclusion probes unchanged, including exact-byte
+assertions, durable fresh-process recovery and the wrong-inode restoration race.
+Their implementation history is at the same checkpoint; none is installer code.
 
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
@@ -650,8 +590,8 @@ identities; ordinary verbs (`cargo run`, process run, `RunAtLoad`). Old context 
 may be scrubbed at historical launch boundaries but never read to decide behavior.
 Current errors, live DTOs and current user instructions get no obsolete aliases.
 
-Production changes now exist in the working tree. Final delta and inventory remain
-outstanding; file moves must not count as architectural deletion.
+The branch contains the runtime changes described above. Final delta and inventory
+remain outstanding; file moves must not count as architectural deletion.
 The final count must report Rust/Swift/Python/scripts production separately, excluding
 builtin prose, tests/fixtures, historical SQL and generated outputs, and name its base.
 
@@ -672,4 +612,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5): source/Apple recovery documentation inspected; Docker unavailable (missing configured socket), offline reboot proof unexecuted; `git diff --check` passed. Prior compression checks remain recorded at `d537a095cfe3fbb8e6e48cc04ae1b1cb1f51cd58`; no behavioral rerun for this design reconciliation.
+Check (October 5): `git diff --check` passed; prose-only compression, no behavioral rerun; prior design/check detail at `b6cfe0521`, offline conversion and affected gate remain open.

@@ -1,5 +1,80 @@
 # Release memory
 
+## Release completion responsibility (2026-10-05)
+
+Jack Heart directed Infrastructure on October 4 to ensure releases finish through
+verified publication and installed acceptance. Release retains its execution and
+evidence; Infrastructure follows interruptions through recovery and reports actual
+stages in the ongoing conversation. A merged release PR is unfinished until the
+public artifacts and configured completion checks pass.
+
+The v0.13.1 version PR #1426 merged without publication. Supported recovery cut
+v0.13.2, ultimately published at 2026-10-05 07:31:48 UTC from
+`f4cbe142b9a320ac6c2488273345c28153b45e91` after
+[candidate 37276274755](https://github.com/loopflowstudio/loopflow/actions/runs/37276274755)
+passed. Published CLI and `/Applications/Loopflow.app` both installed as 0.13.2.
+The default Session inventory contained 43 interactive Sessions, zero headless
+and zero closed; native CLI discovery also passed. This delivers PR #1421's
+filtering. It does not prove LOO-353's unfinished Waiting-first experience.
+
+Recovery exposed three release boundaries. Installed 0.13.0 predates the
+publisher's inherited-lock handoff, so recovery used a current source CLI with a
+disposable Home, preserving the live Home. The publisher launcher retained an
+isolated test lock. The five-minute deadline for the entire 76 MB artifact set
+repeatedly killed healthy transfers near 200 KiB/s; fifteen minutes remains
+bounded and completed the transfer. Finally, publisher preparation and public
+verification still required XCUITest despite Jack's September 30 retirement of
+that prerequisite (LOO-357, `release/UI_HOST_GATE.md`). macOS authentication
+prevented UI runner initialization after Desktop had already built and signed.
+[PR #1438](https://github.com/loopflowstudio/loopflow/pull/1438) landed the download
+and publisher fixes while preserving required headless CI and artifact proof.
+
+A follow-up found the same retired UI receipt in Rust's scheduled-settlement
+validator, and public smoke still invoked the removed `lf catalog` command.
+Remove the obsolete receipt requirement and use `lf list --json`; keep all actual
+public verification stages required. The scheduled regression exercises published,
+no-change, telemetry failure/recovery, missing proof and smoke failure without a
+UI receipt. Publisher fixtures now reject unknown CLI commands instead of returning
+a version for every invocation. The follow-up is not yet shipped at this curation.
+
+A Docker startup failure recovered through one failed-job rerun on a fresh GitHub
+runner. This manual recovery does not satisfy LOO-285's two unattended scheduled
+settlements. Public read-back/smoke verification remains distinct from publication
+and local installation; no verified public receipt was produced by the manual run.
+Publisher checkout cleanup reported a retained lease at
+`/Users/jack/src/loopflow.publish-default-v0-13-2`; preserve it for supported
+reconciliation rather than removing it manually.
+
+## Retained landing incident and minor recovery (2026-10-04)
+
+Jack Heart authorized autonomous recovery and delivery under Infrastructure;
+[LOO-373](https://linear.app/loopflow/issue/LOO-373) owns the retained Home landing
+and deleted-tmux-cwd repairs. The original retry
+`ff94aac9-b59d-409b-9bce-45dc921f1f1a` has no terminal receipt. Its retained
+process receipt named absent PID 17052, and the exact minor/preparation leases
+were unheld before supported re-entry. Process-list absence alone was not used
+as publication authority.
+
+`lf release run minor` completed as Exec `a7dee370-c624-4ac5-b063-a981714d7e7d`
+with exit 0. [v0.13.0](https://github.com/loopflowstudio/loopflow/releases/tag/v0.13.0)
+published at 2026-10-04 07:20:30 UTC from `12016c6d6dd34a4c1a553c25b5cf2529ee93615b`
+and [candidate 37182312803](https://github.com/loopflowstudio/loopflow/actions/runs/37182312803).
+The saved pair remains v0.12.32/v0.13.0, with its original patch commit and
+prepared tree, now `completed: true`. No competing publisher, manual state
+rewrite, or draft-bearing binary promotion was used. This release predates the
+landing migration and startup prevention; installed recovery still requires
+their published patch.
+
+Prevention retires Home landing claims with their identity/PID/heartbeat/generation
+retained on the landing, rejects old executable reacquisition, and preserves
+delivery intent and failures. A released-frontier regression passes through
+domain reads, stale-write rejection, real reconciliation with controlled provider
+facts, and repeat reconciliation under both draft and canonicalized schemas.
+An isolated tmux 3.7c server with deleted cwd launched a child into a quoted path
+after explicit child `cd`; this proves the known defect, not the causes of every
+LOO-371/372 timeout. Their original exited-pane stderr was unavailable. The active
+LOO-371/372/326 Flows were preserved.
+
 Release is the nested Wave `infrastructure/release`. Jack Heart selected its
 objective and ownership of release-focused planning on 2026-09-28. Its GOAL.md
 owns the authored release schedule. Live Linear ownership and schedule cutover

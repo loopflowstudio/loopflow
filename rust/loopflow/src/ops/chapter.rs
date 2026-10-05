@@ -824,7 +824,7 @@ pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResul
     let local = store.local_home().await.map_err(error)?;
     if placement.home_id != local.id {
         return Err(error(format!(
-            "Wave {} is placed on {}; run this command with `lf ssh {}`",
+            "Wave {} is placed on {}; run this command with `lf home ssh {}`",
             wave.slug(),
             placement.home_id,
             placement.home_id

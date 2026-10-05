@@ -60,6 +60,105 @@ fn start_conflicting_recovery(repo: &TestRepo) -> SyncRecovery {
 }
 
 #[test]
+fn checkout_restoration_preserves_resolver_notes_index_and_retry() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("edits.txt", "base\n");
+    repo.stage_all();
+    repo.commit("base");
+    repo.create_file("edits.txt", "staged\n");
+    repo.stage_all();
+    repo.create_file("edits.txt", "unstaged\n");
+    repo.create_file("scratch/questions.md", "original\n");
+    repo.create_file("scratch/plan.md", "plan\n");
+    let staged = git(repo.path(), &["diff", "--cached"]);
+    let unstaged = git(repo.path(), &["diff"]);
+
+    for attempt in 1..=2 {
+        let result = loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+            repo.create_file("scratch/questions.md", &format!("resolver {attempt}\n"));
+            if attempt == 1 {
+                Err(OpsError::Message("update failed after resolution".into()))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result.is_ok(), attempt == 2);
+        assert_eq!(git(repo.path(), &["diff", "--cached"]), staged);
+        assert_eq!(git(repo.path(), &["diff"]), unstaged);
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scratch/questions.md")).unwrap(),
+            "original\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scratch/plan.md")).unwrap(),
+            "plan\n"
+        );
+        assert!(git(repo.path(), &["stash", "list"]).is_empty());
+    }
+    for attempt in 1..=2 {
+        assert_eq!(
+            std::fs::read_to_string(
+                repo.path()
+                    .join(format!("scratch/questions.md.lf-sync-{attempt}"))
+            )
+            .unwrap(),
+            format!("resolver {attempt}\n")
+        );
+    }
+}
+
+#[test]
+fn checkout_restoration_reserves_stashed_sidecar_directories() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("scratch/question.md", "original\n");
+    repo.create_file("scratch/question.md.lf-sync-1/note.md", "prior note\n");
+    loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+        repo.create_file("scratch/question.md", "resolver\n");
+        Ok(())
+    })
+    .unwrap();
+    for (path, expected) in [
+        ("scratch/question.md", "original\n"),
+        ("scratch/question.md.lf-sync-1/note.md", "prior note\n"),
+        ("scratch/question.md.lf-sync-2", "resolver\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            expected
+        );
+    }
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
+fn resolved_sync_restores_original_scratch_through_checkout_boundary() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    repo.create_file("scratch/questions.md", "original question\n");
+    loopflow::ops::checkout::with_preserved_edits(repo.path(), || {
+        start_conflicting_recovery(&repo);
+        repo.create_file("scratch/questions.md", "resolver finding\n");
+        repo.create_file("conflict.txt", "resolved\n");
+        git(repo.path(), &["add", "conflict.txt"]);
+        continue_sync_for_resolution(repo.path(), false)?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(git(repo.path(), &["show", "HEAD:conflict.txt"]), "resolved");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch/questions.md")).unwrap(),
+        "original question\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("scratch/questions.md.lf-sync-1")).unwrap(),
+        "resolver finding\n"
+    );
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
 fn sync_onto_main_succeeds() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
@@ -1051,7 +1150,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     );
     assert_eq!(
         serde_json::to_value(command).unwrap(),
-        serde_json::json!({"command":"task", "args":["sync", "origin/main"]})
+        serde_json::json!({"command":"sync", "args":["origin/main"]})
     );
 }
 
@@ -1173,4 +1272,115 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
         .unwrap();
     assert_eq!(saved.base_commit, parent_head);
     assert_eq!(saved.parent_pr_id, Some(parent.pr.id));
+}
+
+#[test]
+fn persistent_refresh_preserves_local_plans_and_followup_after_merge() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+        .unwrap();
+    git(repo.path(), &["merge", "--squash", &persistent.branch]);
+    repo.commit("Merged document PR");
+    repo.push();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(persistent.path.join("scratch/plan.md"), "private\n").unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "followup\n").unwrap();
+    sync_with_recovery(
+        &persistent.path,
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
+        "followup\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(persistent.path.join("scratch/plan.md")).unwrap(),
+        "private\n"
+    );
+    // Everything committed had landed, so the branch restarts from main
+    // instead of carrying its squash-merged commit into the next PR.
+    assert_eq!(
+        git(&persistent.path, &["rev-parse", "HEAD"]),
+        git(&persistent.path, &["rev-parse", "origin/main"])
+    );
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Followup"))
+        .unwrap();
+    assert!(git(
+        &persistent.path,
+        &["diff", "origin/main...HEAD", "--", "memory.md"]
+    )
+    .contains("+followup"));
+    assert_eq!(
+        git(
+            &persistent.path,
+            &["rev-list", "--count", "origin/main..HEAD"]
+        )
+        .trim(),
+        "1"
+    );
+}
+
+#[test]
+fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("memory.md", "base\n");
+    repo.stage_all();
+    repo.commit("base memory");
+    repo.push();
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    std::fs::write(persistent.path.join("memory.md"), "persistent\n").unwrap();
+    loopflow::ops::commit_selected(
+        &persistent.path,
+        &["memory.md".into()],
+        Some("Local decision"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
+    std::fs::write(persistent.path.join("scratch/private.md"), "private\n").unwrap();
+    repo.create_file("memory.md", "upstream\n");
+    repo.stage_all();
+    repo.commit("competing decision");
+    repo.push();
+    let error = sync_with_recovery(
+        &persistent.path,
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        OpsError::SyncConflict {
+            recovery: Some(_),
+            ..
+        }
+    ));
+    assert!(std::fs::read_to_string(persistent.path.join("memory.md"))
+        .unwrap()
+        .contains("<<<<<<<"));
+    assert_eq!(
+        std::fs::read_to_string(persistent.path.join("scratch/private.md")).unwrap(),
+        "private\n"
+    );
 }

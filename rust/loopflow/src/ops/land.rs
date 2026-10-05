@@ -58,6 +58,7 @@ fn prepare_pr(
     finalize: Finalize,
     integration: Integration,
     progress: &impl Progress,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     if options.complete && options.next_slug.is_some() {
         return Err(OpsError::Message(
@@ -72,6 +73,7 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    crate::ops::commit::prepare_persistent_publication(&repo_root)?;
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
             // Rotation left one unpublished branch at its recorded base after
@@ -145,6 +147,7 @@ fn prepare_pr(
                             &repo_root,
                             options.pr_title.as_deref(),
                             options.pr_body.as_deref(),
+                            &|_| {},
                         )?;
                         progress.status("Pull request is already armed for this exact head");
                         return Ok(Some(pr));
@@ -152,8 +155,9 @@ fn prepare_pr(
                 }
             }
         }
-        let cleared_task_request =
-            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        let cleared_task_request = crate::ops::task::clear_task_pr_merge_before_head_mutation(
+            &repo_root, true, inherit_pr,
+        )?;
         if !options.local && !cleared_task_request {
             // Wave and other non-Task PRs have no durable Task request to
             // revoke, but GitHub may still have this branch in its merge queue.
@@ -166,7 +170,7 @@ fn prepare_pr(
                         pr.number
                     ))
                 })?;
-                crate::ops::pr::disable_auto_merge(&repo_root, number)?;
+                crate::ops::pr::disable_auto_merge(&repo_root, number, inherit_pr)?;
             }
         }
     }
@@ -190,7 +194,7 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
@@ -219,7 +223,7 @@ fn prepare_pr(
     // the recorded base and refuse an empty range before any `gh pr` side effect.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     if pr_exists {
-        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
+        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch, inherit_pr)?;
     }
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
@@ -238,12 +242,13 @@ fn prepare_pr(
         options.create_pr,
         &main_branch,
         &copy,
+        inherit_pr,
     )?;
     let pr = match created_pr {
         Some(pr) => Some(pr),
         None => crate::ops::pr::current_pr(&repo_root)?,
     };
-    crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
+    crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref(), inherit_pr)?;
     crate::ops::task::request_task_pr_merge(
         &repo_root,
         match finalize {
@@ -257,6 +262,7 @@ fn prepare_pr(
             crate::work::task::AfterMerge::ContinueTask
         },
         options.next_slug.as_deref(),
+        inherit_pr,
     )?;
     if let Err(finalize_error) = finalize_remote(
         &repo_root,
@@ -265,6 +271,7 @@ fn prepare_pr(
         pr.as_ref().map(|pr| pr.number),
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         progress,
+        inherit_pr,
     ) {
         // The durable request is written before its remote executor. If any
         // later step fails, revoke a possibly-armed Auto request and clear the
@@ -272,7 +279,7 @@ fn prepare_pr(
         // command did not complete. A failed revocation leaves the durable
         // request intact and reports both failures rather than guessing.
         if let Err(clear_error) =
-            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true, inherit_pr)
         {
             return Err(OpsError::Message(format!(
                 "{finalize_error}; failed to reconcile the durable merge request: {clear_error}"
@@ -295,6 +302,7 @@ pub fn arm(
         Finalize::AutoMerge,
         Integration::Required,
         progress,
+        &|_| {},
     )?;
     if let Some(pr) = &pr {
         crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
@@ -307,6 +315,7 @@ pub(crate) fn finish_arm_after_sync(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     let pr = prepare_pr(
         repo,
@@ -314,6 +323,7 @@ pub(crate) fn finish_arm_after_sync(
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
+        inherit_pr,
     )?;
     if let Some(pr) = &pr {
         crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
@@ -336,6 +346,7 @@ pub fn submit(
         Finalize::UserMerge,
         Integration::Required,
         progress,
+        &|_| {},
     )
 }
 
@@ -350,6 +361,7 @@ pub(crate) fn finish_submit_after_sync(
         Finalize::UserMerge,
         Integration::Completed,
         progress,
+        &|_| {},
     )
 }
 
@@ -396,7 +408,7 @@ fn prepare_land(
         ));
     }
 
-    if !options.strict {
+    if !options.strict && !crate::engine::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
             .clone()
@@ -409,7 +421,7 @@ fn prepare_land(
             agent: options.agent.clone(),
             ..CommitOptions::for_task("land")
         };
-        let _ = commit_workflow(repo_root, &commit_options, progress)?;
+        let _ = commit_workflow(repo_root, &commit_options, progress, &|_| {})?;
     }
 
     Ok(())
@@ -466,6 +478,7 @@ fn ensure_pr(
     create_pr: bool,
     base_branch: &str,
     copy: &PrCopy,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
@@ -478,11 +491,12 @@ fn ensure_pr(
                 &copy.title,
                 &copy.body,
                 base_branch,
+                inherit_pr,
             )
             .map(Some);
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
             )));
         }
     }
@@ -490,6 +504,7 @@ fn ensure_pr(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)] // Remote PR facts and explicit child capability inheritance.
 fn finalize_remote(
     repo_root: &Path,
     copy: &PrCopy,
@@ -497,10 +512,11 @@ fn finalize_remote(
     number: Option<u64>,
     head_sha: Option<&str>,
     progress: &impl Progress,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     progress.status("Updating PR...");
-    update_pr_message(repo_root, Some(&copy.title), Some(&copy.body))?;
-    mark_ready(repo_root)?;
+    update_pr_message(repo_root, Some(&copy.title), Some(&copy.body), inherit_pr)?;
+    mark_ready(repo_root, inherit_pr)?;
 
     match finalize {
         Finalize::AutoMerge => {
@@ -517,7 +533,7 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            crate::ops::pr::enable_auto_merge(repo_root, number, Some(copy), head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo_root, number, Some(copy), head_sha, inherit_pr)?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");
@@ -581,6 +597,9 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(());
+    }
     let scratch = repo.join("scratch");
     let gitkeep = scratch.join(".gitkeep");
 
@@ -616,9 +635,9 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     }
 
     progress.status("Clearing scratch/...");
-    crate::engine::git::stage_all(repo)?;
+    crate::engine::git::stage_all(repo, &|_| {})?;
     if has_staged_changes(repo)? {
-        crate::engine::git::commit(repo, "lf land: clear scratch/")?;
+        crate::engine::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
     }
 
     Ok(())
@@ -648,7 +667,12 @@ fn read_worktree_state(repo: &Path) -> OpsResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn update_pr_message(repo: &Path, title: Option<&str>, body: Option<&str>) -> OpsResult<()> {
+fn update_pr_message(
+    repo: &Path,
+    title: Option<&str>,
+    body: Option<&str>,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     if title.is_none() && body.is_none() {
         return Ok(());
     }
@@ -660,6 +684,7 @@ fn update_pr_message(repo: &Path, title: Option<&str>, body: Option<&str>) -> Op
     if let Some(body) = body {
         cmd.args(["--body", body]);
     }
+    inherit_pr(&mut cmd);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),
@@ -669,9 +694,10 @@ fn update_pr_message(repo: &Path, title: Option<&str>, body: Option<&str>) -> Op
     Ok(())
 }
 
-pub fn mark_ready(repo: &Path) -> OpsResult<()> {
+pub fn mark_ready(repo: &Path, inherit_pr: &impl Fn(&mut Command)) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
+    inherit_pr(&mut cmd);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

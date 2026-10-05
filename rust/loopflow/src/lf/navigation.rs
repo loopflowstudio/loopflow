@@ -46,6 +46,9 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
+    if prefix.is_empty() && name == "resume" && command.find_subcommand("session").is_some() {
+        return Ok(Some(vec!["session".into(), "resume".into()]));
+    }
     descendants(command, name, &[], &mut matches, false);
     // Exact descendant names win over abbreviations, just as exact owners do.
     if matches.is_empty() {
@@ -295,7 +298,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nOmit owners when a command is unique: lf land → lf task pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
     let definition = match path {

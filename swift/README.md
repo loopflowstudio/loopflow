@@ -14,6 +14,21 @@ retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
+A returning launch opens on the workspace saved at `<Home>/desktop-cache/workspace.json`
+and shows **Updating…** until this launch's reads replace it. Saved rows open
+and navigate; Flow state, Task condition, Session state and every action except
+opening a Session wait for the fresh read. The Portfolio window opens from the
+same saved workspace. A failed refresh keeps what is shown under one
+**Couldn't update** line. Delete the file to start from **Loading workspace…**.
+
+```sh
+uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
+```
+
+Each launch records when its first frame, saved workspace and fresh workspace
+arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
+the Home. Durations and command names only; the files stay on this machine.
+
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Home. Disabling stops scheduled
@@ -104,7 +119,10 @@ continues; **Expand** returns to it. **Focus** gives one conversation the conten
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.
 
-Task rows show all Sessions in the Task checkout, including independent conversations.
+Task rows and their counts show unfinished interactive Sessions in the Task checkout,
+including independent conversations and authored Flow reviews. **Show headless Sessions**
+includes background conversations; `lf session list --interactive all --history`
+inspects the full history. Filtering preserves retained terminals and drafts.
 Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
 Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined; **Ready to complete** means
@@ -246,6 +264,18 @@ The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared
 input alone does not establish live provider activity.
+
+Choose a skill beside **New Session** below the repository name. Search by name
+or description, use ↑/↓ and Return to select, or Escape to close. Selection is
+remembered per repository and does not launch anything. Click **New Session**
+to launch the selected skill in an interactive conversation.
+
+The default **capture-tasks** skill explores an idea and captures
+Tasks for their owning Waves, including in other repositories. From a Task, capture
+starts with its parent Wave in the repository checkout. The conversation remains
+available for more ideas; filing does not start workers or move existing panes.
+Wave rows also offer **New Session** with the selected skill in their context menu.
+
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New shell** opens

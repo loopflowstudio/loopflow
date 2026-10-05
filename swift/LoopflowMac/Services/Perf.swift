@@ -15,6 +15,8 @@ enum Perf {
 
     /// Process launch → first outline rows committed.
     static let coldStart: StaticString = "cold_start"
+    /// Process launch → every part of the workspace read by this launch, not saved text.
+    static let workspaceCurrent: StaticString = "workspace_current"
     /// Outline input (fold, presentation, filter, repository) → new rows committed.
     static let hierarchyInteraction: StaticString = "hierarchy_interaction"
     /// Wave/Task selection → detail committed; Session selection → pane accepts input.
@@ -93,5 +95,12 @@ enum Perf {
         let start = info.kp_proc.p_starttime
         let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
         return (Date().timeIntervalSince1970 - started) * 1000
+    }
+}
+
+extension ContinuousClock.Instant {
+    var elapsedMs: Double {
+        let elapsed = ContinuousClock.now - self
+        return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
     }
 }

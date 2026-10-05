@@ -356,10 +356,10 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         let session = loopflow::session::AgentSession {
             captured: None,
             caller_artifact_key: None,
-            task_id: (index == 112).then(|| task.task.id.clone()),
+            task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
             flow_session_id: None,
-            work_source: (index == 112).then_some(loopflow::session::WorkSource::Declared),
+            work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone(),
             artifact_key: uuid::Uuid::new_v4().simple().to_string(),
@@ -405,10 +405,20 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .unwrap();
     }
     fixture.db().execute("UPDATE agent_sessions SET ready_summary='Review this',interactive=0 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
+    assert!(
+        fixture
+            .json(&["session", "list", "--needs-me", "--json"])
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "attention must not broaden participation"
+    );
     let attention = fixture.json(&[
         "session",
         "list",
         "--needs-me",
+        "--interactive",
+        "all",
         "--json",
         "--page",
         "--limit",
@@ -421,6 +431,8 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "session",
         "list",
         "--needs-me",
+        "--interactive",
+        "all",
         "--json",
         "--page",
         "--limit",
@@ -502,6 +514,44 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         "0",
     ]);
     assert_eq!(everywhere.as_array().unwrap().len(), 113);
+
+    // All three local conversations belong to this Task, but only unfinished
+    // interactive participation belongs in its ordinary Session list.
+    let completed = runtime
+        .block_on(task.store.session("inventory-110"))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(
+            task.store
+                .complete_session(&completed.id, completed.captured),
+        )
+        .unwrap();
+    let list = [
+        "session",
+        "list",
+        "--task",
+        &task.task.plan.identifier,
+        "--json",
+    ];
+    for _ in 0..2 {
+        let current = fixture.json(&list);
+        assert_eq!(current.as_array().unwrap().len(), 1);
+        assert_eq!(current[0]["id"], "inventory-111");
+    }
+    let history = fixture.json(&[
+        "session",
+        "list",
+        "--task",
+        &task.task.plan.identifier,
+        "--interactive",
+        "all",
+        "--history",
+        "--json",
+    ]);
+    assert_eq!(history.as_array().unwrap().len(), 3);
+    assert_eq!(history[0]["state"], "closed");
+    assert_eq!(fixture.count("agent_sessions"), 113);
 }
 
 #[test]
@@ -537,7 +587,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     }
     let captures = fixture.count("agent_sessions");
     {
-        let command = vec!["usage", "--days", "0", "--json"];
+        let command = vec!["monitor", "usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -602,7 +652,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["usage", "--days", "0", "--task", issue, "--json"])
+            .json(&["monitor", "usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -886,7 +936,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: task sync --plan\n",
+        "- cmd: sync --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -1414,12 +1464,12 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
     {
-        let rows = fixture.json(&["usage", "--wave", "task-pr-tests", "--json"]);
+        let rows = fixture.json(&["monitor", "usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
     }
-    let activity = fixture.json(&["activity", "--wave", "task-pr-tests", "--json"]);
+    let activity = fixture.json(&["monitor", "activity", "--wave", "task-pr-tests", "--json"]);
     let captures = activity["items"]
         .as_array()
         .unwrap()
@@ -1531,6 +1581,15 @@ raise SystemExit(1 if failed else 0)
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Credential readiness may inspect the native home even for an isolated
+    // route. Keep that lookup headless and outside the real Keychain.
+    let security = fixture.home.path().join("bin/security");
+    std::fs::write(
+        &security,
+        "#!/bin/sh\necho 'The specified item could not be found' >&2\nexit 44\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
     let account_home = fixture.home.path().join("accounts/claude/fixture");
     std::fs::create_dir_all(&account_home).unwrap();
     let credential =
@@ -1577,7 +1636,10 @@ raise SystemExit(1 if failed else 0)
         })
         .unwrap();
     std::fs::write(fixture.home.path().join("fail-once"), "").unwrap();
+    // Keep the synthetic login in its file-backed account home; this test does
+    // not exercise the native macOS Keychain. The Flow captures the mode for retry.
     let blocked = fixture.run(&[
+        "--isolate",
         "--task",
         "INF-123",
         "--model",
@@ -1607,7 +1669,8 @@ raise SystemExit(1 if failed else 0)
     assert_eq!(failed.len(), 1, "{failed:?}");
     assert_eq!(
         (failed[0].2, failed[0].3.as_deref(), failed[0].4.as_deref()),
-        (1, Some("failed"), Some(task_id.as_str()))
+        (1, Some("failed"), Some(task_id.as_str())),
+        "{failure}; {stderr}"
     );
     let headless = fixture.json(&[
         "session",
@@ -1661,9 +1724,9 @@ raise SystemExit(1 if failed else 0)
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }
     let review = runs[2].0.clone();
-    let listed: Vec<Value> = serde_json::from_value(
-        fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
-    )
+    let listed: Vec<Value> = serde_json::from_value(fixture.json(&[
+        "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+    ]))
     .unwrap();
     let mut listed: Vec<&str> = listed
         .iter()
@@ -2018,7 +2081,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
            (SELECT count(*) FROM flow_events WHERE kind='consumed') FROM session_events WHERE kind!='observed'", [],
         |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
     assert_eq!((threads, starts, done, consumed), (2, 3, 3, 2));
-    let usage = fixture.json(&["usage", "--json"]);
+    let usage = fixture.json(&["monitor", "usage", "--json"]);
     assert_eq!(usage.as_array().unwrap().len(), 2);
     let launches = fixture.launches();
     assert_eq!(launches.len(), 3);

@@ -21,6 +21,6 @@ Turn findings into an accurate, ordered set of remaining work.
    a guessed backlog.
 
 Return the remaining blockers and next action briefly. When the input is only
-in conversation, return the corrected list here. If the source cannot be edited
-within the supplied authority, return the exact proposed correction. A clean
-findings list does not prove untested behavior or authorize deployment.
+in conversation, return the corrected list here. If the source is unavailable,
+return the exact proposed correction. A clean
+findings list does not prove untested behavior or deployment readiness.

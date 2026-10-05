@@ -90,6 +90,11 @@ enum OutboundRpc {
         id: Value,
         result: Value,
     },
+    /// A server request Loopflow could not satisfy.
+    Failure {
+        id: Value,
+        message: String,
+    },
 }
 
 type RpcResult = std::result::Result<Value, String>;
@@ -940,10 +945,9 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
         if self.session_driver.is_some() && self.thread_id().is_some() {
-            // A driver's lifetime is not its engine's. Detach even if this is
-            // still the driver: transfer may race teardown, and the engine may
-            // contain another active conversation. Explicit turn interruption
-            // goes through the fenced socket writer.
+            // Managed engines close when the invocation settles its driver, under
+            // the same ownership transaction as takeover. Harness teardown
+            // only drops this connection; a replaced driver cannot stop work.
             self.child.take();
             self.child_group.store(0, Ordering::Release);
             if let Some(directory) = self.engine_directory.take() {
@@ -1063,12 +1067,8 @@ impl CodexHarness {
                     .join("engine.sock")
             });
         let mut command = Command::new("codex");
-        if self
-            .account_route
-            .as_ref()
-            .is_some_and(ProviderAccountRoute::uses_native_home)
-        {
-            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        if let Some(route) = &self.account_route {
+            command.args(route.provider_args());
         }
         command
             // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
@@ -1085,9 +1085,12 @@ impl CodexHarness {
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut command);
-        }
+        // Held until the engine has spawned, so a concurrent switch cannot
+        // replace the native login between activation and startup.
+        let activation = match &self.account_route {
+            Some(route) => route.launch_engine_as(command.as_std_mut()).await?,
+            None => None,
+        };
         // Own process group so stop() can kill everything under the `codex`
         // entry point, including the real app-server binary that npm shims
         // spawn as a grandchild.
@@ -1125,6 +1128,7 @@ impl CodexHarness {
         } else {
             None
         };
+        drop(activation);
 
         // Publish the group pid for the interrupt hook: the signal handler
         // (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the process before
@@ -1202,6 +1206,10 @@ impl CodexHarness {
                     OutboundRpc::Response { id, result } => {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
+                    OutboundRpc::Failure { id, message } => json!({
+                        "jsonrpc": "2.0", "id": id,
+                        "error": { "code": -32000, "message": message },
+                    }),
                 };
                 writer_history
                     .lock()
@@ -1209,21 +1217,9 @@ impl CodexHarness {
                     .request(&payload);
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
-                    let runtime = tokio::runtime::Handle::current();
                     let dispatched = tokio::task::spawn_blocking(move || {
                         let outcome = store.with_session_driver(&session, &expected, || {
-                            runtime.block_on(async {
-                                tokio::time::timeout(Duration::from_secs(2), writer.send(message))
-                                    .await
-                                    .map_err(|_| {
-                                        crate::store::StoreError::InvalidData(
-                                            "Native dispatch timed out; outcome unknown".into(),
-                                        )
-                                    })?
-                                    .map_err(|error| {
-                                        crate::store::StoreError::InvalidData(error.to_string())
-                                    })
-                            })
+                            super::dispatch::send_fenced(&mut writer, message)
                         });
                         (writer, outcome)
                     })
@@ -1289,11 +1285,13 @@ impl CodexHarness {
                     continue;
                 };
                 if let Some((store, session, driver)) = &history {
-                    if let Err(error) = native_history
-                        .lock()
-                        .expect("codex history lock poisoned")
-                        .record(store, session, Some(driver), None, &value)
-                    {
+                    let recorded = super::dispatch::off_reactor(|| {
+                        native_history
+                            .lock()
+                            .expect("codex history lock poisoned")
+                            .record(store, session, Some(driver), None, &value)
+                    });
+                    if let Err(error) = recorded {
                         let _ = event_tx.send(ConversationEvent::Error {
                             code: "conversation_history_unavailable".into(),
                             message: error.to_string(),
@@ -1388,6 +1386,26 @@ impl CodexHarness {
                 // it per the configured Loopflow response policy. The user's
                 // Codex approval policy decides whether these requests occur.
                 if let Some(id) = value.get("id") {
+                    // The engine's lent token was refused; only its origin
+                    // can renew it.
+                    if method == "account/chatgptAuthTokens/refresh" {
+                        let renewed = match &account_route {
+                            Some(route) => route.renew_engine_login().map_err(|e| e.to_string()),
+                            None => Err("this engine has no lent login".to_string()),
+                        };
+                        let reply = match renewed {
+                            Ok(result) => OutboundRpc::Response {
+                                id: id.clone(),
+                                result,
+                            },
+                            Err(message) => OutboundRpc::Failure {
+                                id: id.clone(),
+                                message,
+                            },
+                        };
+                        let _ = approval_tx.send(reply).await;
+                        continue;
+                    }
                     let result = match approval {
                         ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
                     };
@@ -1470,24 +1488,41 @@ impl CodexHarness {
         self.stderr_task = stderr_task;
 
         // Handshake: initialize -> response -> client `initialized`.
+        let engine_login = match &self.account_route {
+            Some(route) => route.engine_login()?,
+            None => None,
+        };
         let init_id = self.next_request_id;
         self.initialize_request_id.store(init_id, Ordering::Relaxed);
-        self.send_request(
-            "initialize",
-            json!({
-                "clientInfo": {
-                    "name": "loopflow",
-                    "title": "loopflow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
-        )
-        .await?;
+        let mut initialize = json!({
+            "clientInfo": {
+                "name": "loopflow",
+                "title": "loopflow",
+                "version": env!("CARGO_PKG_VERSION"),
+            }
+        });
+        // Codex gates signing in with a supplied token behind this capability.
+        if engine_login.is_some() {
+            initialize["capabilities"] = json!({ "experimentalApi": true });
+        }
+        self.send_request("initialize", initialize).await?;
         tokio::time::timeout(Duration::from_secs(15), initialized_rx)
             .await
             .map_err(|_| anyhow!("timed out waiting for codex initialize response"))?
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
+        if let Some(login) = engine_login {
+            let reply = self
+                .send_observed_request("account/login/start", login)
+                .await?;
+            tokio::time::timeout(Duration::from_secs(15), reply.recv())
+                .await
+                .map_err(|_| {
+                    anyhow!("timed out signing the Codex engine in with its lent account")
+                })?
+                .map_err(|_| anyhow!("codex disconnected while signing in"))?
+                .map_err(|error| anyhow!("Codex refused the lent account: {error}"))?;
+        }
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());

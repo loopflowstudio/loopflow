@@ -19,7 +19,9 @@ pub mod pr_landing;
 mod present;
 mod progress;
 pub mod project;
+mod read_retry;
 mod release;
+mod release_lock;
 mod run;
 mod sync;
 pub mod task;
@@ -33,10 +35,11 @@ pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
 pub mod wt;
+pub mod wt_timing;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
-pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
     list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
@@ -48,6 +51,7 @@ pub use cron::{
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_command;
+pub(crate) use flow::execute_flow_command_with_cron;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_sync, finish_submit_after_sync};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};

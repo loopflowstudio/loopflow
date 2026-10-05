@@ -91,7 +91,7 @@ For an additive series, describe the keystone fully and list the intended follow
 
 When filing or editing a Task, keep its description to the current problem,
 desired outcome, observable acceptance, and real constraints. Put dated planning
-and execution updates in authorized Task comments, with links to detailed evidence.
+and execution updates in Task comments, with links to detailed evidence.
 Comments may be collapsed: keep current blockers, dependencies, and accepted scope
 visible in the description. Reconcile changed scope instead of appending amendments.
 

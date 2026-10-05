@@ -4,12 +4,15 @@ use std::ffi::OsString;
 pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
+    "LF_AS",
     "LF_RUN_ID",
     "LF_RUN_DIR",
     "LF_FLOW_STEP",
     "LF_WORK_ADVANCE_CLAIM",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
+    "LF_ACCOUNT_SELECTION",
+    "LF_ACCOUNT_ISOLATION",
     "LF_HUMAN_SESSION",
 ];
 

@@ -1,19 +1,20 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
     current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
-    is_ancestor, is_clean, is_squash_merged, rev_parse, stash_including_untracked, stash_pop,
-    sync_main, worktree_add, worktree_remove, WorktreeBranch,
+    is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
+    worktree_add_inheriting, worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -337,32 +338,6 @@ pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>
     Ok(items)
 }
 
-fn upstream_branch(worktree: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args([
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    let branch = raw
-        .strip_prefix("origin/")
-        .unwrap_or(raw.as_str())
-        .to_string();
-    Some(branch)
-}
-
 /// Parse GitHub owner/repo from the origin remote URL.
 pub(crate) fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
     let output = Command::new("git")
@@ -384,59 +359,428 @@ pub(crate) fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
     Some((owner.to_string(), name.to_string()))
 }
 
-/// Read the current head's PR state for each branch in one GitHub call.
-///
-/// `None` means GitHub was applicable but unavailable, so callers must not
-/// infer that a stale branch has no open PR. A non-GitHub remote has no GitHub
-/// PR state and returns a known-empty map.
-fn pull_request_states(
-    repo: &Path,
-    branches: &[String],
-) -> Option<HashMap<String, PullRequestState>> {
-    if branches.is_empty() {
-        return Some(HashMap::new());
-    }
-    let (owner, name) = match github_repo_nwo(repo) {
-        Some(nwo) => nwo,
-        None => return Some(HashMap::new()),
-    };
+/// Remote enrichment may be slow or unreachable. It never holds a listing
+/// longer than this; an unanswered remote is reported as unknown.
+const REMOTE_LIMIT: Duration = Duration::from_secs(10);
 
-    let branch_heads = branches
+/// Each Git process costs tens of milliseconds to start, so a listing runs its
+/// per-worktree and per-branch commands on this many threads.
+const GIT_WORKERS: usize = 16;
+
+/// Why a remote gave no usable answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteFailure {
+    /// It failed, could not start, or answered something unreadable.
+    Unavailable,
+    /// It was stopped at its limit.
+    TimedOut,
+}
+
+/// How remote enrichment ended for one listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RemoteOutcome {
+    /// No branch needed remote facts.
+    NotAsked,
+    Answered,
+    Unavailable,
+    TimedOut,
+}
+
+impl From<RemoteFailure> for RemoteOutcome {
+    fn from(failure: RemoteFailure) -> Self {
+        match failure {
+            RemoteFailure::Unavailable => Self::Unavailable,
+            RemoteFailure::TimedOut => Self::TimedOut,
+        }
+    }
+}
+
+/// Run a remote command to completion or stop it at the limit.
+fn remote_stdout(command: &mut Command, limit: Duration) -> Result<String, RemoteFailure> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| RemoteFailure::Unavailable)?;
+    let mut stdout = child.stdout.take().ok_or(RemoteFailure::Unavailable)?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    // A transport helper can outlive its stopped parent and keep the pipe
+    // open, so the reader is never joined.
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stdout, &mut bytes);
+        let _ = sender.send(bytes);
+    });
+    match receiver.recv_timeout(limit) {
+        Ok(bytes) => child
+            .wait()
+            .ok()
+            .filter(|status| status.success())
+            .map(|_| String::from_utf8_lossy(&bytes).to_string())
+            .ok_or(RemoteFailure::Unavailable),
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(RemoteFailure::TimedOut)
+        }
+    }
+}
+
+/// Apply `work` to every item on a bounded set of threads, keeping input order.
+fn concurrently<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let mut indexed = thread::scope(|scope| {
+        let workers: Vec<_> = (0..items.len().min(GIT_WORKERS))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(index) else {
+                            return done;
+                        };
+                        done.push((index, work(item)));
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("listing worker panicked"))
+            .collect::<Vec<_>>()
+    });
+    indexed.sort_by_key(|(index, _)| *index);
+    indexed.into_iter().map(|(_, result)| result).collect()
+}
+
+#[derive(Debug)]
+struct LocalBranch {
+    head: String,
+    upstream: Option<String>,
+}
+
+/// Head and configured upstream of every local branch, in one Git process.
+fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track)",
+            "refs/heads",
+        ])
+        .output();
+    let Ok(output) = output else {
+        return HashMap::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\0');
+            let name = fields.next()?.strip_prefix("refs/heads/")?;
+            let head = fields.next()?;
+            let upstream = fields.next().unwrap_or_default();
+            let gone = fields.next() == Some("[gone]");
+            let upstream = (!upstream.is_empty() && !gone).then(|| {
+                upstream
+                    .strip_prefix("origin/")
+                    .unwrap_or(upstream)
+                    .to_string()
+            });
+            Some((
+                name.to_string(),
+                LocalBranch {
+                    head: head.to_string(),
+                    upstream,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Local branches with no commit beyond `target`, in one Git process.
+///
+/// An unreadable target leaves every branch's own commits unproven absent, so
+/// none is reported as contained.
+fn branches_within(repo: &Path, target: &str) -> HashSet<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "for-each-ref",
+            "--merged",
+            target,
+            "--format=%(refname)",
+            "refs/heads",
+        ])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.strip_prefix("refs/heads/"))
+            .map(str::to_string)
+            .collect(),
+        _ => HashSet::new(),
+    }
+}
+
+/// Answers that depend only on a branch commit and the merge target's commit.
+///
+/// Both are immutable, so an answer never goes stale; it stops being asked
+/// when either side moves. The file lives in the Git directory, never in a
+/// checkout, and holds only the current target's answers.
+#[derive(Debug)]
+struct CommitFacts {
+    path: Option<PathBuf>,
+    target: String,
+    target_tree: String,
+    known: HashMap<(String, String), String>,
+    changed: bool,
+}
+
+impl CommitFacts {
+    /// `None` when `target` does not name a commit in this repository.
+    fn load(repo: &Path, target: &str) -> Option<Self> {
+        let resolved = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .arg("rev-parse")
+            .arg(format!("{target}^{{commit}}"))
+            .arg(format!("{target}^{{tree}}"))
+            .output()
+            .ok()?;
+        if !resolved.status.success() {
+            return None;
+        }
+        let resolved = String::from_utf8_lossy(&resolved.stdout);
+        let mut ids = resolved.lines();
+        let target = ids.next()?.to_string();
+        let target_tree = ids.next()?.to_string();
+        let git_dir = repo.join(".git");
+        let path = git_dir.is_dir().then(|| git_dir.join("lf-commit-facts"));
+        let known = path
+            .as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.splitn(4, '\t');
+                let (fact, on, head, answer) = (
+                    fields.next()?,
+                    fields.next()?,
+                    fields.next()?,
+                    fields.next()?,
+                );
+                (on == target).then(|| ((fact.to_string(), head.to_string()), answer.to_string()))
+            })
+            .collect();
+        Some(Self {
+            path,
+            target,
+            target_tree,
+            known,
+            changed: false,
+        })
+    }
+
+    /// Answer `fact` for each head, computing only the unknown ones.
+    fn answers(
+        &mut self,
+        fact: &str,
+        heads: &[String],
+        compute: impl Fn(&Self, &str) -> Option<String> + Sync,
+    ) -> HashMap<String, String> {
+        let unknown: Vec<&String> = heads
+            .iter()
+            .filter(|head| {
+                !self
+                    .known
+                    .contains_key(&(fact.to_string(), (*head).clone()))
+            })
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let computed = concurrently(&unknown, |head| compute(self, head));
+        for (head, answer) in unknown.into_iter().zip(computed) {
+            // A failed command is not an answer; ask again next time.
+            if let Some(answer) = answer {
+                self.known.insert((fact.to_string(), head.clone()), answer);
+                self.changed = true;
+            }
+        }
+        heads
+            .iter()
+            .filter_map(|head| {
+                let answer = self.known.get(&(fact.to_string(), head.clone()))?;
+                Some((head.clone(), answer.clone()))
+            })
+            .collect()
+    }
+
+    /// Heads whose changes the target already contains: merging the head into
+    /// the target would leave the target's tree unchanged.
+    fn squash_merged(&mut self, repo: &Path, heads: &[String]) -> HashSet<String> {
+        self.answers("squash-merged", heads, |facts, head| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(["merge-tree", "--write-tree", &facts.target, head])
+                .output()
+                .ok()?;
+            // Conflicts mean it is not cleanly merged.
+            let merged = output.status.success()
+                && String::from_utf8_lossy(&output.stdout).trim() == facts.target_tree;
+            Some(if merged { "1" } else { "0" }.to_string())
+        })
+        .into_iter()
+        .filter_map(|(head, answer)| (answer == "1").then_some(head))
+        .collect()
+    }
+
+    /// `git diff --shortstat target...head` for each head.
+    fn shortstats(&mut self, repo: &Path, heads: &[String]) -> HashMap<String, String> {
+        self.answers("shortstat", heads, |facts, head| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(["diff", "--shortstat", &format!("{}...{head}", facts.target)])
+                .output()
+                .ok()?;
+            output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        })
+    }
+
+    /// Keep new answers for the next listing. Losing them only costs time.
+    fn save(&self) {
+        let Some(path) = self.path.as_ref().filter(|_| self.changed) else {
+            return;
+        };
+        let mut lines: Vec<String> = self
+            .known
+            .iter()
+            .map(|((fact, head), answer)| format!("{fact}\t{}\t{head}\t{answer}\n", self.target))
+            .collect();
+        lines.sort();
+        let staged = path.with_extension(format!("{}.tmp", std::process::id()));
+        if fs::write(&staged, lines.concat()).is_ok() && fs::rename(&staged, path).is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+    }
+}
+
+/// `git diff --shortstat` of each branch against the default branch's remote
+/// head, keyed by branch. A branch whose diff cannot be read is absent.
+pub fn diff_shortstats(
+    repo: &Path,
+    default_branch: &str,
+    branches: &[&str],
+) -> HashMap<String, String> {
+    let Some(mut facts) = CommitFacts::load(repo, &format!("origin/{default_branch}")) else {
+        return HashMap::new();
+    };
+    let heads = branch_heads(repo);
+    let wanted: Vec<String> = branches
+        .iter()
+        .filter_map(|branch| heads.get(*branch).cloned())
+        .collect();
+    let stats = facts.shortstats(repo, &wanted);
+    facts.save();
+    branches
         .iter()
         .filter_map(|branch| {
-            rev_parse(repo, branch)
-                .ok()
-                .map(|head| (branch.clone(), head))
+            let stat = stats.get(heads.get(*branch)?)?;
+            Some((branch.to_string(), stat.clone()))
         })
-        .collect::<Vec<_>>();
-    if branch_heads.is_empty() {
-        return Some(HashMap::new());
-    }
+        .collect()
+}
 
-    // Build aliased GraphQL query: one field per branch. Branch names are
+fn branch_heads(repo: &Path) -> HashMap<String, String> {
+    local_branches(repo)
+        .into_iter()
+        .map(|(name, branch)| (name, branch.head))
+        .collect()
+}
+
+/// What GitHub knows about each branch: the current head's PR state and
+/// whether the branch still exists there.
+#[derive(Debug, PartialEq)]
+struct GithubBranches {
+    pull_requests: HashMap<String, PullRequestState>,
+    existing: HashSet<String>,
+}
+
+/// Read every branch's PR state and existence in one GitHub call.
+///
+/// A failure means GitHub was unavailable, so callers must not infer that a
+/// stale branch has no open PR.
+fn github_branches(
+    repo: &Path,
+    (owner, name): (String, String),
+    branches: &[String],
+) -> Result<GithubBranches, RemoteFailure> {
+    let mut heads = branch_heads(repo);
+    let branch_heads = branches
+        .iter()
+        .filter_map(|branch| heads.remove(branch).map(|head| (branch.clone(), head)))
+        .collect::<Vec<_>>();
+
+    // Build aliased GraphQL query: two fields per branch. Branch names are
     // reusable, so current-head identity decides whether historical PR state
     // applies to this worktree.
     let mut fields = String::new();
     for (i, (branch, _)) in branch_heads.iter().enumerate() {
         let escaped = branch.replace('\\', "\\\\").replace('"', "\\\"");
         fields.push_str(&format!(
-            "b{i}: pullRequests(first: 100, headRefName: \"{escaped}\", orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ headRefOid state }} }}\n"
+            "b{i}: pullRequests(first: 100, headRefName: \"{escaped}\", orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ headRefOid state }} }}\n\
+             r{i}: ref(qualifiedName: \"refs/heads/{escaped}\") {{ id }}\n"
         ));
     }
     let query =
         format!("query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {fields} }} }}");
 
-    let output = Command::new("gh")
-        .current_dir(repo)
-        .args(["api", "graphql", "-f", &format!("query={query}")])
-        .output();
-
-    let stdout = match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return None,
-    };
+    let stdout = remote_stdout(
+        Command::new("gh").current_dir(repo).args([
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={query}"),
+        ]),
+        REMOTE_LIMIT,
+    )?;
 
     parse_pull_request_states(&stdout, &branch_heads)
+        .zip(parse_existing_branches(&stdout, &branch_heads))
+        .map(|(pull_requests, existing)| GithubBranches {
+            pull_requests,
+            existing,
+        })
+        .ok_or(RemoteFailure::Unavailable)
+}
+
+fn parse_existing_branches(
+    response: &str,
+    branch_heads: &[(String, String)],
+) -> Option<HashSet<String>> {
+    let value = serde_json::from_str::<serde_json::Value>(response).ok()?;
+    let repository = value.pointer("/data/repository")?;
+    branch_heads
+        .iter()
+        .enumerate()
+        .filter_map(
+            |(index, (branch, _))| match repository.get(format!("r{index}")) {
+                // An absent answer is unknown, never a deleted branch.
+                None => Some(None),
+                Some(serde_json::Value::Null) => None,
+                Some(_) => Some(Some(branch.clone())),
+            },
+        )
+        .collect()
 }
 
 fn parse_pull_request_states(
@@ -477,153 +821,164 @@ fn parse_pull_request_states(
 }
 
 /// List all remote branch names via a single `git ls-remote --heads origin` call.
-/// Returns an empty set on failure (offline, no remote, etc.).
-fn list_remote_branches(repo: &Path) -> HashSet<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["ls-remote", "--heads", "origin"])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .filter_map(|line| {
-                line.split('\t')
-                    .nth(1)?
-                    .strip_prefix("refs/heads/")
-                    .map(|b| b.to_string())
-            })
-            .collect(),
-        _ => HashSet::new(),
-    }
+fn list_remote_branches(repo: &Path) -> Result<HashSet<String>, RemoteFailure> {
+    let stdout = remote_stdout(
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args(["ls-remote", "--heads", "origin"]),
+        REMOTE_LIMIT,
+    )?;
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            line.split('\t')
+                .nth(1)?
+                .strip_prefix("refs/heads/")
+                .map(|b| b.to_string())
+        })
+        .collect())
 }
 
-/// List worktrees using only local git operations. No network calls.
+/// Worktree states from local Git alone. No network calls.
 ///
-/// Returns `(default_branch, states)` so callers can forward the resolved
-/// default branch to `enrich_worktrees_network` without a redundant git call.
-///
-/// `merged` reflects local detection only (fast-forward ancestor check and
-/// squash-merge patch-id comparison). `remote_gone` is always `false`, and
-/// `pull_request` is always `None` until network enrichment.
-pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
-    let default_branch = get_default_branch(repo)?;
-    let merge_target = format!("origin/{default_branch}");
-    let items = list_porcelain(repo)?;
-
-    let branches_to_check: Vec<String> = items
-        .iter()
-        .filter_map(|(_, branch)| branch.as_ref())
-        .filter(|b| *b != &default_branch)
-        .cloned()
-        .collect();
-
-    // Squash-merge checks: local git operations, one thread per branch
-    let repo_for_squash = repo.to_path_buf();
-    let target_for_squash = merge_target.clone();
-    let squash_handle = thread::spawn(move || {
-        let handles: Vec<_> = branches_to_check
-            .into_iter()
-            .map(|branch| {
-                let r = repo_for_squash.clone();
-                let t = target_for_squash.clone();
-                thread::spawn(move || {
-                    if is_squash_merged(&r, &branch, &t).unwrap_or(false) {
-                        Some(branch)
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|h| h.join().ok().flatten())
-            .collect::<HashSet<String>>()
-    });
-
-    let squash_merged = squash_handle.join().unwrap_or_default();
-
-    let mut results = Vec::new();
-    for (path, branch) in items {
-        let base = upstream_branch(&path);
-        let base_branch = base.filter(|b| b != &default_branch);
-        let is_default = branch.as_deref() == Some(&default_branch);
-        let has_commits = if is_default {
-            true
-        } else {
-            branch
-                .as_deref()
-                .map(|b| has_commits_beyond(repo, b, &merge_target).unwrap_or(true))
-                .unwrap_or(false)
-        };
-        let merged = branch.as_deref().is_some_and(|b| {
-            !is_default && has_commits && is_ancestor(repo, b, &merge_target).unwrap_or(false)
-        });
-        let squash_merged_flag = branch
-            .as_deref()
-            .is_some_and(|b| !is_default && has_commits && squash_merged.contains(b));
-        // A failed cleanliness check is not evidence that removal is safe.
-        let dirty = !is_clean(&path).unwrap_or(false);
-        // "Fresh" means no net content delta against main yet.
-        // This includes newly-rotated branches that were forked from a landed
-        // branch (commit graph differs, but tree is identical to main).
-        let fresh = !is_default && !merged && (!has_commits || squash_merged_flag);
-        results.push(WorktreeState {
-            branch,
-            path,
-            base_branch,
-            merged,
-            squash_merged: squash_merged_flag,
-            fresh,
-            dirty,
-            remote_gone: false,
-            pull_request: None,
-        });
-    }
-
-    Ok((default_branch, results))
-}
-
-/// Enrich worktree states with network-dependent checks.
-///
-/// Queries GitHub for current-head PR state and `git ls-remote` for remote
-/// branch existence. Updates `merged`, `remote_gone`, and `pull_request`.
-/// Returns false when GitHub was applicable but unavailable; callers use that
-/// to retain stale branches whose open-PR state could not be checked.
-///
-/// `default_branch` should match what `list_worktrees_local` used
-/// (typically from `get_default_branch`).
-fn enrich_worktrees_network(
+/// `squash_merged` and `fresh` come from local history. `merged` is always
+/// `false` here: a branch already contained in the merge target has no commits
+/// of its own, which the listing calls fresh, so only PR evidence establishes
+/// a merge. `remote_gone` is `false` and `pull_request` is `None` until network
+/// enrichment.
+fn local_states(
     repo: &Path,
     default_branch: &str,
-    states: &mut [WorktreeState],
-) -> bool {
-    let branches: Vec<String> = states
+    items: Vec<(PathBuf, Option<String>)>,
+) -> Vec<WorktreeState> {
+    let merge_target = format!("origin/{default_branch}");
+    let (dirty, (branches, within, squash_merged)) = thread::scope(|scope| {
+        // A failed cleanliness check is not evidence that removal is safe.
+        let dirty =
+            scope.spawn(|| concurrently(&items, |(path, _)| !is_clean(path).unwrap_or(false)));
+        let within = scope.spawn(|| branches_within(repo, &merge_target));
+        let branches = local_branches(repo);
+        let within = within.join().expect("listing worker panicked");
+        // Only a branch with commits of its own can have been squash-merged.
+        let candidates: Vec<String> = items
+            .iter()
+            .filter_map(|(_, branch)| branch.as_deref())
+            .filter(|branch| *branch != default_branch && !within.contains(*branch))
+            .filter_map(|branch| branches.get(branch).map(|branch| branch.head.clone()))
+            .collect();
+        let squash_merged = match CommitFacts::load(repo, &merge_target) {
+            Some(mut facts) => {
+                let merged = facts.squash_merged(repo, &candidates);
+                facts.save();
+                merged
+            }
+            None => HashSet::new(),
+        };
+        (
+            dirty.join().expect("listing worker panicked"),
+            (branches, within, squash_merged),
+        )
+    });
+
+    items
+        .into_iter()
+        .zip(dirty)
+        .map(|((path, branch), dirty)| {
+            let known = branch.as_deref().and_then(|branch| branches.get(branch));
+            let base_branch = known
+                .and_then(|branch| branch.upstream.clone())
+                .filter(|upstream| upstream != default_branch);
+            let is_default = branch.as_deref() == Some(default_branch);
+            let has_commits = is_default || branch.as_deref().is_some_and(|b| !within.contains(b));
+            let squash_merged = !is_default
+                && has_commits
+                && known.is_some_and(|branch| squash_merged.contains(&branch.head));
+            // "Fresh" means no net content delta against main yet.
+            // This includes newly-rotated branches that were forked from a landed
+            // branch (commit graph differs, but tree is identical to main).
+            let fresh = !is_default && (!has_commits || squash_merged);
+            WorktreeState {
+                branch,
+                path,
+                base_branch,
+                merged: false,
+                squash_merged,
+                fresh,
+                dirty,
+                remote_gone: false,
+                pull_request: None,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug)]
+struct RemoteFacts {
+    /// `None` when GitHub was applicable but unavailable.
+    pull_requests: Option<HashMap<String, PullRequestState>>,
+    /// Empty when the remote could not be read.
+    branches: HashSet<String>,
+    outcome: RemoteOutcome,
+}
+
+/// Ask the remote which branches exist and what PR state their heads have.
+///
+/// GitHub answers both in one call. Any other remote, or an unavailable
+/// GitHub, is asked for its branches directly. Each call ends within
+/// `REMOTE_LIMIT`, and a GitHub call that reached it is not followed by another.
+fn remote_facts(
+    repo: &Path,
+    default_branch: &str,
+    items: &[(PathBuf, Option<String>)],
+) -> RemoteFacts {
+    let branches: Vec<String> = items
         .iter()
-        .filter_map(|wt| wt.branch.as_ref())
+        .filter_map(|(_, branch)| branch.as_ref())
         .filter(|b| b.as_str() != default_branch)
         .cloned()
         .collect();
-
     if branches.is_empty() {
-        return true;
+        return RemoteFacts {
+            pull_requests: Some(HashMap::new()),
+            branches: HashSet::new(),
+            outcome: RemoteOutcome::NotAsked,
+        };
     }
-
-    let repo_for_pr = repo.to_path_buf();
-    let pr_branches = branches;
-    let pr_handle = thread::spawn(move || pull_request_states(&repo_for_pr, &pr_branches));
-
-    let repo_for_remote = repo.to_path_buf();
-    let remote_handle = thread::spawn(move || list_remote_branches(&repo_for_remote));
-
-    let pr_states = pr_handle.join().ok().flatten();
-    let pull_requests_known = pr_states.is_some();
-    let pr_states = pr_states.unwrap_or_default();
-    let remote_branches = remote_handle.join().unwrap_or_default();
-
-    apply_network_enrichment(states, default_branch, &pr_states, &remote_branches);
-    pull_requests_known
+    let Some(nwo) = github_repo_nwo(repo) else {
+        // A non-GitHub remote has no GitHub PR state: known, and empty.
+        let listed = list_remote_branches(repo);
+        return RemoteFacts {
+            pull_requests: Some(HashMap::new()),
+            outcome: listed
+                .as_ref()
+                .map_or_else(|failure| (*failure).into(), |_| RemoteOutcome::Answered),
+            branches: listed.unwrap_or_default(),
+        };
+    };
+    match github_branches(repo, nwo, &branches) {
+        Ok(mut github) => {
+            // The listing compares against the default branch's remote head,
+            // so a set naming no worktree branch still means "all gone".
+            github.existing.insert(default_branch.to_string());
+            RemoteFacts {
+                pull_requests: Some(github.pull_requests),
+                branches: github.existing,
+                outcome: RemoteOutcome::Answered,
+            }
+        }
+        // PR state stays unknown whatever the fallback learns about branches.
+        // A GitHub that used the whole limit leaves none for a second call.
+        Err(failure) => RemoteFacts {
+            pull_requests: None,
+            branches: match failure {
+                RemoteFailure::Unavailable => list_remote_branches(repo).unwrap_or_default(),
+                RemoteFailure::TimedOut => HashSet::new(),
+            },
+            outcome: failure.into(),
+        },
+    }
 }
 
 fn apply_network_enrichment(
@@ -658,11 +1013,64 @@ fn apply_network_enrichment(
     }
 }
 
+/// Local listing plus remote enrichment, read at the same time, with its
+/// phase timings.
+///
+/// A remote that fails or does not answer leaves `remote_gone` false and
+/// `pull_request` unknown; it never fails or stalls the local listing.
+pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
+    let started = Instant::now();
+    let default_branch = get_default_branch(repo)?;
+    let items = list_porcelain(repo)?;
+    let ((remote, remote_time), mut worktrees, local_git) = thread::scope(|scope| {
+        let remote = scope.spawn(|| {
+            let asked = Instant::now();
+            (remote_facts(repo, &default_branch, &items), asked.elapsed())
+        });
+        let worktrees = local_states(repo, &default_branch, items.clone());
+        let local_git = started.elapsed();
+        (
+            remote.join().expect("listing worker panicked"),
+            worktrees,
+            local_git,
+        )
+    });
+    let pull_requests_known = remote.pull_requests.is_some();
+    apply_network_enrichment(
+        &mut worktrees,
+        &default_branch,
+        &remote.pull_requests.unwrap_or_default(),
+        &remote.branches,
+    );
+    Ok(Listing {
+        default_branch,
+        worktrees,
+        pull_requests_known,
+        local_git,
+        remote: remote_time,
+        remote_outcome: remote.outcome,
+    })
+}
+
+/// Every worktree's state, and what reading it cost.
+#[derive(Debug)]
+pub struct Listing {
+    /// The branch every worktree was compared against.
+    pub default_branch: String,
+    pub worktrees: Vec<WorktreeState>,
+    /// False when GitHub was applicable but unavailable: an absent
+    /// `pull_request` then proves nothing about an open PR.
+    pub pull_requests_known: bool,
+    /// Wall time of the local Git reads, which run beside the remote.
+    pub local_git: Duration,
+    /// Wall time until the remote answered, failed, or was stopped.
+    pub remote: Duration,
+    pub remote_outcome: RemoteOutcome,
+}
+
 /// Full worktree listing with all checks (local + network).
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
-    let (default_branch, mut states) = list_worktrees_local(repo)?;
-    let _ = enrich_worktrees_network(repo, &default_branch, &mut states);
-    Ok(states)
+    list_worktrees_timed(repo).map(|listing| listing.worktrees)
 }
 
 fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
@@ -807,8 +1215,12 @@ pub fn prune_worktrees(
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
-    let (default_branch, mut states) = list_worktrees_local(repo)?;
-    let pull_requests_known = enrich_worktrees_network(repo, &default_branch, &mut states);
+    let Listing {
+        default_branch,
+        worktrees: states,
+        pull_requests_known,
+        ..
+    } = list_worktrees_timed(repo)?;
     let mut report = WorktreePruneReport::default();
     let now = SystemTime::now();
 
@@ -816,6 +1228,7 @@ pub fn prune_worktrees(
         if state.path == current_path
             || state.branch.as_deref() == Some(&default_branch)
             || path_is_protected(&state.path, protected_paths)
+            || is_persistent_worktree(&state.path)?
         {
             continue;
         }
@@ -872,6 +1285,7 @@ fn targeted_prune(
     if path == current_path
         || branch.as_deref() == Some(&default_branch)
         || path_is_protected(path, protected_paths)
+        || is_persistent_worktree(path)?
     {
         return Ok(TargetedPruneOutcome::Protected);
     }
@@ -961,23 +1375,16 @@ pub fn prune_abandoned_prompt_logs(
     Ok(removed)
 }
 
-/// Create a named sibling worktree on an author-scoped branch.
+/// Create a local named sibling worktree; the caller owns publishing its branch.
 ///
-/// This is a low-level compatibility helper for release and diagnostic
-/// worktree operations. Wave and Project runtimes always use the canonical
+/// Source selection belongs to the caller. Wave and Project runtimes use the canonical
 /// main checkout; Task placement uses [`plan_placement`].
 pub fn create_named_worktree(
     repo: &Path,
     name: &str,
     base: Option<&str>,
-    sync_default_base: bool,
+    inherit_creation: &impl Fn(&mut Command),
 ) -> Result<CreateWorktreeResult, GitError> {
-    if sync_default_base {
-        if let Ok(default_branch) = get_default_branch(repo) {
-            let _ = sync_main(repo, &default_branch);
-        }
-    }
-
     let user = git_user(repo)?;
     let segment = WorktreeSegment::parse(name).map_err(|error| GitError::CommandFailed {
         command: "git worktree add".to_string(),
@@ -1016,7 +1423,7 @@ pub fn create_named_worktree(
                 remote: &remote_branch,
             }
         };
-        worktree_add(repo, &worktree_path, &branch, mode)?;
+        worktree_add_inheriting(repo, &worktree_path, &branch, mode, inherit_creation)?;
         return Ok(CreateWorktreeResult {
             path: worktree_path,
             branch,
@@ -1041,15 +1448,15 @@ pub fn create_named_worktree(
         None
     };
 
-    worktree_add(
+    worktree_add_inheriting(
         repo,
         &worktree_path,
         &branch,
         WorktreeBranch::New {
             start_point: base_ref,
         },
+        inherit_creation,
     )?;
-    schedule_upstream_sync(worktree_path.clone(), branch.clone());
     Ok(CreateWorktreeResult {
         path: worktree_path,
         branch,
@@ -1103,6 +1510,14 @@ pub fn create_from_placement_plan(
     repo: &Path,
     plan: &PlacementPlan,
 ) -> Result<CreateWorktreeResult, GitError> {
+    apply_placement_plan(repo, plan, true)
+}
+
+fn apply_placement_plan(
+    repo: &Path,
+    plan: &PlacementPlan,
+    publish_upstream: bool,
+) -> Result<CreateWorktreeResult, GitError> {
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -1137,7 +1552,9 @@ pub fn create_from_placement_plan(
                     start_point: &plan.base_ref,
                 },
             )?;
-            schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
+            if publish_upstream {
+                schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
+            }
         }
     }
     Ok(CreateWorktreeResult {
@@ -1148,28 +1565,80 @@ pub fn create_from_placement_plan(
     })
 }
 
-/// Resolve or create an author-scoped sibling worktree for a main agent.
+/// Resolve or create a persistent worktree for an agent scope.
 ///
-/// New worktrees start from the fetched default branch when `origin` exists,
-/// and from the local default branch otherwise. Existing placements are
-/// reused only at their deterministic sibling path.
+/// New branches use the fetched default branch, falling back to cached or local
+/// state offline. Existing placements are reused at their current path.
 pub fn ensure_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
 ) -> Result<AgentWorktree, GitError> {
-    let main_repo = canonical_default_checkout(main_repo)?;
-    let mut plan = deterministic_agent_plan(&main_repo, segment)?;
-    if plan.strategy == PlacementStrategy::Create {
-        plan.base_ref = agent_base_ref(&main_repo, true)?;
+    let main_repo = main_repo_root(main_repo)?;
+    let lock_path =
+        git_common_dir(&main_repo)?.join(format!("persistent-{}.lock", segment.as_str()));
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    let mut plan = plan_placement(&main_repo, segment)?;
+    if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
+        worktree_remove(&main_repo, &plan.worktree_path)?;
+        plan.strategy = PlacementStrategy::CheckoutExisting;
     }
-    create_agent_worktree(&main_repo, &plan)
+    if plan.strategy == PlacementStrategy::Create {
+        plan.base_ref = agent_base_ref(&main_repo)?;
+    }
+    let worktree = create_agent_worktree(&main_repo, &plan)?;
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&main_repo)
+        .args([
+            "config",
+            &format!("branch.{}.loopflow-persistent", worktree.branch),
+            "true",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "mark persistent worktree".into(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(worktree)
+}
+
+/// Persistent branches keep their checkout and local plans after delivery.
+pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
+    let Some(branch) = current_branch(repo)? else {
+        return Ok(false);
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "config",
+            "--bool",
+            "--get",
+            &format!("branch.{branch}.loopflow-persistent"),
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => Ok(output.stdout == b"true\n"),
+        Some(1) => Ok(false),
+        _ => Err(GitError::CommandFailed {
+            command: "read persistent worktree configuration".into(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+    }
 }
 
 pub(crate) fn existing_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
 ) -> Result<Option<AgentWorktree>, GitError> {
-    let plan = deterministic_agent_plan(main_repo, segment)?;
+    let plan = plan_placement(main_repo, segment)?;
     match plan.strategy {
         PlacementStrategy::UseExistingWorktree => Ok(Some(AgentWorktree {
             path: plan.worktree_path,
@@ -1195,7 +1664,7 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
         return Ok(None);
     }
 
-    let base_ref = agent_base_ref(&main_repo, false)?;
+    let base_ref = agent_base_ref(&main_repo)?;
     let head = rev_parse(&main_repo, "HEAD")?;
     let dirty = !is_clean(&main_repo)?;
     let carries_state = dirty || has_commits_beyond(&main_repo, &default_branch, &base_ref)?;
@@ -1249,73 +1718,24 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     Ok(Some(worktree))
 }
 
-fn deterministic_agent_plan(
-    main_repo: &Path,
-    segment: WorktreeSegment,
-) -> Result<PlacementPlan, GitError> {
-    let expected_path = worktree_path(main_repo, segment.as_str());
-    let plan = plan_placement(main_repo, segment)?;
-    if plan.strategy == PlacementStrategy::UseExistingWorktree
-        && normalized_path(&plan.worktree_path) != normalized_path(&expected_path)
-    {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "branch {} is checked out at {}, expected {}",
-                plan.branch,
-                plan.worktree_path.display(),
-                expected_path.display()
-            ),
-        });
-    }
-    if plan.strategy != PlacementStrategy::UseExistingWorktree && expected_path.exists() {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "expected agent worktree path is occupied: {}",
-                expected_path.display()
-            ),
-        });
-    }
-    Ok(plan)
-}
-
 fn create_agent_worktree(
     main_repo: &Path,
     plan: &PlacementPlan,
 ) -> Result<AgentWorktree, GitError> {
-    let created = create_from_placement_plan(main_repo, plan)?;
+    let created = apply_placement_plan(main_repo, plan, false)?;
     Ok(AgentWorktree {
         path: created.path,
         branch: created.branch,
     })
 }
 
-fn canonical_default_checkout(main_repo: &Path) -> Result<PathBuf, GitError> {
-    let main = main_repo_root(main_repo)?;
-    let main = std::fs::canonicalize(&main).unwrap_or(main);
-    let default_branch = get_default_branch(&main)?;
-    let branch = current_branch(&main)?;
-    if branch.as_deref() != Some(default_branch.as_str()) {
-        return Err(GitError::CommandFailed {
-            command: "resolve agent worktree".to_string(),
-            stderr: format!(
-                "canonical checkout is on {}, expected {default_branch}",
-                branch.as_deref().unwrap_or("detached HEAD")
-            ),
-        });
-    }
-    Ok(main)
-}
-
-fn agent_base_ref(main_repo: &Path, require_fetch: bool) -> Result<String, GitError> {
+fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {
     let default_branch = get_default_branch(main_repo)?;
     if !has_origin(main_repo)? {
         return Ok(default_branch);
     }
     match fetch(main_repo, "origin", &default_branch) {
         Ok(()) => Ok(format!("origin/{default_branch}")),
-        Err(error) if require_fetch => Err(error),
         Err(_) if rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok() => {
             Ok(format!("origin/{default_branch}"))
         }
@@ -1419,9 +1839,10 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        abandoned_prune_reason, apply_network_enrichment, ensure_agent_worktree,
-        move_default_agent_to_worktree, parse_pull_request_states, plan_placement,
-        prune_abandoned_prompt_logs, prune_branch_worktree, wave_agent_segment, worktree_path,
+        abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
+        list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
+        parse_pull_request_states, plan_placement, prune_abandoned_prompt_logs,
+        prune_branch_worktree, remote_stdout, wave_agent_segment, worktree_path,
         worktree_prune_reason, PlacementError, PlacementStrategy, PullRequestState,
         TargetedPruneOutcome, WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
@@ -1586,6 +2007,141 @@ mod tests {
                 ("jack-heart/closed".to_string(), PullRequestState::Closed),
             ]))
         );
+    }
+
+    #[test]
+    fn github_reports_deleted_branches_without_guessing_unanswered_ones() {
+        let response = serde_json::json!({
+            "data": {"repository": {"r0": {"id": "ref"}, "r1": null}}
+        })
+        .to_string();
+        let heads = |names: &[&str]| -> Vec<(String, String)> {
+            names
+                .iter()
+                .map(|name| (name.to_string(), "head".to_string()))
+                .collect()
+        };
+
+        assert_eq!(
+            parse_existing_branches(&response, &heads(&["kept", "deleted"])),
+            Some(HashSet::from(["kept".to_string()]))
+        );
+        assert_eq!(
+            parse_existing_branches(&response, &heads(&["kept", "deleted", "unanswered"])),
+            None
+        );
+    }
+
+    #[test]
+    fn unanswered_remote_stops_at_its_limit() {
+        let started = std::time::Instant::now();
+        let answer = remote_stdout(
+            Command::new("sh").args(["-c", "sleep 30; echo late"]),
+            Duration::from_millis(200),
+        );
+        assert_eq!(answer, Err(super::RemoteFailure::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(
+            remote_stdout(Command::new("echo").arg("answer"), Duration::from_secs(10)),
+            Ok("answer\n".to_string())
+        );
+        assert_eq!(
+            remote_stdout(&mut Command::new("false"), Duration::from_secs(10)),
+            Err(super::RemoteFailure::Unavailable)
+        );
+    }
+
+    #[test]
+    fn listing_reports_each_worktree_and_leaves_checkouts_untouched() {
+        let (root, repo) = repo_with_origin();
+        let sibling = |name: &str| root.path().join(name);
+        let add = |name: &str| {
+            let path = sibling(name);
+            git(
+                &repo,
+                &[
+                    "worktree",
+                    "add",
+                    "-b",
+                    name,
+                    path.to_str().unwrap(),
+                    "origin/main",
+                ],
+            );
+            path
+        };
+
+        let untouched = add("untouched");
+        fs::write(untouched.join("note.txt"), "uncommitted\n").unwrap();
+
+        let active = add("active");
+        fs::write(active.join("active.txt"), "work\n").unwrap();
+        git(&active, &["add", "."]);
+        git(&active, &["commit", "-m", "active work"]);
+        git(&active, &["push", "-u", "origin", "active"]);
+
+        // The same change reaches main as a different commit, as a squash does.
+        let landed = add("landed");
+        fs::write(landed.join("landed.txt"), "landed\n").unwrap();
+        git(&landed, &["add", "."]);
+        git(&landed, &["commit", "-m", "branch commit"]);
+        fs::write(repo.join("landed.txt"), "landed\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "squashed"]);
+        git(&repo, &["push", "origin", "main"]);
+
+        let detached = sibling("detached");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                detached.to_str().unwrap(),
+                "origin/main",
+            ],
+        );
+
+        let listed = list_worktrees(&repo).unwrap();
+        let state = |branch: Option<&str>| {
+            listed
+                .iter()
+                .find(|state| state.branch.as_deref() == branch)
+                .unwrap()
+        };
+        let flags = |state: &WorktreeState| {
+            (
+                state.squash_merged,
+                state.fresh,
+                state.dirty,
+                state.remote_gone,
+            )
+        };
+        assert_eq!(flags(state(Some("main"))), (false, false, false, false));
+        assert_eq!(flags(state(Some("untouched"))), (false, true, true, true));
+        assert_eq!(flags(state(Some("active"))), (false, false, false, false));
+        assert_eq!(flags(state(Some("landed"))), (true, true, false, true));
+        assert_eq!(flags(state(None)), (false, true, false, false));
+        assert_eq!(state(Some("active")).base_branch.as_deref(), Some("active"));
+        assert_eq!(state(Some("untouched")).base_branch, None);
+        assert!(listed
+            .iter()
+            .all(|state| !state.merged && state.pull_request.is_none()));
+
+        assert_eq!(
+            diff_shortstats(&repo, "main", &["active", "landed"])["active"],
+            "1 file changed, 1 insertion(+)"
+        );
+
+        // Remembered answers change nothing a second listing reports, and
+        // live outside every checkout.
+        assert_eq!(
+            serde_json::to_value(list_worktrees(&repo).unwrap()).unwrap(),
+            serde_json::to_value(&listed).unwrap()
+        );
+        assert!(repo.join(".git/lf-commit-facts").is_file());
+        assert!(crate::engine::git::is_clean(&repo).unwrap());
+        assert!(crate::engine::git::is_clean(&active).unwrap());
     }
 
     #[test]
@@ -1792,27 +2348,56 @@ mod tests {
     }
 
     #[test]
-    fn wave_agent_worktree_refuses_a_branch_checked_out_elsewhere() {
+    fn wave_agent_worktree_reuses_a_moved_branch() {
         let (root, repo) = repo_with_origin();
         let segment = wave_agent_segment("ship").unwrap();
-        let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        let persistent = ensure_agent_worktree(&repo, segment.clone()).unwrap();
         let displaced = root.path().join("displaced");
         git(
             &repo,
             &[
                 "worktree",
                 "move",
-                resident.path.to_str().unwrap(),
+                persistent.path.to_str().unwrap(),
                 displaced.to_str().unwrap(),
             ],
         );
 
-        let error =
-            ensure_agent_worktree(&repo, segment).expect_err("resident placement is deterministic");
-
-        assert!(error.to_string().contains(displaced.to_str().unwrap()));
-        assert!(error.to_string().contains("expected"));
+        let recovered = ensure_agent_worktree(&repo, segment).unwrap();
+        assert_eq!(
+            recovered.path.canonicalize().unwrap(),
+            displaced.canonicalize().unwrap()
+        );
+        assert_eq!(recovered.branch, persistent.branch);
         assert!(super::is_clean(&repo).unwrap());
+    }
+
+    #[test]
+    fn missing_persistent_checkout_recovers_commits_and_pruning_retains_it() {
+        let (_root, repo) = repo_with_origin();
+        let segment = wave_agent_segment("ship").unwrap();
+        let persistent = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        fs::write(persistent.path.join("memory.md"), "unpublished").unwrap();
+        git(&persistent.path, &["add", "memory.md"]);
+        git(&persistent.path, &["commit", "-m", "memory"]);
+        fs::remove_dir_all(&persistent.path).unwrap();
+        let recovered = ensure_agent_worktree(&repo, segment).unwrap();
+        assert_eq!(
+            fs::read_to_string(recovered.path.join("memory.md")).unwrap(),
+            "unpublished"
+        );
+        assert_eq!(
+            prune_branch_worktree(
+                &repo,
+                &repo,
+                &recovered.branch,
+                WorktreePruneReason::Merged,
+                &HashSet::new()
+            )
+            .unwrap(),
+            TargetedPruneOutcome::Protected
+        );
+        assert!(recovered.path.exists());
     }
 
     #[test]

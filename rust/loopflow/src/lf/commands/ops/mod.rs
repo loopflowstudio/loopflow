@@ -4,9 +4,10 @@ use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
-    create_from_placement_plan, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
-    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, PullRequestState,
-    WorktreePrunePolicy, WorktreeSegment,
+    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
+    main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
+    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
+    WorktreeSegment,
 };
 use crate::engine::{
     prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
@@ -40,7 +41,9 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
-            crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
+            let repo = find_repo_root()?;
+            crate::ops::task::reconcile_checkout_pr(&repo)?;
+            crate::ops::pr_landing::reconcile_repository(&repo, &progress)?;
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
@@ -130,13 +133,127 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
         pr.branch,
         &pr.base_commit[..pr.base_commit.len().min(12)]
     );
-    println!("Push your follow-up edits, then `lf task pr open` when ready.");
+    println!("Push your follow-up edits, then `lf pr open` when ready.");
     Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
+        ReleaseCommand::History { wave, days, json } => {
+            let repo = crate::engine::worktrees::main_repo_root(&find_repo_root()?)?;
+            let now = chrono::Utc::now().timestamp();
+            let history = crate::ops::cron::history::release_history(
+                &crate::store::lf_home_dir(),
+                &repo,
+                wave,
+                *days,
+                now,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&history)?);
+            } else {
+                println!("{} due, {} accounted, {} collapsed, {} executions; {} published, {} no-change, {} unresolved",
+                    history.summary.due, history.summary.accounted, history.summary.collapsed,
+                    history.summary.executions, history.summary.published, history.summary.no_change,
+                    history.summary.unresolved);
+                println!("{} failed telemetry targets, {} undispositioned failures, {} late dispositions; {} qualifying consecutive pairs",
+                    history.summary.failed_verifications, history.summary.undispositioned_failures.len(),
+                    history.summary.late_dispositions.len(), history.summary.qualifying_pairs.len());
+                if history.observation_frontier.is_none() {
+                    println!("Opportunity coverage unknown: no retained release obligation; sync the configured cron to begin observation. Historical receipts below remain evidence.");
+                }
+                for obligation in &history.obligations {
+                    println!(
+                        "{}/{} on {} ({})",
+                        obligation.wave, obligation.flow, obligation.home_id, obligation.timezone
+                    );
+                    for owner in obligation.closed_unsettled() {
+                        println!(
+                            "blocked {}: obligation {} closed at {}; no future firing on original Home {}. Retained candidate: {}",
+                            owner.id,
+                            obligation.id,
+                            obligation.closed_at.expect("closed owner has a closure timestamp"),
+                            obligation.home_id,
+                            owner.attempts.iter().rev().find_map(|a| a.selection.as_ref())
+                                .map(|s| format!("{} at {}", s.tag, s.commit))
+                                .unwrap_or_else(|| "none recorded".into())
+                        );
+                        if let Some(disposition) = history
+                            .dispositions
+                            .iter()
+                            .rev()
+                            .find(|d| d.subject == owner.id)
+                        {
+                            println!(
+                                "  repair owner {} at {}: {}",
+                                disposition.owner, disposition.recorded_at, disposition.reason
+                            );
+                        }
+                        println!("  Record repair on that Home: lf cron disposition {} --wave {} --owner <task-work-id> --reason <repair-plan>", owner.id, obligation.wave);
+                    }
+                    for opportunity in obligation
+                        .opportunities
+                        .iter()
+                        .filter(|o| o.due_at >= history.window_start)
+                    {
+                        let owner = opportunity
+                            .coalesced_into
+                            .as_ref()
+                            .and_then(|id| {
+                                history
+                                    .obligations
+                                    .iter()
+                                    .flat_map(|r| &r.opportunities)
+                                    .find(|o| &o.id == id)
+                            })
+                            .unwrap_or(opportunity);
+                        println!(
+                            "{} {} {}{}",
+                            opportunity.id,
+                            opportunity.due_local,
+                            owner
+                                .attempts
+                                .last()
+                                .map(|a| format!("last attempt: {:?}", a.outcome))
+                                .or_else(|| owner.wait.as_ref().map(|wait| {
+                                    if obligation.closed_at.is_some() {
+                                        format!(
+                                            "last wait: {}; previously expected firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    } else {
+                                        format!(
+                                            "deferred: {}; next firing {}",
+                                            wait.reason, wait.retry_at
+                                        )
+                                    }
+                                }))
+                                .unwrap_or_else(|| "pending; no execution recorded".into()),
+                            opportunity
+                                .coalesced_into
+                                .as_ref()
+                                .map(|id| format!(" (collapsed into {id})"))
+                                .unwrap_or_default()
+                        );
+                    }
+                }
+                for receipt in history
+                    .receipts
+                    .iter()
+                    .filter(|r| r.outcome == CronOutcome::Failed)
+                {
+                    println!(
+                        "failed {} {}: {}",
+                        receipt.id,
+                        receipt.flow,
+                        receipt.error.as_deref().unwrap_or("inspect cron log")
+                    );
+                }
+            }
+            Ok(())
+        }
+
         ReleaseCommand::Run { version, target } => {
             release_run_cmd(version.as_deref(), target.as_deref(), &progress)
         }
@@ -214,7 +331,7 @@ pub fn run_sync(
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
     run_sync_in(
         &repo_root,
         onto,
@@ -243,7 +360,7 @@ pub(crate) fn run_sync_in(
     }
     if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf task sync --continue` or `lf task sync --abort`"
+            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
         ));
     }
     if continue_sync {
@@ -497,7 +614,7 @@ pub(crate) fn land_repo(
     // The wave home stays put on land — no rotation, no cd.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_sync(repo, options, progress)
+            finish_arm_after_sync(repo, options, progress, &|_| {})
         } else {
             arm(repo, options, progress)
         }
@@ -627,8 +744,16 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&str>) -> Result<()> {
+pub fn run_commit(
+    message: Option<&str>,
+    no_add: bool,
+    paths: &[String],
+    agent_override: Option<&str>,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
+    if !paths.is_empty() {
+        return Ok(crate::ops::commit_selected(&repo_root, paths, message)?);
+    }
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
@@ -638,6 +763,7 @@ pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&s
             ..CommitOptions::for_task("commit")
         },
         &CliProgress,
+        &|_| {},
     )?;
     Ok(())
 }
@@ -1004,6 +1130,32 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
 pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
     let launch_agents_dir = crate::ops::default_launch_agents_dir()?;
     match cmd {
+        CronCommand::Disposition {
+            subject,
+            wave,
+            owner,
+            reason,
+        } => {
+            let owner = crate::durable::TaskId::parse(owner)?;
+            tokio::runtime::Runtime::new()?.block_on(async {
+                let store = crate::store::open_registry_for_authority()
+                    .await
+                    .map_err(cron_registry_error)?;
+                if store.get_task(&owner).await?.is_none() {
+                    return Err(anyhow!("repair owner {owner} is not a registered Task"));
+                }
+                Ok(())
+            })?;
+            crate::ops::cron::history::disposition(
+                &crate::store::lf_home_dir(),
+                wave,
+                subject,
+                owner,
+                reason,
+                chrono::Utc::now().timestamp(),
+            )?;
+            println!("recorded repair disposition for {subject}; original evidence retained");
+        }
         CronCommand::Add {
             wave,
             flow,
@@ -1223,7 +1375,17 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let root = crate::ops::receipt_root(&authority.host.lf_home);
             let prior = crate::ops::cron_receipt_ids(&root, wave, flow)?;
             let triggered_at = chrono::Utc::now().timestamp();
-            crate::ops::trigger_cron(&SystemLaunchctl, wave, flow)?;
+            let request = crate::ops::cron::record_cron_trigger(&launch_agents_dir, wave, flow)?;
+            if let Err(error) = crate::ops::trigger_cron(&SystemLaunchctl, wave, flow) {
+                crate::ops::cron::record_cron_trigger_failure(
+                    &launch_agents_dir,
+                    wave,
+                    flow,
+                    &request,
+                    &error.to_string(),
+                )?;
+                return Err(error.into());
+            }
             println!("triggered {wave}/{flow} through launchd");
             if *wait {
                 let receipt = crate::ops::wait_for_cron_receipt(
@@ -1326,7 +1488,7 @@ fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
             anyhow!("Home registry path cannot be resolved: {error}")
         }
         RegistryUnavailable::Incompatible { path, error } => anyhow!(
-            "Home registry at {} is incompatible: {error}; run `lf doctor`",
+            "Home registry at {} is incompatible: {error}; run `lf home doctor`",
             path.display()
         ),
     }
@@ -1337,7 +1499,7 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Home {}, not local Home {}; run `lf ssh {} cron sync --wave {wave}`",
+        "Wave {wave} is placed on Home {}, not local Home {}; run `lf home ssh {} cron sync --wave {wave}`",
         authority.placed_home,
         authority.local_home,
         authority.placed_home,
@@ -1396,6 +1558,12 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
                 )
             })?;
             let target_kind = cron_target_kind(&authority.repo, &cron.flow)?;
+            if target_kind != CronTargetKind::Flow {
+                return Err(anyhow!(
+                    "configured cron flow {} is missing; refusing to replace it with a skill",
+                    cron.flow
+                ));
+            }
             Ok(CronSpec {
                 wave: wave.to_string(),
                 flow: cron.flow,
@@ -1409,12 +1577,55 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
         .collect()
 }
 
+#[cfg(test)]
+mod cron_catalog_tests {
+    use super::{cron_specs, CronAuthority};
+    use crate::durable::HomeId;
+    use crate::ops::{CronHost, CronTargetKind};
+    use std::fs;
+
+    #[test]
+    fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::write(
+            repo.path().join("wave/infrastructure/GOAL.md"),
+            "---\ncrons:\n- flow: release-run\n  schedule: '0 0 10 * * *'\n---\n",
+        )
+        .unwrap();
+        let flow = repo.path().join(".lf/flows/release-run.yaml");
+        fs::write(&flow, "- cmd: lf release run patch\n").unwrap();
+        let home = HomeId::new();
+        let authority = CronAuthority {
+            host: CronHost {
+                home_id: home.clone(),
+                lf_home: repo.path().join("home"),
+                path_env: "/usr/bin:/bin".into(),
+            },
+            local_home: home.clone(),
+            placed_home: home,
+            repo: repo.path().to_path_buf(),
+        };
+        let specs = cron_specs(&authority, "infrastructure").unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
+        fs::remove_file(&flow).unwrap();
+        assert!(cron_specs(&authority, "infrastructure")
+            .unwrap_err()
+            .to_string()
+            .contains("refusing to replace it with a skill"));
+        fs::write(flow, "[").unwrap();
+        assert!(cron_specs(&authority, "infrastructure").is_err());
+    }
+}
+
 fn require_release_cron_binary() -> Result<()> {
     if crate::build_info::provenance().is_release() {
         return Ok(());
     }
     Err(anyhow!(
-        "lf cron installation requires an installed release binary; promote this build before configuring launchd"
+        "lf wave cron installation requires an installed release binary; promote this build before configuring launchd"
     ))
 }
 
@@ -1432,6 +1643,8 @@ fn cron_receipt_outcome(receipt: &crate::ops::CronReceipt) -> &'static str {
 fn cron_source_name(source: CronSource) -> &'static str {
     match source {
         CronSource::Scheduled => "scheduled",
+        CronSource::Triggered => "triggered",
+        CronSource::Recovery => "recovery",
         CronSource::Manual => "manual",
     }
 }
@@ -1478,7 +1691,9 @@ fn release_run_cmd(
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
     match release_run(&repo_root, input, target_name, progress)? {
-        crate::ops::ReleaseRunOutcome::NoChanges { target, latest_tag } => {
+        crate::ops::ReleaseRunOutcome::NoChanges {
+            target, latest_tag, ..
+        } => {
             let latest = latest_tag.as_deref().unwrap_or("(none)");
             println!("No release ({target}): no merged PRs since {latest}");
         }
@@ -1614,9 +1829,26 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
 pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
-        WtCommand::Create { name, plan } => wt_create(name, *plan),
+        WtCommand::Create {
+            name,
+            plan,
+            persistent,
+        } => {
+            if *persistent && !*plan {
+                let repo = find_repo_root()?;
+                let workspace = crate::engine::worktrees::ensure_agent_worktree(
+                    &repo,
+                    WorktreeSegment::parse(name)?,
+                )?;
+                println!("Persistent workspace: {}", workspace.path.display());
+                Ok(())
+            } else {
+                wt_create(name, *plan)
+            }
+        }
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { json, sync } => wt_list(*json, *sync),
+        WtCommand::Timing { json } => wt_timing(*json),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
@@ -1745,10 +1977,68 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn wt_timing(json: bool) -> Result<()> {
+    let report = crate::ops::wt_timing::report(&crate::store::lf_home_dir())?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    if report.groups.is_empty() {
+        println!("No `lf wt list` invocations recorded in {}", report.path);
+        return Ok(());
+    }
+    let seconds = |ms: u64| format!("{:.2}s", ms as f64 / 1000.0);
+    let phase = |spread: Option<crate::ops::wt_timing::Spread>| {
+        spread.map_or_else(
+            || "-".to_string(),
+            |spread| format!("{} / {}", seconds(spread.median), seconds(spread.p95)),
+        )
+    };
+    for group in &report.groups {
+        let mode = match (group.json, group.sync) {
+            (false, false) => "text",
+            (true, false) => "json",
+            (false, true) => "text --sync",
+            (true, true) => "json --sync",
+        };
+        println!("{}  lf {}  {mode}", group.repo, group.version);
+        println!(
+            "  samples {}   median {}   p95 {}   max {}",
+            group.samples,
+            seconds(group.total_ms.median),
+            seconds(group.total_ms.p95),
+            seconds(group.total_ms.max)
+        );
+        println!(
+            "  median / p95:  startup {}   local git {}   remote {}   receipts {}",
+            phase(Some(group.startup_ms)),
+            phase(group.local_git_ms),
+            phase(group.remote_ms),
+            phase(group.receipt_ms)
+        );
+        println!(
+            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}   receipts unrecorded {}",
+            group.failed,
+            group.interrupted,
+            group.remote_timed_out,
+            group.remote_unavailable,
+            group.receipts_unrecorded
+        );
+    }
+    println!(
+        "{} samples in {} (at most {} kept)",
+        report.samples, report.path, report.retained_limit
+    );
+    if report.unreadable > 0 {
+        println!("{} lines unreadable by this lf", report.unreadable);
+    }
+    Ok(())
+}
+
 fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
+    crate::ops::wt_timing::begin(&main_repo, json, sync);
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
     // self-owned mutation that fetches origin and integrates main first — a
@@ -1757,7 +2047,9 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
     if sync {
         crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
     }
-    let worktrees = list_worktrees(&main_repo)?;
+    let listing = list_worktrees_timed(&main_repo)?;
+    crate::ops::wt_timing::listed(&listing);
+    let (default_branch, worktrees) = (listing.default_branch, listing.worktrees);
 
     if json {
         let json = serde_json::to_string_pretty(&worktrees)?;
@@ -1783,6 +2075,13 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
         diff_stat: String,
     }
 
+    let branches: Vec<&str> = worktrees
+        .iter()
+        .filter_map(|wt| wt.branch.as_deref())
+        .filter(|branch| *branch != default_branch)
+        .collect();
+    let diff_stats = diff_shortstats(&main_repo, &default_branch, &branches);
+
     let mut rows: Vec<Row> = worktrees
         .iter()
         .map(|wt| {
@@ -1805,11 +2104,13 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
                 (name.clone(), name)
             };
             let is_current = wt.path == repo_root;
-            let diff_stat = if is_main {
-                String::new()
-            } else {
-                wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
-            };
+            // "3 files changed, 10 insertions(+), 5 deletions(-)" → "+10 -5 (3 files)"
+            let diff_stat = wt
+                .branch
+                .as_deref()
+                .and_then(|branch| diff_stats.get(branch))
+                .map(|raw| parse_shortstat(raw))
+                .unwrap_or_default();
             Row {
                 label,
                 sort_key,
@@ -1893,28 +2194,6 @@ fn wt_delete(name: &str, force: bool) -> Result<()> {
     crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
     println!("Deleted {name}");
     Ok(())
-}
-
-/// Get a compact diff stat for a branch vs default branch.
-fn wt_diff_stat(repo: &std::path::Path, branch: Option<&str>, default_branch: &str) -> String {
-    let branch = match branch {
-        Some(b) => b,
-        None => return String::new(),
-    };
-    let target = format!("origin/{default_branch}");
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["diff", "--shortstat", &format!("{target}...{branch}")])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => {
-            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            // "3 files changed, 10 insertions(+), 5 deletions(-)" → "+10 -5 (3 files)"
-            parse_shortstat(&raw)
-        }
-        _ => String::new(),
-    }
 }
 
 fn parse_shortstat(raw: &str) -> String {
@@ -2033,7 +2312,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
 
     // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

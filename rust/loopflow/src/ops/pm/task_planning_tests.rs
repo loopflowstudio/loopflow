@@ -56,6 +56,7 @@ struct PlanningState {
     project_name: Option<String>,
     fail_confirmation: bool,
     fail_snapshot: bool,
+    fail_issue_read_after: Option<usize>,
     fail_completion: bool,
     lose_completion: bool,
     lose_comment: bool,
@@ -167,6 +168,15 @@ async fn planning_graphql(
         let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
+        if let Some(remaining) = state.fail_issue_read_after.as_mut() {
+            if *remaining == 0 {
+                state.fail_issue_read_after = None;
+                return axum::Json(
+                    json!({"errors":[{"message":"issue confirmation unavailable"}]}),
+                );
+            }
+            *remaining -= 1;
+        }
         if state.trashed {
             return axum::Json(
                 json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
@@ -402,7 +412,58 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
 }
 
 #[test]
-fn task_creation_snapshot_failure_retries_without_starting_backlog() {
+fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
+        // The initial Project read works, but after creation a Wave snapshot
+        // is unavailable. Exact issue reads still work.
+        fail_snapshot: true,
+        ..Default::default()
+    }));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        let crate::ops::task::TaskCreateResult::Created(created) = crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Continue training".into()),
+            Some("Retain the issue".into()),
+            None,
+        )
+        .unwrap() else {
+            panic!("backlog creation unexpectedly launched work")
+        };
+        crate::ops::task::task_edit(
+            &repo,
+            &created.identifier,
+            None,
+            Some("Continue the existing training Task".into()),
+            None,
+        )
+        .unwrap();
+        let record =
+            crate::ops::task_pm::resolve_task(&repo, &created.id, PmRefresh::Never).unwrap();
+        assert_eq!(record.item.name, "Continue the existing training Task");
+        assert_eq!(record.item.id, created.id);
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues.len() }),
+            1
+        );
+        assert!(runtime
+            .block_on(fixture.store.list_tasks(None))
+            .unwrap()
+            .is_empty());
+    });
+    server.abort();
+}
+
+#[test]
+fn task_creation_confirmation_failure_retries_without_starting_backlog() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -413,7 +474,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
     std::fs::write(repo.join("authored.txt"), "keep this unfinished work").unwrap();
     runtime.block_on(fixture.seed(now() + 86_400));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
-        fail_snapshot: true,
+        fail_issue_read_after: Some(0),
         ..Default::default()
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
@@ -433,7 +494,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
                 error.contains("Linear task issue-1 is committed"),
                 "{error}"
             );
-            assert!(error.contains("snapshot unavailable"), "{error}");
+            assert!(error.contains("issue confirmation unavailable"), "{error}");
             assert!(error.contains("Retry the same `lf task create`"), "{error}");
             assert!(!error.contains("lf task run"), "{error}");
             assert_eq!(
@@ -455,7 +516,7 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
         };
         {
             runtime.block_on(async {
-                state.lock().await.fail_snapshot = true;
+                state.lock().await.fail_issue_read_after = Some(1);
             });
             let error = edit().unwrap_err().to_string();
             assert!(
@@ -1106,7 +1167,7 @@ fi
             }));
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_snapshot = true;
+                provider.fail_issue_read_after = Some(1);
                 provider.lose_comment = true;
             });
             assert!(complete("Delivered the requested outcome")
@@ -1117,7 +1178,7 @@ fi
         if registered {
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_snapshot = true;
+                provider.fail_issue_read_after = Some(1);
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
                 mark_issue_updated(&mut provider.issues[0]);

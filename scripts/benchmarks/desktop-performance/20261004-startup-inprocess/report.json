@@ -1,0 +1,200 @@
+{
+  "endpoint": "model holds outline content (in-process); not a rendered frame",
+  "not_measured": [
+    "first frame",
+    "process launch and pre-main",
+    "CPU",
+    "memory",
+    "main-thread stalls after init"
+  ],
+  "budget_usable_ms": 1000,
+  "capture": {
+    "lf": "lf 0.12.32",
+    "reads": [
+      {
+        "verb": "home",
+        "file": "home.json",
+        "ms": 1380.0,
+        "bytes": 136
+      },
+      {
+        "verb": "wave",
+        "file": "waves.json",
+        "ms": 2285.9,
+        "bytes": 24580
+      },
+      {
+        "verb": "roadmap",
+        "file": "roadmap.json",
+        "ms": 13142.9,
+        "bytes": 607848
+      },
+      {
+        "verb": "activity",
+        "file": "activity.json",
+        "ms": 2178.0,
+        "bytes": 27686
+      },
+      {
+        "verb": "session",
+        "file": "sessions-0.json",
+        "ms": 5280.2,
+        "bytes": 60062
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario": "uncached",
+      "attempted": 20,
+      "usable_from": [
+        "read"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 20,
+        "median_ms": 27.6,
+        "p95_ms": 36.4,
+        "max_ms": 42.0
+      },
+      "usable": {
+        "samples": 20,
+        "median_ms": 13181.1,
+        "p95_ms": 13186.7,
+        "max_ms": 13192.1
+      },
+      "settled": {
+        "samples": 20,
+        "median_ms": 13181.1,
+        "p95_ms": 13186.7,
+        "max_ms": 13192.1
+      },
+      "reads_finished_until_usable": {
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "usable_within_budget": false
+    },
+    {
+      "scenario": "saved",
+      "attempted": 20,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 20,
+        "median_ms": 9.6,
+        "p95_ms": 9.8,
+        "max_ms": 9.9
+      },
+      "usable": {
+        "samples": 20,
+        "median_ms": 9.6,
+        "p95_ms": 9.8,
+        "max_ms": 9.9
+      },
+      "settled": {
+        "samples": 20,
+        "median_ms": 13163.3,
+        "p95_ms": 13164.9,
+        "max_ms": 13165.0
+      },
+      "reads_finished_until_usable": {},
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    },
+    {
+      "scenario": "saved_offline",
+      "attempted": 20,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "failed"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 20,
+        "median_ms": 9.5,
+        "p95_ms": 9.7,
+        "max_ms": 9.8
+      },
+      "usable": {
+        "samples": 20,
+        "median_ms": 9.5,
+        "p95_ms": 9.7,
+        "max_ms": 9.8
+      },
+      "settled": {
+        "samples": 20,
+        "median_ms": 62.4,
+        "p95_ms": 63.4,
+        "max_ms": 63.7
+      },
+      "reads_finished_until_usable": {},
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 1,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    },
+    {
+      "scenario": "warm_reopen",
+      "attempted": 20,
+      "usable_from": [
+        "saved"
+      ],
+      "status": [
+        "current"
+      ],
+      "content_kept": true,
+      "init_main_thread": {
+        "samples": 20,
+        "median_ms": 6.5,
+        "p95_ms": 6.7,
+        "max_ms": 6.7
+      },
+      "usable": {
+        "samples": 20,
+        "median_ms": 6.5,
+        "p95_ms": 6.7,
+        "max_ms": 6.7
+      },
+      "settled": {
+        "samples": 20,
+        "median_ms": 13160.3,
+        "p95_ms": 13161.8,
+        "max_ms": 13162.7
+      },
+      "reads_finished_until_usable": {},
+      "reads_until_settled": {
+        "activity": 1,
+        "roadmap": 1,
+        "session": 2,
+        "wave": 1
+      },
+      "usable_within_budget": true
+    }
+  ]
+}

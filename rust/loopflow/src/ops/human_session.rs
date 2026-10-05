@@ -21,6 +21,54 @@ use crate::work::task::{Task, TaskId};
 #[cfg(test)]
 pub(crate) mod action_test;
 pub(crate) mod primary;
+pub(crate) use primary::ensure_scope_worktree;
+pub(crate) mod provider_conversation;
+
+/// Choose by native human input, falling back to each Session's last opening.
+pub async fn latest_interactive_session(
+    store: &SharedStore,
+    cwd: &Path,
+) -> Result<Option<AgentSession>> {
+    fn checkout(path: &Path) -> Option<PathBuf> {
+        let path = fs::canonicalize(path).ok()?;
+        let root = crate::repo::discover_repo_root(&path).ok()?.unwrap_or(path);
+        fs::canonicalize(root).ok()
+    }
+    let Some(current) = checkout(cwd) else {
+        return Ok(None);
+    };
+    let mut roots = BTreeMap::new();
+    let candidates = store
+        .resume_candidates()
+        .await?
+        .into_iter()
+        .filter(|(session, _)| {
+            roots
+                .entry(session.cwd.clone())
+                .or_insert_with(|| checkout(&session.cwd))
+                .as_ref()
+                == Some(&current)
+        })
+        .collect::<Vec<_>>();
+    let human = provider_conversation::human_input_times(
+        store,
+        candidates.iter().map(|(session, _)| session),
+    )
+    .await?;
+    Ok(candidates
+        .into_iter()
+        .max_by_key(|(session, opened)| {
+            (
+                human
+                    .get(&session.id)
+                    .copied()
+                    .or(*opened)
+                    .unwrap_or(session.created_at.saturating_mul(1000)),
+                session.id.clone(),
+            )
+        })
+        .map(|(session, _)| session))
+}
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_PREPARED_CAPTURE";
@@ -687,19 +735,26 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
 }
 
-/// Resolve the conversation by its durable identity, never by a capture selector.
-async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<SessionTarget>> {
-    let Some(session) = store.session(session_id).await? else {
+/// Resolve a durable Session or recorded native conversation, never a capture selector.
+async fn find_session(
+    store: &SharedStore,
+    session_id: &str,
+    open_completed: bool,
+) -> Result<Option<SessionTarget>> {
+    let Some(session) = session_by_id(store, session_id).await? else {
         return Ok(None);
     };
-    owned_target(store, session).await.map(Some)
+    owned_target(store, session, open_completed).await.map(Some)
 }
 
 async fn owned_target(
     store: &SharedStore,
     session: crate::session::AgentSession,
+    open_completed: bool,
 ) -> Result<SessionTarget> {
-    if session.completed_at.is_some() {
+    if session.completed_at.is_some()
+        && !(open_completed && session.kind == crate::session::SessionKind::Conversation)
+    {
         bail!("Session {} is already complete", session.id);
     }
     let Some((task_id, position)) = managed_review(store, &session).await? else {
@@ -855,7 +910,7 @@ pub(crate) async fn completion_worktree(
     store: &SharedStore,
     session_id: &str,
 ) -> Result<Option<PathBuf>> {
-    match find_session(store, session_id)
+    match find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?
     {
@@ -951,6 +1006,9 @@ async fn serve_flow_locked(
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("review service has no Exec identity"))?;
+    store.sqlite.record_review_service(position, &exec)?;
     if let Some(failure) = &position.failure {
         bail!("review session cannot start: {}", failure.reason);
     }
@@ -986,7 +1044,8 @@ async fn serve_flow_locked(
         .env(
             crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
             accounts.env_value()?,
-        );
+        )
+        .envs(position.invocation.isolation_env());
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;
@@ -1150,13 +1209,30 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
-    let target = find_session(store, session_id)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
+    let target = match find_session(store, session_id, true).await? {
+        Some(target) => target,
+        // Connecting is what brings a provider-started conversation in.
+        None => SessionTarget::Row {
+            session: Box::new(
+                provider_conversation::admit(store, session_id)
+                    .await?
+                    .ok_or_else(|| session_not_found(session_id))?,
+            ),
+        },
+    };
     match &target {
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
         {
+            let admitted;
+            let session = if resume {
+                let id = session.id.clone();
+                let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+                admitted = primary::admit_workspace(store, session.as_ref().clone()).await?;
+                &admitted
+            } else {
+                session
+            };
             let native = NativeSession::of(session)?;
             let Some(provider_session) =
                 store.sqlite.input_provider_session(&session.artifact_key)?
@@ -1169,19 +1245,20 @@ pub(crate) async fn open(
             };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-                if mode == OpenMode::Replace {
-                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-                }
             }
             if resume
                 && native.provider == "codex"
-                && connect_live_codex(store, session, &provider_session).await?
+                && connect_live_codex(store, session, &provider_session, mode == OpenMode::Replace)
+                    .await?
             {
                 let session = store
                     .sqlite
                     .session(&session.id)?
                     .ok_or_else(|| session_not_found(&session.id))?;
                 return surface(store, &session).await;
+            }
+            if resume && mode == OpenMode::Replace {
+                native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
             }
             if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
                 require_session_action(
@@ -1218,7 +1295,7 @@ pub(crate) async fn open(
             let lock_id = id.clone();
             let launch_lock =
                 tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-            let current = find_session(store, session_id)
+            let current = find_session(store, session_id, false)
                 .await?
                 .ok_or_else(|| session_not_found(session_id))?;
             let SessionTarget::Flow {
@@ -1250,13 +1327,15 @@ pub(crate) async fn open(
 }
 
 /// Connect to one existing provider thread. Native UI traffic crosses the same
-/// driver fence as the headless writer; closing the UI releases only its claim.
+/// driver fence as the headless writer; closing the current UI closes the runtime.
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
     session: &AgentSession,
     provider: &crate::session_record::ProviderSessionRef,
+    replace_clients: bool,
 ) -> Result<bool> {
+    let expected = store.sqlite.session_driver(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
@@ -1277,16 +1356,29 @@ async fn connect_live_codex(
     }
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
-    let expected = store.sqlite.session_driver(&session.id)?;
-    let driver = store
-        .sqlite
-        .claim_session_driver(&session.id, expected.as_ref(), &exec, false)?;
+    let driver =
+        match store
+            .sqlite
+            .claim_session_driver(&session.id, expected.as_ref(), &exec, false)
+        {
+            Ok(driver) => driver,
+            Err(crate::store::StoreError::InvalidAuthority(_))
+                if store.sqlite.session_connection(&session.id)?.is_none() =>
+            {
+                // Close won the race. The ordinary open path resumes saved history.
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
     crate::session_record::register_session_driver_interrupt(
         &store.sqlite,
         session.id.clone(),
         driver.clone(),
     );
     let connected = async {
+        if replace_clients {
+            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+        }
         store.sqlite.make_session_interactive(&session.id, &driver)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
@@ -1324,10 +1416,12 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match store
-        .sqlite
-        .finish_session_driver(&session.id, &driver, "detached")
-    {
+    match crate::session_record::finish_session_driver(
+        &store.sqlite,
+        &session.id,
+        &driver,
+        "completed",
+    ) {
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
     }
@@ -1335,7 +1429,7 @@ async fn connect_live_codex(
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
-    let target = find_session(store, session_id)
+    let target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     #[cfg(test)]
@@ -1379,6 +1473,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if session.completed_at.is_some() {
         bail!("session {id:?} is already complete");
     }
+    let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let token = session_token(&session);
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
@@ -1635,7 +1730,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
     }))
 }
 
-fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
+pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
     crate::session_record::record_dir(&crate::store::lf_home_dir(), artifact_key)
 }
 
@@ -1647,7 +1742,7 @@ pub(crate) async fn rename(
     title: &str,
     source: SessionTitleSource,
 ) -> Result<SessionRecord> {
-    let mut target = find_session(store, session_id)
+    let mut target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     let title = crate::session_record::validate_session_title(title)
@@ -1676,7 +1771,7 @@ pub(crate) async fn rename(
     #[cfg(test)]
     action_test::after_lookup("rename", session_id).await;
     let _launch_lock = pending_lock.await??;
-    target = find_session(store, session_id)
+    target = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
     if let SessionTarget::Flow { position, .. } = &target {
@@ -1728,8 +1823,7 @@ pub(crate) async fn preview_binding(
 }
 
 async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
-    let session = store
-        .session(id)
+    let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
     let task = match crate::durable::TaskId::parse(task) {
@@ -1738,6 +1832,14 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Ag
     }
     .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
     Ok((session, task))
+}
+
+/// Resolve a Session in any state by its durable or native conversation id.
+pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+    if let Some(session) = store.session(id).await? {
+        return Ok(Some(session));
+    }
+    provider_conversation::recorded(store, id).await
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {
@@ -1899,7 +2001,7 @@ pub(crate) fn human_open_argv(
         context.lf_bin.display().to_string(),
     ];
     if let Some(home_id) = remote_home {
-        argv.push("ssh".to_string());
+        argv.extend(["home".to_string(), "ssh".to_string()]);
         if let Some(worktree) = worktree {
             let repo = crate::engine::wave_home::resolve_home_relative_repo(worktree)
                 .map_err(anyhow::Error::msg)?;
@@ -2083,7 +2185,19 @@ pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
         .truncate(false)
         .open(path)
         .context("open Session launch lock")?;
-    FileExt::lock_exclusive(&file).context("lock Session launch")?;
+    let deadline = std::time::Instant::now() + SESSION_START_TIMEOUT;
+    loop {
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    bail!("Session launch is still busy; retry after its current launch settles");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error).context("lock Session launch"),
+        }
+    }
     Ok(file)
 }
 

@@ -324,6 +324,84 @@ pub(crate) mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn steer_failure_preserves_confirmed_or_uncertain_publication() {
+        for confirmed in [true, false] {
+            let failure = || {
+                json_response(
+                    StatusCode::OK,
+                    json!({"errors": [{"message": "observation unavailable"}]}),
+                )
+            };
+            let write = if confirmed {
+                json_response(
+                    StatusCode::OK,
+                    json!({"data": {
+                        "commentCreate": {"comment": {"id": "posted-comment"}}
+                    }}),
+                )
+            } else {
+                failure()
+            };
+            let (url, _) = test_server::spawn(vec![write, failure()]).await;
+            let home = tempfile::tempdir().unwrap();
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    home.path().join("store.db"),
+                ))
+                .await
+                .unwrap(),
+            );
+            store
+                .upsert_provider_token(&ProviderToken {
+                    provider: "linear".into(),
+                    access_token: "fixture-token".into(),
+                    refresh_token: None,
+                    oauth_client_id: None,
+                    expires_at: None,
+                    login: Some("fixture".into()),
+                    updated_at: 1,
+                    credential_type: CredentialType::OAuth,
+                })
+                .await
+                .unwrap();
+            let mut task = task();
+            task.worktree = home.path().to_path_buf();
+            std::fs::create_dir_all(home.path().join(".lf")).unwrap();
+            std::fs::write(
+                home.path().join(".lf/config.yaml"),
+                "pm:\n  provider: linear\n",
+            )
+            .unwrap();
+            let error = crate::ops::pm::PM_TEST_CONTEXT
+                .scope(
+                    crate::ops::pm::PmTestContext {
+                        path: home.path().join("store.db"),
+                        store: store.clone(),
+                        graphql_url: url,
+                    },
+                    super::publish_task_steer(&store, &task, "preserve the working conversation"),
+                )
+                .await
+                .unwrap_err()
+                .to_string();
+            if confirmed {
+                assert!(
+                    error.contains("Posted Linear comment posted-comment"),
+                    "{error}"
+                );
+                assert!(error.contains("local delivery is pending"), "{error}");
+            } else {
+                assert!(
+                    error.contains("Linear did not confirm this comment"),
+                    "{error}"
+                );
+                assert!(error.contains("before resubmitting"), "{error}");
+            }
+            assert!(!error.contains("was not published"), "{error}");
+        }
+    }
+
     const VIEWER: &str = "user-loopflow";
 
     #[test]

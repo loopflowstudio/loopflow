@@ -49,7 +49,7 @@ fn flow_steps_use_explicit_binary_and_retain_effects_after_experimental_schema_c
         write_flow(
             repo.path(),
             "path-proof",
-            "- cmd: task sync --plan\n- cmd: task sync --plan\n",
+            "- cmd: sync --plan\n- cmd: sync --plan\n",
         );
         // An explicitly selected executable delegates the effect to lf, then
         // changes the experimental schema so subsequent opens must refuse it.
@@ -153,7 +153,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     write_flow(
         repo.path(),
         "mechanical-failure",
-        "- cmd: task sync --plan\n- cmd: __telemetry-scorecard\n",
+        "- cmd: sync --plan\n- cmd: __telemetry-scorecard\n",
     );
     let output = run_lf(
         repo.path(),
@@ -259,7 +259,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     write_flow(
         repo.path(),
         "survive",
-        "- cmd: __telemetry-scorecard\n- cmd: task sync --plan\n",
+        "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
     );
     let mut driver = lf_command(
         repo.path(),
@@ -994,7 +994,7 @@ fn flow_parsing_parity() {
 }
 
 #[test]
-fn code_flow_records_each_skill_as_one_generic_run() {
+fn authored_flow_records_each_skill_as_one_session() {
     let repo = TempDir::new().unwrap();
     run_git(repo.path(), &["init", "-b", "main"]);
     run_git(repo.path(), &["config", "user.email", "test@example.com"]);
@@ -1002,6 +1002,7 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     for skill in ["implement", "compress"] {
         write_skill(repo.path(), skill, &format!("Run the {skill} step."));
     }
+    write_flow(repo.path(), "two-skills", "- implement\n- compress\n");
     run_git(repo.path(), &["add", "."]);
     run_git(repo.path(), &["commit", "-m", "fixture"]);
 
@@ -1018,12 +1019,12 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["code", "--mode", "batch", "--no-loopflow"],
+        &["two-skills", "--mode", "batch", "--no-loopflow"],
         Some(&path),
     );
     assert!(
         output.status.success(),
-        "lf code failed:\n{}\n{}",
+        "two-skills failed:\n{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1031,7 +1032,7 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["usage", "--days", "7", "--json"],
+        &["monitor", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(
@@ -1101,6 +1102,8 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     fs::remove_file(repo.path().join(".lf/skills/saved-review.md")).unwrap();
     fs::remove_file(repo.path().join(".lf/flows/review-flow.yaml")).unwrap();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // Startup logs can fill a pipe while this test waits for provider identity.
+    let stderr = home.path().join("review.stderr");
     let mut opened = lf_command(
         repo.path(),
         home.path(),
@@ -1109,7 +1112,7 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     )
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::piped())
+    .stderr(fs::File::create(&stderr).unwrap())
     .spawn()
     .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -1149,7 +1152,7 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     assert!(
         opened.status.success(),
         "{}",
-        String::from_utf8_lossy(&opened.stderr)
+        fs::read_to_string(&stderr).unwrap()
     );
     assert!(fs::read_to_string(received)
         .unwrap()
@@ -1384,7 +1387,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     for args in [
         vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
-        vec!["usage", "--task", "INF-123", "--json"],
+        vec!["monitor", "usage", "--task", "INF-123", "--json"],
     ] {
         let read = run_lf(repo.path(), home.path(), &args, None);
         assert!(read.status.success(), "{read:?}");
@@ -1458,7 +1461,9 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         let output = run_lf(
             repo.path(),
             home.path(),
-            &["usage", "--days", "0", "--task", selector, "--json"],
+            &[
+                "monitor", "usage", "--days", "0", "--task", selector, "--json",
+            ],
             None,
         );
         assert!(
@@ -1593,12 +1598,14 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
             .unwrap_or_else(|| panic!("Session {run_id} is not listed"))
     };
     let task_runs = |identifier: &str| -> Vec<String> {
-        json(&["usage", "--days", "0", "--task", identifier, "--json"])
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|run| run["artifact_key"].as_str().unwrap().to_string())
-            .collect()
+        json(&[
+            "monitor", "usage", "--days", "0", "--task", identifier, "--json",
+        ])
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["artifact_key"].as_str().unwrap().to_string())
+        .collect()
     };
 
     write_skill(repo.path(), "binding-work", "Do proof-owned work.");
@@ -1705,7 +1712,9 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // Observation stays observation.
     let settled = events();
     let _ = json(&["session", "list", "--all", "--json"]);
-    let _ = json(&["usage", "--days", "0", "--task", "INF-123", "--json"]);
+    let _ = json(&[
+        "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+    ]);
     let _ = json(&["monitor", "active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
 
@@ -1748,7 +1757,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
-    write_flow(repo.path(), "claim-proof", "- cmd: task sync --plan\n");
+    write_flow(repo.path(), "claim-proof", "- cmd: sync --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
@@ -1879,7 +1888,9 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     let read = run_lf(
         repo.path(),
         home.path(),
-        &["usage", "--days", "0", "--task", "INF-123", "--json"],
+        &[
+            "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+        ],
         None,
     );
     assert!(
@@ -2092,7 +2103,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["usage", "--days", "7", "--json"],
+        &["monitor", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(output.status.success());
@@ -2175,7 +2186,9 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let listed = run_lf(
         repo.path(),
         home.path(),
-        &["usage", "--days", "0", "--task", "INF-123", "--json"],
+        &[
+            "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+        ],
         None,
     );
     assert!(listed.status.success());
@@ -2281,7 +2294,7 @@ fn command_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- cmd: task pr land
+- cmd: pr land
 "#,
     );
 
@@ -2292,8 +2305,8 @@ fn command_item_parses_and_expands() {
             target: loopflow::engine::target::Target::Command(item),
             ..
         } => {
-            assert_eq!(item.command, "task");
-            assert_eq!(item.args, vec!["pr", "land"]);
+            assert_eq!(item.command, "pr");
+            assert_eq!(item.args, vec!["land"]);
         }
         other => panic!("expected command item, got {other:?}"),
     }
@@ -2473,7 +2486,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     ] {
         write_skill(repo.path(), skill, "Fixture step.");
     }
-    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: task pr land -c\n";
+    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: pr land -c\n";
     write_flow(repo.path(), "two-loops", two_loops);
 
     // Before any Flow: the recommendation, Start, and no invented history.
@@ -2564,7 +2577,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             "decide-proof",
             "demo-proof",
             "decide-proof",
-            "task pr land -c"
+            "pr land -c"
         ]
     );
     assert_eq!(record["current"], 1);
@@ -2766,6 +2779,7 @@ case "$*" in *app-server*) ;; *)
         repo.path(),
         home.path(),
         &[
+            "--isolate",
             "--account",
             "claude=claude-chosen@",
             "--account",
@@ -2794,6 +2808,7 @@ case "$*" in *app-server*) ;; *)
         repo.path(),
         home.path(),
         &[
+            "--isolate",
             "--account",
             "claude=claude-other@",
             "--account",

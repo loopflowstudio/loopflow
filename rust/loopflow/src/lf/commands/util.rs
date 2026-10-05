@@ -99,7 +99,7 @@ pub(crate) fn exec_session_with_env(
     if target == ExecTarget::Ide {
         if let Some(url) = launch.ide_url.as_deref() {
             match crate::engine::platform::open_url_checked(url) {
-                Ok(()) => return Ok(()),
+                Ok(()) => return record_interactive_opened(environment),
                 Err(err) => eprintln!("Could not open vendor app ({err}); falling back to TUI."),
             }
         } else if harness == "opencode" {
@@ -313,7 +313,7 @@ pub(crate) fn resume_session_with_env(
         } else {
             "failed"
         };
-        match store.finish_session_driver(&session, &driver, outcome) {
+        match crate::session_record::finish_session_driver(&store, &session, &driver, outcome) {
             Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
             Err(error) => return Err(error.into()),
         }
@@ -640,6 +640,7 @@ fn spawn_session_command_with_env(
 
 fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static str {
     match reason {
+        ProviderClientStopReason::Retired => "Review retired by Task restart.",
         ProviderClientStopReason::Moved => "Session moved to another terminal.",
         ProviderClientStopReason::Completed => "Session completed elsewhere.",
     }
@@ -649,6 +650,32 @@ fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static st
 struct SessionCommandOutcome {
     status: std::process::ExitStatus,
     stop_reason: Option<ProviderClientStopReason>,
+}
+
+fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
+    let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
+        return Ok(());
+    };
+    let Some(exec) = crate::journal::current_exec_id() else {
+        return Ok(());
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session_for_artifact(input)?
+        .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
+    if !session.interactive {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc();
+    store.retain_session_observation(&session, &crate::session::SessionObservation {
+        artifact_key: crate::session_record::parse_artifact_key(input)?,
+        source: format!("interactive_opened:{exec}:{}", session.id),
+        observed_at: now.unix_timestamp(),
+        task_id: session.task_id.clone(),
+        wave_id: session.wave_id.clone(),
+        payload: serde_json::json!({"type":"interactive_opened", "opened_at_ms": now.unix_timestamp_nanos() / 1_000_000}),
+    })?;
+    Ok(())
 }
 
 fn session_command_status_with_env(
@@ -694,12 +721,8 @@ fn session_command_status_with_env(
         .flatten();
 
     let mut process = Command::new(&command.program);
-    if provider == Some(Provider::Codex)
-        && account_route
-            .as_ref()
-            .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
-    {
-        process.args(["-c", "cli_auth_credentials_store=\"file\""]);
+    if let Some(route) = &account_route {
+        process.args(route.provider_args());
     }
     if command.program == "codex" && provider_session_id.is_none() && capture_dir.is_some() {
         let hook = codex_session_start_hook()?;
@@ -718,9 +741,12 @@ fn session_command_status_with_env(
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
         .envs(environment);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
+    let mut activation = None;
     if let Some(route) = &account_route {
         tracing::info!(provider = %command.program, "selected managed provider account");
-        route.apply(&mut process);
+        activation = route
+            .launch_as_blocking(&mut process)
+            .map_err(|error| anyhow!("failed to activate provider account: {error}"))?;
         process.env(
             crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
             route.account_id().as_str(),
@@ -739,6 +765,7 @@ fn session_command_status_with_env(
         )?;
     }
     let mut child = process.spawn()?;
+    drop(activation);
     let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {
         Ok(client) => client,
         Err(error) => {
@@ -747,6 +774,11 @@ fn session_command_status_with_env(
             return Err(error);
         }
     };
+    if let Err(error) = record_interactive_opened(environment) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
     // Completion and another Open can proceed once exact client ownership is visible.
     drop(launch_lock);
     drop(launch);
@@ -762,6 +794,15 @@ fn session_command_status_with_env(
         observer
             .join()
             .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
+    }
+    // Record which home this conversation lives in, so reopening returns there.
+    if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
+        if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
+            if let Err(error) = route.record_exec_blocking(Some(session.provider_session_id), None)
+            {
+                tracing::warn!(%error, "failed to record the provider session's account home");
+            }
+        }
     }
     let stop_reason = client
         .as_ref()
@@ -1838,7 +1879,7 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn session_launch_tui_claude_uses_a_healthy_managed_login() {
+    async fn session_launch_tui_claude_signs_its_native_home_in_as_a_healthy_managed_login() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
@@ -1850,7 +1891,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_ACCOUNT_LEASE");
-        std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
+        let native = temp.path().join("native");
+        std::env::set_var("CLAUDE_CONFIG_DIR", &native);
 
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1895,7 +1937,11 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
-            account_home.to_string_lossy()
+            native.to_string_lossy()
+        );
+        assert_eq!(
+            std::fs::read(native.join(".credentials.json")).unwrap(),
+            std::fs::read(account_home.join(".credentials.json")).unwrap()
         );
     }
 

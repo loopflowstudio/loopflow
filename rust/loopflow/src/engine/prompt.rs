@@ -135,7 +135,7 @@ pub enum Surface {
     Mac,
     Iphone,
     /// A live chat channel (e.g. Discord) where a person is reading. The reply
-    /// is the message they see, so the resident speaks plainly and deliberately.
+    /// is the message they see, so the agent speaks plainly and deliberately.
     Chat,
     #[default]
     #[serde(other)]
@@ -2371,7 +2371,7 @@ mod tests {
         assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("launch an ordinary contribution explicitly"));
         assert!(prompt.contains("explain the failure in ordinary output and stop"));
-        assert!(prompt.contains("For reversible ambiguity within existing authorization"));
+        assert!(prompt.contains("For reversible ambiguity"));
     }
 
     #[test]

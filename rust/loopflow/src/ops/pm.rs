@@ -420,7 +420,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf ssh` resolves the PM
+    // A forwarded token wins over the local store: `lf home ssh` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf repo refresh` could never authenticate.
@@ -586,7 +586,7 @@ async fn resolve_pm_token_from_store(
     unreachable!("both refresh attempts return or retry")
 }
 
-/// Env var carrying a PM access token forwarded by `lf ssh`.
+/// Env var carrying a PM access token forwarded by `lf home ssh`.
 pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
 /// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
 pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
@@ -1007,6 +1007,7 @@ async fn pm_init_async(
                 ..crate::ops::CommitOptions::for_task("pm")
             },
             progress,
+            &|_| {},
         )?;
     }
 
@@ -1274,15 +1275,15 @@ pub(crate) async fn pm_update_async(
         apply_update(&ctx, &options, progress).await?;
     }
     let reconcile = async {
-        progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
-        let snapshot = refresh_pm_snapshot(repo, &wave, &ctx).await?;
-        let item = snapshot
-            .items
-            .iter()
-            .find(|updated| updated.id == item.id)
-            .ok_or_else(|| {
-                OpsError::Message("updated issue is absent from the refreshed snapshot".into())
-            })?;
+        progress.status(&format!("confirming Linear task {}", item.identifier));
+        let record = crate::ops::task_pm::resolve_task_async(repo, &item.id, PmRefresh::Force).await?;
+        if record.wave != wave {
+            return Err(OpsError::Message(format!(
+                "updated issue moved from wave/{wave} to wave/{}; reconcile its ownership before continuing",
+                record.wave
+            )));
+        }
+        let item = &record.item;
         if matches!(options.update, PmTaskUpdate::Complete { .. }) {
             validate_completion_outcome(item)?;
         }
@@ -1293,12 +1294,18 @@ pub(crate) async fn pm_update_async(
             )));
         }
         let store = pm_store().await?;
+        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        super::chapter::sync_projects(&store, &registered, &PmSnapshot {
+            projects: vec![record.project.clone()],
+            items: vec![item.clone()],
+        }).await?;
         if let Some(task) = store
             .get_task_by_issue(&item.id)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            let row = read_pm_snapshot(repo, &wave).await?;
             store
                 .update_task_plan(
                     &task.id,
@@ -1307,7 +1314,7 @@ pub(crate) async fn pm_update_async(
                         identifier: item.identifier.clone(),
                         title: item.name.clone(),
                         description: item.description.clone(),
-                        pm_snapshot_synced_at: row.synced_at,
+                        pm_snapshot_synced_at: record.observed_at,
                     },
                 )
                 .await
@@ -2274,6 +2281,7 @@ async fn apply_or_plan_repository_reteam(
                     ..crate::ops::CommitOptions::for_task("pm")
                 },
                 progress,
+                &|_| {},
             )?;
         }
     }
@@ -2977,7 +2985,7 @@ fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> Op
     if linear_name.contains(" — ") {
         return Err(OpsError::Message(format!(
             "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             inspect `lf doctor --planning` and correct the provider title before retrying"
+             inspect `lf home doctor --planning` and correct the provider title before retrying"
         )));
     }
     Ok(linear_name.trim().to_string())

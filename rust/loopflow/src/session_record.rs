@@ -2,6 +2,9 @@
 
 pub mod active;
 pub(crate) mod activity;
+mod runtime;
+
+pub(crate) use runtime::finish_session_driver;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -239,6 +242,7 @@ pub(crate) struct ProviderClientRef {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProviderClientStopReason {
+    Retired,
     Moved,
     Completed,
 }
@@ -1859,7 +1863,7 @@ pub(crate) fn register_session_driver_interrupt(
 ) {
     let store = store.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        match store.finish_session_driver(&session, &driver, "interrupted") {
+        match finish_session_driver(&store, &session, &driver, "interrupted") {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
         }
@@ -2706,7 +2710,7 @@ impl SessionCapture {
         self.recorder.drain_after_settlement();
         if let Some((session, driver)) = self.driver.take() {
             match row_store(&self.dir)
-                .and_then(|store| store.finish_session_driver(&session, &driver, outcome))
+                .and_then(|store| finish_session_driver(&store, &session, &driver, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => return Err(std::io::Error::other(error)),

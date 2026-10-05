@@ -17,7 +17,7 @@ fn flow(store: &Store, task: &Task, review: bool) -> String {
     let steps = if review {
         "- step:\n    name: demo\n    id: review\n    human: true\n"
     } else {
-        "- cmd: task sync --plan\n- step:\n    name: demo\n    id: review\n    human: true\n"
+        "- cmd: sync --plan\n- step:\n    name: demo\n    id: review\n    human: true\n"
     };
     fs::write(task.worktree.join(".lf/flows/proof.yaml"), steps).unwrap();
     let flow = FlowSession {

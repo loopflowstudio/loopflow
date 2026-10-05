@@ -1393,6 +1393,36 @@ impl SqliteStore {
         Ok(flow)
     }
 
+    /// Retire a stopped Flow by request. Its remaining steps never run and no
+    /// step result is invented; the row, its failure and its history remain.
+    pub fn retire_flow(&self, id: &str, version: u64, reason: &str) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        if flow.version != version || flow.claim.is_some() {
+            return Err(stale(id));
+        }
+        tx.execute(
+            "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE id=?1",
+            params![id, now_unix()],
+        )?;
+        if let Some(task) = &flow.task_id {
+            super::children::insert_task_event_in(
+                &tx,
+                task,
+                &TaskEventKind::Progress {
+                    summary: format!("Flow {id} {reason}"),
+                },
+            )?;
+        }
+        tx.execute(
+            "UPDATE tasks SET current_invocation_id=NULL WHERE current_invocation_id=?1",
+            [id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// The Flow ran its last step.
     pub fn end_flow(
         &self,
@@ -1770,6 +1800,56 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
+    }
+
+    #[test]
+    fn saved_flow_commands_migrate_without_changing_the_cursor_or_identity() {
+        use clap::Parser;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let commands = [
+            ("task", vec!["sync", "--plan"], "sync --plan"),
+            ("task", vec!["pr", "land", "-c"], "pr land -c"),
+            ("task", vec!["wt", "list"], "wt list"),
+            (
+                "task",
+                vec!["commit", "-m", "captured"],
+                "commit -m captured",
+            ),
+            ("rebase", vec![], "sync"),
+            ("install", vec![], "home install"),
+        ];
+        let steps = commands
+            .iter()
+            .map(|(command, args, _)| {
+                ConcreteStep::Command(ConcreteCommand {
+                    item: Command {
+                        command: (*command).into(),
+                        args: args.iter().map(|arg| (*arg).into()).collect(),
+                    },
+                    sources: vec!["captured-custom-flow".into()],
+                })
+            })
+            .collect();
+        let flow = launched(&store, steps, 1);
+        let restored = store.flow(flow.id()).unwrap().unwrap();
+        assert_eq!(restored.id(), flow.id());
+        assert_eq!(restored.cursor, flow.cursor);
+        assert_eq!(restored.version, flow.version);
+        assert_eq!(restored.worker_generation, flow.worker_generation);
+        assert_eq!(restored.claim, flow.claim);
+        for (step, (_, _, expected)) in restored.invocation.steps.iter().zip(commands) {
+            let ConcreteStep::Command(command) = step else {
+                panic!("saved command")
+            };
+            assert_eq!(command.item.display_name(), expected);
+            assert_eq!(command.sources, ["captured-custom-flow"]);
+            crate::lf::Cli::try_parse_from(command.item.argv()).unwrap();
+        }
+        let again: QueuedInvocation =
+            serde_json::from_str(&serde_json::to_string(&restored.invocation).unwrap()).unwrap();
+        assert_eq!(again, restored.invocation);
     }
 
     #[test]

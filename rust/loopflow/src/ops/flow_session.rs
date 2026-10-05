@@ -146,7 +146,8 @@ pub(crate) async fn prepare_exec(
                 .clone()
                 .unwrap_or_default()
                 .env_value()?,
-        );
+        )
+        .envs(flow.invocation.isolation_env());
     if let Some(model) = &flow.model {
         command.args(["--model", model]);
     }

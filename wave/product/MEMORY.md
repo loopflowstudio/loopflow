@@ -31,12 +31,13 @@ authored id/name fields are unnecessary. This supersedes the sleeping-runner and
 single-capture human-segment proposals preserved at
 `5090f672e:scratch/focus-on-your-own-work.md`.
 
-Design review is finished and approved; Jack requested further kickoff reconciliation
-and continuation of LOO-353's saved pursue capture without replacement. Local main
-`a1d2f8a59` has zero-human pursue, while the saved capture still has demo and its
-post-review decider. Source templates cannot establish a saved invocation's shape.
-No configured proof follows from this reconciliation. Workspace/remote/performance/
-defaults/website scope stays LOO-353; LOO-366/367 retain separate policy scope.
+Design review is approved; runtime work remains. Saved pursue retains demo although
+current source does not: templates cannot establish a saved invocation's shape.
+Main `16fa97425` adds native-human-input recency for `lf resume`; reuse that ranking
+for initial Task selection, with unfinished Task membership and explicit-primary
+precedence. Resume also admits completed history. This supplies no configured
+workspace proof. Remote/performance/defaults/website scope stays LOO-353;
+LOO-366/367 retain separate policy scope.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

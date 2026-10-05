@@ -48,6 +48,10 @@ without fetching, launching or migrating. Prior scratch is preserved at
 `6513477a5`; the superseded worker-start repair proposal is at
 `5090f672e:scratch/task-workspace-continuation.md`.
 
+The checkout includes local main `16fa97425` through merge `48d9eecd6`; the
+current diff from local main contains planning/memory only. No runtime slice has
+been implemented. This is local source evidence, not a fetched remote-tip claim.
+
 Preserve main's repo/Wave primaries, Ask removal, native conversation lookup,
 Session working-set filtering, configurable New Session and Task history filters.
 Task primary selection remains absent. Reuse the existing engine traversal,
@@ -144,12 +148,11 @@ at `pr-publish`. Saved capture `fbd24356-3d6f-415d-a236-16b4f6140c8f` instead
 has implement → compress → refresh → loop-decide → pr-publish → demo → loop-decide.
 At inspection it was at node 0, with no completed nodes, pending Session or failure.
 
-Jack requested continuing that capture with `lf --task LOO-353 flow start`.
-Installed start continues saved progress; templates only select a new Task's Flow.
-Do not replace/reset the capture or launch a competing driver from a running step.
-This bridge does not retain workers in the final product. Report failures or reached
-human review to the caller; do not edit the live Home, retry uncertain work or open
-another interactive review conversation.
+Jack requested continuation of that existing capture without replacement. Its saved
+shape is historical execution evidence, distinct from current source templates;
+no fresh invocation status was read during this reconciliation. The bridge retains
+no worker authority in the final product and authorizes neither live migration nor
+replacement of uncertain work. Workflow navigation remains with the caller.
 
 ### Primary selection and Waiting
 
@@ -157,7 +160,13 @@ Extend existing primary selection with `PrimaryScope::Task(TaskId)`. Ensure unde
 the existing scope lock; reuse an explicitly chosen existing Task conversation or,
 on initial selection, the sole unfinished interactive Task conversation. If several
 exist and none is selected, default to the most recently used interactive conversation
-and preserve the rest. This is a reversible implementation default, not evidence of Jack's preference. If none exists, explicit Task conversation opening creates one
+and preserve the rest. Reuse the ranking in `human_session::latest_interactive_session`: native
+human input, then per-Session interactive opening, then creation time. Assistant
+output must not change the choice. Reuse the ranking with Task-membership and
+unfinished-interactive eligibility; ordinary `lf resume` also admits completed
+conversations, so its candidate set cannot be adopted unchanged. An explicit
+primary remains selected regardless of later recency. This is a reversible
+implementation default, not evidence of Jack's preference. If none exists, explicit Task conversation opening creates one
 in the recorded checkout; read-only inventory never does. A Task primary is still a
 Task member: narrow current primary exclusions to Repository/Wave. No Task Ctrl-C
 reset behavior is introduced; ordinary interruption never restarts its Flow.
@@ -282,7 +291,7 @@ Review rejected handshake-like feedback receipts. Superseded proposals remain at
 
 One coherent runtime/UI change, with no intermediate release of two executors:
 
-1. **This slice:** integrate current main through supported sync; remove Task-worker
+1. **Runtime slice remains:** current local main is integrated; remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
    history and cutting over the minimum DTO consumers. Build the changed Rust code
    and run the focused ordinary-Flow crash/no-restart case in `flow_tests`.
@@ -377,4 +386,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `git diff --check` passed for prose compression; runtime implementation and its build/focused test remain outstanding; configured proof belongs to demo.
+Checks: `git diff --check` passed for prose reconciliation; runtime implementation and its build/focused test remain outstanding; configured proof belongs to demo.

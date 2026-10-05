@@ -1,5 +1,11 @@
 # Task workspace review — October 1, 2026
 
+October 4 supersession: PR #1369 merged as `2f14e4422`. Jack Heart's later
+approved Task-conversation design assigns Task primary selection and complete
+worker/review-handshake deletion to LOO-353. It supersedes this review's LOO-364
+Task-runtime split, mutable Flow switching and attention presentation. Historical
+checks below retain their original limits; configured workspace proof remains open.
+
 Jack Heart requested landing, then withdrew the branch from merging until the Task
 Session model is corrected. PR #1369 was disarmed during this correction. The revised model is implemented
 and locally verified; the previously requested landing can resume.

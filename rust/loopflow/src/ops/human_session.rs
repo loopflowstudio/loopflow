@@ -272,10 +272,7 @@ pub enum SessionFlowOccurrence {
 
 /// Add one headless input to an open conversation and return it prepared; the
 /// launch that takes it resumes the conversation's native history.
-pub(crate) fn continue_conversation(
-    id: &str,
-    flow: crate::session_record::SessionFlowMembership,
-) -> Result<String> {
+pub(crate) fn continue_conversation(id: &str) -> Result<String> {
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
     anyhow::ensure!(
@@ -286,6 +283,7 @@ pub(crate) fn continue_conversation(
     next.artifact_key = crate::session_record::new_artifact_key();
     next.input_published = false;
     let next = store.replace_session_input(replaced, next)?;
+    let flow = crate::session_record::SessionFlowMembership::Independent;
     Ok(publish_prepared_input(&store, &next, flow)?.artifact_key)
 }
 

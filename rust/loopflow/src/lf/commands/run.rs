@@ -773,7 +773,6 @@ fn begin_run_capture(
         .cloned()
         .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
-    let flow = crate::session_record::SessionFlowMembership::Independent;
     let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -783,12 +782,12 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: flow.clone(),
+        flow: crate::session_record::SessionFlowMembership::Independent,
         work: built.work.clone(),
     };
     let capture = if let Some(session) = resume {
         // A headless resume is another turn of the same conversation.
-        let input = crate::ops::human_session::continue_conversation(session, flow)?;
+        let input = crate::ops::human_session::continue_conversation(session)?;
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)

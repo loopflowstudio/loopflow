@@ -148,8 +148,8 @@ reviewed them. TaskWorkflow, takeover and resume are not built.
   registering and that poll leaves the step's Exec without a step row.
 - **Publish after an unobserved merge** still reaches GitHub through
   `pr publish`; `lf pr reconcile` remains its owner.
-- **Leftovers.** `agent_sessions.node`/`iterations` are no longer written or
-  read; native history readers still parse `structured_output`;
+- **Leftovers.** Native history readers still parse `structured_output`, for
+  conversations recorded before this pass;
   `SessionFlowMembership::Step` remains for older manifests.
   `SessionKind::FlowReview` and `SessionAttention::Review` go with the Waiting
   slice. Task status still lists every Exec. `--needs-me` remains until
@@ -220,7 +220,10 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 
-CHECKS_PLACEHOLDER
+October 5, after compress: the commands above except `land_tests` passed
+(`store::` 181, `session_lifecycle_tests` 17, `flow_tests` 24,
+`flow_discovery_tests` 3, `task_flow_launch_tests` 1, `dto_fixtures` 18);
+all-target Clippy clean. `land_tests` and the full suites are gate's.
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

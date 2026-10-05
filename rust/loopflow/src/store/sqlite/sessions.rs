@@ -1063,8 +1063,7 @@ fn capture_in(
     }
     let payload = serde_json::json!({"artifact_key":session.artifact_key,
         "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
-        "provider":session.provider,"model":session.model,
-        "node":session.node,"iterations":session.iterations,"work_source":session.work_source});
+        "provider":session.provider,"model":session.model,"work_source":session.work_source});
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,exec,session.task_id.as_ref().map(TaskId::as_str),
@@ -1080,8 +1079,8 @@ fn insert_session_in(
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,completed_at,
         created_at,kind,request,interactive,repo,task_id,wave_id,work_source,bound_at,
-        input_published,cwd,skill,provider,model,node,iterations)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+        input_published,cwd,skill,provider,model)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             session.id,
             session.title,
@@ -1105,13 +1104,7 @@ fn insert_session_in(
             session.cwd.to_string_lossy(),
             session.skill,
             session.provider,
-            session.model,
-            session.node,
-            session
-                .iterations
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?
+            session.model
         ],
     )?;
     session.captured = Some(capture_in(conn, session, session.created_at, exec)?);
@@ -1473,31 +1466,24 @@ mod metadata_tests {
     }
 
     #[test]
-    fn session_metadata_filters_before_decoding_and_preserves_explicit_membership() {
+    fn session_metadata_filters_and_preserves_explicit_membership() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            for (id, title, interactive, repo, iterations, membership) in [
-                ("a", "Alpha%", true, "/repo", None, Some("independent")),
-                ("b", "Beta", true, "/repo", None, None),
-                ("headless", "Headless", false, "/repo", None, None),
-                (
-                    "foreign",
-                    "Foreign",
-                    true,
-                    "/other",
-                    Some("bad metadata"),
-                    None,
-                ),
-                ("later", "Zulu", true, "/repo", Some("bad metadata"), None),
+            for (id, title, interactive, repo, membership) in [
+                ("a", "Alpha%", true, "/repo", Some("independent")),
+                ("b", "Beta", true, "/repo", None),
+                ("headless", "Headless", false, "/repo", None),
+                ("foreign", "Foreign", true, "/other", None),
+                ("later", "Zulu", true, "/repo", None),
             ] {
                 let input = crate::session_record::new_artifact_key();
                 conn.execute(
                     "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
-                    interactive,input_published,cwd,repo,iterations)
-                    VALUES(?1,?2,'human',1,'conversation',?3,1,'/unavailable',?4,?5)",
-                    params![id, title, interactive, repo, iterations],
+                    interactive,input_published,cwd,repo)
+                    VALUES(?1,?2,'human',1,'conversation',?3,1,'/unavailable',?4)",
+                    params![id, title, interactive, repo],
                 )
                 .unwrap();
                 super::test_capture(&conn, id, &input);

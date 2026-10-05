@@ -209,7 +209,8 @@ confirmed by Jack Heart.
   is deleted. Loop counts for deciders outside the latest step's own path read
   zero; settled counts inside a finished XOR path are no longer shown.
 - **Session position.** A Session's node and iterations are read from its
-  step row. `agent_sessions.node`/`iterations` stay in the schema, unwritten.
+  step row. The draft drops `agent_sessions.node`/`iterations`; a saved Flow's
+  position survives in its `legacy_flow` observation.
 
 ## Choices the earlier pass made without Jack
 

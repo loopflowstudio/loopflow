@@ -497,7 +497,6 @@ impl SkillExecutor for &Driver<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
-        anyhow::ensure!(!skill.human, "Human review belongs in the Task conversation; operational Flows cannot launch review Sessions");
         let name = &skill.skill.name;
         if let Some(progress) = ctx.progress {
             print_skill_progress(progress, name);

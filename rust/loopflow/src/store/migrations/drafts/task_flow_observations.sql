@@ -47,6 +47,9 @@ DROP TRIGGER validate_conversation_ancestry_update;
 DROP TRIGGER validate_flow_conversation_parents;
 DROP TRIGGER validate_flow_capture;
 ALTER TABLE agent_sessions DROP COLUMN flow_session_id;
+-- A conversation's Flow position is its step row, written by the driver.
+ALTER TABLE agent_sessions DROP COLUMN node;
+ALTER TABLE agent_sessions DROP COLUMN iterations;
 UPDATE flow_sessions SET operation_start=NULL;
 DROP TABLE flow_events;
 DROP TABLE flow_sessions;

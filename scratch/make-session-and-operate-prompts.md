@@ -161,8 +161,8 @@ scope (`lf pr next`) are reported as separate facts.
 
 ### Continuation, honestly
 
-Each session states: this conversation acts only during a turn; nothing
-schedules its next one. Within a turn it may wait on a state change with
+Each session skill states that an ongoing Session acts only during a turn and
+that nothing schedules its next one. Within a turn it may wait on a state change with
 `lf task wait`. Between turns, Task workers continue on their own; the minute
 check and CI watcher help only where `lf task automation` and
 `lf ci watch --status` show them installed. Say which are active instead of
@@ -184,7 +184,7 @@ Task, Ctrl-C semantics) stays with LOO-364/LOO-353.
 
 A review belongs to its own Session. Operators surface it with its open command.
 An operator completes that exact Session (`lf session complete <id>`) only when
-the person present explicitly decides that review in this conversation and the
+the participant explicitly decides that review with the operator and the
 feedback is saved; the following `loop-decide` owns navigation. Headless, a
 pending review is a waiting disposition.
 

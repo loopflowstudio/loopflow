@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -71,7 +73,61 @@ impl WorktreeLease {
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
-    run_git_inheriting(repo, args, &|_| {})
+    Ok(retained_output(repo, args)?)
+}
+
+type RetainedReads = HashMap<(PathBuf, Vec<String>), (Instant, Output)>;
+
+/// Set only by a process that never writes through Git.
+static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
+
+/// How long a retained answer stands: repository layout rarely moves, while a
+/// checkout's files change under a working agent.
+const LAYOUT_RETENTION: Duration = Duration::from_secs(600);
+const CONTENT_RETENTION: Duration = Duration::from_secs(60);
+
+/// Let this process reuse a Git answer for a short time instead of spawning
+/// `git` again. For a long-lived reader that asks the same questions on every
+/// reading and changes nothing itself; one-shot commands never call this.
+pub(crate) fn retain_reads() {
+    *RETAINED_READS.lock().expect("git read cache poisoned") = Some(HashMap::new());
+}
+
+/// `git -C repo args`, reusing a retained answer when this process keeps them.
+pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
+    let run = || Command::new("git").arg("-C").arg(repo).args(args).output();
+    let key = (
+        repo.to_path_buf(),
+        args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
+    );
+    let layout = ["--git-common-dir", "--show-toplevel"];
+    let retention = if args.iter().any(|arg| layout.contains(arg)) {
+        LAYOUT_RETENTION
+    } else {
+        CONTENT_RETENTION
+    };
+    {
+        let reads = RETAINED_READS.lock().expect("git read cache poisoned");
+        match reads.as_ref() {
+            None => return run(),
+            Some(reads) => {
+                if let Some((read_at, output)) = reads.get(&key) {
+                    if read_at.elapsed() < retention {
+                        return Ok(output.clone());
+                    }
+                }
+            }
+        }
+    }
+    let output = run()?;
+    if let Some(reads) = RETAINED_READS
+        .lock()
+        .expect("git read cache poisoned")
+        .as_mut()
+    {
+        reads.insert(key, (Instant::now(), output.clone()));
+    }
+    Ok(output)
 }
 
 fn run_git_inheriting(
@@ -86,7 +142,14 @@ fn run_git_inheriting(
 }
 
 pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
-    git_stdout_inheriting(repo, args, &|_| {})
+    let output = run_git(repo, args)?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git {}", args.join(" ")),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn git_stdout_inheriting(

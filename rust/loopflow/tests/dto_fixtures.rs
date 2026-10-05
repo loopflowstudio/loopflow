@@ -479,3 +479,29 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
         .all(|usage| usage.tokens.is_none()));
     assert_eq!(ContextReport::new(report.steps.clone()), report);
 }
+
+#[test]
+fn workspace_frames_keep_each_part_and_require_every_envelope_field() {
+    use loopflow::lf::commands::workspace_watch::{WorkspaceContent, WorkspaceFrame};
+    let json = include_str!("../../../tests/fixtures/dto/workspace_frame.json");
+    let frames: Vec<WorkspaceFrame> = serde_json::from_str(json).unwrap();
+    let source: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&frames).unwrap(), source);
+    assert!(matches!(frames[0].content, WorkspaceContent::Planning(Some(_))));
+    assert_eq!(frames[0].answers, None);
+    assert!(matches!(frames[2].content, WorkspaceContent::Task(None)));
+    assert!(frames[2].unavailable.is_some());
+    assert!(frames[4].revisions.is_none());
+    let WorkspaceContent::Heartbeat(heartbeat) = &frames[5].content else {
+        panic!("last fixture frame is a heartbeat");
+    };
+    assert_eq!(heartbeat.projections["planning"], 3);
+    for field in ["sequence", "home", "part"] {
+        let mut missing = source[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<WorkspaceFrame>(missing).is_err(),
+            "{field} must be required"
+        );
+    }
+}

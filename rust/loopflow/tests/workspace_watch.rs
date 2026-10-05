@@ -323,19 +323,23 @@ fn a_steady_writer_is_shown_while_it_writes() {
     watch.planning(Duration::from_secs(30), |_| true);
     let started = Instant::now();
     let mut shown = None;
+    let mut latest = 0;
     for count in 1..=60 {
         home.plan(count);
         std::thread::sleep(Duration::from_millis(50));
         while let Ok(frame) = watch.frames.try_recv() {
-            if matches!(frame.content, WorkspaceContent::Planning(Some(_))) && shown.is_none() {
-                shown = Some((count, started.elapsed()));
+            if let WorkspaceContent::Planning(Some(part)) = frame.content {
+                latest = identifiers(&part.roadmap).len();
+                shown.get_or_insert((count, started.elapsed()));
             }
         }
     }
     let (count, elapsed) = shown.expect("no planning frame until the writer stopped");
     assert!(count < 60, "first frame arrived only as the writer finished");
     eprintln!("first frame after {elapsed:?}, at write {count}");
-    watch.planning(Duration::from_secs(3), |tasks| tasks.len() == 60);
+    if latest != 60 {
+        watch.planning(Duration::from_secs(5), |tasks| tasks.len() == 60);
+    }
 }
 
 #[test]

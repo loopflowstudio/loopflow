@@ -62,18 +62,22 @@ fn exec_ids(selector: &str) -> String {
         tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
 }
 
-/// The same membership as `exec_ids`, reached from the unfinished Execs.
+/// The same membership as `exec_ids`, reached from the unfinished Execs: each
+/// one's few Sessions and Flows are tested against the Task, instead of first
+/// listing every Session the Task has.
 fn unfinished_exec_filter(selector: &str) -> String {
+    let tasks = tasks(selector);
+    let session = session_membership("a");
     format!(
-        "e.completed_at IS NULL AND (EXISTS(SELECT 1 FROM ({}) tw WHERE {})
-        OR EXISTS(SELECT 1 FROM session_events se WHERE se.exec_id=e.id AND se.session_id IN ({}))
-        OR EXISTS(SELECT 1 FROM agent_sessions a WHERE a.driver_exec_id=e.id AND a.id IN ({}))
-        OR EXISTS(SELECT 1 FROM flow_events fe WHERE fe.exec_id=e.id AND fe.flow_id IN ({})))",
-        tasks(selector),
+        "e.completed_at IS NULL AND (EXISTS(SELECT 1 FROM ({tasks}) tw WHERE {})
+        OR EXISTS(SELECT 1 FROM session_events se JOIN agent_sessions a ON a.id=se.session_id
+            JOIN ({tasks}) tw ON ({session}) WHERE se.exec_id=e.id)
+        OR EXISTS(SELECT 1 FROM agent_sessions a JOIN ({tasks}) tw ON ({session})
+            WHERE a.driver_exec_id=e.id)
+        OR EXISTS(SELECT 1 FROM flow_events fe JOIN flow_sessions af ON af.id=fe.flow_id
+            JOIN ({tasks}) tw ON af.task_id=tw.id OR ({}) WHERE fe.exec_id=e.id))",
         checkout("e.cwd"),
-        session_ids(selector),
-        session_ids(selector),
-        flow_ids(selector)
+        checkout(FLOW_CWD)
     )
 }
 

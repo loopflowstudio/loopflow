@@ -39,6 +39,7 @@ public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let observe: @Sendable () async throws -> ActiveSessionsObservation
+    private let observeWorkspace: (@Sendable () async throws -> WorkspaceObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
@@ -47,17 +48,20 @@ public struct RegistryQuery: Sendable {
         watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
             throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
+        watchWorkspace: (@Sendable () async throws -> WorkspaceObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveSessions
+        self.observeWorkspace = watchWorkspace
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
+        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe,
+                      watchWorkspace: observeWorkspace) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -125,6 +129,17 @@ public struct RegistryQuery: Sendable {
 
     public func watchActiveSessions() async throws -> ActiveSessionsObservation {
         try await observe()
+    }
+
+    /// Whether this transport keeps a workspace current by itself. Without one,
+    /// a caller reads once and shows that reading until it asks again.
+    public var streamsWorkspace: Bool { observeWorkspace != nil }
+
+    public func watchWorkspace() async throws -> WorkspaceObservation {
+        guard let observeWorkspace else {
+            throw RegistryQueryError("Workspace observation is unavailable on this transport")
+        }
+        return try await observeWorkspace()
     }
 
     /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.

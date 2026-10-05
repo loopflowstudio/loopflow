@@ -33,8 +33,9 @@ const BURST: Duration = Duration::from_millis(250);
 const HEARTBEAT: Duration = Duration::from_secs(2);
 /// Revisions are read again on this clock in case a filesystem event was lost.
 const CHECK: Duration = Duration::from_secs(1);
-/// Git and filesystem facts in planning are not store commits.
-const PLANNING_CLOCK: Duration = Duration::from_secs(60);
+/// Git and filesystem facts in planning are not store commits. Checkout
+/// contents are re-read at most once a minute, so this is their worst case.
+const PLANNING_CLOCK: Duration = Duration::from_secs(300);
 /// Process liveness is observed, never committed.
 const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
 const MAX_FRAME: usize = 64 * 1024 * 1024;
@@ -537,6 +538,10 @@ pub(super) fn run(watch: bool) -> Result<()> {
         .unwrap_or(home)
         .to_string_lossy()
         .into_owned();
+    if watch {
+        // Every reading asks Git the same questions about the same checkouts.
+        crate::engine::git::retain_reads();
+    }
     let shared: Shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
     let mut reader = Reader {
         database: database.clone(),

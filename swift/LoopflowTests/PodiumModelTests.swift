@@ -577,6 +577,174 @@ struct PodiumOutputSignalTests {
     }
 }
 
+@Suite("Podium workspace stream", .serialized)
+@MainActor
+struct PodiumModelStreamTests {
+    @Test("Frames update planning in place and an older frame cannot replace a newer one")
+    func framesReplaceReadings() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+
+        try await feed.opened(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+        try await eventually { model.roadmap.value != nil }
+        model.select(.task(id: "issue-now"))
+        let renamed = try fixture.planningFrame(sequence: 3, answers: nil, renaming: "Renamed elsewhere")
+        await feed.send(renamed)
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "Renamed elsewhere" }
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(model.workspaceStatus == .current)
+
+        // Sequence 2 was read before sequence 3; another Home's frame names nothing here.
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: nil))
+        await feed.send(try fixture.heartbeat(sequence: 4))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.task(id: "issue-now")?.task.task.name == "Renamed elsewhere")
+        #expect(!model.roadmap.isLoading)
+    }
+
+    @Test("A frame read before a local write cannot restore what the write removed")
+    func localWriteSupersedesOlderFrames() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        guard case .scope(let scopeId, let sent) = scope else {
+            Issue.record("first request was \(scope)")
+            return
+        }
+        #expect(sent.repo == "/src/loopflow")
+        let session = try fixture.sessionEntries()
+        await feed.send(try fixture.sessionsFrame(sequence: 1, answers: scopeId, repo: "/src/loopflow", entries: session.json))
+        try await eventually { model.sessions.value?.count == session.ids.count }
+
+        model.sessionResolved(session.ids[0], repo: "/src/loopflow")
+        #expect(model.sessions.value?.contains { $0.id == session.ids[0] } == false)
+        let refresh = try await feed.request(2)
+        // Read before the completion: still lists the Session.
+        await feed.send(try fixture.sessionsFrame(sequence: 2, answers: scopeId, repo: "/src/loopflow", entries: session.json))
+        // Another repository's rows never land in this one.
+        await feed.send(try fixture.sessionsFrame(sequence: 3, answers: refresh.id, repo: "/src/context", entries: session.json))
+        await feed.send(try fixture.heartbeat(sequence: 4))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.sessions.value?.contains { $0.id == session.ids[0] } == false)
+        await feed.send(try fixture.sessionsFrame(sequence: 5, answers: refresh.id, repo: "/src/loopflow", entries: "[]"))
+        try await eventually { model.sessions.value?.isEmpty == true }
+    }
+
+    @Test("Refresh returns when a planning frame answers it")
+    func refreshWaitsForItsAnswer() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+
+        try await feed.opened(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+        try await eventually { model.roadmap.value != nil }
+        let finished = Flag()
+        let refreshing = Task { await model.refresh(); await finished.set() }
+        let scope = try await feed.request(1)
+        let refresh = try await feed.request(2)
+        #expect(refresh == .refresh(id: refresh.id))
+        // Read before the request: not an answer.
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: scope.id, renaming: "Stale"))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await finished.value == false)
+        #expect(model.task(id: "issue-now")?.task.task.name != "Stale")
+        await feed.send(try fixture.planningFrame(sequence: 3, answers: refresh.id, renaming: "Answered"))
+        await refreshing.value
+        #expect(model.task(id: "issue-now")?.task.task.name == "Answered")
+    }
+
+    @Test("A reader that ends leaves the last reading marked unavailable, then recovers")
+    func readerEndRecovers() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let feed = WorkspaceFeed()
+        let model = PodiumModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+
+        try await feed.opened(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+        try await eventually { model.roadmap.value != nil }
+        await feed.fail(RegistryQueryError("reader exited"))
+        try await eventually { model.roadmap.errorMessage == "reader exited" }
+        #expect(model.roadmap.value != nil)
+        #expect(!model.roadmap.isLoading)
+
+        try await feed.opened(2, within: .seconds(5))
+        // The new reader numbers its frames from one.
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil, renaming: "After restart"))
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "After restart" }
+        #expect(model.roadmap.errorMessage == nil)
+    }
+
+    private func eventually(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("condition did not hold in time")
+                throw CancellationError()
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+}
+
+private actor Flag {
+    private(set) var value = false
+    func set() { value = true }
+}
+
+/// A scripted reader: the test decides which frames arrive and when.
+private actor WorkspaceFeed {
+    private var continuations: [AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation] = []
+    private var requests: [WorkspaceRequest] = []
+
+    nonisolated func open() async -> WorkspaceObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+        await add(continuation)
+        return WorkspaceObservation(frames: stream, request: { request in
+            Task { await self.record(request) }
+        }, cancel: { continuation.finish() })
+    }
+
+    private func add(_ continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation) {
+        continuations.append(continuation)
+    }
+
+    private func record(_ request: WorkspaceRequest) { requests.append(request) }
+    func send(_ frame: WorkspaceFrame) { continuations.last?.yield(frame) }
+    func fail(_ error: any Error) { continuations.last?.finish(throwing: error) }
+
+    func opened(_ count: Int, within: Duration = .seconds(3)) async throws {
+        let deadline = ContinuousClock.now + within
+        while continuations.count < count {
+            guard ContinuousClock.now < deadline else { throw RegistryQueryError("reader \(count) never opened") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// The request with this id, once it has been made.
+    func request(_ id: Int) async throws -> WorkspaceRequest {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while true {
+            if let request = requests.first(where: { $0.id == id }) { return request }
+            guard ContinuousClock.now < deadline else { throw RegistryQueryError("request \(id) was never made") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+}
+
 private struct PodiumTestFixture {
     let roadmap: RoadmapSnapshot
     let waves: [Wave]
@@ -646,6 +814,46 @@ private struct PodiumTestFixture {
             activityArguments: activityArguments,
             query: query
         )
+    }
+
+    func streaming(_ feed: WorkspaceFeed) -> RegistryQuery {
+        RegistryQuery(watchWorkspace: { await feed.open() }) { args, _ in
+            throw RegistryQueryError("a streamed window ran lf \(args.joined(separator: " "))")
+        }
+    }
+
+    private func frame(_ part: String, sequence: Int, answers: Int?, body: String) throws -> WorkspaceFrame {
+        let answers = answers.map(String.init) ?? "null"
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"/home","revisions":null,"unavailable":null,"body":\#(body)}"#
+        return try WorkspaceFrame.decode(line: Data(line.utf8))
+    }
+
+    func planningFrame(sequence: Int, answers: Int?, renaming name: String? = nil) throws -> WorkspaceFrame {
+        var roadmap = roadmapJSON
+        if let name {
+            roadmap = roadmap.replacingOccurrences(of: "Make lf roadmap the machine-wide view", with: name)
+        }
+        return try frame("planning", sequence: sequence, answers: answers,
+                         body: #"{"roadmap":\#(roadmap),"waves":\#(wavesJSON)}"#)
+    }
+
+    func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkspaceFrame {
+        try frame("sessions", sequence: sequence, answers: answers,
+                  body: #"{"repo":"\#(repo)","includes_headless":false,"entries":\#(entries)}"#)
+    }
+
+    func heartbeat(sequence: Int) throws -> WorkspaceFrame {
+        try frame("heartbeat", sequence: sequence, answers: nil, body: #"{"projections":{}}"#)
+    }
+
+    func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {
+        let page = URL(fileURLWithPath: sourceFile)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/session_page.json")
+        let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: page)) as? [String: Any])
+        let entries = try #require(object["entries"] as? [[String: Any]])
+        let json = try #require(String(data: JSONSerialization.data(withJSONObject: entries), encoding: .utf8))
+        return (json, try entries.map { try #require($0["id"] as? String) })
     }
 
     func workActivityJSON(replacingFirstSubjectWith subject: String) throws -> String {

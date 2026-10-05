@@ -131,7 +131,18 @@ struct WavesView: View {
                 .frame(minWidth: 1100, minHeight: 700)
             }
         }
-        .task(id: model.repoPath) { await model.keepWorkspaceCurrent() }
+        .task { await model.keepWorkspaceCurrent() }
+        .onChange(of: model.workspaceScope) { _, _ in model.syncWorkspaceScope() }
+        .onChange(of: selectedWave?.id, initial: true) { _, _ in
+            model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
+        }
+        // Registered Waves arrive with every planning frame.
+        .onChange(of: model.planningSequence) { _, _ in
+            Task {
+                await syncRepoStates()
+                await refreshAuthoredWaves()
+            }
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -153,7 +164,6 @@ struct WavesView: View {
             }
             ensureRepoStates()
             await syncRepoStates()
-            await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
@@ -296,6 +306,7 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
+                streamed: model.waveDetail,
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     model.setRepoPath(waveRepoPath(for: wave))
@@ -437,7 +448,14 @@ struct WavesView: View {
         ensureRepoStates()
 
         do {
-            let waves = try await RegistryQueryLocal.shared.allWaves()
+            // The window's stream already holds the registry's Waves; read
+            // once only before its first planning frame.
+            let waves: [Wave]
+            if let streamed = model.waves.value {
+                waves = streamed
+            } else {
+                waves = try await RegistryQueryLocal.shared.allWaves()
+            }
             let plans = await buildWavePlanCache(registryWaves: waves)
             plansByWaveKey = plans
             for state in repoStates.values {
@@ -548,16 +566,6 @@ struct WavesView: View {
         }
     }
 
-    /// Refresh Work observations without starting execution.
-    private func pollRegistry() async {
-        if AppTestMode.shouldBypassRegistry { return }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
-            if Task.isCancelled { return }
-            await syncRepoStates()
-            await refreshAuthoredWaves()
-        }
-    }
 
     /// A live screenshot can request one real Wave after the registry resolves.
     /// Fixture selection stays in `seedMockWaves`; production has no requested

@@ -50,15 +50,19 @@ The Swift cleanup finding stays in release memory (shipped in v0.12.24).
 PR #1413 merged these as acd6654f9 after hosted CI passed, including Swift under
 combined headless and external-network restrictions. Merge is not installation.
 
-The Task then could not complete: an earlier restart had stranded its review
-under a replaced Flow, an independent Flow had failed, and their Execs and one
-provider turn never settled before a machine restart removed the evidence.
-Branch repair (PR 2): an Exec or provider turn that began before the last boot
-has exited; a review whose Flow ended awaits no one; `lf flow end ID` retires one
-stopped Flow by request, keeping its failure and history and inventing no step
-result. Live or unknown execution since boot still blocks. Closing LOO-326 needs
-an installed release carrying this, then `lf flow end` and `lf task complete`
-from outside any `lf --task LOO-326` run, whose own Exec gates completion.
+Jack Heart's October 5 steer records #1413/#1435 installed in v0.13.3,
+both stopped recovery Flows ended and the headless Session completed. Installed
+0.13.3 readback still shows Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`
+without terminal fields. Its exact process receipt is absent; it started after
+the current boot. The shared trace's terminal events lack Exec IDs and cannot
+settle it. Session closure does not prove child exit. Preserve the unknown
+outcome until exact exit evidence or a subsequent boot establishes death;
+completion remains outside this Task's active contribution.
+
+Source inspection found identity-loss paths in failed terminal writes, PID-keyed
+receipt replacement and monitor pruning; none is proved as this incident's cause.
+Prevention must preserve identity across all three, without inventing historical
+outcomes. No source repair or Task completion is established by this readback.
 
 PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
 Exec receipt can precede closure of inherited checkout descriptors. A delayed

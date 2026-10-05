@@ -171,7 +171,7 @@ A Rust `StoreChanges` reader holds one `query_only` connection and waits on
 filesystem events for `loopflow.db-wal` (generalizing the existing
 `session_record/active/events.rs` subscription, re-arming when the file is
 recreated). On wake it reads the four revisions. A 30 s check and an explicit
-`rescan` cover missed events, checkpoints and sleep/wake. Revisions are the
+`refresh` cover missed events, checkpoints and sleep/wake. Revisions are the
 authority; events only say "look now".
 
 ### 2. One watch process projects and streams
@@ -214,8 +214,9 @@ bytes sends nothing and still cost its 300 ms. The heartbeat frame therefore
 carries per-part projection counts, so "idle" and "busy producing nothing" are
 distinguishable in tests and in the field.
 
-Stdin requests: `scope` (repository, headless filter, selected Task),
-`refresh`, `rescan`. Each carries an id; every frame names the newest request
+Stdin requests: `scope` (repository, headless filter, selected Task) and
+`refresh` (also sent on wake; a separate `rescan` did the same thing and is
+gone). Each carries an id; every frame names the newest request
 handled before its projection began (`answers`). A window that just ran a write
 command sends `refresh` and waits for a frame answering it — that frame
 necessarily reflects the write. This replaces the generation counters guarding
@@ -242,13 +243,13 @@ re-render. Rules:
 - Drop a frame whose `sequence` is older than the part's last applied frame, or
   whose `home` or scope differs from the current one.
 - Never pass through `.loading` between frames; a stream failure shows the last
-  good reading as unavailable and restarts with backoff, then `rescan`.
+  good reading as unavailable and restarts with backoff, then `refresh`.
 - Selection clears only when a complete planning frame omits the selected Task
   and it is not retained history; drafts and native terminals are untouched.
 - Search filters and Show completed stay window-local over the same rows.
 - A repository or Home switch sends `scope` and ignores frames until one
   answers it.
-- Wake from sleep sends `rescan` (the hook exists for active Sessions).
+- Wake from sleep sends `refresh` (the hook exists for active Sessions).
 
 ## Alternatives considered
 
@@ -287,7 +288,7 @@ files, diffs, usage).
 | No store yet | Frames with empty bodies; the watch waits for the file to appear. |
 | Projection fails | Part frame carries the existing `Unavailable` evidence; Desktop keeps last good rows, marked. |
 | Stream ends or stalls past the heartbeat | Last good reading shown as unavailable; restart with backoff; no silent freeze. |
-| Missed event, checkpoint, sleep | 30 s revision check or `rescan` converges. |
+| Missed event, checkpoint, sleep | 30 s revision check or `refresh` converges. |
 | Record deleted | Next complete frame omits it; it is not resurrected from saved text. |
 | Liveness not verified | Stays unknown; a frame never upgrades it. |
 | Home or installed `lf` replaced | Watch exits on configuration change as the active reader does; the window reopens it and drops other-Home content. |
@@ -421,3 +422,6 @@ costs seconds. This plan earns no KR by itself.
   `check_architecture.py` pass. `status_tests`
   `previous_release_merge_request_migrates…` fails locally because it applies
   published migrations only; it needs `materialize_rust_tests.py`, left to gate.
+- 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 5/5,
+  `--lib workspace_watch` 2/2, clippy clean; `swift test --filter
+  "PodiumModel|DTOFixture|ActiveRunsObservation"` 53/53.

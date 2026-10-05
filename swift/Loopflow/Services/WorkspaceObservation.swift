@@ -20,29 +20,30 @@ public struct WorkspaceObservation: Sendable {
     }
 }
 
+/// The Work whose activity is shown. Mirrors Rust `WorkActivityScope`.
+public struct WorkActivityScope: Decodable, Equatable, Sendable {
+    public let wave: String?
+    public let project: String?
+    public let task: String?
+
+    public init(wave: String?, project: String?, task: String?) {
+        self.wave = wave
+        self.project = project
+        self.task = task
+    }
+}
+
 /// What a window shows. Mirrors the Rust reader's `scope` request.
 public struct WorkspaceScope: Equatable, Sendable {
-    public struct Activity: Equatable, Sendable {
-        public let wave: String?
-        public let project: String?
-        public let task: String?
-
-        public init(wave: String?, project: String?, task: String?) {
-            self.wave = wave
-            self.project = project
-            self.task = task
-        }
-    }
-
     public let repo: String?
     public let headless: Bool
     /// Task identifier whose work is shown.
     public let task: String?
     /// Wave id whose detail is shown.
     public let wave: String?
-    public let activity: Activity?
+    public let activity: WorkActivityScope?
 
-    public init(repo: String?, headless: Bool, task: String?, wave: String?, activity: Activity?) {
+    public init(repo: String?, headless: Bool, task: String?, wave: String?, activity: WorkActivityScope?) {
         self.repo = repo
         self.headless = headless
         self.task = task
@@ -56,11 +57,10 @@ public struct WorkspaceScope: Equatable, Sendable {
 public enum WorkspaceRequest: Equatable, Sendable {
     case scope(id: Int, WorkspaceScope)
     case refresh(id: Int)
-    case rescan(id: Int)
 
     public var id: Int {
         switch self {
-        case .scope(let id, _), .refresh(let id), .rescan(let id): id
+        case .scope(let id, _), .refresh(let id): id
         }
     }
 
@@ -79,7 +79,6 @@ public enum WorkspaceRequest: Equatable, Sendable {
                  "task": activity.task ?? NSNull()] as [String: Any]
             } ?? NSNull()
         case .refresh: object["action"] = "refresh"
-        case .rescan: object["action"] = "rescan"
         }
         // The values above are all JSON types.
         var data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
@@ -126,13 +125,7 @@ public struct WorkspaceFrame: Decodable, Sendable {
     }
 
     public struct WorkActivityPart: Decodable, Sendable {
-        public struct Scope: Decodable, Equatable, Sendable {
-            public let wave: String?
-            public let project: String?
-            public let task: String?
-        }
-
-        public let scope: Scope
+        public let scope: WorkActivityScope
         public let snapshot: WorkActivitySnapshot
     }
 

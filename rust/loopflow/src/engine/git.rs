@@ -142,7 +142,10 @@ fn run_git_inheriting(
 }
 
 pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = run_git(repo, args)?;
+    successful_stdout(args, run_git(repo, args)?)
+}
+
+fn successful_stdout(args: &[&str], output: Output) -> Result<String, GitError> {
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
@@ -157,14 +160,7 @@ fn git_stdout_inheriting(
     args: &[&str],
     inherit: &impl Fn(&mut Command),
 ) -> Result<String, GitError> {
-    let output = run_git_inheriting(repo, args, inherit)?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    successful_stdout(args, run_git_inheriting(repo, args, inherit)?)
 }
 
 pub(crate) fn find_worktree_for_branch(

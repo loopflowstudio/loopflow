@@ -10,12 +10,6 @@ struct StreamedWaveDetail: Sendable {
     let reason: String?
 }
 
-struct WorkActivityScope: Equatable, Sendable {
-    let wave: String?
-    let project: String?
-    let task: String?
-}
-
 enum TaskFlowControlRequest: Equatable, Sendable {
     case start(flow: String)
     case restart(flow: String)
@@ -587,9 +581,7 @@ final class PodiumModel {
             headless: navigation.showsHeadlessSessions,
             task: shown?.task.task.identifier,
             wave: detailWaveId,
-            activity: activityScope(for: selection).map {
-                WorkspaceScope.Activity(wave: $0.wave, project: $0.project, task: $0.task)
-            })
+            activity: activityScope(for: selection))
     }
 
     /// Tell the reader what this window shows now. Frames for the previous
@@ -605,7 +597,7 @@ final class PodiumModel {
     /// After sleep, events may have been missed.
     func rescanWorkspace() {
         guard workspaceObservation != nil else { return }
-        _ = send { .rescan(id: $0) }
+        _ = send { .refresh(id: $0) }
     }
 
     private func send(_ request: (Int) -> WorkspaceRequest) -> Int {
@@ -691,8 +683,7 @@ final class PodiumModel {
                 workActivity = .unavailable(lastGood: workActivity.value, reason: reason)
                 break
             }
-            guard body.scope.wave == scope.wave, body.scope.project == scope.project,
-                  body.scope.task == scope.task else { return }
+            guard body.scope == scope else { return }
             workActivityScope = scope
             let next = PodiumReading.available(body.snapshot)
             if workActivity != next { workActivity = next }

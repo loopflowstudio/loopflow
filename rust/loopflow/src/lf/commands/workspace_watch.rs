@@ -131,10 +131,9 @@ enum Request {
         wave: Option<String>,
         activity: Option<WorkActivityScope>,
     },
-    /// Read every part again and answer, changed or not.
+    /// Read every part again and answer, changed or not: after a local
+    /// write, sleep, or any other gap in observation.
     Refresh { id: u64 },
-    /// As `refresh`, after sleep or any other gap in observation.
-    Rescan { id: u64 },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -268,18 +267,11 @@ fn enqueue(
 fn encode(frame: &WorkspaceFrame) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(frame)?;
     if bytes.len() > MAX_FRAME {
-        let mut frame = frame.clone();
-        frame.unavailable = Some("workspace frame exceeds the 64 MiB transport limit".into());
-        frame.content = match frame.content {
-            WorkspaceContent::Planning(_) => WorkspaceContent::Planning(None),
-            WorkspaceContent::Sessions(_) => WorkspaceContent::Sessions(None),
-            WorkspaceContent::Task(_) => WorkspaceContent::Task(None),
-            WorkspaceContent::Wave(_) => WorkspaceContent::Wave(None),
-            WorkspaceContent::WorkActivity(_) => WorkspaceContent::WorkActivity(None),
-            WorkspaceContent::Activity(_) => WorkspaceContent::Activity(None),
-            heartbeat @ WorkspaceContent::Heartbeat(_) => heartbeat,
-        };
-        bytes = serde_json::to_vec(&frame)?;
+        // Only a part's body can be this large; a heartbeat never is.
+        let mut value = serde_json::to_value(frame)?;
+        value["unavailable"] = "workspace frame exceeds the 64 MiB transport limit".into();
+        value["body"] = serde_json::Value::Null;
+        bytes = serde_json::to_vec(&value)?;
     }
     bytes.push(b'\n');
     Ok(bytes)
@@ -379,7 +371,7 @@ impl Reader {
                 }
                 id
             }
-            Request::Refresh { id } | Request::Rescan { id } => {
+            Request::Refresh { id } => {
                 for state in self.parts.values_mut() {
                     state.force = true;
                 }

@@ -13,14 +13,15 @@ input readiness and attached lifetime. Resume/replacement earns no live-attachme
 proof. Jack authorized autonomous landing October 4 without a manual demo;
 no Desktop KR credit follows.
 
-Native rejection exposed destructive startup cleanup. The relay now transfers
-its driver after delivering successful thread resume; rejected startup/replacement
-preserves the engine, driver and native draft. Owner exit still closes its engine.
-`lf session timings EXEC` records phases and unavailable UI endpoints.
-Output survives SQLite contention; accounting may delay exit.
+Native rejection exposed destructive cleanup. Driver transfer now follows
+successful thread resume; failed attachment preserves the engine and old UI's
+draft. Successful takeover starts another UI and does not copy drafts; engine
+reuse alone cannot satisfy continuity. Owner exit still closes its engine.
+`lf session timings EXEC` records phases and unavailable UI endpoints despite
+SQLite contention; accounting may delay exit.
 [Attachment evidence](../../scripts/benchmarks/session-connect/20261005-attachment/README.md)
-retains failures and limits. Response timing bounds readiness,
-not its onset. No representative baseline, targets or speedup exists.
+retains failures. Response timing bounds readiness, not onset.
+No representative baseline, targets or speedup exists.
 
 Flow reviews launch native TUI without a relay.
 Resume cannot preserve that provider/draft. Revise first-launch

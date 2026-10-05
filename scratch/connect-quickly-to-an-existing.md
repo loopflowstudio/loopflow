@@ -50,7 +50,7 @@ The first probe timed out on disposable folder trust and its cleanup failed;
 a later probe separated text/Enter to avoid Codex paste handling. No installed
 Home, account route or unrelated Session was changed by these probes.
 
-### Lifecycle counterexample: dependent optimization stops
+### Repaired lifecycle counterexample
 
 The baseline's rejected UI also cleared the pre-existing engine endpoint.
 The baseline `connect_live_codex` claimed the driver before native UI startup,
@@ -60,7 +60,7 @@ but does not meet the accepted preservation contract for other startup failures.
 This is a reproduced contradiction in the attachment lifecycle, not an auth,
 display-server or performance-budget blocker.
 
-The design must distinguish unsuccessful UI attachment from an established
+The implementation distinguishes unsuccessful UI attachment from an established
 controlling UI's ordinary exit, using the existing Session/driver authority.
 The implementation prepares the native UI without transferring write authority.
 The relay transfers only after delivering the matching successful thread/resume
@@ -102,7 +102,7 @@ native replacement for normal reviews. The attempted adaptation was removed,
 not retained as an unexercised second path. This is a source-proven architecture
 gap, not a claim that Jack's live Session was inspected or changed.
 
-Dependent performance optimization stops at this counterexample. Revised design:
+Dependent performance optimization remains behind this counterexample. Revised design:
 Codex interactive/review first launch needs to reuse the owned app-server and
 remote UI path, preserving its captured input, exact review token, launch-lock
 ordering and driver/provider generations. Prepare that one engine before native
@@ -112,6 +112,16 @@ acceptable. An already-running standalone native UI has no recorded attach
 transport; report that route explicitly without pretending saved-history resume
 preserves its draft. The first-launch cut and its exact-selector native proof
 remain implementation work within Jack's existing authorization.
+
+Reconciliation on October 5 UTC confirmed a second continuity limit: the runner
+explicitly reports that successful takeover does not copy drafts. The relay
+starts a new native UI and stops the observed old clients after attachment; its
+failed-replacement proof preserves a draft only because the original UI survives.
+Publishing an app-server endpoint on first launch alone does not preserve an
+incumbent UI's unsent composer. The remaining implementation must establish
+draft continuity for ordinary live connection and repeated connections, rather
+than counting successful explicit replacement as that proof. Jack's preservation
+requirement remains unchanged; no reduced acceptance was approved.
 
 ### Implemented safety and diagnostic slice
 
@@ -146,7 +156,8 @@ still closes an exclusively owned engine. This is separate from native PTY proof
 
 - Implement the revised native/review first-launch ownership cut and prove Jack's
   exact Flow-review selector with real native UI, retained draft/history, failed
-  startup and exact review completion/retirement fences.
+  startup and exact review completion/retirement fences. Resolve the successful
+  takeover draft gap separately from engine reuse.
 - Extend production PTY coverage to completed short/paginated history and repeated
   connections. Check supported authenticated providers; Claude/OpenCode and
   standalone native clients remain unmeasured or without this attachment route.
@@ -192,4 +203,4 @@ owned process/descriptor and retains cleanup errors alongside the original
 failure. Review found cleanup exceptions could previously escape with a passing
 sample still recorded. Production ownership and timing endpoints are unchanged.
 
-Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo-378-compress-20261005` passed; helper Ruff and injected failure/cleanup-result check passed (initial injection accidentally mocked platform discovery, corrected); prior Rust checks remain applicable; first-launch revision and full performance acceptance remain with implementation/gate.
+Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo-378-compress-20261005` passed; helper Ruff and injected failure/cleanup-result check passed (initial injection accidentally mocked platform discovery, corrected); prior Rust checks reused; realign `git diff --check` and `lf context --skill realign` passed; first-launch revision, draft continuity and full performance acceptance remain with implementation/gate.

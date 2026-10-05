@@ -267,7 +267,7 @@ Compression also deletes the orphaned `session stop-client` command and its
 completion-specific shutdown helper. Primary replacement uses the existing native
 client replacement path; its successor/history semantics and legacy stop receipts
 remain. Native move tests retain unknown-exit, exact-client and delayed-history
-coverage. Task-worker claims and managed review launch remain deletion targets.
+coverage. Task-worker claims and managed review launch were deleted afterwards.
 
 Compression removes the unused feedback payload from `SkillOutcome::Completed`
 and the duplicate feedback field/query from `FlowSession`. Archived feedback is
@@ -326,10 +326,10 @@ hop (pass launch args to the detached launch directly when taskless `-b` lands),
 and `FlowOutcome::Waiting` for a watched landing if Jack wants such a Flow
 finished.
 
-Landing is a concrete deletion hazard: `pr_landing.rs::landing_has_pending_flow`
-and operation receipts can delay settlement for exact Flow work. Retain immutable
-Flow/Exec/PR-operation linkage and delivery idempotency. Remove the assumption that
-one Task-selected Flow supplies delivery authority. A merge receipt cannot resume a
+Landing no longer reads a Task-selected Flow: `landing_has_pending_flow` is gone;
+`ops/pr_landing.rs` and `ops/task_execution.rs` hold settlement only for a pending
+Session turn or flow-step Exec. Immutable Flow/Exec/PR-operation linkage and
+delivery idempotency are retained. A merge receipt cannot resume a
 runner or complete a review; unknown work remains unknown. Preserve existing Task
 admission/completion policy while adapting its evidence readers; policy redesign
 stays LOO-367. Update builtin Task-operation/session guidance and architecture/docs
@@ -452,5 +452,16 @@ No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
 Checks (compress, October 4): `cargo build -p loopflow --bin lf`, `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo fmt` — passed. Focused suites passed with inherited `LF_*` cleared: `--test session_lifecycle_tests` (17), `cli_discovery` (18), `flow_tests` (23), `global_commands` (9), `task_flow_launch_tests`, `golden_prompt`, `land_tests lf_pr_land_returns_before`, `--lib ops::chapter engine::process` (25). `default_conversation_tests`, `doctor_tests` and the CI-repair case in `land_tests` fail only under an agent run's inherited `LF_AS`/`LF_FLOW_STEP`; gate should run with that environment cleared. Full `cargo test -p loopflow --no-fail-fast`: 55 binaries passed; five `ops::chapter`/`ops::ci_watch` cases fail only in the parallel run and pass alone; `status_tests previous_release_merge_request_migrates…` needs the materialized draft schema (gate). `swift build --build-tests` passed; `LocalWaveAgentLauncherTests` 8 passed. Schema materialization, configured demo and Desktop interaction remain outstanding; no live Home or saved invocation was mutated.
+
+Realign October 4 at `93d925c96`: source search for the worker identifiers
+(`TaskWorkerClaim`, `claim_task_worker`, `recover_flow`, `retry_flow`,
+`current_invocation_id`, `__worker`, `worker_generation`, `claim_json`) matches
+only released migrations, the draft and its conversion test, and the
+`task_flow_launch_tests` case asserting the removed commands fail. No builtin
+Flow carries `human: true`; `controller/` is absent. Main's `lf flow end`
+(#1435, LOO-326) is absent from this branch: `store.end_flow` remains as the
+driver's own write, the CLI command and its retirement store path were dropped
+at the merge. Whether that Infrastructure command should survive is recorded in
+[questions](questions.md). The draft-conversion test was not rerun here.
 
 Sync October 4: merged pinned main `be09439a9`, retaining boot-time process/turn evidence and historical ended-review filtering; omitted manual Flow retirement because stopped Flows already remain nonblocking history. `cargo test -p loopflow --lib ops::task::tests::a_dead_flow_is_history_while_a_live_driver_holds_completion -- --exact` (inherited LF/LOOPFLOW authority cleared) — passed, including reboot evidence preservation.

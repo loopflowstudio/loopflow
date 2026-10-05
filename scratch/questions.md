@@ -50,3 +50,7 @@ to Jack Heart; each is the simplest reading of his complete-removal direction.
   delivery" and its row stays `current` after the merge, because nothing
   resumes it. Landing cleanup proceeds as for a standalone landing. Open:
   whether reconciliation should mark such a Flow finished.
+- **Main's `lf flow end` is dropped.** #1435 (LOO-326) added it to retire a
+  stopped Flow that blocked a Task. Here a stopped Flow blocks nothing, so the
+  merge kept boot-time exit evidence and omitted the command. Open: whether
+  Infrastructure still wants an explicit "replaced" mark on stopped history.

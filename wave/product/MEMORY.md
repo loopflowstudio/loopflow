@@ -50,6 +50,10 @@ captures and effect receipts remain and grant no navigation authority. Taskless
 detached launch, Task primary selection, Waiting, workflow/loop authoring and
 all-Flow Desktop views remain unimplemented.
 
+Merging main `be09439a9` kept boot-time exit evidence and dropped `lf flow end`
+(#1435, LOO-326): a stopped Flow blocks nothing here. That omission awaits
+review. Landing holds only for a pending Session turn or flow-step Exec.
+
 Focused migration, launch, projection and crash/effect checks establish local
 behavior only. Preserve main's confirmed-dead completed-provider admission exemption
 and Session fencing outside async waits. No live Home migration or configured
@@ -182,13 +186,12 @@ Earlier primary-runtime planning selected eager repo/Wave Sessions and a Task
 conversation on launch. The October 1 correction supersedes any interpretation
 that a Task has only one Session or that it owns every other conversation. Repo owns onboarding and last-resort help,
 including without Waves or PM; Wave combines autonomous operation and emerging
-design; TaskSession operates the existing Task Flow authority. Primary repo/Wave
+design; the Task Flow authority it once operated is deleted. Primary repo/Wave
 Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
 never silently restart its Flow. Ordinary reads remain read-only.
 
-The “switch now” / “finish, then switch” proposal is superseded by October 4's
-removal of mutable Flow switching; its text is at
-`16168c473:wave/product/MEMORY.md`.
+October 4 removed mutable Flow switching; the superseded “switch now” proposal
+is at `16168c473:wave/product/MEMORY.md`.
 
 Earlier planning accepted automatic Wave wakes for operational blockers and
 reading existing Task/Session output. The Ask removal decision above supersedes
@@ -1090,7 +1093,7 @@ They explain the topology change; they are not current setup instructions.
   ones (e.g. `RunStatus`), not re-litigating the approach.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
-  `LF_RUN_ID` and `LF_FLOW_STEP`; Rust tests that launch or assert journal ids
+  `LF_RUN_ID`, `LF_AS` and `LF_FLOW_STEP`; Rust tests that launch or assert journal ids
   must clear both or `cargo test -p loopflow` fails only under agent runs.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left

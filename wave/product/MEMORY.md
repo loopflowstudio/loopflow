@@ -889,21 +889,14 @@ under this heading. Retain these independent constraints:
   using PID and birth evidence. Resume preserves history, not unsent TUI input.
   `session open --json --replace` prepares argv without stopping the old client.
   Closing a pane or provider exit resolves nothing.
-- tmux is the first client's detached PTY cradle, never identity or authority.
-  An advisory lock protects first-launch publication; native resume releases it
-  before waiting so metadata remains readable.
 - Desktop retains terminals across selection, with explicit splits and reversible
   Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
   Canonical Git common-directory identity keeps Task checkouts out of repo roots.
-- Work conditions describe evidence; usage and inspection preserve attribution.
-  Shared action descriptors replace Swift's legality matrix. Prepared commands,
-  drafts, surfaces and opening errors have independent presentation lifetimes.
 - Configured provider continuation and native focus/pane reconciliation remain
   unproven by mocks, launch screenshots or empty inventories. The deleted review
   handshake is no longer an acceptance requirement.
-- September 23 reconciliation assigned native continuation to LOO-251, shared
-  actions to LOO-284 and scoped planning to LOO-291. Retain their dated directives
-  and evidence limits; do not infer completion or file duplicate follow-ups.
+- LOO-251/284/291 retain native, shared-action and planning proof obligations;
+  the archived reconciliation establishes neither completion nor new follow-ups.
 
 ### Task observation and Watch (2026-09-23)
 

@@ -762,8 +762,9 @@ Harness completion and execution need separate evidence. LOO-304's `2176cac20`
 counts CLI processes and main-store SQLite statements/rows without SQL or values;
 interrupted receipts remain partial. Three headless owned-provider reopens retain
 one Session and native history; post-exit inventory requires `--history`.
-The standalone mounted scenario has no rendered result. Setup and scenario CLI receipts now remain separate with partial counts retained;
-older combined receipts remain unscoped. Reopen totals cannot measure planning
+The mounted scenario remains unrendered. Fixture preparation owns both receipt
+directories; real-CLI isolation confirms separate setup counts. Partial counts
+remain visible; older combined receipts remain unscoped. Reopen totals cannot measure planning
 refresh or the cat-PTY soak. Task-window reopening,
 native identity through the dense soak and realistic volume still require LOO-371
 integration. Release's retired publisher UI receipt does not waive this acceptance.

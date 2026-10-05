@@ -333,12 +333,20 @@ def _report(output: Path, baseline: Path | None) -> dict:
             summary, json.loads((baseline / "report.json").read_text())
         )
     _write(output / "report.json", summary)
+    (output / "report.md").write_text(
+        _markdown(summary, scoped=(output / "fixture-setup-cli-volume").is_dir()),
+        encoding="utf-8",
+    )
+    return summary
+
+
+def _markdown(summary: dict, *, scoped: bool) -> str:
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
         "Endpoint: in-process native bitmap capture with text verification; "
         "Session return also waits for owned PTY replies.",
-        "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+        "**Not compositor paint time. Soak trace evidence is reported separately.**",
         "",
         "Fixture data excludes CLI/registry discovery, network and provider startup. "
         "Three retained cat PTYs per population; "
@@ -358,8 +366,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
             f"| {group['population']} | {group['scenario']} | {group['state']} | "
             f"{group['passed']}/{group['attempted']} | {p50} | {p95} |"
         )
-    if baseline:
-        comparison = summary["comparison"]
+    if comparison := summary.get("comparison"):
         lines += ["", "## Comparison", ""]
         if not comparison["available"]:
             lines.append(comparison["reason"])
@@ -388,7 +395,6 @@ def _report(output: Path, baseline: Path | None) -> dict:
             "Idle-only trace coverage is reported separately; partial coverage is not acceptance.",
         ]
     volume = summary["cli_volume"]
-    scoped = (output / "fixture-setup-cli-volume").is_dir()
     scope = "Scenario" if scoped else "Unscoped"
     lines += [
         "",
@@ -403,15 +409,14 @@ def _report(output: Path, baseline: Path | None) -> dict:
             if scoped else "No separate setup receipts; setup/scenario attribution is unmeasured."
         ),
     ]
-    if not complete:
+    if summary["status"] != "complete":
         lines += [
             "",
             "See run.json, attempts.jsonl and native.log for failed, interrupted "
             "or unavailable observations.",
         ]
-        lines.extend(f"- {error}" for error in errors)
-    (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return summary
+        lines.extend(f"- {error}" for error in summary["journal_errors"])
+    return "\n".join(lines) + "\n"
 
 
 def _stop(process: subprocess.Popen) -> None:
@@ -426,6 +431,8 @@ def _stop(process: subprocess.Popen) -> None:
 
 
 def _prepare_native_fixture(output: Path, cli: Path) -> Path:
+    for directory in ("fixture-setup-cli-volume", "cli-volume"):
+        (output / directory).mkdir()
     home = output / "native-home"
     native = home / "codex"
     bin_dir = home / "bin"
@@ -506,9 +513,7 @@ def _run_native(output: Path, samples: int, soak_seconds: int, cli: Path) -> dic
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
     isolated.mkdir()
-    volume = output / "cli-volume"
-    volume.mkdir()
-    environment.update(LF_HOME=str(isolated), HOME=str(isolated), LF_PERF_OUTPUT=str(volume))
+    environment.update(LF_HOME=str(isolated), HOME=str(isolated))
     fixture = _prepare_native_fixture(output, cli)
     environment.update(
         LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),

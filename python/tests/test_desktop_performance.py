@@ -240,7 +240,6 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
         f"#!{sys.executable}\n"
         "import json, os, pathlib\n"
         "directory = pathlib.Path(os.environ['LF_PERF_OUTPUT'])\n"
-        "directory.mkdir(parents=True, exist_ok=True)\n"
         "start = dict(event='start', pid=os.getpid(), time=10, elapsed_ms=0, "
         "connections=0, statements=0, rows=0)\n"
         "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"

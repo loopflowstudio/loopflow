@@ -881,6 +881,22 @@ its payload and SQLite database. No descriptor survives from before exclusion.
 The probe restores permissions and removes its own files; it uses no installed
 Home. This disproves directory permissions as the sole conversion boundary.
 
+Reproduce interrupted sealing with a writable shared parent:
+
+```bash
+uv run python tests/e2e/capture_exclusion.py --probe-recovery
+```
+
+The probe fsyncs original inode identities and metadata before a child changes
+one file's mode and dies by SIGKILL, leaving its directory unsealed. A fresh
+process replaces the payload path while continuing unrelated writes. Recovery
+in another process refuses the changed inode without altering either history.
+After the fixture restores the original namespace, two fresh recovery processes
+restore the saved metadata from the receipt. This portable test proves a namespace
+counterexample and metadata restoration, not privileged exclusion or quiescence.
+The container also runs it with root-owned file sealing and an unprivileged
+process replacing the path.
+
 Probe released commands, hard links and external storage in isolation:
 
 ```bash
@@ -905,8 +921,9 @@ reached through a symlink. Namespace replacement must fail while sealed. Writes
 must succeed again after restoring the fixture's original ownership and modes.
 The privileged reader uses immutable SQLite access to avoid creating its own WAL.
 
-Fixed fixture roots and in-memory metadata are not production discovery or durable
-recovery. This experiment does not establish ACL/mount coverage, shared-namespace
+The full sealing probe still uses fixed roots and in-memory metadata. The separate
+interruption probe has a durable fixture receipt, not candidate recovery or a
+complete interruption matrix. Neither establishes ACL/mount coverage, shared-namespace
 preservation, general quiescence, a candidate converter, populated Session
 preservation, macOS privileged exclusion or recovery targeting.
 

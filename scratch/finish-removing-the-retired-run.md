@@ -218,6 +218,35 @@ not recovery from partial sealing or loss of that list. The production fault mat
 therefore needs interruption between metadata mutations and a fresh recovery process
 using only durable evidence, with unrelated shared-directory access preserved.
 
+### Interrupted sealing and shared namespace — October 5 counterexample
+
+`--probe-recovery` now fsyncs a fixture restoration receipt (path, device/inode,
+owner and mode) before a separate worker seals one file and dies by SIGKILL,
+leaving its directory unsealed. The executed unprivileged macOS probe replaces
+that directory through its writable shared parent while unrelated writes continue.
+Fresh-process recovery detects the changed inode before restoring any metadata;
+both displaced history and replacement bytes remain intact. After the fixture
+explicitly restores the namespace, two fresh recovery processes restore the
+original metadata from the receipt. No in-memory restoration list crosses into
+those processes. This is process-death evidence, not a power-loss proof.
+
+The container variant seals the file as root and attempts replacement as its
+fixture account; Docker remains unavailable, so this variant is unexecuted and
+CI-owned. The existing full-sealing probe instead seizes the entire external
+parent; its exclusion assertion cannot prove preservation of unrelated access.
+A durable receipt prevents blind restoration onto replacement inodes but does
+not establish exclusion during partial sealing. Dependent conversion remains
+stopped: a replacement design must establish admission/namespace exclusion before
+metadata changes without taking unrelated shared-directory access. Repeated
+quiescence after interruption, ACL/mount preservation, interruption between every
+ownership/mode mutation, and candidate-owned recovery remain unproved. The small
+fixture recovery helper is not installer code and does not select a deployment
+mechanism.
+
+Review finding: the fixture waits for its known renamer to exit before recovery.
+Identity prechecks do not fence a concurrent path swap or discover unknown writers;
+production recovery still needs exclusion and a repeated quiescence observation.
+
 ## Problem and observable outcome
 
 The original inventory found capture keys called Run IDs, presence-based execution
@@ -454,7 +483,8 @@ in isolation, without another product approval.
    design covering all access paths, not only original pathnames. Retain both
    released-writer and newly opened alias counterexamples. Select and prove that
    boundary before dependent privilege/recovery implementation; no replacement is
-   currently proved. The inode-sealing experiment above is the next proof target.
+   currently proved. The interrupted-sealing probe above now demonstrates the shared-namespace
+   gap; a durable metadata receipt alone cannot close it.
    Then implement any required OS-account targeting, durable
    recovery/restoration, and candidate-owned conversion through exact-schema
    advancement and recovery. Inventory mutable absolute references, preserve the
@@ -535,4 +565,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, realign): `git diff --check` passed; retained `uv run ruff check tests/e2e/capture_exclusion.py` and `uv run python tests/e2e/capture_exclusion.py --probe-aliases` passes; Linux sealing remains deferred to CI after Docker was unavailable; no behavioral checks rerun for prose reconciliation.
+Check (October 5, implement): `uv run ruff check tests/e2e/capture_exclusion.py`, `uv run python tests/e2e/capture_exclusion.py --probe-recovery` and `git diff --check` passed; `uv run python scripts/test_capture_exclusion.py` could not connect to Docker; privileged interruption/sealing remains CI-owned.

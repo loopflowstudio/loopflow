@@ -8,9 +8,11 @@ at /fixture/prior/lf and no host Home, installation, or credential mounts.
 
 import argparse
 import hashlib
+import json
 import os
 import pwd
 import select
+import signal
 import sqlite3
 import stat
 import subprocess
@@ -22,6 +24,135 @@ from pathlib import Path
 
 CLI = Path("/fixture/prior/lf")
 ACCOUNT = "lf-capture-exclusion"
+
+
+def _sync(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _recover_metadata(receipt: Path) -> None:
+    entries = json.loads(receipt.read_text())
+    # Check every identity before restoring any access. A pathname alone cannot
+    # safely identify an object after an interrupted namespace exclusion.
+    # The fixture's renamer has exited; this check does not fence concurrent swaps.
+    for entry in entries:
+        metadata = Path(entry["path"]).lstat()
+        if (metadata.st_dev, metadata.st_ino) != (entry["dev"], entry["ino"]):
+            raise SystemExit("recovery target changed; metadata left untouched")
+    for entry in reversed(entries):
+        path = Path(entry["path"])
+        if os.geteuid() == 0:
+            os.chown(path, entry["uid"], entry["gid"])
+        path.chmod(entry["mode"])
+        _sync(path)
+
+
+def _probe_interrupted_metadata() -> None:
+    # This narrow counterexample deliberately leaves the shared parent writable.
+    # The privileged variant uses root-owned inodes and an unprivileged renamer;
+    # the portable variant proves pathname replacement, not ownership exclusion.
+    privileged = os.geteuid() == 0
+    account = pwd.getpwnam(ACCOUNT) if privileged else None
+    with tempfile.TemporaryDirectory(prefix="lf-capture-recovery-") as temporary:
+        root = Path(temporary)
+        root.chmod(0o755)
+        shared = root / "shared"
+        shared.mkdir()
+        if account:
+            os.chown(shared, account.pw_uid, account.pw_gid)
+        storage = shared / "payloads"
+        storage.mkdir()
+        payload = storage / "events.jsonl"
+        payload.write_text("retained history\n")
+        if account:
+            for path in (storage, payload):
+                os.chown(path, account.pw_uid, account.pw_gid)
+        receipt = root / "restoration.json"
+        entries = []
+        # File first: a crash leaves the directory unsealed. Its restoration
+        # record is still required before the first change to either inode.
+        for path in (payload, storage):
+            metadata = path.stat()
+            entries.append(
+                dict(
+                    path=str(path),
+                    dev=metadata.st_dev,
+                    ino=metadata.st_ino,
+                    uid=metadata.st_uid,
+                    gid=metadata.st_gid,
+                    mode=stat.S_IMODE(metadata.st_mode),
+                )
+            )
+        receipt.write_text(json.dumps(entries))
+        receipt.chmod(0o600)
+        _sync(receipt)
+        _sync(root)
+        worker = subprocess.run(
+            [sys.executable, __file__, "--interrupt-metadata", str(receipt)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert worker.returncode == -signal.SIGKILL, worker.stderr
+        assert stat.S_IMODE(payload.stat().st_mode) == 0o400
+        assert stat.S_IMODE(storage.stat().st_mode) == entries[1]["mode"]
+        # A fresh account process can keep unrelated work moving, but can also
+        # replace the protected path without opening its sealed payload inode.
+        replacement = subprocess.run(
+            [
+                *(["runuser", "-u", ACCOUNT, "--"] if privileged else []),
+                sys.executable,
+                "-c",
+                "import sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                "(p/'unrelated').write_text('before'); "
+                "(p/'payloads').rename(p/'displaced'); (p/'payloads').mkdir(); "
+                "(p/'payloads/events.jsonl').write_text('replacement'); "
+                "(p/'unrelated').write_text('after')",
+                str(shared),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert replacement.returncode == 0, replacement.stderr
+        before = _snapshot(shared)
+        recovery = subprocess.run(
+            [sys.executable, __file__, "--recover-metadata", str(receipt)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert recovery.returncode != 0 and "target changed" in recovery.stderr
+        assert _snapshot(shared) == before
+        assert (shared / "unrelated").read_text() == "after"
+        assert (shared / "displaced/events.jsonl").read_text() == "retained history\n"
+        # Only the fixture restores the known namespace. Recovery then uses the
+        # on-disk receipt alone and is repeatable in separate processes.
+        payload.unlink()
+        storage.rmdir()
+        (shared / "displaced").rename(storage)
+        for _ in range(2):
+            subprocess.run(
+                [sys.executable, __file__, "--recover-metadata", str(receipt)],
+                check=True,
+                timeout=10,
+            )
+        for entry in entries:
+            metadata = Path(entry["path"]).stat()
+            assert (metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)) == (
+                entry["uid"],
+                entry["gid"],
+                entry["mode"],
+            )
+        assert payload.read_text() == "retained history\n"
+    print(
+        "Counterexample confirmed: partial sealing leaves shared namespace replaceable; "
+        "fresh recovery preserves replacement and retained history."
+    )
 
 
 def _probe_retained_aliases() -> None:
@@ -274,8 +405,29 @@ def main() -> None:
     modes.add_argument("--released-sha256")
     modes.add_argument("--probe-aliases", action="store_true")
     modes.add_argument("--write-aliases", type=Path)
+    modes.add_argument("--probe-recovery", action="store_true")
+    modes.add_argument("--interrupt-metadata", type=Path)
+    modes.add_argument("--recover-metadata", type=Path)
     parser.add_argument("--excluded", action="store_true")
     args = parser.parse_args()
+    if os.geteuid() == 0 and not Path("/.dockerenv").exists():
+        raise SystemExit("Privileged probes require the disposable container.")
+    if args.interrupt_metadata:
+        entry = json.loads(args.interrupt_metadata.read_text())[0]
+        path = Path(entry["path"])
+        if os.geteuid() == 0:
+            os.chown(path, 0, 0)
+        path.chmod(0o400)
+        _sync(path)
+        os.kill(os.getpid(), signal.SIGKILL)
+    if args.recover_metadata:
+        _recover_metadata(args.recover_metadata)
+        return
+    if args.probe_recovery:
+        if os.geteuid() == 0:
+            raise SystemExit("Run the portable recovery probe unprivileged.")
+        _probe_interrupted_metadata()
+        return
     if args.write_aliases:
         if not Path("/.dockerenv").exists() or os.geteuid() == 0:
             raise SystemExit("Alias writes require the disposable container's fixture account.")
@@ -291,6 +443,7 @@ def main() -> None:
     assert version == "lf 0.13.3", version
     subprocess.run(["useradd", "--create-home", ACCOUNT], check=True)
     account = pwd.getpwnam(ACCOUNT)
+    _probe_interrupted_metadata()
     subprocess.run(
         ["runuser", "-u", ACCOUNT, "--", sys.executable, __file__, "--probe-aliases"],
         check=True,

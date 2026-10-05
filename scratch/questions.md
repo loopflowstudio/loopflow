@@ -19,3 +19,8 @@ limits remain at
 They are neither current availability evidence nor authorization to change an
 installation. Future authenticated probes must resolve their actual account
 context and preserve unrelated data.
+
+October 5 context queries: the stored Work seed is 858–862 tokens over its 16,000-token
+goal limit. It is assembled from live Task/steer content, not an editable local
+goal file; this implementation does not rewrite those authored inputs. Local
+scratch and Product memory remain within their limits.

@@ -1,0 +1,6 @@
+{
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "endpoint": "PTY bytes; no compositor or provider",
+  "tmux_version": "tmux 3.7c",
+  "error": "CalledProcessError: Command '['tmux', '-S', '/tmp/lf-terminal-1n1yxhwf/tmux/tmux.sock', '-f', '/dev/null', 'send-keys', '-t', 'probe:0.0', 'query']' returned non-zero exit status 1."
+}

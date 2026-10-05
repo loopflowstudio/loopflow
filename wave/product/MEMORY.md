@@ -7,24 +7,25 @@ they mean the Mac surface.
 
 ## Live Session connection evidence (2026-10-05 UTC)
 
-Jack Heart selected live `lf session connect` performance (LOO-378), including
+Jack Heart selected live `lf session connect` (LOO-378), including
 his Flow-review selector. Preserve identity, history and drafts; separate output,
 input readiness and attached lifetime. Resume/replacement earns no live-attachment
 proof. Jack authorized autonomous landing October 4 without a manual demo;
 no Desktop KR credit follows.
 
-Driver transfer follows successful resume; failed attachment preserves engine
-and draft. Reconnect without `--replace` starts another UI: the
-[reconnect probe](../../scripts/benchmarks/session-connect/20261005-reconnect/README.md)
-accepted a fresh marker without the original draft despite unchanged engine
-identity. Engine reuse is insufficient. Cleanup remains unreliable; owner exit still closes the engine.
-`lf session timings EXEC` records phases, unavailable readiness and lifetime;
-SQLite may delay exit. No baseline or speedup exists.
+Engine reuse loses drafts:
+[reconnect evidence](../../scripts/benchmarks/session-connect/20261005-reconnect/README.md).
+Failed attachment preserves engine/draft; owner exit closes the engine. Cleanup
+remains unreliable. `lf session timings EXEC` separates phases/lifetime despite
+SQLite-delayed exit. No baseline or speedup exists.
 
-Flow reviews already have a tmux cradle, but native resume replaces their UI.
-Retaining the UI/PTY is the unimplemented proposal; compare opt-in tmux with a
-transparent relay before choosing presentation. Preserve Infrastructure's launch-lock ordering and review fences. Conversation proof excludes reviews; repeated retained attachment,
-pagination and authenticated providers remain unproven.
+The [terminal comparison](../../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
+preserves fixture drafts across tmux reattachment/transfer, but sends clipboard
+queries to recently active passive viewers. Raw replay repeats historical queries.
+Screen state, controller-owned replies and passive typing need separate
+handling. Native images/providers/review completion remain unproven. Reviews'
+tmux cradle does not prevent UI replacement. Retention remains unimplemented;
+preserve Infrastructure's launch-lock ordering and review fences.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

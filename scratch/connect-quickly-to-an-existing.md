@@ -53,16 +53,40 @@ The normal Flow-review route launches `--mode tui` through `serve_flow_locked`
 has no retained transport. Routing reviews through `connect_live_codex` alone
 falls back to that replacement; the attempted adaptation was removed.
 
-Compare opt-in tmux presentation with a transparent PTY relay before selecting
-this owner, as Product's shared-viewing contract requires. The earlier engine-first
-proposal is superseded: an app-server endpoint alone cannot retain a UI-local
-draft. The comparison remains authorized local work; transport selection is
-unresolved, and dependent latency optimization awaits continuity proof. Compare
-truecolor, keyboard/image input, independent view sizes, late replay, one native
-UI/provider/draft, passive-view enforcement and explicit control transfer. Detach
-must preserve the terminal; exact review completion must retain its existing
-owner. Existing tmux launch ownership is not acceptance of tmux presentation.
-No new authorization, account repair or manual performance demo is required.
+The [October 5 terminal comparison](../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
+now supplies bounded evidence, not a selected production transport. A private
+configured tmux server preserved truecolor/paste bytes, three reattachments,
+fixture draft submission and explicit input transfer. A 60-column passive view
+left the application's 100×30 PTY intact. Cleanup observed both server and fixture
+exit. This is a canned application, not native provider continuity or image proof.
+
+Two counterexamples invalidate a plain-attachment/raw-replay implementation:
+
+- With `get-clipboard request`, tmux directs an independently emitted clipboard
+  query to the recently active passive viewer. The controller gets no query;
+  the passive reply does not reach the application. Controller replies work
+  before passive attachment and after explicit transfer. Read-only typing alone
+  does not establish ownership of terminal responses.
+- Raw transcript replay contains historical clipboard queries. Responding to
+  those queries writes fresh clipboard data into the retained application PTY
+  unless the owner suppresses replayed queries and fences replies. This is a
+  counterexample to the proposed raw relay, not an existing production vulnerability.
+
+**Revised design requirement, not implemented:** one retained terminal owner
+must hold application screen state and live terminal queries separately. Late
+views receive a display snapshot plus subsequent display updates, never past
+clipboard/device queries. Only the controller supplies query replies and PTY
+size; passive viewers have independent cropped/panned presentation. Transfer
+revokes the old input/reply path before granting the new one, without changing
+the Session driver. Full view-specific reflow is not promised by one PTY.
+
+Plain tmux attachment and an append-only byte replay are rejected as the complete
+owner. A tmux-backed presentation needs explicit controller-bound query routing;
+a transparent relay needs terminal state/replay handling, input fencing and bounded
+backpressure. The comparison does not choose between those implementations.
+This is a substantial remaining architectural cut, not a latency optimization.
+Dependent production replacement remains stopped on these counterexamples.
+No new user authorization or manual demo is needed to implement the revised owner.
 
 Preserve Infrastructure's LOO-377 launch-lock-before-driver-fence ordering and
 exact review revalidation (`c5dc238b0afb`). Attachment grants no review-completion
@@ -146,4 +170,4 @@ Earlier design chronology and observer notes are preserved at
 Compression removes the superseded engine-first sequence and duplicate evidence;
 production code and the failing regression remain unchanged.
 
-Check: `git diff --check` and `lf context --skill realign` passed; documentation-only reconciliation reused the recorded failing reconnect probe; no build or native rerun.
+Check: `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-comparison-12` and runner Ruff passed; transport comparison only, with clipboard/replay counterexamples retained; native connection acceptance remains open.

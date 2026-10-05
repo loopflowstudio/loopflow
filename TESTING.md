@@ -547,6 +547,20 @@ connects again without `--replace`, and appends a unique input marker without
 copying the draft. The accepted request must contain both. This is currently a
 failing regression: engine continuity and accepted input do not preserve the
 old UI's composer. Reconnect cleanup errors remain separate from that failure.
+
+Compare retained terminal transports without an account or native provider:
+
+```bash
+uv run python tests/e2e/terminal_transport.py --output /tmp/terminal-comparison
+```
+
+Requires tmux with `get-clipboard request` support and a new output directory.
+The private server and raw PTY fixture exercise replay, draft submission,
+passive typing, control transfer, clipboard queries and detach/cleanup.
+Exit zero means the comparison completed, not that either transport meets the
+Session contract. JSON retains contrary observations and failures. This is
+transport evidence, not native image/provider, Flow-review or latency acceptance.
+
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.

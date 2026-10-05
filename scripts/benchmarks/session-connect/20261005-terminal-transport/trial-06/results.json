@@ -1,0 +1,38 @@
+{
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "endpoint": "PTY bytes; no compositor or provider",
+  "tmux_version": "tmux 3.7c",
+  "tmux": {
+    "initial_history": true,
+    "bracketed_paste_exact": true,
+    "draft_visible": true,
+    "truecolor_bytes": true,
+    "clipboard_query_forwarded": true,
+    "passive_input_blocked": true,
+    "late_draft_replay": true,
+    "late_clipboard_query_replayed": false,
+    "pane_size_with_smaller_view": "100x30",
+    "passive_receives_clipboard_query": true,
+    "passive_clipboard_reply_reaches_provider": false,
+    "detach_keeps_process": true,
+    "repeated_attachments": 3,
+    "same_process": true,
+    "submitted_retained_draft": true,
+    "image_input": "unmeasured: fixture has no native clipboard/image decoder",
+    "review_fences": "unmeasured: transport fixture is not lf session connect",
+    "cleanup_status": 0,
+    "server_absent_after_cleanup": true
+  },
+  "relay": {
+    "truecolor_bytes": true,
+    "bracketed_paste_exact": true,
+    "clipboard_query_forwarded": true,
+    "late_draft_replay": true,
+    "late_clipboard_query_replayed": true,
+    "passive_clipboard_reply_reaches_provider": true,
+    "replay_bytes": 95,
+    "image_input": "unmeasured: byte relay does not prove native image decoding",
+    "independent_sizes": "not implemented: one PTY has one size",
+    "cleanup_status": -15
+  }
+}

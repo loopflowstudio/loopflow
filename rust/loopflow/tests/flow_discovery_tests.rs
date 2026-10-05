@@ -13,7 +13,6 @@ fn flow_inventory_wire_keeps_unknowns_and_requires_metadata() {
     let page: FlowPage = serde_json::from_str(json).unwrap();
     assert_eq!(page.entries[0].summary.name, None);
     assert_eq!(page.entries[0].repo, None);
-    assert!(!page.entries[0].managed);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -22,7 +21,7 @@ fn flow_inventory_wire_keeps_unknowns_and_requires_metadata() {
     missing["entries"][0]
         .as_object_mut()
         .unwrap()
-        .remove("managed");
+        .remove("updated_at");
     assert!(serde_json::from_value::<FlowPage>(missing).is_err());
 }
 
@@ -77,8 +76,6 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
             model: None,
             current_attempt: None,
             pending_session_id: None,
-            worker_generation: 0,
-            claim: None,
             failure: None,
             finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
@@ -161,8 +158,6 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
         "PROOF-1",
         "--for-wave",
         "wave",
-        "--managed",
-        "false",
         "--limit",
         "2",
         "--json",
@@ -175,11 +170,22 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
             cmd: loopflow::lf::FlowCommand::List { inventory, json },
         }) => {
             assert_eq!(inventory.for_task.as_deref(), Some("PROOF-1"));
-            assert_eq!(inventory.managed, Some(false));
             assert!(json);
         }
         _ => panic!("expected Flow discovery"),
     }
+    assert!(
+        loopflow::lf::Cli::try_parse_from([
+            "lf",
+            "flow",
+            "list",
+            "--sessions",
+            "--managed",
+            "true"
+        ])
+        .is_err(),
+        "no Flow is selected over another"
+    );
     assert!(loopflow::lf::Cli::try_parse_from([
         "lf",
         "flow",

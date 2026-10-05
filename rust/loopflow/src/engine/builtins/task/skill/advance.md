@@ -12,17 +12,18 @@ never select a different Task merely because it is the only waiting session.
 
 When the User asks to finish a review, save the agreed design, feedback and
 remaining work. Continue the discussion in the same conversation. Feedback is
-not a command to close a Session or restart a saved Flow. Inspect work and effect
+not a command to close a Session or launch a Flow. Inspect work and effect
 history before launching explicitly selected next work; ambiguous feedback
 starts nothing.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`, then use `lf --task <issue> flow start`.
-It continues the saved Flow or reports the current driver. Historical review boundaries remain evidence for the caller. A blocker needs its stated recovery,
-and completed work is not restarted. If there is no active Flow, select one using
+Read `lf task status <issue> --json`. Leave a Flow with a live driver running.
+A stopped or failed Flow is history: inspect what it finished and the effects it
+recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf --task <issue> flow start <flow>` only when the current request identifies the
-next work—for example, implementation after an accepted design. A finished Flow
+next work—for example, implementation after an accepted design. A blocker needs
+its stated recovery first, completed work is not repeated, and a finished Flow
 alone is not a request to run it again.
 
 ## An approved design has no Task

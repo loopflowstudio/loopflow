@@ -6,8 +6,7 @@
       "kind": "conversation",
       "interactive": false,
       "flow_session_id": null,
-      "completed_at": null,
-      "managed": false
+      "completed_at": null
     },
     {
       "id": "review",
@@ -15,8 +14,7 @@
       "kind": "flow_review",
       "interactive": true,
       "flow_session_id": "managed",
-      "completed_at": null,
-      "managed": true
+      "completed_at": null
     }
   ],
   "flows": [
@@ -30,7 +28,6 @@
       "wave_id": null,
       "updated_at": 1,
       "repo": "/repo",
-      "managed": true,
       "ended_at": null
     }
   ],

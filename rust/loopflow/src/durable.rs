@@ -5,11 +5,10 @@ use time::OffsetDateTime;
 
 use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
 use crate::engine::ConcreteStep;
-use crate::id::{ExecId, TraceId, WaveId};
+use crate::id::WaveId;
 
 /// The exact active Run named by an in-Run process.
 pub const RUN_ID_ENV: &str = "LF_RUN_ID";
-pub const TASK_WORKER_CLAIM_ENV: &str = "LF_WORK_ADVANCE_CLAIM";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -154,28 +153,9 @@ pub(crate) fn test_flow_invocation(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskWorkerOwner {
-    pub trace_id: TraceId,
-    pub exec_id: ExecId,
-    pub pid: u32,
-    pub started_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskWorkerClaim {
-    pub invocation_id: String,
-    pub generation: u64,
-    pub position_version: u64,
-    pub owner: TaskWorkerOwner,
-    #[serde(with = "time::serde::rfc3339")]
-    pub claimed_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFlowBlocker {
     pub captured: Option<i64>,
     pub reason: String,
-    pub restart_required: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub observed_at: OffsetDateTime,
 }
@@ -185,7 +165,6 @@ impl TaskFlowBlocker {
         Self {
             captured: None,
             reason: reason.into(),
-            restart_required: false,
             observed_at: OffsetDateTime::now_utc(),
         }
     }
@@ -214,15 +193,13 @@ pub struct FlowTurnSelection {
     pub output: Option<crate::engine::flow_output::FlowOutput>,
     pub flow_id: String,
     pub version: u64,
-    pub claim: Option<TaskWorkerClaim>,
     pub session_id: String,
     pub after: i64,
 }
 
 /// One Flow invocation as its row holds it: the captured graph, the cursor,
-/// the launch facts, the current attempt, the worker claim and the failure. A
-/// Task's own invocation and a saved Flow are the same record driven by the
-/// same executor; a Task's `cwd` is its worktree.
+/// the launch facts, the current attempt and the failure. Its driving process
+/// owns the live cursor; the row is evidence, never a restart instruction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowSession {
     pub invocation: QueuedInvocation,
@@ -235,8 +212,6 @@ pub struct FlowSession {
     pub model: Option<String>,
     pub current_attempt: Option<FlowAttempt>,
     pub pending_session_id: Option<String>,
-    pub worker_generation: u64,
-    pub claim: Option<TaskWorkerClaim>,
     pub failure: Option<TaskFlowBlocker>,
     pub finished: bool,
     pub updated_at: OffsetDateTime,
@@ -344,14 +319,6 @@ impl FlowSession {
             source: crate::session::WorkSource::Declared,
         })
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TaskWorkerClaimOutcome {
-    Claimed(TaskWorkerClaim),
-    Busy(TaskWorkerClaim),
-    Stale { actual_version: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,7 +431,6 @@ pub struct FlowFilter {
     pub task_id: Option<TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub taskless: bool,
-    pub managed: Option<bool>,
     pub state: Option<crate::session::FlowSummaryState>,
     pub search: Option<String>,
 }
@@ -474,7 +440,6 @@ pub struct FlowInventoryEntry {
     #[serde(flatten)]
     pub summary: crate::session::FlowSummary,
     pub repo: Option<String>,
-    pub managed: bool,
     pub ended_at: Option<i64>,
 }
 

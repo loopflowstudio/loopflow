@@ -23,13 +23,13 @@ struct TaskFlowTests {
     @Test("Participation opens only the captured occurrence in the current pass")
     func exactParticipationSession() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        guard case .pinned(let pinned) = snapshots[2].record else { Issue.record("pinned"); return }
+        guard case .latest(let latest) = snapshots[2].record else { Issue.record("latest"); return }
         var value = try #require(JSONSerialization.jsonObject(with: fixture("session.json")) as? [String: Any])
         value["kind"] = "flow"
         value["id"] = "exact"
         value["state"] = "waiting"
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": pinned.invocationId,
-            "step": "demo", "node": 4, "iterations": pinned.iterations, "occurrence": "current"]
+        value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": latest.invocationId,
+            "step": "demo", "node": 4, "iterations": latest.iterations, "occurrence": "current"]
         let exact = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         var wrong = value
         wrong["id"] = "previous"
@@ -37,9 +37,9 @@ struct TaskFlowTests {
         membership["iterations"] = [[0, 0]]
         wrong["flow_membership"] = membership
         let previous = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wrong))
-        #expect(participationSession(node: "4", pinned: pinned, sessions: [previous, exact])?.id == "exact")
-        #expect(participationSession(node: "4", pinned: pinned, sessions: [previous]) == nil)
-        #expect(participationSession(node: "7", pinned: pinned, sessions: [exact]) == nil)
+        #expect(participationSession(node: "4", latest: latest, sessions: [previous, exact])?.id == "exact")
+        #expect(participationSession(node: "4", latest: latest, sessions: [previous]) == nil)
+        #expect(participationSession(node: "7", latest: latest, sessions: [exact]) == nil)
         #expect(exact.offersParticipation)
         #expect(exact.participationLabel == "Available · preparing")
         value["kind"] = "conversation"
@@ -56,14 +56,14 @@ struct TaskFlowTests {
     func flowFixtures() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
         #expect(snapshots.map(\.recommended) == ["feature", "feature", "feature", "build", "feature"])
-        guard case .pinned(let running) = snapshots[1].record else {
-            Issue.record("second snapshot is pinned"); return
+        guard case .latest(let running) = snapshots[1].record else {
+            Issue.record("second snapshot has a latest Flow"); return
         }
         #expect(running.returns.map(\.traversals) == [2, 0])
         #expect(running.returns.map(\.decider) == [3, 5])
         #expect(running.graph.steps.filter { $0.returnsTo == 1 }.map(\.key) == [3, 5])
-        #expect(snapshots[1].control(.start)?.unavailable != nil)
-        #expect(snapshots[1].controls.map(\.kind) == [.start, .resume, .restart])
+        // Start stays legal beside an earlier Flow; it launches a fresh one.
+        #expect(snapshots.allSatisfy { $0.controls == [TaskFlowControl(kind: .start, unavailable: nil)] })
         #expect(snapshots[4].record == .finished(flow: "build"))
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("task_flow.json")) as? [[String: Any]])
@@ -124,39 +124,38 @@ struct TaskFlowTests {
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
     func occurrenceStates() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        guard case .pinned(let human) = snapshots[2].record else { Issue.record("pinned"); return }
-        let states = flowNodeStates(human.graph, pinned: human)
+        guard case .latest(let review) = snapshots[2].record else { Issue.record("latest"); return }
+        let states = flowNodeStates(review.graph, latest: review)
         #expect(states[1] == .completed && states[3] == .completed)
-        #expect(states[4] == .waitingForHuman)
+        #expect(states[4] == .stopped)
         // The second decision is pending again in this pass; the router pends too.
         #expect(states[5] == .pending && states[6] == .pending)
         #expect(states[7] == .pending)
-        #expect(human.iterations == [[1, 1]])
-        #expect(human.returns[1].traversals == 1)
-        guard case .pinned(let running) = snapshots[1].record else { Issue.record("pinned"); return }
+        #expect(review.iterations == [[1, 1]])
+        #expect(review.returns[1].traversals == 1)
+        guard case .latest(let running) = snapshots[1].record else { Issue.record("latest"); return }
         #expect(running.iterations == [[2, 0]])
         #expect(flowIterationLabel([[2, 1], [3]]) == "(2, 1) / (3)")
         #expect(flowIterationLabel([[]]) == nil)
         #expect(running.returns.map(\.traversals) == [2, 0])
 
-        guard case .pinned(let blocked) = snapshots[3].record else { Issue.record("pinned"); return }
-        #expect(flowNodeStates(blocked.graph, pinned: blocked)[3] == .blocked)
+        guard case .latest(let blocked) = snapshots[3].record else { Issue.record("latest"); return }
+        #expect(flowNodeStates(blocked.graph, latest: blocked)[3] == .blocked)
         let stalledSnapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("task_flow_stalled.json"))
-        guard case .pinned(let stalled) = stalledSnapshot.record else { Issue.record("pinned"); return }
+        guard case .latest(let stalled) = stalledSnapshot.record else { Issue.record("latest"); return }
         #expect(stalled.execution == .stalled)
-        #expect(flowNodeStates(stalled.graph, pinned: stalled)[0] == .stalled)
-        #expect(FlowPalette.describe(.stalled).contains("interrupt then resume"))
+        #expect(flowNodeStates(stalled.graph, latest: stalled)[0] == .stalled)
         #expect(stalled.reason.contains("Session event 12"))
         // A preview only marks human boundaries.
-        let preview = flowNodeStates(human.graph, pinned: nil)
+        let preview = flowNodeStates(review.graph, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
     }
 
     @Test("Captured numeric IDs preserve nested containment and independent return counts")
     func nestedNumericIdentity() throws {
         let snapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("flow_numeric_nested.json"))
-        guard case .pinned(let pinned) = snapshot.record else { Issue.record("pinned"); return }
-        let graph = pinned.graph
+        guard case .latest(let latest) = snapshot.record else { Issue.record("latest"); return }
+        let graph = latest.graph
         #expect(graph.steps.map(\.key) == [0, 1, 9])
         #expect(graph.node(5)?.label == "check")
         #expect(graph.node(5)?.returnsTo == 4)
@@ -168,12 +167,12 @@ struct TaskFlowTests {
         #expect(outer.contains(5) && outer.contains(8) && !outer.contains(9))
         #expect(outer.paths[0].steps.contains { $0.contains(5) })
         #expect(!outer.paths[1].steps.contains { $0.contains(5) })
-        let states = flowNodeStates(graph, pinned: pinned)
+        let states = flowNodeStates(graph, latest: latest)
         #expect(states[1] == .running && states[3] == .running && states[5] == .running)
         #expect(states[4] == .completed && states[7] == .pending && states[9] == .pending)
-        #expect(pinned.returns.map(\.decider) == [5, 6, 8, 9])
-        #expect(pinned.returns.map(\.traversals) == [2, 0, 0, 3])
-        #expect(pinned.iterations == [[3], [0], [2]])
+        #expect(latest.returns.map(\.decider) == [5, 6, 8, 9])
+        #expect(latest.returns.map(\.traversals) == [2, 0, 0, 3])
+        #expect(latest.iterations == [[3], [0], [2]])
     }
 
     @Test("Running status elapsed time and the two return ports")
@@ -198,7 +197,7 @@ struct TaskFlowTests {
 @Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
-    @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")
+    @Test("Flow preview, Start and execution updates keep the Session's terminal, draft and companion")
     func flowControlsRetainTerminals() async throws {
         _ = NSApplication.shared
         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
@@ -408,45 +407,39 @@ struct TaskFlowProofTests {
         for _ in 0..<20 where await source.controls.isEmpty { try await settle(window) }
         #expect(await source.controls == [["--task", "W2-156", "flow", "start", "build"]])
 
-        // Pinned and waiting for review: the saved position, not the catalogue.
+        // A launched Flow stopped at review: the saved position, not the catalogue.
         model.select(.task(id: "issue-review"))
         try await settle(window)
-        #expect(try text("task-flow-status") == "Waiting for your review at demo")
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, waiting for your review")
+        #expect(try text("task-flow-status") == "Stopped · Waiting for your review at demo")
+        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stopped here")
         #expect(try find("flow-node-1").accessibilityLabel().string() == "implement, completed this pass")
         // Each loop labels its own returns; the header carries the tuple.
         #expect(try find("task-flow-loop-3").text().string() == "Loop 1 · 1 return")
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2 · 1 return")
         #expect(try text("task-flow-iteration") == "Iteration (1, 1)")
-        #expect(try find("task-flow-resume").button().isDisabled())
+        #expect(try !find("task-flow-start").button().isDisabled(), "Start stays offered beside the latest Flow")
         for key in ["3", "5"] {
             try pressElement("flow-node-\(key)", in: window)
             try await settle(window)
             let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
             #expect(details.contains { $0.contains("Iterate returns to implement · taken 1×") })
         }
-        try captureIfRequested(window, name: "task-flow-pinned")
+        try captureIfRequested(window, name: "task-flow-latest")
 
-        // Stop & restart: Cancel leaves everything; a rejected replacement keeps
-        // the pinned Flow and names the failure.
+        // Choosing another Flow beside the latest one mutates nothing; a refused
+        // Start keeps the latest Flow drawn and names the failure.
         try find("task-flow-name").button().tap()
         try await settle(window)
         try find("task-flow-option-build").button().tap()
         try await settle(window)
-        _ = try find("task-flow-restart-confirmation")
-        try find("task-flow-restart-cancel").button().tap()
-        try await settle(window)
-        #expect(throws: (any Error).self) { try find("task-flow-restart-confirmation") }
+        #expect(try find("task-flow-name").accessibilityLabel().string() == "Flow build, choose another")
+        #expect(try text("task-flow-latest-name") == "Latest: feature")
         #expect(await source.controls.count == 1)
-        try find("task-flow-name").button().tap()
-        try await settle(window)
-        try find("task-flow-option-build").button().tap()
-        try await settle(window)
-        try find("task-flow-restart-confirm").button().tap()
+        try find("task-flow-start").button().tap()
         for _ in 0..<20 where (try? find("task-flow-error")) == nil { try await settle(window) }
         #expect(try text("task-flow-error") == "Task flow \"build\" was refused by the fixture")
-        #expect(await source.controls.last == ["task", "restart", "W2-131", "--flow", "build"])
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, waiting for your review")
+        #expect(await source.controls.last == ["--task", "W2-131", "flow", "start", "build"])
+        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stopped here")
 
         // Execution advances through the shared read; the graph follows it.
         await source.advanceReview()
@@ -547,8 +540,8 @@ struct TaskFlowProofTests {
     }
 }
 
-/// Shared reads plus recorded controls. Only `task run`/`task restart`/
-/// `task resume` count as controls; anything else unexpected fails loudly.
+/// Shared reads plus recorded controls. Only `flow start` counts as a control;
+/// anything else unexpected fails loudly.
 private actor FlowSource {
     private var roadmap: [String: Any]
     private var catalog: String
@@ -620,10 +613,9 @@ private actor FlowSource {
         case ("flow", "list"): return catalog
         case ("--task", _) where args.dropFirst(2).starts(with: ["flow", "start"]):
             controls.append(args)
+            // W2-131 already has a Flow; the fixture refuses a second launch.
+            if args[1] == "W2-131" { throw RegistryQueryError("Task flow \"build\" was refused by the fixture") }
             return ""
-        case ("task", "restart"):
-            controls.append(args)
-            throw RegistryQueryError("Task flow \"build\" was refused by the fixture")
         default:
             throw RegistryQueryError("Unexpected Flow proof operation: \(args)")
         }

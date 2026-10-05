@@ -178,23 +178,18 @@ public struct RegistryQuery: Sendable {
             .sorted { $0.name < $1.name }
     }
 
-    /// Every selectable Flow with the topology it would pin, via the shared loader.
+    /// Every selectable Flow with the topology it would capture, via the shared loader.
     public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
         let stdout = try await run(["flow", "list", "--json"], cwd)
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    /// Start (preparing when needed) the Task's managed Flow.
+    /// Launch a fresh Flow for the Task, preparing it when needed. Without
+    /// `flow`, Rust runs the Project default.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["--task", issue, "flow", "start"]
         if let flow { args.append(flow) }
         _ = try await run(args, cwd)
-    }
-
-    /// Checkpoint, stop, and replace the pinned Flow. Rust validates `flow`
-    /// before any side effect.
-    public func restartTaskFlow(issue: String, flow: String, cwd: String?) async throws {
-        _ = try await run(["task", "restart", issue, "--flow", flow], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before

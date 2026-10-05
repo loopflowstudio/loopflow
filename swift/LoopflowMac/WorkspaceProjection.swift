@@ -357,16 +357,14 @@ struct FlowNodeSelection: Equatable {
 }
 
 /// One Task's Flow selection and in-flight control. Presentation only: the
-/// pinned Flow and its saved position stay with Rust.
+/// latest Flow and its saved position stay with Rust.
 struct TaskFlowDraft: Equatable {
-    enum Picker: Equatable { case preview, restart }
     /// Flow chosen for the next Start; `nil` follows the recommendation.
     var preview: String?
     var selectedNode: FlowNodeSelection?
-    var picker: Picker?
+    /// The catalogue search is open.
+    var picking = false
     var search = ""
-    /// Replacement awaiting explicit confirmation.
-    var pendingRestart: String?
     var acting = false
     var error: String?
 }

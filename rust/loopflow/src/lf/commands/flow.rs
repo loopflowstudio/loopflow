@@ -1,4 +1,4 @@
-use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
+use crate::durable::{FlowSession, TaskFlowBlocker, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{
     compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
@@ -120,8 +120,6 @@ fn execute(
         model: cli.model.clone(),
         current_attempt: None,
         pending_session_id: None,
-        worker_generation: 0,
-        claim: None,
         failure: None,
         finished: false,
         updated_at: time::OffsetDateTime::now_utc(),
@@ -132,7 +130,7 @@ fn execute(
         Ok::<_, anyhow::Error>((store, flow))
     })?;
     eprintln!("Flow invocation {}", flow.id());
-    report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
+    report_outcome(runtime.block_on(drive(store, flow, cli))?)
 }
 
 async fn open_flow_store() -> Result<SharedStore> {
@@ -146,9 +144,7 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     match outcome {
         FlowOutcome::Completed => Ok(()),
         FlowOutcome::Waiting => {
-            anyhow::bail!(
-                "Flow is waiting for human input or delivery; inspect its saved Flow Session"
-            )
+            anyhow::bail!("Flow stopped waiting on delivery; inspect its history and effects")
         }
         FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
     }
@@ -170,7 +166,7 @@ where
     })
 }
 
-/// An operator-requested stop releases the position without recording a failure.
+/// An operator-requested stop ends the driver without recording a failure.
 #[derive(Debug)]
 pub(crate) enum StepEnd {
     Interrupted,
@@ -188,39 +184,19 @@ impl std::fmt::Display for StepEnd {
 
 impl std::error::Error for StepEnd {}
 
-/// Prepare uncertain native work for an explicit retry. Both Task launch and
-/// taskless resume use this before acquiring a replacement worker claim. Recorded
-/// failures remain with the caller's existing retry policy.
-pub(crate) async fn prepare_native_retry(
-    store: &SharedStore,
-    flow: FlowSession,
-) -> Result<FlowSession> {
-    wait_for_step(store, &flow).await?;
-    let _driver = flow_run::driver_lock(flow.id())?;
-    let saved = store
-        .flow(flow.id())
-        .await?
-        .ok_or_else(|| anyhow!("Flow disappeared"))?;
-    anyhow::ensure!(
-        saved.version == flow.version && saved.claim == flow.claim,
-        "Flow changed before native retry"
-    );
-    recover_native_flow(store, flow.id(), flow.claim.as_ref(), true).await
-}
-
 /// Preserve a surviving step's write authority until its own result is recorded.
 pub(crate) async fn wait_for_step(store: &SharedStore, flow: &FlowSession) -> Result<()> {
     loop {
         let current = store.flow(flow.id()).await?.context("Flow disappeared")?;
         anyhow::ensure!(
-            current.version == flow.version && current.claim == flow.claim,
+            current.version == flow.version,
             "Flow changed while observing its step"
         );
         let Some(exec) = store.sqlite.pending_flow_step_exec(flow.id())? else {
             return Ok(());
         };
-        // In-process historical captures and managed Task steps still name their
-        // driver. Waiting for ourselves would prevent that driver from settling.
+        // In-process captures name their driver. Waiting for ourselves would
+        // prevent that driver from settling.
         if journal::current_exec_id().as_ref() == Some(&exec) {
             return Ok(());
         }
@@ -236,56 +212,25 @@ pub(crate) async fn wait_for_step(store: &SharedStore, flow: &FlowSession) -> Re
     }
 }
 
-/// Read the selected provider turn before judging the Flow. A surviving engine
-/// can finish after its driver exits; observing that result does not repair the
-/// driver's unknown command outcome or grant a new conversation driver claim.
-async fn recover_native_flow(
-    store: &SharedStore,
-    id: &str,
-    claim: Option<&TaskWorkerClaim>,
-    retry: bool,
-) -> Result<FlowSession> {
+/// Read the selected provider turn before judging the step. A surviving engine
+/// can finish after its launcher exits; the driver reads that result from
+/// native history instead of inventing an outcome.
+async fn settle_step(store: &SharedStore, id: &str) -> Result<FlowSession> {
     loop {
         let flow = store
             .flow(id)
             .await?
             .ok_or_else(|| anyhow!("Flow {id} disappeared"))?;
-        anyhow::ensure!(
-            flow.claim.as_ref() == claim,
-            "Flow {id} changed under its driver"
-        );
         wait_for_step(store, &flow).await?;
-        if flow
-            .current_attempt
-            .as_ref()
-            .is_some_and(|attempt| !attempt.published)
-        {
-            if let Some(exec) = store.sqlite.pending_flow_step_exec(id)? {
-                if journal::exec_process_evidence(&store.sqlite, &exec)
-                    == journal::ProcessIdentityEvidence::Dead
-                {
-                    // No provider may start before publication. Retain this capture
-                    // in history and let the next command capture its own input.
-                    return Ok(store.reset_flow_input(id, flow.version, claim).await?);
-                }
-            }
-        }
         let Some(session_id) = store.sqlite.pending_flow_conversation(id)? else {
             break;
         };
-        if retry && crate::session_record::conversation_engine_exited(&store.sqlite, &session_id)? {
-            // Missing native completion remains unknown. Explicit retry releases
-            // only the fenced boundary after exact engine exit evidence.
-            return Ok(store.reset_flow_input(id, flow.version, claim).await?);
-        }
         let (endpoint, thread_id) =
             store
                 .sqlite
                 .session_connection(&session_id)?
                 .ok_or_else(|| {
-                    anyhow!(
-                        "Selected conversation {session_id} has no native connection for recovery"
-                    )
+                    anyhow!("Selected conversation {session_id} has no native connection")
                 })?;
         let session = store
             .sqlite
@@ -323,17 +268,16 @@ async fn recover_native_flow(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
-    Ok(store.recover_flow(id, claim).await?)
+    Ok(store.settle_flow_step(id).await?)
 }
 
 /// Drive one invocation from its row until it completes, waits or blocks.
-/// `claim` is the Task worker's, held until the driver stops; every write is
-/// fenced by it. The engine owns traversal; child commands read their work,
-/// model fallback and captured definition from the selected Flow row.
+/// The engine owns traversal in this process; child commands read their work,
+/// model fallback and captured definition from the Flow row. A driver that
+/// dies leaves history and effects for its caller; nothing resumes it.
 pub(crate) async fn drive(
     store: SharedStore,
     flow: FlowSession,
-    claim: Option<TaskWorkerClaim>,
     launcher: &Cli,
 ) -> Result<FlowOutcome> {
     require_autonomous_steps(&flow.invocation.steps)?;
@@ -347,7 +291,7 @@ pub(crate) async fn drive(
         LfEventType::Started,
         fields(LfEventFields::default()),
     );
-    let result = drive_loop(store, &flow, claim, launcher).await;
+    let result = drive_loop(store, &flow, launcher).await;
     let (event, error) = match &result {
         Ok(FlowOutcome::Completed) => (LfEventType::Completed, None),
         Ok(_) => (LfEventType::Escalated, None),
@@ -365,12 +309,7 @@ pub(crate) async fn drive(
     result
 }
 
-async fn drive_loop(
-    store: SharedStore,
-    flow: &FlowSession,
-    claim: Option<TaskWorkerClaim>,
-    launcher: &Cli,
-) -> Result<FlowOutcome> {
+async fn drive_loop(store: SharedStore, flow: &FlowSession, launcher: &Cli) -> Result<FlowOutcome> {
     let id = flow.id().to_owned();
     let _driver = flow_run::driver_lock(&id)?;
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.invocation.flow);
@@ -380,51 +319,10 @@ async fn drive_loop(
         .clone()
         .unwrap_or_default()
         .activate()?;
-    let mut owned_claim = claim;
     loop {
-        let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;
+        let mut flow = settle_step(&store, &id).await?;
         if flow.finished {
             return Ok(FlowOutcome::Completed);
-        }
-        if let Some(task_id) = &flow.task_id {
-            if store
-                .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
-                .await?
-                == crate::durable::WorkStatus::Done
-                && store
-                    .task_flow(task_id)
-                    .await?
-                    .is_some_and(|managed| managed.id() == id)
-            {
-                store
-                    .end_flow(&id, flow.version, owned_claim.as_ref(), "Task completed")
-                    .await?;
-                let task = store
-                    .get_task(task_id)
-                    .await?
-                    .context("completed Task disappeared")?;
-                crate::ops::task::cleanup_completed_task(&store, &task).await?;
-                return Ok(FlowOutcome::Completed);
-            }
-        }
-        if let Some(task_id) = &flow.task_id {
-            if store
-                .task_flow(task_id)
-                .await?
-                .is_some_and(|managed| managed.id() == flow.id())
-            {
-                let task = store.get_task(task_id).await?.context("Task disappeared")?;
-                if let Err(error) =
-                    crate::ops::task::resolve_managed_task_planning(&store, &task).await
-                {
-                    if owned_claim.is_some() {
-                        store
-                            .release_flow(flow.id(), flow.version, owned_claim.as_ref())
-                            .await?;
-                    }
-                    return Err(error.into());
-                }
-            }
         }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
@@ -436,7 +334,6 @@ async fn drive_loop(
             store: store.clone(),
             id: id.clone(),
             version: Mutex::new(flow.version),
-            claim: Mutex::new(owned_claim.clone()),
             progress: Mutex::new(None),
             launcher,
         };
@@ -453,27 +350,20 @@ async fn drive_loop(
             }
         };
         let version = executor.version();
-        let claim = executor.claim();
         let progress = executor
             .progress
             .lock()
             .expect("Flow progress mutex poisoned")
             .take();
         return match outcome {
-            Ok(None) => {
-                owned_claim = claim;
-                continue;
-            }
+            Ok(None) => continue,
             Ok(Some(FlowOutcome::Completed)) => {
                 store
-                    .end_flow(
-                        &id,
-                        version,
-                        claim.as_ref(),
-                        progress.as_deref().unwrap_or_default(),
-                    )
+                    .end_flow(&id, version, progress.as_deref().unwrap_or_default())
                     .await?;
-                if let Some(task_id) = flow.task_id.as_ref().filter(|_| claim.is_some()) {
+                // A step that completed its Task could not clean up under its
+                // own live Flow; the finished Flow can.
+                if let Some(task_id) = &flow.task_id {
                     let task = store
                         .get_task(task_id)
                         .await?
@@ -485,29 +375,21 @@ async fn drive_loop(
             Ok(Some(FlowOutcome::Waiting)) => Ok(FlowOutcome::Waiting),
             Ok(Some(FlowOutcome::Blocked(reason))) => {
                 store
-                    .fail_flow(&id, version, claim.as_ref(), &TaskFlowBlocker::now(&reason))
+                    .fail_flow(&id, version, &TaskFlowBlocker::now(&reason))
                     .await?;
                 anyhow::bail!(
                     "Flow {id} blocked: {reason}; inspect its history and effects before launching further work"
                 )
             }
             // A step's failure is what the caller hears; a write the row no longer
-            // accepts (the Flow was replaced or ended meanwhile) is logged.
+            // accepts is logged.
             Err(error) => match error.downcast_ref::<StepEnd>() {
                 Some(StepEnd::StoreChanged(_)) => Err(error),
-                Some(StepEnd::Interrupted) => {
-                    record(store.release_flow(&id, version, claim.as_ref()).await);
-                    Ok(FlowOutcome::Waiting)
-                }
+                Some(StepEnd::Interrupted) => Ok(FlowOutcome::Waiting),
                 None => {
                     record(
                         store
-                            .fail_flow(
-                                &id,
-                                version,
-                                claim.as_ref(),
-                                &TaskFlowBlocker::now(format!("{error:#}")),
-                            )
+                            .fail_flow(&id, version, &TaskFlowBlocker::now(format!("{error:#}")))
                             .await,
                     );
                     anyhow::bail!(
@@ -629,8 +511,6 @@ struct CliFlowExecutor<'a> {
     store: SharedStore,
     id: String,
     version: Mutex<u64>,
-    /// The Task worker's claim while the driver holds the position.
-    claim: Mutex<Option<TaskWorkerClaim>>,
     /// The finished step's summary, reported with the next checkpoint.
     progress: Mutex<Option<String>>,
     launcher: &'a Cli,
@@ -641,23 +521,13 @@ impl CliFlowExecutor<'_> {
         *self.version.lock().expect("Flow version mutex poisoned")
     }
 
-    fn claim(&self) -> Option<TaskWorkerClaim> {
-        self.claim
-            .lock()
-            .expect("Flow claim mutex poisoned")
-            .clone()
-    }
-
     fn observe(&self, flow: &FlowSession) {
         *self.version.lock().expect("Flow version mutex poisoned") = flow.version;
-        if flow.claim.is_none() {
-            *self.claim.lock().expect("Flow claim mutex poisoned") = None;
-        }
     }
 
     /// The row at the step about to run, with any earlier attempt settled.
     async fn begin(&self) -> Result<FlowSession> {
-        let flow = recover_native_flow(&self.store, &self.id, self.claim().as_ref(), false).await?;
+        let flow = settle_step(&self.store, &self.id).await?;
         anyhow::ensure!(
             !flow.finished && flow.failure.is_none(),
             "Flow is not ready to execute"
@@ -708,11 +578,10 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                     return Ok(outcome);
                 }
                 Err(_) => {
-                    flow = self.store.sqlite.correct_flow_output(
-                        &self.id,
-                        self.version(),
-                        self.claim().as_ref(),
-                    )?;
+                    flow = self
+                        .store
+                        .sqlite
+                        .correct_flow_output(&self.id, self.version())?;
                     self.observe(&flow);
                 }
             }
@@ -727,13 +596,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             .take();
         let flow = self
             .store
-            .checkpoint_flow(
-                &self.id,
-                self.version(),
-                cursor,
-                self.claim().as_ref(),
-                progress.as_deref(),
-            )
+            .record_flow_cursor(&self.id, self.version(), cursor, progress.as_deref())
             .await?;
         self.observe(&flow);
         Ok(())
@@ -767,28 +630,22 @@ pub fn execute_step(id: &str, version: u64, cli: &Cli) -> Result<()> {
             receipt_id: id.clone(),
             lock_fd: fd,
         });
-    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
-        .ok()
-        .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
-        .transpose()?;
-    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
     block_on_store(|store| async move {
         let flow = store
             .flow(id)
             .await?
             .context("Flow disappeared before step execution")?;
         anyhow::ensure!(
-            flow.version == version && flow.claim == claim && !flow.finished,
+            flow.version == version && !flow.finished,
             "Flow changed before step execution"
         );
         let exec = journal::current_exec_id().context("Flow step requires a registered Exec")?;
         let Some(ConcreteStep::Command(op)) = flow.current_step() else {
             anyhow::bail!("agent steps execute through lf skill");
         };
-        let Some(start) =
-            store
-                .sqlite
-                .begin_flow_operation(id, version, claim.as_ref(), Some(&exec))?
+        let Some(start) = store
+            .sqlite
+            .begin_flow_operation(id, version, Some(&exec))?
         else {
             return Ok(());
         };
@@ -805,14 +662,9 @@ pub fn execute_step(id: &str, version: u64, cli: &Cli) -> Result<()> {
         if let Ok(Some(landing)) = &result {
             store.sqlite.bind_operation_landing(start, landing)?;
         }
-        store.sqlite.finish_flow_operation(
-            id,
-            version,
-            claim.as_ref(),
-            start,
-            Some(&exec),
-            result.is_ok(),
-        )?;
+        store
+            .sqlite
+            .finish_flow_operation(id, version, start, Some(&exec), result.is_ok())?;
         result.map(|_| ()).map_err(anyhow::Error::from)
     })
 }
@@ -834,7 +686,6 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
-        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV)
         .envs(flow.invocation.isolation_env());
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         if let Some((id, fd)) = cli.cron_receipt.as_ref().zip(cli.cron_lock_fd) {
@@ -864,12 +715,6 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
             "skill",
             &flow.current().step,
         ]);
-    }
-    if let Some(claim) = &flow.claim {
-        command.env(
-            crate::durable::TASK_WORKER_CLAIM_ENV,
-            serde_json::to_string(claim)?,
-        );
     }
     let status = command.status().await;
     // A new installation can select a newer child. Never settle its result through an older
@@ -990,8 +835,6 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
                 failure: None,
                 finished: false,
                 updated_at: now,
@@ -1000,7 +843,7 @@ mod tests {
             .unwrap();
         let start = store
             .sqlite
-            .begin_flow_operation(flow.id(), flow.version, None, None)
+            .begin_flow_operation(flow.id(), flow.version, None)
             .unwrap()
             .unwrap();
         let landing = PrLanding::new(
@@ -1024,14 +867,13 @@ mod tests {
             .unwrap();
         store
             .sqlite
-            .finish_flow_operation(flow.id(), flow.version, None, start, None, true)
+            .finish_flow_operation(flow.id(), flow.version, start, None, true)
             .unwrap();
         let cli = crate::lf::Cli::try_parse_from(["lf"]).unwrap();
         let executor = super::CliFlowExecutor {
             store: store.clone(),
             id: flow.id().to_owned(),
             version: Mutex::new(flow.version),
-            claim: Mutex::new(None),
             progress: Mutex::new(None),
             launcher: &cli,
         };
@@ -1127,19 +969,14 @@ mod tests {
     }
 
     #[test]
-    fn rendered_pipeline_lists_human_node_identity() {
+    fn builtin_task_flows_launch_as_operational_work() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let flow = crate::engine::load_flow("task-design", &repo).unwrap();
-        let items = crate::engine::compile_flow(&flow, &repo).unwrap();
-
-        let lines = render_pipeline_lines(&items);
-        assert_eq!(
-            lines,
-            vec![
-                "kickoff".to_string(),
-                "review-design [review:review_kickoff]".to_string(),
-            ]
-        );
+        for name in ["feature", "code", "task-design", "pursue", "queue", "ship"] {
+            let flow = crate::engine::load_flow(name, &repo).unwrap();
+            let items = crate::engine::compile_flow(&flow, &repo).unwrap();
+            super::require_autonomous_steps(&items)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+        }
     }
 
     #[test]

@@ -70,21 +70,6 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn restart_task_flow(
-        &self,
-        task: &Task,
-        expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        let expected = expected.cloned();
-        let task = task.clone();
-        let checkpoint_head = checkpoint_head.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, expected.as_ref(), &checkpoint_head)
-        })
-        .await
-    }
-
     pub async fn rebind_task_issue_identifier(
         &self,
         issue_id: &str,

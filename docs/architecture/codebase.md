@@ -25,7 +25,6 @@ complexity.
 | Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, sessions, PR, Git, release, metrics, PM |
 | Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
-| Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifacts, repository identity, subscriptions |
@@ -50,7 +49,7 @@ subprocess edge to one concept.
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` conversation |
-| Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
+| Flow driver | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one FlowSession under its per-invocation driver lock |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
@@ -62,7 +61,6 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
-lf task __worker           one already-claimed Task boundary
 lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner
 Loopflow.app               pure client over CLI/HTTP DTOs
@@ -88,25 +86,25 @@ have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
-`lf flow start` and `restart` compose that substrate with a bounded
-Task worker. `lf --task ... <skill>` goes directly through execution with Task
-attribution and never advances the Task's Flow position.
+`lf --task ISSUE flow start` launches a fresh detached `lf --task ISSUE run FLOW`
+in that checkout. `lf --task ... <skill>` goes directly through execution with
+Task attribution and never moves a Flow's position.
 
 ## Dependency direction
 
 ```text
-task worker -> execution
-task worker -> work
-task worker -> delivery
-delivery   -> work
-surface    -> controller, execution, work, delivery
+task launch -> execution
+task launch -> work
+task launch -> delivery
+delivery    -> work
+surface     -> execution, work, delivery
 
-execution ⇏ work, task worker
-work      ⇏ task worker
+execution ⇏ work, task launch
+work      ⇏ task launch
 ```
 
 Keep these directions literal. Work types own Project/Task domain progression;
-the Task worker joins them with the exact `FlowSession` worker claim.
+Task launch joins them by starting an ordinary Flow in the Task checkout.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 

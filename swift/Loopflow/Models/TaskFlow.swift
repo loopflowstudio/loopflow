@@ -85,7 +85,7 @@ public struct FlowGraphPath: Decodable, Sendable, Hashable {
     public let steps: [FlowNode]
 }
 
-/// Execution evidence for one authored backward edge in the pinned invocation.
+/// Execution evidence for one authored backward edge in the latest invocation.
 /// The edge itself is the deciding node's `returnsTo`.
 public struct FlowReturn: Decodable, Sendable, Hashable {
     /// Key of the deciding occurrence that owns the edge.
@@ -98,12 +98,12 @@ public enum TaskFlowExecution: String, Decodable, Sendable, Hashable {
     case starting
     case running
     case stalled
-    case human
     case blocked
     case unknown
 }
 
-public struct PinnedTaskFlow: Decodable, Sendable, Hashable {
+/// The most recently launched Flow and where its cursor stands.
+public struct LatestTaskFlow: Decodable, Sendable, Hashable {
     public let invocationId: String
     public let graph: FlowGraph
     public let current: UInt32?
@@ -113,24 +113,22 @@ public struct PinnedTaskFlow: Decodable, Sendable, Hashable {
     public let iterations: [[UInt32]]
     public let execution: TaskFlowExecution
     public let reason: String
-    public let restartRequired: Bool
 
     enum CodingKeys: String, CodingKey {
         case graph, current, completed, returns, iterations, execution, reason
         case invocationId = "invocation_id"
-        case restartRequired = "restart_required"
     }
 }
 
 public enum TaskFlowRecord: Decodable, Sendable, Hashable {
-    /// No pinned or finished Flow is recorded.
+    /// No Flow has been launched for this Task.
     case none
-    case pinned(PinnedTaskFlow)
-    /// The Flow finished; its definition was not retained, so nothing is drawn.
+    case latest(LatestTaskFlow)
+    /// The most recently launched Flow finished; its definition was not retained, so nothing is drawn.
     case finished(flow: String)
 
     private enum Kind: String, Decodable {
-        case none, pinned, finished
+        case none, latest, finished
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -142,8 +140,8 @@ public enum TaskFlowRecord: Decodable, Sendable, Hashable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .none:
             self = .none
-        case .pinned:
-            self = .pinned(try PinnedTaskFlow(from: decoder))
+        case .latest:
+            self = .latest(try LatestTaskFlow(from: decoder))
         case .finished:
             self = .finished(flow: try container.decode(String.self, forKey: .flow))
         }
@@ -152,8 +150,6 @@ public enum TaskFlowRecord: Decodable, Sendable, Hashable {
 
 public enum TaskFlowControlKind: String, Decodable, Sendable, Hashable {
     case start
-    case resume
-    case restart
 }
 
 public struct TaskFlowControl: Decodable, Sendable, Hashable {
@@ -173,7 +169,7 @@ public struct TaskFlowSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-/// One selectable Flow and the topology it would pin if started now.
+/// One selectable Flow and the topology it would capture if started now.
 public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
     public let graph: FlowGraph?

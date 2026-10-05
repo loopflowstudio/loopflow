@@ -8,12 +8,6 @@ struct WorkActivityScope: Equatable, Sendable {
     let task: String?
 }
 
-enum TaskFlowControlRequest: Equatable, Sendable {
-    case start(flow: String)
-    case restart(flow: String)
-    case resume
-}
-
 enum PodiumReading<Value> {
     case loading
     case available(Value)
@@ -918,10 +912,10 @@ final class PodiumModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
-    /// Run one Rust-owned Task Flow control, then refresh the shared reading.
+    /// Launch a fresh Flow for the Task, then refresh the shared reading.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func performFlowControl(_ control: TaskFlowControlRequest, task: RoadmapTask, wave: WaveSnapshot) async {
+    func startFlow(_ flow: String, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.flowDrafts[taskId]?.acting != true else { return }
@@ -930,14 +924,7 @@ final class PodiumModel {
         let issue = task.task.identifier
         let cwd = WaveOrigin.resolve(wave.repo)
         do {
-            switch control {
-            case .start(let flow):
-                try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
-            case .restart(let flow):
-                try await query.restartTaskFlow(issue: issue, flow: flow, cwd: cwd)
-            case .resume:
-                try await query.runTaskFlow(issue: issue, flow: nil, cwd: cwd)
-            }
+            try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
             owner.flowDrafts[taskId] = nil
             await refresh()
         } catch {

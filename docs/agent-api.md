@@ -43,8 +43,8 @@ lf wait INF-123 --until terminal                # block until it settles
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its current Linear Project owns Tasks, KRs, targets and default Flow.
-Task owns the checkout, serial PRs and one managed FlowSession selection. Other
-conversations and Flows may carry Task attribution without acquiring that claim.
+Task owns the checkout and serial PRs. Every conversation and Flow attributed
+to it is equally its work; none is privileged.
 
 Exec records an actual lf command process. AgentSession keeps a continuable
 conversation, whether interactive or headless. FlowSession captures one Flow
@@ -53,9 +53,9 @@ inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
 calling conversation and provider generation. That evidence grants neither
-process-control authority nor permission to move a Flow cursor. A driver handoff
-retains conversation identity while fencing the old writer. Passive observation
-acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
+process-control authority nor permission to move a Flow cursor. A conversation
+driver handoff retains conversation identity while fencing the old writer.
+Passive observation acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
 ## Delegate
@@ -91,18 +91,18 @@ lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
 Comment on the Linear Task directly, or use `task comment`. Both reach only the
-worker advancing that Task. Independent conversations sharing its worktree or using
-`--task` do not subscribe to steering. With no active worker, comments
-wait for explicit advancement; steering never starts execution.
+Task's running Flow. Independent conversations sharing its worktree or using
+`--task` do not subscribe to steering. With no running Flow, comments
+wait for the next launch; steering never starts execution.
 
-Linear comments are the authored record. Workers refresh comments while running
+Linear comments are the authored record. Task Flows refresh comments while running
 and before starting a Skill; local events cache their delivery. The command
 receipt confirms publication to Linear. Conversation history distinguishes input included
 in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
-On a repeated captured Flow step, workers seed only steer IDs newer than that
+On a repeated captured Flow step, Task Flows seed only steer IDs newer than that
 step's last successful Run inputs. Failed or interrupted attempts acknowledge
 nothing. Each structural step and each new invocation has its own history;
 unreceived late comments remain eligible. This records delivery, not proof that
@@ -111,21 +111,24 @@ the model followed the instruction.
 Keep routine agent progress in working notes and the Run response. `task comment`
 inside a Run marks its publication as progress, excluded from steers. Use
 `--steer` only to deliver deliberate new direction. Direct
-participant comments and explicit worker steering remain direction, even through
+participant comments and explicit `--steer` remain direction, even through
 the same account. Other integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
 `lf interrupt INF-123` appends a durable interrupt comment;
-the active Task worker observes it and ends the current provider turn so the
-next boundary re-reads direction. With no live worker it remains durable input.
+the Task's running Flow observes it and ends the current provider turn so the
+next boundary re-reads direction. With no running Flow it remains durable input.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf --task INF-123 flow start` continues the saved
-Flow without losing durable direction, the worktree, or the Task PR. `lf flow start` never reopens terminal Work. Create a new Task for new work;
-`lf task status ISSUE` retains deliberate historical lookup.
+Work survives its provider process. A Flow whose driver died keeps its last
+position, failure and effect receipts as history; nothing resumes it. Inspect
+`lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
+fresh work with `lf --task INF-123 flow start`. The Task keeps its durable
+direction, worktree and PR. `flow start` never reopens terminal Work; create a
+new Task for new work.
 
 Automated Task commit, PR, and completion commands also re-check current PM
 ownership. If Linear moved the issue to another Project, the Task operation
@@ -146,7 +149,8 @@ Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the
 after an incomplete operation, even after planning refresh or chapter replacement.
 Missing provider data does not confirm deletion.
 Deletion cancels unfinished placed work or cleans completed delivery before trashing
-the issue. Live or unresolved workers and dirty checkouts block it. Task, PR and
+the issue. Live or unresolved execution and dirty checkouts block it; a stopped
+Flow is history and blocks nothing. Task, PR and
 Run history remain readable; confirmed provider trash makes retries idempotent.
 
 ## Ship

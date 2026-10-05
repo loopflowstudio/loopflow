@@ -83,8 +83,7 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let sessions = tx
             .prepare(&format!(
-                "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at,
-            COALESCE(s.flow_session_id=(SELECT current_invocation_id FROM tasks WHERE id=?1),0)
+                "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
                 session_ids("?1")
             ))?
@@ -96,11 +95,10 @@ impl SqliteStore {
                     interactive: row.get(3)?,
                     flow_session_id: row.get(4)?,
                     completed_at: row.get(5)?,
-                    managed: row.get(6)?,
                 })
             })?
             .collect::<StoreResult<Vec<_>>>()?;
-        let mut flows = tx
+        let flows = tx
             .prepare(&format!(
                 "SELECT {},{} {} WHERE f.id IN ({}) ORDER BY f.id",
                 super::flows::FLOW_METADATA_COLUMNS,
@@ -110,9 +108,6 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::flow_inventory::read_entry)?
             .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
-        for flow in &mut flows {
-            flow.managed &= flow.summary.task_id.as_ref() == Some(task);
-        }
         let execs = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -339,18 +334,13 @@ mod tests {
                 );
             }
             for (id, cwd, bound) in [
-                ("managed", "/elsewhere", true),
+                ("bound", "/elsewhere", true),
                 ("independent", "/missing/task%_/sub", false),
                 ("unrelated", "/other", false),
             ] {
-                conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
-                    VALUES(?1,?2,?3,?4,?5,0,0,1,0,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),(!bound).then_some(cwd),serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
+                conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,updated_at,state)
+                    VALUES(?1,?2,?3,?4,?5,0,0,1,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),(!bound).then_some(cwd),serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
             }
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='managed' WHERE id=?1",
-                [task.as_str()],
-            )
-            .unwrap();
             for (id, cwd) in [
                 (&mechanical, "/missing/task%_"),
                 (&bound_exec, "/elsewhere"),
@@ -378,9 +368,9 @@ mod tests {
         assert_eq!(
             work.flows
                 .iter()
-                .map(|f| (f.summary.id.as_str(), f.managed))
+                .map(|f| f.summary.id.as_str())
                 .collect::<Vec<_>>(),
-            [("independent", false), ("managed", true)]
+            ["bound", "independent"]
         );
         assert_eq!(work.execs.len(), 2);
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
@@ -430,23 +420,18 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,0,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='child-flow' WHERE id=?1",
-                [child.as_str()],
-            )
-            .unwrap();
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,flow_session_id,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/elsewhere','child-flow',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
         let work = store.task_work(&task).unwrap();
         assert!(work
             .flows
             .iter()
-            .any(|flow| flow.summary.id == "child-flow" && !flow.managed));
+            .any(|flow| flow.summary.id == "child-flow"));
         assert!(work
             .sessions
             .iter()
-            .any(|session| session.id == "child-session" && !session.managed));
+            .any(|session| session.id == "child-session"));
         let memberships = store.session_task_ids("child-session").unwrap();
         assert!(memberships.contains(&task) && memberships.contains(&child));
         {
@@ -467,7 +452,7 @@ mod tests {
                 .iter()
                 .map(|flow| flow.summary.id.as_str())
                 .collect::<Vec<_>>(),
-            ["managed"]
+            ["bound"]
         );
     }
 }

@@ -162,7 +162,6 @@ fn task(state: &str) -> PmItem {
 fn only_proven_untouched_backlog_expires() {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        worker_claimed: false,
         authored: Some(false),
         published: false,
         abandoned: false,
@@ -188,18 +187,12 @@ fn only_proven_untouched_backlog_expires() {
         classify_task(&task("backlog"), &evidence).0,
         TaskDisposition::Move
     );
-    evidence.worker_claimed = true;
-    assert_eq!(
-        classify_task(&task("canceled"), &evidence).0,
-        TaskDisposition::Unresolved
-    );
 }
 
 #[test]
 fn interrupted_retirement_finishes_without_reopening_local_work() {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        worker_claimed: false,
         authored: Some(false),
         published: false,
         abandoned: true,
@@ -213,12 +206,12 @@ fn interrupted_retirement_finishes_without_reopening_local_work() {
         classify_task(&task("canceled"), &evidence).0,
         TaskDisposition::Historical
     );
-    evidence.worker_claimed = true;
+    evidence.begun = true;
     assert_eq!(
         classify_task(&task("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
-    evidence.worker_claimed = false;
+    evidence.begun = false;
     evidence.authored = Some(true);
     assert_eq!(
         classify_task(&task("unstarted"), &evidence).0,
@@ -527,42 +520,37 @@ async fn local_started_task(
     let now = OffsetDateTime::now_utc();
     let flow = context
         .store
-        .start_task_flow(
-            &task.id,
-            FlowSession {
-                invocation: QueuedInvocation::new(
-                    "captured",
-                    vec![ConcreteStep::Skill(ConcreteSkill {
-                        skill: Skill::named("implement"),
-                        sources: Vec::new(),
-                        id: Some("implement".into()),
-                        human: false,
-                        repeat: None,
-                    })],
-                )
-                .unwrap(),
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                task_id: Some(task.id.clone()),
-                wave_id: Some(task.wave_id.clone()),
-                cwd: repo.into(),
-                message: Some("original input".into()),
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: now,
-            },
-        )
+        .create_flow(FlowSession {
+            invocation: QueuedInvocation::new(
+                "captured",
+                vec![ConcreteStep::Skill(ConcreteSkill {
+                    skill: Skill::named("implement"),
+                    sources: Vec::new(),
+                    id: Some("implement".into()),
+                    human: false,
+                    repeat: None,
+                })],
+            )
+            .unwrap(),
+            cursor: ExecutionCursor::default(),
+            version: 0,
+            task_id: Some(task.id.clone()),
+            wave_id: Some(task.wave_id.clone()),
+            cwd: repo.into(),
+            message: Some("original input".into()),
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            failure: None,
+            finished: false,
+            updated_at: now,
+        })
         .await
         .unwrap();
     assert!(!context.store.task_started(&task.id).await.unwrap());
     let flow = context
         .store
-        .reserve_attempt(flow.id(), flow.version, None, None)
+        .reserve_attempt(flow.id(), flow.version, None)
         .await
         .unwrap();
     assert!(context.store.task_started(&task.id).await.unwrap());
@@ -823,7 +811,10 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(retained.project_id, task.project_id);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    assert_eq!(
+        store.latest_task_flow(&task.id).await.unwrap().unwrap(),
+        flow
+    );
     server.abort();
 }
 
@@ -917,7 +908,10 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                         assert_eq!(moved.worktree, task.worktree);
                         assert_eq!(moved.plan, task.plan);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-                        assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+                        assert_eq!(
+                            store.latest_task_flow(&task.id).await.unwrap().unwrap(),
+                            flow
+                        );
                         assert_eq!(task_started_at(&path, &task.id), started_at);
                     })
                     .await;
@@ -1080,7 +1074,10 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
     }
     assert_eq!(task_started_at(&path, &task.id), started_at);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    assert_eq!(
+        store.latest_task_flow(&task.id).await.unwrap().unwrap(),
+        flow
+    );
     let state = provider.lock().await;
     assert_eq!(state.mutations, mutations);
     assert_eq!(state.projects, projects);
@@ -1178,7 +1175,10 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             let store = super::pm_store().await.unwrap();
             assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+            assert_eq!(
+                store.latest_task_flow(&task.id).await.unwrap().unwrap(),
+                flow
+            );
         })
         .await;
     assert_eq!(provider.lock().await.mutations, 0);
@@ -1304,7 +1304,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         let store = super::pm_store().await.unwrap();
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
-                        let flow = store.task_flow(&task.id).await.unwrap();
+                        let flow = store.latest_task_flow(&task.id).await.unwrap();
                         let ctx = super::resolve_context(&repo, "a").await.unwrap();
                         super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                             .await
@@ -1321,7 +1321,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         assert_eq!(provider.lock().await.mutations, mutations);
                         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
+                        assert_eq!(store.latest_task_flow(&task.id).await.unwrap(), flow);
                         {
                             let state = provider.lock().await;
                             assert_eq!(state.projects.len(), 4);
@@ -1339,7 +1339,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         assert_ne!(moved.project_id, task.project_id);
                         assert_eq!(moved.worktree, task.worktree);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
+                        assert_eq!(store.latest_task_flow(&task.id).await.unwrap(), flow);
                     })
                     .await;
             }

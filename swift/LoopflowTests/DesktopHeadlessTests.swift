@@ -11,7 +11,7 @@ import ViewInspector
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Task work renders checkout conversations, the managed Flow and mechanical Execs")
+    @Test("Task work renders checkout conversations, Flows and mechanical Execs")
     func taskWorkInventory() async throws {
         let fixtures = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -30,9 +30,6 @@ struct DesktopHeadlessTests {
         for id in work.sessions.map(\.id) + work.flows.map(\.id) + work.execs.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
-        #expect(try view.inspect().findAll(ViewType.Text.self) {
-            try $0.string() == "Managed"
-        }.count == 2)
     }
 
     @Test("Loading, unavailable, empty and selected Work have distinct content")

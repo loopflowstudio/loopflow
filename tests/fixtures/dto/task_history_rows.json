@@ -47,14 +47,6 @@
         {
           "kind": "start",
           "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Linear Task is canceled"
         }
       ]
     },
@@ -108,14 +100,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -171,14 +155,6 @@
         {
           "kind": "start",
           "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Linear Task is canceled"
         }
       ]
     },
@@ -232,14 +208,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -295,14 +263,6 @@
         {
           "kind": "start",
           "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Linear Task is canceled"
         }
       ]
     },
@@ -356,14 +316,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -419,14 +371,6 @@
         {
           "kind": "start",
           "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Linear Task is canceled"
         }
       ]
     },
@@ -481,14 +425,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -543,14 +479,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -605,14 +533,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -667,14 +587,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -728,14 +640,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is complete"
         }
       ]
@@ -791,14 +695,6 @@
         {
           "kind": "start",
           "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Linear Task is complete"
         }
       ]
     },
@@ -852,14 +748,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is complete"
         }
       ]
@@ -915,14 +803,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -976,14 +856,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]

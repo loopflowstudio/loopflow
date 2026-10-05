@@ -3,10 +3,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
+use loopflow::durable::FlowSession;
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::engine::ExecutionCursor;
-use loopflow::id::{ExecId, TraceId, WaveId};
+use loopflow::id::WaveId;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
@@ -16,7 +16,7 @@ use serde_json::json;
 
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn task_adopts_linear_checkout_and_preserves_saved_progress() {
+fn task_adopts_linear_checkout_and_preserves_flow_history() {
     for (operation, remote_only) in [("checkout", false), ("checkout", true)] {
         let repo = TestRepo::new();
         repo.create_file(
@@ -231,41 +231,36 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
 
         if operation == "checkout" {
             assert!(runtime
-                .block_on(store.task_flow(&task.id))
+                .block_on(store.latest_task_flow(&task.id))
                 .unwrap()
                 .is_none());
             runtime
-                .block_on(store.start_task_flow(
-                    &task.id,
-                    FlowSession {
-                        invocation: QueuedInvocation::load(&checkout, "adoption").unwrap(),
-                        cursor: ExecutionCursor {
-                            index: 1,
-                            iteration: 3,
-                            ..Default::default()
-                        },
-                        version: 0,
-                        task_id: Some(task.id.clone()),
-                        wave_id: Some(task.wave_id.clone()),
-                        cwd: checkout.clone(),
-                        message: None,
-                        model: None,
-                        current_attempt: None,
-                        pending_session_id: None,
-                        worker_generation: 0,
-                        claim: None,
-                        failure: None,
-                        finished: false,
-                        updated_at: now,
+                .block_on(store.create_flow(FlowSession {
+                    invocation: QueuedInvocation::load(&checkout, "adoption").unwrap(),
+                    cursor: ExecutionCursor {
+                        index: 1,
+                        iteration: 3,
+                        ..Default::default()
                     },
-                ))
+                    version: 0,
+                    task_id: Some(task.id.clone()),
+                    wave_id: Some(task.wave_id.clone()),
+                    cwd: checkout.clone(),
+                    message: None,
+                    model: None,
+                    current_attempt: None,
+                    pending_session_id: None,
+                    failure: None,
+                    finished: false,
+                    updated_at: now,
+                }))
                 .unwrap();
         }
         let saved = runtime
-            .block_on(store.task_flow(&task.id))
+            .block_on(store.latest_task_flow(&task.id))
             .unwrap()
             .unwrap();
-        // Catalog changes must not replace the saved graph or reset its cursor.
+        // Catalog changes must not rewrite a captured graph or its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
             "- cmd: sync --plan\n",
@@ -274,7 +269,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         invoke("checkout");
         assert_eq!(
             runtime
-                .block_on(store.task_flow(&task.id))
+                .block_on(store.latest_task_flow(&task.id))
                 .unwrap()
                 .unwrap(),
             saved
@@ -356,13 +351,13 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 let output = run(repo.path(), &["--task", "FIX-1", "flow", "start", "--json"]);
                 assert!(
                     !output.status.success(),
-                    "{condition} allowed managed continuation"
+                    "{condition} allowed a Task Flow launch"
                 );
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(error.contains(expected), "{condition}: {error}");
                 assert_eq!(
                     runtime
-                        .block_on(store.task_flow(&task.id))
+                        .block_on(store.latest_task_flow(&task.id))
                         .unwrap()
                         .unwrap(),
                     saved
@@ -383,72 +378,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                     .unwrap();
                 }
             }
-            // A worker rechecks planning independently of the initiating command.
-            // Review positions correctly cannot claim a worker, so use a captured
-            // mechanical boundary for this separate admission check.
-            let mut worker = saved.clone();
-            worker.invocation = QueuedInvocation::load(&checkout, "adoption").unwrap();
-            worker.cursor = Default::default();
-            worker.version = 0;
-            worker.current_attempt = None;
-            worker.pending_session_id = None;
-            let worker = runtime
-                .block_on(store.start_task_flow(&task.id, worker))
-                .unwrap();
-            let TaskWorkerClaimOutcome::Claimed(claim) = runtime
-                .block_on(store.claim_task_worker(
-                    &task.id,
-                    worker.id(),
-                    worker.version,
-                    &TaskWorkerOwner {
-                        trace_id: TraceId::new(),
-                        exec_id: ExecId::new(),
-                        pid: std::process::id(),
-                        started_at: now.unix_timestamp(),
-                    },
-                    now,
-                ))
-                .unwrap()
-            else {
-                panic!("worker claim was not acquired")
-            };
-            let output = command(&checkout, &["task", "__worker", task.id.as_str()])
-                .env(
-                    loopflow::durable::TASK_WORKER_CLAIM_ENV,
-                    serde_json::to_string(&claim).unwrap(),
-                )
-                .output()
-                .unwrap();
-            assert!(!output.status.success());
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("Removed"),
-                "worker refusal: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let stopped = runtime
-                .block_on(store.task_flow(&task.id))
-                .unwrap()
-                .unwrap();
-            assert!(stopped.claim.is_none());
-            assert_eq!(stopped.invocation, worker.invocation);
-            assert_eq!(stopped.cursor, worker.cursor);
-            assert_eq!(stopped.pending_session_id, worker.pending_session_id);
-            assert_eq!(stopped.current_attempt, worker.current_attempt);
-            assert_eq!(stopped.failure, worker.failure);
-            // Independent execution keeps working after the planning Task is gone.
-            let output = run(&checkout, &["flow", "adoption"]);
-            assert!(
-                output.status.success(),
-                "independent Flow: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert_eq!(
-                runtime
-                    .block_on(store.task_flow(&task.id))
-                    .unwrap()
-                    .unwrap(),
-                stopped
-            );
         }
         fs::remove_dir_all(&checkout).unwrap();
     }

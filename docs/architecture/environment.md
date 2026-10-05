@@ -1,7 +1,7 @@
 # Environment
 
 Environment configures a process; it never decides what the process is. A
-variable that names a Home, an Exec or a claim is checked against the store or
+variable that names a Home, an Exec or a Flow step is checked against the store or
 the filesystem before it grants anything, and a new session starts without it.
 
 ```bash
@@ -31,11 +31,10 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_RUN_ID`, `LF_RUN_DIR` | Session capture, agent launch | `session_record::inherited_caller`, `lf runs`, Task lifecycle, direct-skill checkpointing, Task comments | Parent attribution. `inherited_caller` honours it only when the manifest in `LF_RUN_DIR` names the same id. Three readers still treat its presence alone as "inside a Run": the direct-skill checkpoint, branch-Task lookup and the progress marker on Task comments. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
 | `LF_AGENT_CALLER` | Session capture | Journal, once, then removed | Provenance of the agent that issued a nested command. |
-| `LF_AS` | `--as`, Task worker launch | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
+| `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
-| `LF_FLOW_STEP` | Flow driver | `ops::flow_run::token` | Fences a step to one Flow position; validated against the saved Flow. |
-| `LF_WORK_ADVANCE_CLAIM` | Task worker launch | Flow and run commands, once, then removed | One-shot claim; must match the Task's stored claim. |
-| `LF_TASK_SKILL_OPTIONS` | `lf task` commands | Task worker, once | Carries step flags across the worker launch. |
+| `LF_FLOW_STEP` | Flow driver | `ops::flow_run::token` | Fences a step to one Flow position; validated against the captured Flow's position version. |
+| `LF_TASK_FLOW_OPTIONS` | `lf` Task and `flow start` commands | The detached Task Flow launch, once | Carries the caller's prompt and provider flags to the Flow it launches. |
 | `LF_HUMAN_SESSION`, `LF_HUMAN_SESSION_RUN` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | `lf runs` | Records which account a provider child used. |

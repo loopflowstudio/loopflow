@@ -132,8 +132,8 @@ Chain skills manually, or use a named flow (a flow is a sequence of steps; each 
 
 ```bash
 lf incident                            # unbreak → 5whys → launch-plan
-lf code                                # implement → compress; local changes
-lf feature                             # kickoff → design review → pursue → queue → land
+lf code                                # pursue: implement until it holds, publish the PR
+lf feature                             # kickoff → pursue; ends at a published PR
 lf ship                                # gate → land and complete the Task
 ```
 
@@ -141,9 +141,10 @@ Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
 `lf flow incident` explicitly selects the Flow when a name also names a skill
 or CLI command; the prefix is otherwise optional.
 
-Flow YAML owns step order, interactive reviews (`human: true`), and explicit
-backward edges. A Flow with backward edges is a loopflow; it runs with or without
-a Task. `ship` and `deploy` supply explicitly selected delivery steps.
+Flow YAML owns step order and explicit backward edges. Every step is
+autonomous; design review and the demo happen in the Task conversation. A Flow
+with backward edges is a loopflow; it runs with or without a Task. `ship` and
+`deploy` supply explicitly selected delivery steps.
 
 ### Custom skills
 
@@ -181,7 +182,7 @@ lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require a live Task worker.
+branch and Task PR record when present; they do not require a running Task Flow.
 
 ---
 

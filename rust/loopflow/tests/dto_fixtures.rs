@@ -434,13 +434,11 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
 }
 
 #[test]
-fn task_work_preserves_all_owners_and_managed_marker() {
+fn task_work_preserves_all_owners() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
-    assert!(!work.sessions[0].managed);
-    assert!(work.sessions[1].managed);
-    assert!(work.flows[0].managed);
+    assert_eq!(work.flows.len(), 1);
     assert!(!work.execs.is_empty());
     assert_eq!(
         serde_json::to_value(work).unwrap(),

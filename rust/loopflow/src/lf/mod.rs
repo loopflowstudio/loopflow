@@ -1,9 +1,9 @@
-/// Prompt flags forwarded to a managed Task's ordinary skill commands.
-#[doc(hidden)]
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
-pub const TASK_SKILL_OPTIONS_ENV: &str = "LF_TASK_SKILL_OPTIONS";
+/// The caller's prompt and provider flags for the Task Flow it launches.
+#[doc(hidden)]
+pub const TASK_FLOW_OPTIONS_ENV: &str = "LF_TASK_FLOW_OPTIONS";
 
 use std::path::PathBuf;
 
@@ -467,9 +467,9 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// Start or continue a Task through its saved Flow
+    /// Launch a fresh Flow for a Task in the background
     Start {
-        /// Template for a new Task Flow; existing saved progress remains authoritative
+        /// Flow to launch; the Project's default when omitted
         template: Option<String>,
         #[arg(long)]
         name: Option<String>,
@@ -478,12 +478,9 @@ pub enum FlowCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Explain what changed after an execution blocker
+        /// Direction for this launch, published to the Task
         #[arg(long)]
         reason: Option<String>,
-        /// Retry uncertain native work after confirmed engine exit.
-        #[arg(long)]
-        retry: bool,
         #[arg(long)]
         json: bool,
     },
@@ -740,10 +737,7 @@ pub enum TaskCommand {
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
-    /// Internal: drive a Task Flow from its claimed boundary
-    #[command(name = "__worker", hide = true)]
-    Worker { task_id: crate::work::task::TaskId },
-    /// Ensure tracked Task Work and its worktree without starting a worker
+    /// Ensure tracked Task Work and its worktree without launching a Flow
     Checkout {
         issue: String,
         #[arg(long)]
@@ -772,7 +766,7 @@ pub enum TaskCommand {
         run: bool,
         #[arg(long, requires = "run")]
         name: Option<String>,
-        /// Select a Flow for this Task worker; defaults to the chapter recommendation
+        /// Flow to launch for this Task; defaults to the chapter recommendation
         #[arg(long, value_name = "FLOW", requires = "run")]
         flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -898,24 +892,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Stop the pinned Flow and begin a new one in a fresh Task worker;
-    /// uses valid cached planning, even offline. New advice requires Linear publication.
-    Restart {
-        issue: String,
-        advice: Option<String>,
-        /// Replacement Flow; validated before any checkpoint or stop
-        #[arg(long)]
-        flow: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::Worker { .. }
-            | Self::Create { .. }
+            Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
             | Self::Repair { .. }
@@ -932,8 +914,7 @@ impl TaskCommand {
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::Restart { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }
@@ -2412,30 +2393,6 @@ mod tests {
                 "{removed} must not remain as a compatibility command"
             );
         }
-    }
-
-    #[test]
-    fn task_restart_accepts_optional_advice() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "restart",
-            "LOO-267",
-            "replace the old runtime model",
-            "--json",
-        ])
-        .expect("parse Task restart");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Restart {
-                    issue,
-                    advice: Some(advice),
-                    flow: None,
-                    json: true,
-                }
-            }) if issue == "LOO-267" && advice == "replace the old runtime model"
-        ));
     }
 
     #[test]

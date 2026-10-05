@@ -15,8 +15,8 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    with `lf task status <issue> --json`. Read its current brief, design, and
    relevant scratch history in its existing checkout. Separate accepted decisions
    from drafts and superseded plans. Inspect `lf session list --json` and the
-   Task's captured Flow, cursor, driver, and pending review. Other conversations
-   in the checkout are evidence, not automatically the managed Flow's Session.
+   Task's Flows: each one's captured graph, last cursor, driver and effects. Every
+   conversation and Flow in the checkout is the Task's work; none is privileged.
    If Task identity is missing or ambiguous, ask for it; do not file duplicate work.
 
    Keep the current design in the Task checkout. If required material lives
@@ -25,23 +25,25 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    working copy. A path in another checkout does not deliver context. Do not
    launch competing implementation when existing code has no supported handoff.
 
-2. **Preserve or choose the Flow.** Continue an unfinished captured Flow even
-   when the Wave's recommendation has changed. If none exists, read the owning
-   Wave's status and current Project's `flow:` default, then inspect the actual
+2. **Choose the Flow.** Leave a Flow with a live driver running. A stopped
+   Flow is history: read what it finished and which effects it recorded before
+   choosing what to launch. Read the owning Wave's status and current Project's
+   `flow:` default, then inspect the actual
    installed catalog with `lf list` and `lf help <flow>`. Honor an explicit Flow
    choice; otherwise use the Project default unless the design and execution
    evidence call for another entry point. For example, an accepted design with
-   implementation remaining can use `pursue`; unresolved design needs the design
-   review in `feature`. Read composed delivery and review steps before launching.
+   implementation remaining can use `pursue`; unresolved design starts with
+   `task-design` and its review in the Task conversation. Flows run autonomous
+   work only; review happens in the conversation. Read composed steps before launching.
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow is not evidence of unfinished work:
    stop if the Task's outcome is already satisfied. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** Use `lf --task <issue> flow start` to continue, or
-   `lf --task <issue> flow start <flow>` for the selected new Flow. Check installed
-   help first. Leave a live driver running. Recover a stopped driver through
-   the same saved Flow; never restart or replace it merely to bypass a blocker.
+3. **Advance the work.** `lf --task <issue> flow start [flow]` launches a
+   fresh Flow in the background; it never continues an earlier one. Check installed
+   help first. Leave a live driver running. After a stopped or failed Flow,
+   launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
    merely to reach the person already present. Discuss review feedback in the
    ongoing conversation and save agreed direction. Inspect execution and effects

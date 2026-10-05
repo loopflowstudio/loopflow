@@ -83,8 +83,8 @@ Wave or Task. Return accepted decisions to those owners with their practical
 consequence. Changes beyond accepted direction stay proposals for review.
 Repository synthesis does not own identity alone.
 
-Tasks keep progressing through their selected Flows and human review gates
-when both operators are absent. Projects belong to Waves; they have no separate
+Running Task Flows keep progressing when both operators are absent; review
+happens in the Task conversation. Projects belong to Waves; they have no separate
 operator. Scheduling and connected chat are separate integration work. These
 manual passes neither install jobs nor post replies to a channel.
 
@@ -374,12 +374,12 @@ lf --task INF-125 flow start incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its
-Project's Flow supplies the default; `--flow` selects any other template.
-Launch creates an invocation containing the expanded graph and its execution
-state. Source edits and chapter transfers do not change that captured graph.
-Finished and replaced invocations remain history; the Task has at most one
-managed FlowSession. Completion leaves Task Work open until an explicit
-completion or delivery operation settles it.
+Project's Flow supplies the default; naming a Flow selects any other template.
+Each launch creates a fresh invocation containing the expanded graph and its
+execution state. Source edits and chapter transfers do not change that captured
+graph. Every invocation remains history and none is privileged. A finished Flow
+leaves Task Work open until an explicit completion or delivery operation
+settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
@@ -398,7 +398,7 @@ Loopflow adds the canonical Task name, Linear link, and merge consequence.
 Publication refreshes that context without replacing the title or summary.
 
 Task events remain durable evidence for the next finite Wave pass. Status,
-steering, resume and recovery use the same commands for people and agents:
+steering and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash

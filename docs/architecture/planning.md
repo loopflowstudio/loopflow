@@ -67,9 +67,9 @@ invalid until complete detail repairs it. This creates no deletion receipt.
 `planning.observed_at` remains the last successful acquisition. An unresolved
 selector returns an unavailable envelope even without execution.
 
-Invalid and removed facts remain inspectable through status. Managed execution
+Invalid and removed facts remain inspectable through status. Task execution
 requires available planning: a fresh cached observation suffices, but a failed
-due refresh stops continuation. Wave `synced_at` dates its last successful list
+due refresh stops the launch. Wave `synced_at` dates its last successful list
 acquisition; joined entities may have newer detail observations.
 
 Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
@@ -118,20 +118,22 @@ lf flow show FLOW_SESSION --sessions --json
 Starting a Flow compiles its definition into one FlowSession's captured graph,
 including every Skill, router, alternative and review policy. Source edits or
 deletion cannot change it. One cursor and its return counters identify loop
-passes; retry retains the same pass. Subflows and passes are display lenses,
-with no separate FlowSession, process or claim.
+passes. Subflows and passes are display lenses, with no separate FlowSession
+or process.
 
-A Task selects one managed FlowSession and may have other attributed Flows.
-Taskless and managed execution share the driver. The Project's Flow supplies the
-default for a new selection; explicit selection is allowed. Continuing a saved
-Flow preserves its definition, review wait, failure and feedback. Explicit restart
-replaces it. Finishing retains history, clears the managed selection and chooses
-no successor; Flow completion alone does not complete Task Work.
+Every FlowSession naming a Task, or run in its checkout, is equally that Task's
+work; none is selected or privileged. Taskless and Task execution share the
+driver. Each `flow start` captures a fresh FlowSession; the Project's Flow
+supplies the default and naming a Flow selects another. Flows hold autonomous
+steps only: launching one with a `human: true` step is rejected. Finishing
+retains history and chooses no successor; Flow completion alone does not
+complete Task Work.
 
 ## Settle the exact boundary
 
-A boundary is the FlowSession, node and iteration tuple. Its claim and version
-fence each mutation. Agent boundaries select a native start in an AgentSession
+A boundary is the FlowSession, node and iteration tuple. One process drives the
+invocation under its per-invocation driver lock, and the row's position version
+fences each mutation. Agent boundaries select a native start in an AgentSession
 and consume its exact successful completion once. Mechanical boundaries retain
 correlated starts and results in Flow history. Each executed skill or operation
 runs in its own child lf Exec through the ordinary command path. The Flow driver
@@ -150,39 +152,38 @@ Helpers, older successes and late generations cannot settle the current selectio
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
-impediments or discusses missing judgment in its ongoing chat. Explicit retry
-retains the position and pass; unchanged failures do not automatically retry.
+impediments or discusses missing judgment in its ongoing chat. Nothing retries
+or resumes a stopped Flow.
 
 ## Inspect before further work
 
-Saved Flow invocations are history, not a public resume entry point. Inspect the
-selected Session, process and effect receipts before launching a fresh ordinary
-Flow. Observation does not replay work or consume a surviving child's result.
-
-The remaining managed Task controls below are part of the pending worker removal.
-
 ```bash
-lf --task INF-124 flow start
-lf --task INF-124 flow start --retry
+lf task status INF-124
+lf flow show FLOW_SESSION --sessions --json
+lf task interrupt INF-124
+lf --task INF-124 flow start --reason "take the smaller approach"
 ```
 
-The Flow orchestration claim and conversation driver claim have different owners.
-After driver loss, read back the selected native turn from a surviving engine;
-do not send extra input. Its completion retains original Exec and provider
-generation, even when a new driver records it. The old command outcome stays
-unknown if no terminal receipt exists.
+A FlowSession whose driver died keeps its last cursor, failure, events and effect
+receipts as history. Nothing resumes it and no command does. Crash recovery
+belongs to the caller, normally the Task conversation: inspect the Session,
+process and effect receipts, then launch fresh work. Observation does not replay
+work or consume a surviving child's result.
 
-Explicit retry after confirmed engine exit resumes the conversation with a new
-provider generation. Exact process/native evidence excludes an old writer.
+`flow start` always launches a fresh ordinary Flow, detached in the Task
+checkout, with the caller's prompt and provider options. `--reason` publishes
+direction to the Task first. To change direction, interrupt, inspect, then
+launch.
+
+Task status and roadmap `execution` observe the Task's most recently launched
+Flow: `none`, `latest` or `finished`. Its only control is `start`, available
+whenever the Task can run, even when an earlier Flow exists.
+
 Automatic provider retries within one Exec retain earlier failure and usage and
 select only an authorized successor. An uncertain mechanical effect requires
-inspection or explicit retry; moving a cursor does not establish exactly-once
-external effects.
-
-Task commands supply the same explicit attribution and shared Flow execution;
-their claim and background placement are driver mechanics.
-A live claimed worker cannot be replaced because a status read timed out. Missing
-process evidence is uncertainty, and causal ancestry grants no signal authority.
+inspection; moving a cursor does not establish exactly-once external effects.
+Missing process evidence is uncertainty, and causal ancestry grants no signal
+authority.
 
 ## Task conversations
 
@@ -193,7 +194,7 @@ lf session connect SESSION --json
 
 Discuss design and review feedback in the ongoing Task conversation. Historical
 review feedback remains Session evidence. No Ready/Complete operation closes the
-conversation or releases a saved Flow. The caller inspects outcomes and effects
+conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
 Saved handoffs retain executable, Home and database together. Renaming, binding
@@ -205,7 +206,7 @@ the same record and keys its terminal surface on AgentSession identity.
 Task status is `Ready`, `Done` or `Abandoned`. Current activity, command outcome,
 conversation state and Flow progress remain separate. A ready Task can have no
 live process; an absent terminal result cannot prove liveness. Binding to a done
-Task assigns work history without reopening it or acquiring its managed claim.
+Task assigns work history without reopening it.
 
 ```bash
 lf comment INF-124 "keep the public name"
@@ -214,7 +215,7 @@ lf --wave product wave/operate "review the current priorities"
 
 Linear owns authored Task comments. The shared skill path supplies Task context
 and live steers when the checkout or explicit attribution selects a Task.
-Idle steering starts no worker. Prompt inclusion and provider acceptance do not
+Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite
 AgentSessions.
 
@@ -239,8 +240,8 @@ Step itself, not to a reusable Target.
 
 Compilation produces `ConcreteStep` plans containing every Skill body and Xor
 router/path. The `sources` breadcrumb retains definition provenance for display.
-These captured plans serve both Task and ordinary execution; resume never
-resolves names from current source.
+These captured plans serve both Task and ordinary execution; a running Flow
+never resolves names from current source.
 
 Review Sessions launch the captured Skill explicitly, escaping command names.
 Execution selection reads that captured value before looking for authored files;

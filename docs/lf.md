@@ -15,7 +15,7 @@ without contacting providers.
 
 ## Use one Home
 
-Ordinary commands, Task workers and agent tools use the installed `lf` and
+Ordinary commands, Task Flows and agent tools use the installed `lf` and
 `~/.lf`. Source builds forward there too. For an explicit disposable experiment:
 
 ```bash
@@ -31,34 +31,36 @@ repair or preserve them. Use a fresh directory when its schema changes.
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf --task EXP-12 flow start          # start or continue its managed Flow
-lf --task EXP-12 flow start incident # choose a template for new work
+lf --task EXP-12 flow start          # launch the Project's default Flow, fresh
+lf --task EXP-12 flow start incident # launch a chosen Flow
+lf --task EXP-12 flow start --reason "take the smaller approach"
 ```
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
-it cannot override a Task's owning Wave. A named direct Flow creates an
-independent FlowSession. `flow start` preserves the Task's selected Flow and
-saved progress. Inspect an ordinary Flow with `lf flow show ID --sessions --json`;
-saved ordinary invocations cannot be resumed. Inspect recorded effects before
-launching further work. The remaining `task restart` control explicitly replaces
-the Task's managed workflow. A waiting review is retired with its
-history intact; its exact service, driver and provider execution must exit before
-the replacement starts. Retirement does not approve the review. If interruption
-leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
-unresolved process ownership still block admission.
+it cannot override a Task's owning Wave. `flow start` always launches a fresh
+Flow, detached in the background, in the Task checkout. It never continues an
+earlier one. `--reason` publishes direction to the Task before launching. Every
+Flow run for a Task is equally its work.
+
+A Flow whose driver died keeps its last position, failure and effect receipts as
+history. No command resumes it. To change direction or recover:
+
+```bash
+lf task interrupt EXP-12             # end the active provider turn
+lf task status EXP-12                # the latest Flow and all Task work
+lf flow show ID --sessions --json    # one Flow's history and effects
+lf --task EXP-12 flow start          # launch fresh work
+```
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
 remain separate even when their text matches. IDE launches with Wave documents
 use the assembled prompt so those references reach the provider.
 
-Existing Task restart and continuation use valid cached planning regardless of age.
+Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
-`lf task restart ISSUE` works without Linear; adding advice requires successful
-Linear publication before replacing the worker. Failed advice publication preserves
-the old Flow but may already have checkpointed local edits. Status retains the
-planning observation's original age.
-
+`--reason` requires successful Linear publication before the launch. Status
+retains the planning observation's original age.
 
 ## Connect planning and create work
 
@@ -239,9 +241,9 @@ Flow reviews. `--needs-me` narrows that selection to immediate attention;
 and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
-including headless and completed work. Managed marks the Flow advanced by
-`lf --task … flow start`; the managed execution line describes only that worker. Independent
-work remains visible and preserves the checkout while unfinished or unresolved.
+including headless and completed work. No Flow is privileged; the execution
+line observes the most recently launched one. Live or unresolved work preserves
+the checkout. A stopped Flow is history and blocks nothing.
 
 ## Keep a document workspace
 

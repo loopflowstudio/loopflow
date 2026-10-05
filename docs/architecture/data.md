@@ -7,7 +7,7 @@ lf flow show FLOW_SESSION --sessions --json
 lf ps --json
 ```
 
-A conversation, a saved Flow and an operating-system process answer different
+A conversation, a captured Flow and an operating-system process answer different
 questions. SQLite owns their identities and history references; large payloads
 and provider-native state keep their own storage formats. This page specifies
 those ownership boundaries. [Cutover status](../architecture-reference.md#cutover-status)
@@ -37,7 +37,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Actual lf command process, causal parent and observed command outcome | `execs` |
 | Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
 | Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Exec |
-| Captured Flow graph, cursor, return counts and claim | `flow_sessions` |
+| Captured Flow graph, cursor and return counts | `flow_sessions` |
 | Mechanical boundary results and consumed agent completions | FlowSession history |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Home |
@@ -65,18 +65,19 @@ History retains the original Exec and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-FlowSession owns one captured graph and progression. A Task selects one managed
-FlowSession and may have other attributed Flows. Taskless execution uses the same
-owner and driver. Every selected boundary is fenced by Flow identity, version,
-claim, node and iteration tuple. Agent boundaries consume the exact successful
+FlowSession owns one captured graph and progression. Every FlowSession naming a
+Task, or run in its checkout, is equally that Task's work. Taskless execution
+uses the same owner and driver. One process drives an invocation under its
+per-invocation driver lock; every write is fenced by the row's position
+version. Agent boundaries consume the exact successful
 native history entry; mechanical boundaries record their own start and result.
 No generic attempt lifecycle sits between these owners.
 
 A retry appends history. Replacing a failed selected turn also discards its
 navigation candidate; the successful successor must supply its own verdict or
-route. A live turn is recovered without sending extra input. Explicit retry after
-confirmed engine death preserves the earlier unknown command result and native
-history. Cursor movement alone never proves an external operation happened once.
+route. A FlowSession whose driver died keeps its last cursor, failure, events and
+effect receipts as history; nothing resumes it, and its caller launches fresh
+work. Cursor movement alone never proves an external operation happened once.
 
 ## Admission and publication
 
@@ -116,7 +117,7 @@ and its limits are in the
 [contract](../architecture-reference.md#attribution-binding-and-started).
 
 Actual work reservation, including first bind, sets Task Started once. Merely
-recording an inspection Exec does not. Later launch, retry, chapter transfer or
+recording an inspection Exec does not. Later launch, chapter transfer or
 conversion cannot move or erase an existing timestamp.
 
 ## Reads and cutover
@@ -124,7 +125,7 @@ conversion cannot move or erase an existing timestamp.
 Summary queries filter identity, ancestry, command, skill, title, mode and state
 in SQL before loading payloads. Detail reads load only the selected capture or
 transcript. Missing payloads remain visible rows with explicit missing evidence.
-Passive readers acquire no driver or Flow claim and never launch or import.
+Passive readers acquire no driver and never launch or import.
 
 The three migration groups create Exec rows, adopt Linear Project statuses, and
 cut over Session ownership directly from the released schema. Current Task

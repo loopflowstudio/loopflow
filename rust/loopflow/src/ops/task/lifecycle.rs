@@ -1,4 +1,4 @@
-//! Task lifecycle composes the provider, PR, worker and checkout owners.
+//! Task lifecycle composes the provider, PR and checkout owners.
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -27,24 +27,6 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
             blockers.join("; ")
         );
         return Ok(());
-    }
-    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
-        if execution_unsettled(store, &position)? {
-            eprintln!(
-                "Task {} is complete; checkout cleanup waits for its execution to settle.",
-                task.plan.identifier
-            );
-            return Ok(());
-        }
-        store
-            .end_flow(
-                position.id(),
-                position.version,
-                position.claim.as_ref(),
-                "Task completed",
-            )
-            .await
-            .map_err(task_error)?;
     }
     let result = async {
         let wave = owning_wave(store, task).await?;
@@ -137,30 +119,13 @@ fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<boo
             crate::journal::exec_process_evidence(&store.sqlite, exec)
                 != crate::journal::ProcessIdentityEvidence::Dead
         })
-        || flow.claim.as_ref().is_some_and(|claim| {
-            crate::journal::task_worker_owner_evidence(&claim.owner)
-                != crate::journal::ProcessIdentityEvidence::Dead
-        }))
+        || crate::ops::flow_run::driver_live(flow.id()))
 }
 
-async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
+async fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let blockers = associated_work_blockers(store, task)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
-    }
-    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
-        if execution_unsettled(store, &position)? {
-            return Err(task_error(format!("{} has live or unresolved execution; interrupt it and wait for exit before abandoning", task.plan.identifier)));
-        }
-        if let Some(claim) = &position.claim {
-            if !settle_dead {
-                return Err(task_error("worker claim requires explicit settlement"));
-            }
-            store
-                .release_flow(position.id(), position.version, Some(claim))
-                .await
-                .map_err(task_error)?;
-        }
     }
     Ok(())
 }
@@ -172,7 +137,7 @@ pub(crate) fn notice_retained_task(
 ) -> OpsResult<()> {
     block_on_task(async {
         if let Some((store, task)) = branch_task(repo, branch).await? {
-            require_idle(&store, &task, true).await?;
+            require_idle(&store, &task).await?;
             progress.status(&format!("Task {} and its Linear outcome remain unchanged; use `lf task abandon {}` to cancel the Task.", task.plan.identifier, task.plan.identifier));
         }
         Ok(())
@@ -273,7 +238,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
                 .is_some();
             if !deleted {
                 if super::task_work_status(&store, &task).await? == WorkStatus::Done {
-                    require_idle(&store, &task, true).await?;
+                    require_idle(&store, &task).await?;
                     cleanup_completed_task(&store, &task).await?;
                 } else {
                     abandon(&repo, issue, false).await?;
@@ -290,7 +255,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
 }
 
 // Preview and apply share every exclusion. Preparation never retires a sweep's
-// worker claim; explicit abandonment may settle a worker proven dead.
+// live execution.
 async fn prepare_abandon(
     repo: &Path,
     store: &SharedStore,
@@ -314,7 +279,7 @@ async fn prepare_abandon(
         {
             return Err(task_error("completed Tasks cannot be abandoned"));
         }
-        require_idle(store, task, !sweep).await?;
+        require_idle(store, task).await?;
         for pr in &prs {
             // Merged history is never recast as abandonment.
             if pr.merge_commit.is_none() {
@@ -360,7 +325,7 @@ async fn apply_abandon(
     if let Some(task) = task {
         let work = WorkRef::Task(task.id.clone());
         if store.work_status(&work).await.map_err(task_error)? != WorkStatus::Abandoned {
-            // This transaction refuses a concurrently claimed worker.
+            // This transaction refuses concurrently started work.
             store
                 .abandon(&work, "explicit Task abandonment")
                 .await
@@ -516,19 +481,9 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// Completion cannot implicitly settle another Flow's work.
+/// A Flow whose driver died is history; only live or unresolved execution waits.
 pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    let mut blockers = execution_blockers(store, &work, ExecutionCheck::RetainWork)?;
-    for flow in work.flows.iter().filter(|flow| !flow.managed) {
-        if flow.summary.state == crate::session::FlowSummaryState::Current {
-            blockers.push(format!(
-                "Flow {} is unfinished; inspect `lf flow show {} --sessions`",
-                flow.summary.id, flow.summary.id
-            ));
-        }
-    }
-    Ok(blockers)
+    associated_execution_blockers(store, task)
 }
 
 /// Restoring a checkout preserves idle Flows; only unresolved execution waits.
@@ -539,65 +494,43 @@ pub(super) fn associated_execution_blockers(
     execution_blockers(
         store,
         &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::RetainWork,
     )
-}
-
-/// Resumption acquires exact Flow authority; unrelated history is not a claim.
-pub(super) fn recovery_execution_blockers(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::ResumeFlow,
-    )
-}
-
-#[derive(Clone, Copy)]
-enum ExecutionCheck {
-    RetainWork,
-    ResumeFlow,
 }
 
 fn execution_blockers(
     store: &SharedStore,
     work: &crate::task_work::TaskWork,
-    check: ExecutionCheck,
 ) -> OpsResult<Vec<String>> {
     let mut blockers = Vec::new();
-    let mut managed_execs = HashSet::new();
-    let mut session_execs = HashSet::new();
-    // A missing historical receipt differs from an observed process whose
-    // liveness query failed. Only the former can be unrelated history.
-    let observed_execs: HashSet<String> = match check {
-        ExecutionCheck::RetainWork => HashSet::new(),
-        ExecutionCheck::ResumeFlow => {
-            crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
-                .map_err(task_error)?
-                .into_iter()
-                .map(|receipt| receipt.exec_id)
-                .collect()
-        }
-    };
+    // The caller cannot outlive the processes that launched it, nor wait on
+    // the Flow whose step it is. Lineage exempts waiting, not authority.
+    let mut lineage = HashSet::new();
+    let mut next = crate::journal::current_exec_id();
+    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
+        next = store
+            .sqlite
+            .exec(&id)
+            .map_err(task_error)?
+            .and_then(|exec| exec.parent_exec_id);
+    }
+    let mut own_flows = HashSet::new();
     for flow in work
         .flows
         .iter()
         .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
     {
+        if store
+            .sqlite
+            .flow_exec_ids(&flow.summary.id)
+            .map_err(task_error)?
+            .iter()
+            .any(|exec| lineage.contains(exec))
+        {
+            own_flows.insert(flow.summary.id.as_str());
+            continue;
+        }
         if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
-            if flow.managed {
-                managed_execs.extend(
-                    store
-                        .sqlite
-                        .flow_exec_ids(&flow.summary.id)
-                        .map_err(task_error)?,
-                );
-                if let Some(claim) = position.claim {
-                    managed_execs.insert(claim.owner.exec_id);
-                }
-            } else if execution_unsettled(store, &position)? {
+            if execution_unsettled(store, &position)? {
                 blockers.push(format!(
                     "Flow {} has live or unresolved execution",
                     flow.summary.id
@@ -605,17 +538,12 @@ fn execution_blockers(
             }
         }
     }
-    for session in work.sessions.iter().filter(|session| !session.managed) {
-        if session.completed_at.is_none() {
-            if let Some(driver) = store
-                .sqlite
-                .session_driver(&session.id)
-                .map_err(task_error)?
-            {
-                session_execs.extend(driver.exec_id);
-                session_execs.insert(driver.provider_exec_id);
-            }
-        }
+    for session in work.sessions.iter().filter(|session| {
+        session
+            .flow_session_id
+            .as_deref()
+            .is_none_or(|flow| !own_flows.contains(flow))
+    }) {
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
             if input.completed_at.is_none() && !input.interactive && !input.input_published {
                 blockers.push(format!("Session {} has a reserved input", session.id));
@@ -642,26 +570,13 @@ fn execution_blockers(
             ));
         }
     }
-    let caller = crate::journal::current_exec_id();
     for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
-        if caller.as_ref() == Some(&exec.id) || managed_execs.contains(&exec.id) {
+        if lineage.contains(&exec.id) {
             continue;
         }
-        let blocks = match crate::journal::exec_process_evidence(&store.sqlite, &exec.id) {
-            crate::journal::ProcessIdentityEvidence::Dead => false,
-            crate::journal::ProcessIdentityEvidence::Live => true,
-            crate::journal::ProcessIdentityEvidence::Unknown => {
-                matches!(check, ExecutionCheck::RetainWork)
-                    || observed_execs.contains(exec.id.as_str())
-                    || session_execs.contains(&exec.id)
-                    || exec.caller_session_id.as_ref().is_some_and(|id| {
-                        work.sessions
-                            .iter()
-                            .any(|session| &session.id == id && session.completed_at.is_none())
-                    })
-            }
-        };
-        if blocks {
+        if crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+        {
             blockers.push(format!(
                 "Exec {} has live or unresolved execution; inspect `lf monitor show {}`",
                 exec.id, exec.id

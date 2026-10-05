@@ -1,8 +1,4 @@
+# Design and build to a published PR. Design review and the demo happen in the
+# Task conversation; `ship` lands the result once it is accepted.
 - flow: task-design
 - flow: pursue
-- step:
-    id: review_delivery
-    name: demo
-    human: true
-- flow: queue
-- cmd: pr land -c

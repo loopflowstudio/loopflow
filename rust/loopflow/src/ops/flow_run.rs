@@ -1,5 +1,5 @@
 //! The driver's kernel lock and the step identity a child Exec carries in its
-//! environment. Captured progression and claims live on `flow_sessions`.
+//! environment. Captured progression lives on `flow_sessions`.
 use std::fs::{self, File, OpenOptions};
 
 use anyhow::{Context, Result};
@@ -43,6 +43,19 @@ pub(crate) fn driver_lock(id: &str) -> Result<File> {
         .open(dir.join("driver.lock"))?;
     FileExt::lock_exclusive(&file)?;
     Ok(file)
+}
+
+/// Whether a driver process holds this Flow now. Observation only: a free
+/// lock grants the reader nothing.
+pub(crate) fn driver_live(id: &str) -> bool {
+    let path = crate::store::lf_home_dir()
+        .join("flows")
+        .join(id)
+        .join("driver.lock");
+    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return false;
+    };
+    FileExt::try_lock_exclusive(&file).is_err()
 }
 
 pub(crate) fn token() -> Result<Option<ActiveStep>> {

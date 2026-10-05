@@ -169,7 +169,6 @@ fn summary_query(page: &str, by_id: bool) -> String {
             WHERE f.id IN (SELECT flow_session_id FROM page))
         SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
         w.slug,t.issue_identifier,
-        COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
@@ -187,8 +186,6 @@ fn summary_query(page: &str, by_id: bool) -> String {
         LEFT JOIN flows f ON f.id=s.flow_session_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
-        LEFT JOIN homes h ON h.id=p.home_id
         ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
 }
 
@@ -197,11 +194,11 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
-            task_ids: serde_json::from_str(&row.get::<_, String>(32)?)?,
-            primary_scope: row.get(33)?,
-            driver_outcome: row.get(34)?,
-            latest_turn: row.get(35)?,
-            task_terminal: row.get(36)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(29)?)?,
+            primary_scope: row.get(30)?,
+            driver_outcome: row.get(31)?,
+            latest_turn: row.get(32)?,
+            task_terminal: row.get(33)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -235,14 +232,7 @@ fn read_summary(
             flow: super::flows::read_flow_summary(row, 18)?,
             wave_name: row.get(26)?,
             task_identifier: row.get(27)?,
-            managed: row.get(28)?,
-            home_id: row
-                .get::<_, Option<String>>(29)?
-                .map(|id| crate::durable::HomeId::parse(&id))
-                .transpose()
-                .map_err(invalid)?,
-            home_route: row.get(30)?,
-            independent: row.get::<_, Option<bool>>(31)?.unwrap_or(false),
+            independent: row.get::<_, Option<bool>>(28)?.unwrap_or(false),
         })
     })())
 }
@@ -590,87 +580,6 @@ impl SqliteStore {
             )
             .collect::<StoreResult<Vec<_>>>()?;
         Ok((histories, truncated))
-    }
-
-    /// Fence the exact review before stopping its execution. Keep process owners
-    /// and history so an interrupted restart can finish stopping the same work.
-    pub(crate) fn retire_task_review(&self, expected: &FlowSession) -> StoreResult<()> {
-        let Some(id) = expected.pending_session_id.as_deref() else {
-            return Ok(());
-        };
-        let _dispatch = self.lock_session_driver(id)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if super::flows::task_flow_in(&tx, expected.task_id.as_ref().ok_or(StoreError::NotFound)?)?
-            .as_ref()
-            != Some(expected)
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task review changed before retirement".into(),
-            ));
-        }
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if session.completed_at.is_none() {
-            tx.execute(
-                "UPDATE agent_sessions SET completed_at=?2,driver_generation=driver_generation+CASE WHEN driver_generation>0 THEN 1 ELSE 0 END WHERE id=?1",
-                params![id, crate::store::rows::now_unix()],
-            )?;
-            tx.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                 VALUES(?1,'observed','task_restart:retired',?2,?3,?4)",
-                params![id, crate::store::rows::now_unix(),
-                    serde_json::json!({"type":"review_retired","reason":"explicit Task restart","flow_id":expected.id()}).to_string(), session.captured],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub(crate) fn review_stop_processes(&self, id: &str) -> StoreResult<Option<Vec<(u32, i64)>>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT payload FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:processes'",
-            [id], |row| row.get::<_, String>(0),
-        ).optional()?.map(|value| serde_json::from_str(&value).map_err(StoreError::from)).transpose()
-    }
-
-    pub(crate) fn record_review_stop_processes(
-        &self,
-        id: &str,
-        owners: &[(u32, i64)],
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT id,'observed','task_restart:processes',?2,?3,current_capture FROM agent_sessions
-             WHERE id=?1 AND completed_at IS NOT NULL ON CONFLICT DO NOTHING",
-            params![id, crate::store::rows::now_unix(), serde_json::to_string(owners)?],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn review_execution_stopped(&self, id: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT id,'observed','task_restart:stopped',?2,'{\"type\":\"review_execution_stopped\"}',current_capture
-             FROM agent_sessions WHERE id=?1 AND completed_at IS NOT NULL
-             ON CONFLICT DO NOTHING",
-            params![id, crate::store::rows::now_unix()],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn review_execs(&self, id: &str) -> StoreResult<Vec<crate::id::ExecId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.current_capture=e.seq WHERE s.id=?1 AND e.exec_id IS NOT NULL
-             UNION SELECT exec_id FROM session_events WHERE session_id=?1 AND receipt_key='review_service:'||exec_id AND exec_id IS NOT NULL
-             UNION SELECT driver_exec_id FROM agent_sessions WHERE id=?1 AND driver_exec_id IS NOT NULL
-             UNION SELECT provider_exec_id FROM agent_sessions WHERE id=?1 AND provider_exec_id IS NOT NULL",
-        )?;
-        let rows = query.query_map([id], |row| row.get(0))?;
-        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
@@ -1521,9 +1430,9 @@ mod metadata_tests {
         conn.execute_batch("BEGIN;
             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<5000)
             INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-                position_version,worker_generation,updated_at,state,pending_session_id)
+                position_version,updated_at,state,pending_session_id)
             SELECT printf('f%05d',i),json_object('id',printf('f%05d',i),'flow','review','steps',hex(zeroblob(1024))),
-                '/repo',0,0,1,0,1,'current',NULL FROM n;
+                '/repo',0,0,1,1,'current',NULL FROM n;
             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
             INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
                 interactive,input_published,cwd,repo,flow_session_id)
@@ -1614,8 +1523,8 @@ mod metadata_tests {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-                position_version,worker_generation,updated_at,state,current_capture)
-                VALUES('flow',?1,'/unavailable',0,0,1,0,1,'current',NULL)",
+                position_version,updated_at,state,current_capture)
+                VALUES('flow',?1,'/unavailable',0,0,1,1,'current',NULL)",
                 params![
                     json!({"id":"flow","flow":"retained","steps":"invalid capture"}).to_string()
                 ],

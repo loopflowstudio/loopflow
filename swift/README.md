@@ -137,13 +137,12 @@ There is no creation opt-out from checkout association. **Task details** opens t
 The Task's compact Flow shows interactive stages and inspectable background work.
 Select a current stage to join its exact conversation; select a future stage to
 inspect it. **Detailed Flow** exposes the captured branches and repeats. The header
-uses the shared read: before start, the chosen
-Flow's preview (click its name to search the catalogue) and **Start**; once
-started, the pinned definition, the current occurrence, and each loop's iteration.
-Hover or focus the name for **Stop & restart…**, which confirms before replacing
-the Flow. Controls are disabled with Rust's reason when they cannot be used.
-A pinned Flow without a live worker reads **Stopped** and offers **Resume**;
-there is no Pause until Loopflow can hold a Flow at a boundary.
+uses the shared read: the Flow **Start** would launch (click its name to search
+the catalogue) and, once one has been launched, the most recent Flow's captured
+definition, current occurrence, and each loop's iteration. **Start** always
+launches a fresh Flow, including beside an earlier one, and is disabled with
+Rust's reason when it cannot be used. A launched Flow without a live worker
+reads **Stopped**; there is no Pause until Loopflow can hold a Flow at a boundary.
 **Recent runs** under the Flow reads nothing until expanded; it then lists that
 Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
@@ -335,7 +334,7 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave status <wave> --json`.
 
-Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
+Start, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
 changed files, per-file patches, current contents, and embedded shells.
 The condition chip and spoken row use the same `lf roadmap` reason: green is a

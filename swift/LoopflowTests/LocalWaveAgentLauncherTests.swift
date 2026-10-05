@@ -19,18 +19,16 @@ struct LocalWaveAgentLauncherTests {
             "LF_WAVE_ID": "launching-wave",
             "LF_FLOW_STEP": "launching-step",
             "LF_RUN_ID": "launching-run",
-            "LF_WORK_ADVANCE_CLAIM": "launching-task-claim",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
         #expect(environment["LF_FLOW_STEP"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
-        #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
 
-    @Test("Task controls use the bounded worker commands")
+    @Test("Task controls use the Task commands")
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
@@ -46,9 +44,6 @@ struct LocalWaveAgentLauncherTests {
             lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
             "--notes", "Refine text for LOOPFLOW.md.",
             "--json",
-        ])
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "--task", "W2-131", "flow", "start",
         ])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",

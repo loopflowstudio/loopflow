@@ -6,7 +6,6 @@ pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_RUN_ID",
     "LF_RUN_DIR",
     "LF_FLOW_STEP",
-    "LF_WORK_ADVANCE_CLAIM",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
     "LF_ACCOUNT_SELECTION",

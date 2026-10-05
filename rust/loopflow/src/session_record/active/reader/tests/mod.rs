@@ -312,18 +312,12 @@ async fn discovery_cost_matrix() {
         started_at: time::OffsetDateTime::UNIX_EPOCH,
     };
     let native = serde_json::to_vec(&stale).unwrap();
-    let owner = crate::durable::TaskWorkerOwner {
-        trace_id: crate::id::TraceId::new(),
-        exec_id: crate::id::ExecId::new(),
-        pid: stale.pid,
-        started_at: 0,
-    };
     let exec = serde_json::to_vec(&crate::journal::ExecProcessReceipt {
         schema_version: 1,
-        trace_id: owner.trace_id.to_string(),
-        exec_id: owner.exec_id.to_string(),
-        pid: owner.pid,
-        started_at: owner.started_at,
+        trace_id: crate::id::TraceId::new().to_string(),
+        exec_id: crate::id::ExecId::new().to_string(),
+        pid: stale.pid,
+        started_at: 0,
     })
     .unwrap();
     fs::create_dir_all(home.path().join("runtime/exec-processes")).unwrap();

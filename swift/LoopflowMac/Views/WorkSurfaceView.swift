@@ -253,7 +253,7 @@ struct WorkSurfaceView: View {
                             }
                             .buttonStyle(WorkspaceOutlineButtonStyle())
                             .disabled(model.navigation.startingTaskSessions.contains(task.id))
-                            .help("Open an independent conversation with this Task's context in its worktree. The managed Flow is not started.")
+                            .help("Open an independent conversation with this Task's context in its worktree. No Flow is started.")
                             .accessibilityIdentifier("task-new-session")
                         }
                     }
@@ -278,7 +278,7 @@ struct WorkSurfaceView: View {
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
-                    if case .pinned = task.flow.record {
+                    if case .latest = task.flow.record {
                         TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                     }
                 } else {
@@ -440,13 +440,13 @@ struct WorkSurfaceView: View {
     }
 
     /// The plan row's state, read from the shared Task projection. Only running,
-    /// done, human, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
+    /// done, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
     private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
         if let label = task.task.historyLabel {
             return (label, task.task.isSuccessful ? .done : .neutral)
         }
-        if case .pinned(let pinned) = task.flow.record {
-            return pinned.execution.presentation
+        if case .latest(let latest) = task.flow.record {
+            return latest.execution.presentation
         }
         return (nil, .neutral)
     }

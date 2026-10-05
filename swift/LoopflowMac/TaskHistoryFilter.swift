@@ -24,7 +24,7 @@ struct TaskHistoryFilter: Equatable {
     static func hasUnresolvedExecution(runtime: TaskRuntimeSnapshot?, condition: TaskConditionSnapshot, flow: TaskFlowSnapshot) -> Bool {
         guard let runtime else { return false }
         if runtime.status == .ready { return true }
-        if case .pinned(let pinned) = flow.record, pinned.execution != .idle { return true }
+        if case .latest(let latest) = flow.record, latest.execution != .idle { return true }
         // Removed historical checkouts do not reopen settled work. Only an
         // observation of existing unsettled files/commits keeps it current.
         return condition.localProgress.state == .observed && condition.localProgress.unsettled == true

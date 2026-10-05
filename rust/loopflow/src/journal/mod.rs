@@ -929,52 +929,8 @@ fn current_context() -> Option<ExecContext> {
     EXEC_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
-pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwner> {
-    let context = current_context()?;
-    Some(crate::durable::TaskWorkerOwner {
-        trace_id: context.trace_id,
-        exec_id: context.process_id,
-        pid: std::process::id(),
-        started_at: context.process_started_at?,
-    })
-}
-
 pub(crate) fn current_exec_id() -> Option<ExecId> {
     current_context().map(|context| context.process_id)
-}
-
-pub(crate) fn task_worker_owner_evidence(
-    owner: &crate::durable::TaskWorkerOwner,
-) -> ProcessIdentityEvidence {
-    let receipts = match read_exec_process_receipts_at(&crate::store::lf_home_dir()) {
-        Ok(receipts) => receipts,
-        Err(_) => return ProcessIdentityEvidence::Unknown,
-    };
-    let receipt = receipts.iter().find(|receipt| {
-        receipt.trace_id == owner.trace_id.as_str()
-            && receipt.exec_id == owner.exec_id.as_str()
-            && receipt.pid == owner.pid
-            && receipt.started_at == owner.started_at
-    });
-    if let Some(receipt) = receipt {
-        return receipt.process_evidence();
-    }
-
-    let Ok(path) = crate::store::database_path_from_env() else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    if !path.exists() {
-        return ProcessIdentityEvidence::Unknown;
-    }
-    let Ok(store) = SqliteStore::open_execs_read_only(&path) else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    match store.exec(&owner.exec_id) {
-        Ok(Some(exec)) if exec.trace_id == owner.trace_id && exec.completed_at.is_some() => {
-            ProcessIdentityEvidence::Dead
-        }
-        _ => ProcessIdentityEvidence::Unknown,
-    }
 }
 
 pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
@@ -1195,7 +1151,7 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 mod tests {
     use super::{
         emit, events_path, read_events, traces_root, LfEvent, LfEventFields, LfEventType, LfNode,
-        ProcessIdentityEvidence, TestLedgerGuard,
+        TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
     use crate::id::{ExecId, TraceId};
@@ -1275,79 +1231,6 @@ mod tests {
 
         opened.expect("open explicit ledger");
         assert!(path.exists());
-    }
-
-    #[test]
-    fn exact_process_evidence_distinguishes_a_live_exec_from_its_completion() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        emit(
-            repo.path(),
-            LfNode::Exec,
-            LfEventType::Started,
-            started_fields(
-                &["lf".to_string(), "task".to_string()],
-                repo.path(),
-                "runtime",
-            ),
-        );
-        let owner = super::current_process_identity().expect("live Exec identity");
-
-        assert_eq!(
-            super::task_worker_owner_evidence(&owner),
-            ProcessIdentityEvidence::Live
-        );
-
-        emit(
-            repo.path(),
-            LfNode::Exec,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-        assert_eq!(
-            super::task_worker_owner_evidence(&owner),
-            ProcessIdentityEvidence::Dead
-        );
-    }
-
-    #[test]
-    fn a_killed_registered_exec_is_authoritatively_dead() {
-        let guard = journal_test_guard();
-        let mut child = Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .expect("spawn owned process");
-        let owner = crate::durable::TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
-            pid: child.id(),
-            started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        };
-        let receipt = super::ExecProcessReceipt {
-            schema_version: 1,
-            trace_id: owner.trace_id.to_string(),
-            exec_id: owner.exec_id.to_string(),
-            pid: owner.pid,
-            started_at: owner.started_at,
-        };
-        let root = guard.home().join(super::EXEC_PROCESS_ROOT);
-        std::fs::create_dir_all(&root).expect("create receipt directory");
-        std::fs::write(
-            root.join(format!("{}.json", owner.pid)),
-            serde_json::to_vec(&receipt).expect("serialize receipt"),
-        )
-        .expect("write receipt");
-
-        assert_eq!(
-            super::task_worker_owner_evidence(&owner),
-            ProcessIdentityEvidence::Live
-        );
-        child.kill().expect("kill owned process");
-        child.wait().expect("reap owned process");
-        assert_eq!(
-            super::task_worker_owner_evidence(&owner),
-            ProcessIdentityEvidence::Dead
-        );
     }
 
     #[test]

@@ -1041,8 +1041,7 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,
-                worker_generation,updated_at,state,ended_at) VALUES('mechanical',?1,?2,'{\"id\":\"mechanical\"}',0,0,1,0,1,'completed',2)",params![first.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,updated_at,state,ended_at) VALUES('mechanical',?1,?2,'{\"id\":\"mechanical\"}',0,0,1,1,'completed',2)",params![first.as_str(),wave]).unwrap();
             for exec in [&shared, &mechanical] {
                 conn.execute(
                     "INSERT INTO flow_events(flow_id,node,iterations,kind,exec_id,payload)

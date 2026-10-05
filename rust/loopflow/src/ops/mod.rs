@@ -37,7 +37,6 @@ pub mod wt;
 pub mod wt_timing;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub(crate) use commit::checkpoint_task_restart;
 pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
@@ -63,7 +62,7 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{exec_task_worker, TaskWorkerExec};
+pub(crate) use run::{exec_task_flow, TaskFlowExec};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,

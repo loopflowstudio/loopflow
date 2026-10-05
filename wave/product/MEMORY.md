@@ -31,24 +31,26 @@ authored id/name fields are unnecessary. This supersedes the sleeping-runner and
 single-capture human-segment proposals preserved at
 `5090f672e:scratch/focus-on-your-own-work.md`.
 
-Design review is approved; the full runtime cut remains. Scheduling/enrollment
-and five scheduling columns are deleted; Task/PR checks share delivery reconciliation
-and per-landing locks, preserving CI repair holds. Ready/Complete, `exec_driver`,
-review-completion restart, `stop-client` and duplicate feedback plumbing are deleted.
-New review reservation, `serve-flow`, review capture publication and automatic
-review checkpoint/push are also removed. Operational launch rejects human steps
-inside resolved subflows and XOR alternatives before capture.
+Design review is approved. The local runtime cut deletes scheduling/enrollment
+with five scheduling columns, Ready/Complete, review launch and tokens, saved
+Flow resume, and Task-worker authority: claims, generations, `__worker`,
+`task restart`, `--retry`, managed flags, `tasks.current_invocation_id` and the
+claim columns. Task/PR checks share delivery reconciliation and per-landing
+locks, preserving CI repair holds. `flow start` launches a fresh detached
+ordinary Flow; one process drives it under a driver lock and a dead driver
+leaves history, never a position to resume. Status shows the latest launched
+Flow as observation. Only live or unresolved execution holds completion,
+cleanup and landing. Builtin Flows carry no human step: `feature` ends at a
+published PR and `ship` lands after the conversational demo. These last choices
+are implementation interpretations awaiting Jack's review, not his decisions.
 
-The draft archives feedback and legacy review boundaries as Session observations,
-then converts review kinds to Conversation. Identity, historical completion,
-pending-boundary links, captured positions and effect receipts remain; conversion
-grants no navigation authority. Native replacement and primary succession retain
-process fencing. Task-worker claims, managed selection, internal recovery and
-legacy review read/token branches still remain. Ordinary detached launch, Task
-primary selection, Waiting and workflow/loop authoring remain unimplemented.
-Human-bearing templates need the workflow cut before release.
+The draft archives feedback and legacy review boundaries as Session
+observations and converts review kinds to Conversation; identity, completion,
+captures and effect receipts remain and grant no navigation authority. Taskless
+detached launch, Task primary selection, Waiting, workflow/loop authoring and
+all-Flow Desktop views remain unimplemented.
 
-Focused migration, projection, CLI, Desktop and crash/effect checks establish local
+Focused migration, launch, projection and crash/effect checks establish local
 behavior only. Preserve main's confirmed-dead completed-provider admission exemption
 and Session fencing outside async waits. No live Home migration or configured
 acceptance follows from these checks.
@@ -184,13 +186,9 @@ design; TaskSession operates the existing Task Flow authority. Primary repo/Wave
 Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
 never silently restart its Flow. Ordinary reads remain read-only.
 
-Jack's “switch now” and “finish, then switch” replace a captured invocation while
-retaining Task identity, TaskSession and files. “Finish” stops at the next loop
-point of the innermost active loop before its decider. Durable acceptance must
-serialize with worker claims and retain the captured successor across recovery;
-checkpoint final writes after confirmed stop. Crossing repeat intervals and an
-already-claimed decider need explicit resolution, not an invented inner boundary.
-These are required implementation mechanics, not delivered behavior.
+The “switch now” / “finish, then switch” proposal is superseded by October 4's
+removal of mutable Flow switching; its text is at
+`16168c473:wave/product/MEMORY.md`.
 
 Earlier planning accepted automatic Wave wakes for operational blockers and
 reading existing Task/Session output. The Ask removal decision above supersedes

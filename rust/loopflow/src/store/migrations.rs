@@ -1897,7 +1897,7 @@ mod tests {
     }
 
     #[test]
-    fn task_flow_observations_removes_scheduling_and_preserves_repair_hold() {
+    fn task_flow_observations_removes_scheduling_and_worker_control_and_preserves_history() {
         let conn = open();
         apply_before_current_draft(&conn, "task_flow_observations");
         conn.execute_batch(r#"
@@ -1912,8 +1912,9 @@ mod tests {
             INSERT INTO agent_sessions(id,title,title_source,created_at,ready_summary,completed_at,input_published,cwd,kind,task_id,wave_id)
             VALUES('review','Review','human',3,'Retained exact feedback',NULL,0,'/repo/task','flow_review','t','w'),
                   ('closed','Closed','human',4,'Historical result',7,0,'/repo/task','flow_review','t','w');
-            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,pending_session_id)
-            VALUES('legacy-flow','t','w','{"id":"legacy-flow","flow":"feature"}',2,3,4,0,5,'current','review');
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,claim_json,updated_at,state,pending_session_id)
+            VALUES('legacy-flow','t','w','{"id":"legacy-flow","flow":"feature"}',2,3,4,7,'{"generation":7}',5,'current','review');
+            UPDATE tasks SET current_invocation_id='legacy-flow' WHERE id='t';
             UPDATE agent_sessions SET flow_session_id='legacy-flow' WHERE id='review';
             INSERT INTO flow_events(flow_id,version,node,iterations,kind,observed_at,payload)
             VALUES('legacy-flow',4,2,'[]','operation_started',5,'{"command":"pr publish"}');
@@ -1945,6 +1946,27 @@ mod tests {
         assert_eq!(
             history,
             (2, 3, "review".into(), r#"{"command":"pr publish"}"#.into())
+        );
+        // The Task's former selection and worker claim are gone; the Flow row
+        // keeps its last cursor as history under the Task that launched it.
+        let control: i64 = conn.query_row(
+            "SELECT (SELECT count(*) FROM pragma_table_info('tasks') WHERE name='current_invocation_id')
+                + (SELECT count(*) FROM pragma_table_info('flow_sessions') WHERE name IN ('claim_json','worker_generation'))",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(control, 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT task_id,state,position_version FROM flow_sessions WHERE id='legacy-flow'",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?
+                ))
+            )
+            .unwrap(),
+            ("t".into(), "current".into(), 4)
         );
         assert_eq!(
             conn.query_row(

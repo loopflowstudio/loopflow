@@ -667,10 +667,10 @@ struct SessionsContentView: View {
 
     @ViewBuilder
     private var taskStage: some View {
-        if let task = fileTask, case .pinned(let pinned) = task.task.flow.record,
-           let current = pinned.current, let node = pinned.graph.node(current) {
+        if let task = fileTask, case .latest(let latest) = task.task.flow.record,
+           let current = latest.current, let node = latest.graph.node(current) {
             Button {
-                if let session = participationSession(node: String(current), pinned: pinned,
+                if let session = participationSession(node: String(current), latest: latest,
                                                       sessions: store.sessions.map(\.record)) {
                     openSession(session)
                 } else { workspace.showsDetails = true }
@@ -678,7 +678,7 @@ struct SessionsContentView: View {
                 Label(node.label, systemImage: node.human ? "bubble.left" : "arrow.triangle.branch")
                     .font(Typography.meta).lineLimit(1)
             }
-            .buttonStyle(.plain).help(pinned.reason)
+            .buttonStyle(.plain).help(latest.reason)
             .accessibilityIdentifier("workspace-current-stage")
         }
     }
@@ -827,9 +827,7 @@ struct SessionsContentView: View {
         case .chooseFlow(let id):
             guard let found = model.task(id: id) else { return }
             model.select(.task(id: id))
-            let hasInvocation: Bool
-            if case .pinned = found.task.flow.record { hasInvocation = true } else { hasInvocation = false }
-            navigation.flowDrafts[id, default: TaskFlowDraft()].picker = hasInvocation ? .restart : .preview
+            navigation.flowDrafts[id, default: TaskFlowDraft()].picking = true
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
@@ -972,8 +970,8 @@ struct SessionsContentView: View {
     }
 
     /// An independent conversation with Task context in the Task's checkout.
-    /// Resolving the checkout prepares Task Work only; it never starts the
-    /// managed Flow or replaces another Session.
+    /// Resolving the checkout prepares Task Work only; it never starts a
+    /// Flow or replaces another Session.
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation

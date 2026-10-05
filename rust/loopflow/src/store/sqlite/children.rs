@@ -140,77 +140,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn restart_task_flow(
-        &self,
-        task: &Task,
-        expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        validate_task(task)?;
-        if checkpoint_head.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "Task restart requires a checkpoint head".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        super::durable::require_ready_work(
-            &transaction,
-            &crate::durable::WorkRef::Task(task.id.clone()),
-        )?;
-        let current = super::flows::task_flow_in(&transaction, &task.id)?;
-        if current.as_ref() != expected
-            || current
-                .as_ref()
-                .is_some_and(|position| position.claim.is_some())
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task execution changed before restart; stop the current worker before retrying"
-                    .into(),
-            ));
-        }
-        if let Some(id) = current
-            .as_ref()
-            .and_then(|flow| flow.pending_session_id.as_deref())
-        {
-            let stopped: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:stopped')",
-                [id], |row| row.get(0),
-            )?;
-            if !stopped {
-                return Err(StoreError::InvalidAuthority(
-                    "previous review execution must be retired before restart".into(),
-                ));
-            }
-        }
-        validate_task_project(&transaction, task)?;
-        transaction.execute(
-            &format!(
-                "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {}",
-                super::flows::TASK_INVOCATION
-            ),
-            params![task.id.as_str(), now_unix()],
-        )?;
-        transaction.execute(
-            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
-            [task.id.as_str()],
-        )?;
-        let parameters = task_params(task);
-        transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        insert_task_event_in(
-            &transaction,
-            &task.id,
-            &TaskEventKind::Progress {
-                summary: format!("Task restarted from checkpoint {checkpoint_head}"),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn rebind_task_issue_identifier(
         &self,
         issue_id: &str,
@@ -390,13 +319,9 @@ impl SqliteStore {
             [child.task_id.as_str()],
             |row| row.get(0),
         )?;
-        let claimed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1 AND claim_json IS NOT NULL)",
-            [child.task_id.as_str()], |row| row.get(0),
-        )?;
-        if !ready || claimed {
+        if !ready {
             return Err(StoreError::InvalidAuthority(
-                "Task must be ready with its worker claim released before selecting a parent; use the existing Task stop/recovery path".into(),
+                "Task must be ready before selecting a parent".into(),
             ));
         }
         let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;

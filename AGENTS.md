@@ -8,7 +8,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
-- A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; its managed Flow is one marked member
+- A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -205,10 +205,10 @@ default, not another objective, memory or operator.
 A Task's work includes every AgentSession, FlowSession and Exec associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
-Flow authority and never rewrites historical usage. The managed FlowSession is
-one marked member, selected only for worker progression, claim fencing and exact
-review/delivery settlement. The Project's Flow supplies its default; explicit
-Flow selection is allowed.
+Flow authority and never rewrites historical usage. Every Flow naming the Task
+is equally its work; a stopped Flow is history its caller inspects, never a
+position to resume. The Project's Flow supplies the default for a fresh launch;
+explicit Flow selection is allowed.
 Taskless execution uses the same captured graph, cursor, return counts and driver.
 Template composition expands the graph. One started Flow is one FlowSession;
 loop passes are node/iteration positions and lenses over its history, not child

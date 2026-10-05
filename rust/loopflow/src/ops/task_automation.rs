@@ -79,19 +79,11 @@ pub(crate) fn admission_blocker(
     }
     for flow in &work.flows {
         if let Some(flow) = store.flow(&flow.summary.id).map_err(error)? {
-            if flow.is_human() && !flow.finished {
-                return Ok(Some("Flow awaits review".into()));
-            }
-            if let Some(claim) = flow.claim {
-                if Some(&claim.owner.exec_id) != caller.as_ref()
-                    && crate::journal::task_worker_owner_evidence(&claim.owner)
-                        != ProcessIdentityEvidence::Dead
-                {
-                    return Ok(Some(format!(
-                        "Flow {} has a live or unresolved worker",
-                        flow.invocation.id
-                    )));
-                }
+            if !flow.finished && crate::ops::flow_run::driver_live(flow.id()) {
+                return Ok(Some(format!(
+                    "Flow {} has a live driver",
+                    flow.invocation.id
+                )));
             }
         }
     }

@@ -282,32 +282,37 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct TaskWorkerExec {
+pub(crate) struct TaskFlowExec {
     pub task_id: TaskId,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
-    pub tmux_name: String,
-    pub environment: Vec<(String, String)>,
+    pub session: String,
+    pub flow: String,
 }
 
-pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
-    let mut environment = request.environment;
+/// Start `lf --task <task> run <flow>` detached in the Task checkout, with the
+/// caller's prompt and provider options.
+pub(crate) async fn exec_task_flow(request: TaskFlowExec) -> OpsResult<()> {
     let execution = execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)
         .to_string_lossy()
         .to_string();
-    let argv = vec![
-        control_bin.clone(),
-        "task".to_string(),
-        "__worker".to_string(),
+    let options: Vec<String> = std::env::var(crate::lf::TASK_FLOW_OPTIONS_ENV)
+        .ok()
+        .map(|value| serde_json::from_str(&value))
+        .transpose()
+        .map_err(run_error)?
+        .unwrap_or_default();
+    let mut argv = vec![control_bin.clone()];
+    argv.extend(options);
+    argv.extend([
+        "--task".to_string(),
         request.task_id.to_string(),
-    ];
-    environment.extend([
-        (
-            crate::lf::WORK_DECLARATION_ENV.to_string(),
-            format!("task:{}", request.task_id),
-        ),
+        "run".to_string(),
+        request.flow,
+    ]);
+    let mut environment = vec![
         (
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),
@@ -317,7 +322,7 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
             "LF_HOME".to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
-    ]);
+    ];
     if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
         .filter(|value| !value.is_empty())
     {
@@ -332,16 +337,13 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
             .map_err(run_error)?
             .unwrap_or_default(),
     ));
-    if let Ok(options) = std::env::var(crate::lf::TASK_SKILL_OPTIONS_ENV) {
-        environment.push((crate::lf::TASK_SKILL_OPTIONS_ENV.to_string(), options));
-    }
     let environment = environment
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
+    start_lf_session_with_env(&request.session, &request.cwd, &argv, &environment)
         .await
-        .map_err(|error| OpsError::Message(format!("failed to launch Task worker: {error}")))
+        .map_err(|error| OpsError::Message(format!("failed to launch Task Flow: {error}")))
 }
 
 #[cfg(test)]

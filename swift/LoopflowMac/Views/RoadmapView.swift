@@ -5,13 +5,11 @@ import SwiftUI
 
 enum RoadmapTaskAction: Equatable {
     case run
-    case resume
     case openPr
 
     var label: String {
         switch self {
         case .run: "Start"
-        case .resume: "Resume"
         case .openPr: "Open PR"
         }
     }
@@ -22,12 +20,12 @@ enum RoadmapTaskAction: Equatable {
 /// recommendation onto the affordance the app can offer, and never re-derives
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    guard task.runtime != nil else {
-        guard let start = task.flow.control(.start), start.unavailable == nil else { return nil }
-        return .run
-    }
+    let startable = task.flow.control(.start).map { $0.unavailable == nil } ?? false
+    guard task.runtime != nil else { return startable ? .run : nil }
     switch task.actions.recommended {
-    case .resume: return .resume
+    case .resume:
+        // Continuing a Task is a fresh Flow launch; Rust's Start legality governs it.
+        if startable { return .run }
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
     case .startNextPr, .complete, .noAction, .none:
@@ -439,17 +437,10 @@ struct RoadmapView: View {
         onOpenWave(wave)
     }
 
-    private enum TaskControl {
-        case run
-        case resume
-    }
-
     private func perform(_ action: RoadmapTaskAction, on selection: RoadmapTaskSelection) {
         switch action {
         case .run:
-            perform(TaskControl.run, on: selection)
-        case .resume:
-            perform(TaskControl.resume, on: selection)
+            start(selection)
         case .openPr:
             if let github = selection.task.activePr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
@@ -457,7 +448,7 @@ struct RoadmapView: View {
         }
     }
 
-    private func perform(_ control: TaskControl, on selection: RoadmapTaskSelection) {
+    private func start(_ selection: RoadmapTaskSelection) {
         let controlId = "task:\(selection.task.id)"
         activeControlId = controlId
         controlError = nil
@@ -466,12 +457,7 @@ struct RoadmapView: View {
                 let repo = selection.wave.repo
                 let issue = selection.task.task.identifier
                 try await Task.detached(priority: .userInitiated) {
-                    switch control {
-                    case .run:
-                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    case .resume:
-                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    }
+                    try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                 }.value
                 await refresh()
             } catch {

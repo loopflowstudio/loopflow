@@ -205,9 +205,6 @@ pub(crate) struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
-    pub managed: bool,
-    pub home_id: Option<crate::durable::HomeId>,
-    pub home_route: Option<String>,
 }
 
 /// Recorded Flow facts; Current says nothing about a live driver or process.

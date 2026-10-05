@@ -803,7 +803,6 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let output = command
             .current_dir(cwd)
             .env("LF_AGENT_CALLER", &caller)
-            .env("LF_WORK_ADVANCE_CLAIM", "obsolete identity")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -904,34 +903,8 @@ fn declared_agent_can_start_another_tasks_flow() {
     // Y needs a harness that supports the checkout boundary. Its mechanical
     // Flow never starts a provider; X's interactive OpenCode only issues the command.
     store.set_task_agent(&target.task.id, "claude").unwrap();
-    let flow = store
-        .start_task_flow(
-            &target.task.id,
-            &loopflow::durable::FlowSession {
-                invocation: loopflow::engine::invocation::QueuedInvocation::load(
-                    &y,
-                    "switch-proof",
-                )
-                .unwrap(),
-                cursor: Default::default(),
-                version: 0,
-                task_id: Some(target.task.id.clone()),
-                wave_id: Some(target.task.wave_id.clone()),
-                cwd: y.clone(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        )
-        .unwrap();
     let bin = fixture.home.path().join("bin");
-    // A local process stands in for tmux; the actual Task driver and op execute.
+    // A local process stands in for tmux; the actual Flow driver and op execute.
     std::fs::write(bin.join("tmux"), format!(
         "#!/bin/sh\ncase \"$1\" in new-session) cd \"$6\"; shift 8; /bin/sh -c \"$1\" >'{}' 2>&1 & ;; has-session) exit 1 ;; esac\n",
         fixture.home.path().join("worker.log").display())).unwrap();
@@ -949,7 +922,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "--json"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "switch-proof", "--json"], "cwd": x,
         }))
         .unwrap(),
     )
@@ -967,6 +940,10 @@ fn declared_agent_can_start_another_tasks_flow() {
     )
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
+    let flow = store
+        .latest_task_flow(&target.task.id)
+        .unwrap()
+        .expect("flow start records its launched Flow");
     wait_for("Y Flow completion", || {
         let current = store.flow(flow.id()).unwrap().unwrap();
         assert!(
@@ -1212,11 +1189,6 @@ fn saved_flow_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
-        lf.join("flows/work-then-review.yaml"),
-        "- work-proof\n- step:\n    id: review\n    name: review-proof\n    human: true\n",
-    )
-    .unwrap();
-    std::fs::write(
         lf.join("flows/work-then-decide.yaml"),
         "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n",
     )
@@ -1274,12 +1246,10 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
 }
 
 #[test]
-fn failure_without_ask_stops_taskless_decision_until_explicit_retry() {
+fn failed_taskless_decision_stops_and_keeps_its_history() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
-    std::fs::write(fixture.repo.path().join(".lf/flows/work-then-decide.yaml"),
-        "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n- step:\n    id: review\n    name: review-proof\n    human: true\n").unwrap();
     let mut command = fixture.command(&[
         "--model",
         "opencode",
@@ -1322,7 +1292,6 @@ fn failure_without_ask_stops_taskless_decision_until_explicit_retry() {
         .contains("Release target is missing"));
     assert_eq!(failed.cursor.index, 1);
     assert_eq!(failed.cursor.iteration, 0);
-    assert!(failed.claim.is_none());
     assert!(fixture.sessions().is_empty());
     let launches = fixture.launches();
     assert_eq!(launches.len(), 2);
@@ -1333,29 +1302,6 @@ fn failure_without_ask_stops_taskless_decision_until_explicit_retry() {
         history.to_string().contains("Release target is missing"),
         "{history}"
     );
-    for _ in 0..2 {
-        let resumed = fixture.run(&["flow", "resume", &id]);
-        assert!(!resumed.status.success());
-        let retained = store.flow(&id).unwrap().unwrap();
-        assert_eq!(retained.cursor, failed.cursor);
-        assert_eq!(retained.failure, failed.failure);
-        assert_eq!(fixture.launches(), launches);
-        assert!(fixture.sessions().is_empty());
-    }
-    let retried = fixture.run(&["flow", "resume", &id, "--retry"]);
-    assert!(
-        String::from_utf8_lossy(&retried.stderr).contains("waiting for human input"),
-        "{retried:?}"
-    );
-    let review = store.flow(&id).unwrap().unwrap();
-    assert_eq!(review.cursor.index, 2);
-    assert_eq!(review.cursor.iteration, 0);
-    assert!(review.failure.is_none());
-    assert_eq!(fixture.launches().len(), 3);
-    let sessions = fixture.sessions();
-    assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0]["kind"], "flow");
-    assert_eq!(store.session_inputs(&session.id).unwrap().len(), 2);
 }
 
 #[test]
@@ -1436,12 +1382,6 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         6
     );
     assert_eq!(fixture.launches().len(), 6);
-    assert!(fixture.run(&["flow", "resume", &root]).status.success());
-    assert_eq!(
-        fixture.launches().len(),
-        6,
-        "completed resumption must not launch another pass"
-    );
 }
 
 #[test]

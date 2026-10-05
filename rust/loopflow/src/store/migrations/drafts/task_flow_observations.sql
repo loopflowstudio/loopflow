@@ -22,3 +22,11 @@ SELECT s.id,'observed','legacy_flow_review',s.task_id,s.wave_id,unixepoch(),
         'completed_at',s.completed_at),s.current_capture
 FROM agent_sessions s WHERE s.kind='flow_review';
 UPDATE agent_sessions SET kind='conversation' WHERE kind='flow_review';
+
+-- A Task no longer selects one Flow, and no worker claims a Flow's position.
+-- Every Flow row keeps its last cursor, failure, events and effect receipts as
+-- history; none of it is resumable state.
+DROP TRIGGER validate_task_invocation;
+ALTER TABLE tasks DROP COLUMN current_invocation_id;
+ALTER TABLE flow_sessions DROP COLUMN claim_json;
+ALTER TABLE flow_sessions DROP COLUMN worker_generation;

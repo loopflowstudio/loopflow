@@ -17,14 +17,14 @@ struct TaskWorkView: View {
             if let work = model.taskWork[task.id].value {
                 ForEach(work.sessions) { session in
                     row("Session", id: session.id, name: session.title,
-                        state: session.completedAt == nil ? "open" : "completed", managed: session.managed)
+                        state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.flows) { flow in
-                    row("Flow", id: flow.id, name: flow.name ?? "Unnamed", state: flow.state, managed: flow.managed)
+                    row("Flow", id: flow.id, name: flow.name ?? "Unnamed", state: flow.state)
                 }
                 ForEach(work.execs) { exec in
                     row("Exec", id: exec.id, name: exec.command ?? "Unknown command",
-                        state: exec.outcome ?? "unknown", managed: false)
+                        state: exec.outcome ?? "unknown")
                 }
                 if work.sessions.isEmpty && work.flows.isEmpty && work.execs.isEmpty {
                     Text("No recorded work.")
@@ -42,11 +42,10 @@ struct TaskWorkView: View {
         .accessibilityIdentifier("task-work")
     }
 
-    private func row(_ kind: String, id: String, name: String, state: String, managed: Bool) -> some View {
+    private func row(_ kind: String, id: String, name: String, state: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(kind)
             Text(name).lineLimit(2)
-            if managed { Text("Managed").foregroundStyle(palette.accentInk) }
             Spacer()
             Text(state)
             Text(id).font(Typography.code(10)).help(id)

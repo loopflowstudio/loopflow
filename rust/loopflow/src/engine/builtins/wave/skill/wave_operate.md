@@ -69,17 +69,18 @@ disagreement. A draft or failed delivery leaves the handoff pending.
 ## The hierarchy is an intent graph, not a control plane
 
 Tasks progress independently of Wave and repository passes. Neither operation
-is an approval prerequisite. Each Task's selected Flow carries its work through
-landing; do not perform that Flow's steps or create another cursor here. Preserve selected Flows, review gates,
+is an approval prerequisite. A Task's Flows carry its autonomous work; do not
+perform a Flow's steps here. Preserve Flow history, conversation reviews,
 worktrees, placement and execution history.
 
 - Start selected work with `lf --task <issue-id> flow start`; use the
-  current Project's Flow unless an explicit choice is warranted. Existing
-  execution is reconciled through Task operations, never a duplicate driver.
+  current Project's Flow unless an explicit choice is warranted. Each start
+  launches a fresh Flow; leave a live one running instead of duplicating it.
 - Inspect `lf task status` and existing logs before recovery. Resolve
   impediments; discuss missing judgment in the ongoing Wave chat when present.
-  Headless operation stops with the reason when it cannot proceed. Retry failed
-  work with `lf --task <issue> flow start --reason "<what changed>"` only when new
+  Headless operation stops with the reason when it cannot proceed. After a
+  failure, inspect its effects and launch fresh work with
+  `lf --task <issue> flow start <flow> --reason "<what changed>"` only when new
   evidence warrants it. Unknown liveness is not idle. Preserve historical review
   evidence; discuss feedback and next work in the ongoing Task conversation.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only

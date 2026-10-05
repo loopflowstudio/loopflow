@@ -389,12 +389,12 @@ struct WorkspaceNavigator: View {
     }
 
     /// The dot a Task row carries while it needs eyes, from its shared Flow
-    /// projection: running, blocked, or waiting on you. Stopped and idle rows
+    /// projection: running, blocked, or stalled. Stopped and idle rows
     /// carry nothing.
     private func taskTone(_ row: WorkspaceOutlineRow) -> WorkspaceTone? {
         guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
-              case .pinned(let pinned) = found.task.flow.record else { return nil }
-        let state = pinned.execution.presentation
+              case .latest(let latest) = found.task.flow.record else { return nil }
+        let state = latest.execution.presentation
         return state.label == nil ? nil : state.tone
     }
 

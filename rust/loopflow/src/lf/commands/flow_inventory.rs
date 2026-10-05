@@ -35,9 +35,6 @@ pub struct FlowInventoryArgs {
     pub for_wave: Option<String>,
     #[arg(long)]
     pub taskless: bool,
-    /// Whether the Task currently selects this FlowSession
-    #[arg(long, action = clap::ArgAction::Set)]
-    pub managed: Option<bool>,
 }
 
 impl FlowInventoryArgs {
@@ -51,7 +48,6 @@ impl FlowInventoryArgs {
             && self.for_task.is_none()
             && self.for_wave.is_none()
             && !self.taskless
-            && self.managed.is_none()
     }
 }
 
@@ -93,7 +89,6 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
             }),
             repo,
             taskless: args.taskless,
-            managed: args.managed,
             search: args.search.clone(),
         };
         let page = store
@@ -109,11 +104,10 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
         } else {
             for entry in page.entries {
                 println!(
-                    "{}  {:?}  {}{}",
+                    "{}  {:?}  {}",
                     entry.summary.id,
                     entry.summary.state,
                     entry.summary.name.as_deref().unwrap_or("unknown template"),
-                    if entry.managed { "  [managed]" } else { "" }
                 );
             }
             if let Some(next) = page.next {

@@ -46,7 +46,7 @@ extension PodiumModel {
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
             let flowIsVisible: Bool
-            if case .pinned = found.task.flow.record { flowIsVisible = true }
+            if case .latest = found.task.flow.record { flowIsVisible = true }
             else { flowIsVisible = !found.wave.unavailableTasks.contains { $0.taskId == found.task.id } }
             if flowIsVisible {
                 rows.append(.init(id: .chooseFlow(selection.id), title: "Choose Flow for \(found.task.task.identifier)",

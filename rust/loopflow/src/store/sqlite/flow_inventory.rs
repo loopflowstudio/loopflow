@@ -14,8 +14,7 @@ use super::SqliteStore;
 // records its launch repository; cwd never becomes read-time identity.
 pub(super) const INVENTORY_FROM: &str = "FROM flow_sessions f INDEXED BY flow_metadata
     LEFT JOIN tasks t ON t.id=f.task_id LEFT JOIN waves w ON w.id=f.wave_id";
-pub(super) const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),
-    COALESCE(t.current_invocation_id=f.id,0),f.ended_at";
+pub(super) const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),f.ended_at";
 
 fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String, Vec<Value>) {
     let mut sql = format!("WITH page AS MATERIALIZED (SELECT f.id {INVENTORY_FROM} WHERE 1");
@@ -44,12 +43,6 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
     }
     if filter.taskless {
         sql.push_str(" AND f.task_id IS NULL");
-    }
-    if let Some(managed) = filter.managed {
-        sql.push_str(&format!(
-            " AND COALESCE(t.current_invocation_id=f.id,0)={}",
-            bind(Value::Integer(i64::from(managed)))
-        ));
     }
     if let Some(state) = filter.state {
         sql.push_str(match state {
@@ -82,8 +75,7 @@ pub(super) fn read_entry(
         Ok(FlowInventoryEntry {
             summary: read_flow_summary(row, 0)?.ok_or(StoreError::NotFound)?,
             repo: row.get(8)?,
-            managed: row.get(9)?,
-            ended_at: row.get(10)?,
+            ended_at: row.get(9)?,
         })
     })())
 }
@@ -182,8 +174,8 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-            position_version,worker_generation,updated_at,state)
-            VALUES(?1,?2,'/missing',0,0,1,0,17,'current')",
+            position_version,updated_at,state)
+            VALUES(?1,?2,'/missing',0,0,1,17,'current')",
             params![
                 id,
                 serde_json::json!({"id":id,"flow":name,"steps":"corrupt"}).to_string()
@@ -214,7 +206,7 @@ mod tests {
             ["a", "ab"]
         );
         assert_eq!(first.next.as_deref().unwrap(), "ab");
-        assert!(first.entries.iter().all(|e| e.repo.is_none() && !e.managed));
+        assert!(first.entries.iter().all(|e| e.repo.is_none()));
         assert!(store
             .flow_detail("a")
             .unwrap_err()
@@ -300,8 +292,6 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
                 failure: None,
                 finished: false,
                 updated_at: time::OffsetDateTime::now_utc(),
@@ -315,10 +305,10 @@ mod tests {
         assert_eq!(store.flow(saved.id()).unwrap().unwrap(), saved);
     }
     #[test]
-    fn flow_inventory_distinguishes_task_selection_without_starting_done_work() {
+    fn flow_inventory_lists_every_task_flow_without_starting_done_work() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        seed(&store, "managed", "feature");
+        seed(&store, "first", "feature");
         let wave = "00000000-0000-0000-0000-000000000001";
         let task = "task_11111111111111111111111111111111";
         {
@@ -341,19 +331,14 @@ mod tests {
                 params![task, wave],
             )
             .unwrap();
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='managed' WHERE id=?1",
-                [task],
-            )
-            .unwrap();
         }
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id)
-                 SELECT 'other','{\"id\":\"other\",\"flow\":\"feature\",\"steps\":\"corrupt\"}',cwd,0,0,1,0,17,'current',task_id,wave_id FROM flow_sessions WHERE id='managed'",
+                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,updated_at,state,task_id,wave_id)
+                 SELECT 'other','{\"id\":\"other\",\"flow\":\"feature\",\"steps\":\"corrupt\"}',cwd,0,0,1,17,'current',task_id,wave_id FROM flow_sessions WHERE id='first'",
                 [],
             )
             .unwrap();
@@ -361,23 +346,22 @@ mod tests {
             .resolve_task_id("PROOF-1", Some("/repo"))
             .unwrap()
             .unwrap();
-        let mut filter = FlowFilter {
+        let filter = FlowFilter {
             task_id: Some(id),
-            managed: Some(true),
             repo: Some("/repo".into()),
             ..FlowFilter::default()
         };
         let page = store
             .flow_inventory(&filter, None, NonZeroU32::new(10).unwrap())
             .unwrap();
-        assert_eq!(page.entries.len(), 1);
-        assert_eq!(page.entries[0].summary.id, "managed");
-        filter.managed = Some(false);
-        let page = store
-            .flow_inventory(&filter, None, NonZeroU32::new(10).unwrap())
-            .unwrap();
-        assert_eq!(page.entries.len(), 1);
-        assert_eq!(page.entries[0].summary.id, "other");
+        // Every Flow naming the Task is listed alike; none is selected over another.
+        assert_eq!(
+            page.entries
+                .iter()
+                .map(|entry| entry.summary.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "other"]
+        );
         let conn = store.conn.lock().unwrap();
         let state: (String, Option<i64>) = conn
             .query_row(

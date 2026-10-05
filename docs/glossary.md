@@ -11,7 +11,6 @@ first, then the engineering words it borrows.
 | **Flow** | Steps in order, written as a file in `.lf/flows/`. |
 | **Loopflow** | A flow that can go back and try again. Exactly: a flow with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
-| **Human step** | A step that waits for a person. In a flow file it is marked `human: true`. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
 | **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
@@ -20,7 +19,7 @@ first, then the engineering words it borrows.
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Exec** | One actual lf process, its causal parent and its observed command outcome. |
-| **FlowSession** | One captured resumable Flow, its cursor and exact boundary completion history. |
+| **FlowSession** | One captured Flow invocation, its cursor and exact boundary completion history. It is never resumed. |
 | **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

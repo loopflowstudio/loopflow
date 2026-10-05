@@ -184,8 +184,8 @@ decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
 decision: return it with a required reason in the final structured result.
 Existing logs and outcomes provide the evidence. The Wave operator resolves
-impediments or discusses missing judgment in its ongoing chat. Explicit retry
-retains the position and pass; unchanged failures do not automatically retry.
+impediments or discusses missing judgment in its ongoing chat. A stopped Flow
+is never retried or resumed; its caller launches fresh work explicitly.
 
 Inspect saved invocation history and effects before launching further work.
 Edits to the source apply to new invocations.

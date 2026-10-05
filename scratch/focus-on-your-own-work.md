@@ -2,9 +2,11 @@
 
 October 4, 2026. LOO-353, Product. **Design review finished and approved by
 Jack Heart.** Jack requested further kickoff reconciliation and continuation
-through the existing saved pursue Flow. Reconciliation is complete; automatic scheduling and the Ready/Complete review
-control path are deleted locally. Task-worker authority and the remaining runtime
-cut and configured acceptance are outstanding.
+through the existing saved pursue Flow. Reconciliation is complete. Automatic
+scheduling, the Ready/Complete review control path and Task-worker authority are
+deleted locally; Task Flow launch is an ordinary detached Flow. Workflow and loop
+authoring, Waiting, Task primary selection, the all-Flow Desktop views and
+configured acceptance are outstanding.
 
 ## Outcome
 
@@ -89,23 +91,34 @@ XOR paths. The draft records each legacy review as a Session observation and con
 its kind to Conversation, preserving identity, completion, pending-boundary links,
 captures and effect history. Read-only historical review projections still exist.
 
-`TaskWorkerClaim`, Task `__worker`, managed selection, `recover_flow`, `retry_flow`
-and worker control columns still execute. Their store/driver removal remains the
-next runtime cut; deleting the review branch is not complete worker removal. Public
-saved Flow resume, Ready/Complete, `exec_driver` and completion-only `stop-client`
-are already deleted. Compression also removes review launch tokens, captured-skill
-overrides of ordinary discovery, duplicate review open/rename dispatch, and the
-unused waiting-review store queries. Open and rename use stored conversation identity;
-native process fencing and captured history remain. Worker-exclusive controller tests are retired with the review
-path; ordinary Flow tests carry execution and crash/effect proof.
+October 4 implementation also deletes Task-worker authority at store and driver
+ownership: claims, generations, handoff/reclaim, the claim environment variable,
+`lf task __worker`, `lf task restart`, `flow start --retry`, managed selection and
+its flags, and the exclusive tests. Earlier compression removed saved Flow resume,
+Ready/Complete, `exec_driver`, completion-only `stop-client`, review launch tokens
+and duplicate review open/rename dispatch. What replaced them:
+
+- `lf --task ISSUE flow start [FLOW]` launches a fresh ordinary Flow, detached in
+  the Task checkout (`lf --task <id> run <flow>` with the caller's options). It
+  never continues an earlier invocation. This is the Task's `-b` path; ordinary
+  taskless `-b` for skills/prompts remains unbuilt.
+- One process drives a Flow under its kernel driver lock; writes are fenced by
+  `position_version`. The lock is also the liveness observation. A dead driver
+  leaves cursor, failure, events and effect receipts as history.
+- Task status describes the most recently launched Flow, as observation only.
+  Record kinds are none/latest/finished; the only control is Start.
+- Completion, cleanup, abandon, checkout restore, CI-repair admission and landing
+  cleanup wait only for live or unresolved execution. A caller is never blocked
+  by its own process lineage or by the Flow whose step it is.
+- Chapter rotation treats any FlowSession as started work.
 
 Attention still projects Review/Reply and `--needs-me`, which builtin
 `repo_operate` guidance still names; Task primaries, workflows, autonomous loop
 syntax (`loop-or-next` exists nowhere yet; `loop-decide` and `repeat.from` remain)
-and ordinary detached launch remain unimplemented. Builtin `feature`, `code`,
-`task-design` and `ship-demo` still carry a human step and now fail operational
-launch; `feature` is the chapter's Task Flow, so this branch cannot release before
-those become conversation workflow guidance. Builtin `pursue` has no human step. No live Home or saved invocation was changed.
+and taskless detached launch remain unimplemented. Builtin Flows are operational:
+`task-design` is kickoff, `code` is pursue, `feature` is task-design then pursue
+and ends at a published PR, `ship-demo` is deleted. Their review stages are not
+yet authored as workflow guidance. No live Home or saved invocation was changed.
 
 [Workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
 `bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` retain
@@ -282,45 +295,36 @@ process authority.
 
 ## Delete — do not maintain
 
-The architectural cut is indivisible; these are removal targets, not components to
-modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
+Paths are under `rust/loopflow/src/` unless qualified. Removed in the local cut;
+none is to be repaired or reintroduced under another name:
 
-- `durable.rs::{TaskWorkerOwner, TaskWorkerClaim, TASK_WORKER_CLAIM_ENV}` and the
-  mutable controller portion of `FlowSession`/`FlowTurnSelection`; retain exact
-  Session completion selection and ordinary process/Session fencing.
-- `tasks.current_invocation_id`; `store/flows.rs` and `store/sqlite/flows.rs`
-  managed selection, `start_task_flow`, `claim_task_worker`, `handoff_task_worker`,
-  `reclaim_task_worker`, `checkpoint_flow`, `retry_flow`, `recover_flow`,
-  `reserve_task_review`. `complete_task_review` is deleted. Replace mixed history writes at
-  their owner, rather than deleting their retained data.
-- `ops/run.rs::TaskWorkerExec`, `controller/task` worker/review progression,
-  Task `__worker` and managed
-  branches in `lf/commands/flow.rs`. Keep shared engine graph/cursor traversal.
-- Review reservation/launch in `ops/flow_session.rs`, `serve-flow`, review capture
-  reservation/publication and automatic review checkpoint/push are deleted. The draft
-  converts legacy review kinds without resolving their boundaries. Review launch tokens,
-  skill overrides and duplicate open/rename paths are deleted, including `ops/flow_session.rs`;
-  managed review projections still need the worker cut.
-- Ready/Complete and hidden `stop-client` CLI handlers, store mutations, Session action/Ready state,
-  Desktop completion controls and pane-resolution callback are deleted. Historical
-  feedback remains in the read DTOs, sourced from Session evidence. Generated
-  instructions and affected docs no longer prescribe those commands. Preserve
-  provider Completed, historical completion timestamps and primary-successor
-  bookkeeping. New review reservation/serve-flow and legacy kind conversion are cut;
-  review-token/open/rename dispatch is deleted; managed projection and restart
-  consumers still need deletion.
-- Resume scheduling in `ops/task_automation.rs` and cron consumers; singular-Flow
-  conditions/actions in `ops/task_execution.rs`, `ops/task_flow.rs`,
-  `ops/task_actions.rs` and Task controller projections. Retain unrelated cron
-  merge settlement, CI repair and release work.
-- `FlowFilter.managed`, inventory managed flags, Task-work managed badges and
-  Swift pinned-Flow mutable controls. Cut over `TaskStatus`, `TaskWork`, Session
-  participation and Flow DTOs, `RegistryQuery`, Task history filtering and CLI
-  status/roadmap together. iOS consumes shared models; inspect its compilation too.
-- Exclusive claim/reclaim/restart tests and fixtures, including managed cases in
-  `task_restart_tests`, `task_initialization_tests` where still present after sync,
-  and the installation harness. Replace their promised behavior with ordinary
-  Flow/caller-recovery tests, not renamed controller tests.
+- `durable.rs::{TaskWorkerOwner, TaskWorkerClaim, TaskWorkerClaimOutcome,
+  TASK_WORKER_CLAIM_ENV}`, `FlowSession.{claim, worker_generation}`,
+  `FlowTurnSelection.claim`, `TaskFlowBlocker.restart_required`, `FlowFilter.managed`
+  and the inventory/Task-work/Session `managed` flags.
+- `tasks.current_invocation_id` and its trigger, `flow_sessions.{claim_json,
+  worker_generation}`; store `start_task_flow`, `task_flow`, `claim_task_worker`,
+  `handoff_task_worker`, `reclaim_task_worker`, `retry_flow`, `release_flow`,
+  `reset_flow_input`, `restart_task_flow`, review retirement/stop receipts.
+- `controller/task`, `ops/run.rs::TaskWorkerExec`, `ops/task/restart.rs`,
+  `stop_task_worker`, `wait_until_running`, `checkpoint_task_restart`,
+  `prepare_native_retry`, `lf task __worker`, `lf task restart`, `flow start --retry`,
+  `lf flow list --managed`, journal owner-evidence helpers.
+- `TaskFlowRecord::Pinned`, Resume/Restart controls, `TaskExecutionState::Human`.
+- `tests/task_restart_tests.rs`, `tests/scheduled_task_tests.rs` and the claim,
+  handoff, reclaim, retry and stop cases in store, `ops/task.rs` and `flow_tests`.
+
+Retained on the surviving path: `settle_flow_step` and `record_flow_cursor` are
+the driver's own history writes (formerly `recover_flow`/`checkpoint_flow` with a
+claim argument); invocation, event, Session, effect and landing linkage; process
+fencing by driver lock, Exec identity and Session driver generations.
+
+Still to delete: `--needs-me` and Review/Reply attention, `loop-decide`/
+`repeat.from` authoring once `loop-or-next` exists, read-only historical review
+projections that no surface needs, the `LF_TASK_FLOW_OPTIONS` process-environment
+hop (pass launch args to the detached launch directly when taskless `-b` lands),
+and `FlowOutcome::Waiting` for a watched landing if Jack wants such a Flow
+finished.
 
 Landing is a concrete deletion hazard: `pr_landing.rs::landing_has_pending_flow`
 and operation receipts can delay settlement for exact Flow work. Retain immutable
@@ -331,17 +335,14 @@ admission/completion policy while adapting its evidence readers; policy redesign
 stays LOO-367. Update builtin Task-operation/session guidance and architecture/docs
 so they no longer prescribe the deleted worker or retry APIs.
 
-Saved `flow resume` and its exclusive recovery assertions are deleted. Internal
-Task retry, worker claims, store recovery and managed driver paths remain removal
-targets; deleting the public command does not remove their authority.
-
 One draft migration, generated with `uv run python scripts/new_migration.py task_flow_observations`
 converts the released schema directly; it removes five scheduling columns and
 archives review feedback before dropping the live readiness column, and converts
-legacy review kinds to conversations with unresolved-boundary observations. Extend
-that same draft for worker-control deletion. Preserve every invocation,
-Session, event, exact review and effect receipt; archive last legacy position as
-historical evidence, not resumable state. Existing pending reviews remain visible
+legacy review kinds to conversations with unresolved-boundary observations. The
+same draft drops `tasks.current_invocation_id`, its trigger, and
+`flow_sessions.{claim_json, worker_generation}`. Every invocation, Session, event,
+exact review and effect receipt is preserved; each Flow row keeps its last cursor
+as history, not resumable state. Existing pending reviews remain visible
 as unresolved historical boundaries attached to their original conversations; they
 are not auto-approved, discarded or silently reassigned. No live Home conversion
 or active worker interruption is authorized by this design. Conversion requires
@@ -356,35 +357,17 @@ Review rejected handshake-like feedback receipts. Superseded proposals remain at
 
 One coherent runtime/UI change, with no intermediate release of two executors:
 
-1. **Runtime slice remains:** current local main is integrated. Repository checks
-   now reconcile deliveries only; Task and PR checks share `pr_landing`'s finite
-   reconciliation entry point and per-landing locks. The Task scheduler lock,
-   automatic Flow scheduling/enrollment, five scheduling columns and their DTO/UI
-   consumers are deleted. Review traced
-   CI enablement into implicit Flow creation and removed that side effect, plus
-   the now-unreachable managed recovery exception in repair admission. CI repair keeps
-   its existing per-Task hold and incident retry policy. Direct Task-worker claims
-   and internal Task recovery still exist; public saved Flow resume is deleted.
-   Ready/Complete store/CLI/UI paths, `exec_driver`,
-   review-completion restart and feedback-to-Flow-result consumption are deleted;
-   new review creation/serve-flow are deleted and legacy conversion is implemented.
-   Remove Task-worker
-   authority at store/driver ownership while preserving invocation/event/effect
-   history and cutting over the minimum DTO consumers. Build the changed Rust code
-   and retain the focused ordinary-Flow crash/no-restart case in `flow_tests`. It proves
-   repository inspection does not restart a killed ordinary Flow before or after
-   its surviving effect receipt. It does not prove Task-worker removal, detached
-   admission or delivery-effect deduplication. The populated migration case separately
-   proves review-kind conversion while retaining unresolved links and effect history.
+1. **Runtime slice, local:** scheduling, Ready/Complete, review launch and
+   Task-worker authority are deleted; Task Flow launch is an ordinary detached
+   Flow; builtin Flows are operational. Remaining in this slice: taskless `-b`
+   for skills and prompts through the same detached path.
 2. Separate workflow source guidance from executable operational graphs; implement
    canonical autonomous loops/XOR composition and the loop-or-next catalog rename.
-   Review-specific tokens, launch reads and duplicate open/rename dispatch are deleted;
-   prune remaining managed projections. New review launch and settlement APIs are deleted. Add
-   ordinary `-b` launch, Task primary selection and caller-owned recovery paths.
-3. Cut all Flow views to the shared lazy detail renderer; implement Waiting through
-   Rust/provider mappings. Remove managed fields, controls, automation, exclusive
-   tests and stale instructions. Verify the deletion inventory by final source
-   search, distinguishing historical migrations/captures from executable paths.
+   Author the builtin review stages as workflow guidance. Add Task primary
+   selection.
+3. Cut all Flow views to the shared lazy detail renderer, replacing the
+   latest-Flow status projection with every associated Flow; implement Waiting
+   through Rust/provider mappings.
 4. Complete configured workspace proof and repair exposed defects, then retained
    default/source editing and website scope below. Native conversation navigation
    in Desktop and external terminals needs real configured proof, not input injection.
@@ -468,4 +451,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Reconciliation check: `cargo test -p loopflow --lib -- lf::commands::run` — 33 passed inside a Flow step, after two launch cases began clearing the inherited `LF_FLOW_STEP` they had read as their own Flow position. Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.
+Checks (compress, October 4): `cargo build -p loopflow --bin lf`, `cargo clippy -p loopflow --all-targets -- -D warnings`, `cargo fmt` — passed. Focused suites passed with inherited `LF_*` cleared: `--test session_lifecycle_tests` (17), `cli_discovery` (18), `flow_tests` (23), `global_commands` (9), `task_flow_launch_tests`, `golden_prompt`, `land_tests lf_pr_land_returns_before`, `--lib ops::chapter engine::process` (25). `default_conversation_tests`, `doctor_tests` and the CI-repair case in `land_tests` fail only under an agent run's inherited `LF_AS`/`LF_FLOW_STEP`; gate should run with that environment cleared. Full `cargo test -p loopflow --no-fail-fast`: 55 binaries passed; five `ops::chapter`/`ops::ci_watch` cases fail only in the parallel run and pass alone; `status_tests previous_release_merge_request_migrates…` needs the materialized draft schema (gate). `swift build --build-tests` passed; `LocalWaveAgentLauncherTests` 8 passed. Schema materialization, configured demo and Desktop interaction remain outstanding; no live Home or saved invocation was mutated.

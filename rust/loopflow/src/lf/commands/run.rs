@@ -71,15 +71,6 @@ pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
 }
 
 fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &Cli) -> Result<()> {
-    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
-        .ok()
-        .map(|value| serde_json::from_str::<crate::durable::TaskWorkerClaim>(&value))
-        .transpose()?;
-    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
-    anyhow::ensure!(
-        flow.claim == claim,
-        "Flow claim changed before skill execution"
-    );
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -92,7 +83,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         task == flow.task_id,
         "Flow Task and current checkout disagree; restore the Flow checkout before resuming"
     );
-    let flow = store.reserve_attempt(flow.id(), flow.version, claim.as_ref(), Some(&exec))?;
+    let flow = store.reserve_attempt(flow.id(), flow.version, Some(&exec))?;
     let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
         .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
     anyhow::ensure!(
@@ -160,7 +151,6 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
             source: binding.source,
         })
         .or_else(|| flow.declared_work().filter(|work| work.task_id.is_none()));
-    built.claim = claim;
     print_context_header(&built, &launch);
     exec_prompt(&built, &launch).map(|_| ())
 }
@@ -290,7 +280,6 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::SessionWork>,
-    claim: Option<crate::durable::TaskWorkerClaim>,
 }
 
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
@@ -584,7 +573,6 @@ fn build_prompt_at(
         log_name,
         subjects: Vec::new(),
         work: None,
-        claim: None,
     })
 }
 
@@ -905,7 +893,6 @@ fn begin_run_capture(
                     &token.invocation,
                     token.version,
                     captured,
-                    built.claim.as_ref(),
                     &provider,
                     model.as_deref(),
                 )
@@ -1575,7 +1562,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
-            claim: None,
         };
         let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
         let run_id = capture.artifact_key();
@@ -1687,7 +1673,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
-                claim: None,
             }
         }
 

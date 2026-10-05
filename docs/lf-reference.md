@@ -14,12 +14,11 @@ are internal process boundaries and are marked below.
 
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
-owning Wave. Named direct Flows are independent contributions; `flow start`
-selects the Task's saved managed Flow. Saved state, identity and feedback
-survive continuation. `task restart` explicitly replaces that workflow.
+owning Wave. `flow start` launches a fresh Flow for the Task in the
+background; every Flow naming a Task is equally its work.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
-limits this launch and its children. Saved Flows retain provider selections;
+limits this launch and its children. A Flow retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
@@ -31,13 +30,14 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 ## Flow decisions and recovery
 
 ```bash
-lf --task EXP-12 flow start
-lf task restart EXP-12 --flow feature
+lf --task EXP-12 flow start pursue
+lf flow show FLOW_ID --sessions --json
+lf task interrupt EXP-12
 ```
 
-Ordinary saved Flows remain inspectable through `lf flow show ID --sessions --json`.
-Inspect their execution and effect history before launching fresh work. Remaining
-managed Task controls retain their captured position or explicitly replace it.
+Each start captures a new invocation. A Flow whose driver stopped keeps its
+cursor, failure and effects as history; nothing resumes it. Inspect it, then
+launch the work that remains.
 
 ## lf
 
@@ -56,6 +56,8 @@ Open Loopflow or run its CLI
 | `--yolo` | Skip permission prompts Default: false. |
 | `--mode` | Choose the provider surface; omission inherits configuration and terminal context |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
+| `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
+| `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--max-turns` | Maximum agent turns for this invocation |
 | `--wave` | Add Wave context and identity without changing the working directory |
@@ -426,6 +428,15 @@ Inspect and continue Sessions
 |---|---|
 | `--help / -h` | Print help |
 
+## lf session resume
+
+Resume a conversation by ID, or the last interactive Session in this worktree
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Loopflow Session ID or Claude/Codex conversation ID |
+| `--help / -h` | Print help |
+
 ## lf session history
 
 Read this conversation's native start, usage and completion receipts
@@ -592,9 +603,9 @@ Spend one banked Codex reset for this named login
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf account <provider> use
+## lf account use
 
-Sign the provider's ordinary home in as a stored login:
+Sign the provider's ordinary home in as a stored login: `lf account <provider> use <email>`
 
 | Argument | What it does |
 |---|---|
@@ -671,6 +682,17 @@ Release operations (run, check, notes, bump, tag, status)
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf repo release history
+
+Show original due opportunities and their release evidence
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | wave |
+| `--days` | days Default: 35. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo release run
@@ -995,6 +1017,18 @@ Local launchd jobs that run lf commands on a schedule
 |---|---|
 | `--help / -h` | Print help |
 
+## lf wave cron disposition
+
+Record repair ownership without changing the failed evidence
+
+| Argument | What it does |
+|---|---|
+| `<subject>` | subject |
+| `--wave` | wave |
+| `--owner` | owner |
+| `--reason` | reason |
+| `--help / -h` | Print help |
+
 ## lf wave cron add
 
 Install or replace a scheduled lf invocation
@@ -1187,20 +1221,9 @@ Internal command; invoked by the owning operation.
 | `<launcher>` | launcher |
 | `--help / -h` | Print help |
 
-## lf task __worker
-
-Internal: drive a Task Flow from its claimed boundary
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<task_id>` | task id |
-| `--help / -h` | Print help |
-
 ## lf task checkout
 
-Ensure tracked Task Work and its worktree without starting a worker
+Ensure tracked Task Work and its worktree without launching a Flow
 
 | Argument | What it does |
 |---|---|
@@ -1222,7 +1245,7 @@ File a Task in the current chapter; optionally prepare and run it
 | `--notes` | Description; defaults to a report read from stdin |
 | `--run` | Validate placement and execution before filing, then run the Task Default: false. |
 | `--name` | name |
-| `--flow` | Select a Flow for this Task worker; defaults to the chapter recommendation |
+| `--flow` | Flow to launch for this Task; defaults to the chapter recommendation |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1376,18 +1399,6 @@ Wait without polling an LM
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task restart
-
-Stop the pinned Flow and begin a new one in a fresh Task worker; defaults to the chapter's currently recommended Flow
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<advice>` | advice |
-| `--flow` | Replacement Flow; validated before any checkpoint or stop |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf context
 
 Show effective context budgets, their sources, and current source usage
@@ -1484,16 +1495,15 @@ Run or inspect authored flows
 
 ## lf flow start
 
-Start or continue a Task through its saved Flow
+Launch a fresh Flow for a Task in the background
 
 | Argument | What it does |
 |---|---|
-| `<template>` | Template for a new Task Flow; existing saved progress remains authoritative |
+| `<template>` | Flow to launch; the Project's default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
-| `--reason` | Explain what changed after an execution blocker |
-| `--retry` | Retry uncertain native work after confirmed engine exit Default: false. |
+| `--reason` | Direction for this launch, published to the Task |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1513,7 +1523,6 @@ List authored flows or saved FlowSessions
 | `--for-task` | Retained Task ID or issue identifier, including completed Tasks |
 | `--for-wave` | Retained Wave ID or name |
 | `--taskless` | taskless Default: false. |
-| `--managed` | Whether the Task currently selects this FlowSession |
 | `--help / -h` | Print help |
 
 ## lf flow show

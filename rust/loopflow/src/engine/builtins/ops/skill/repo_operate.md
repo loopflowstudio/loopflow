@@ -278,25 +278,24 @@ For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's
 `--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
-Process ancestry supplies no Work attribution. A direct contribution does not
-advance the Task's selected managed Flow or claim exclusive ownership. `flow start`
-sets the same declaration and drives the ordinary Flow in the Task checkout.
+Process ancestry supplies no Work attribution. Every attributed contribution
+is equally the Task's work; none claims exclusive ownership. `flow start` sets
+the same declaration and launches an ordinary Flow in the Task checkout.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-Use `lf --task <issue> flow start <chosen-flow>` for managed pursuit. Dependent
+Use `lf --task <issue> flow start <chosen-flow>` for background pursuit. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
-When evidence invalidates the attempt, update the Task and wait for required
-contributions, then `lf restart <issue> "<changed direction>"`. Restart
-checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
-and starts the current Project's default Flow fresh. It interrupts an exact live
-Task worker; other attributed Flows and conversations remain independent. Reconcile prior
-scratch against the new evidence rather than treating it as approved design.
-An explicitly selected Flow governs even when it differs from that default.
+When evidence invalidates the attempt, `lf task interrupt <issue>` its live
+execution, update the Task, and wait for required contributions. Then launch
+fresh work with `lf --task <issue> flow start <flow> --reason "<changed direction>"`.
+The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
+Reconcile prior scratch against the new evidence rather than treating it as
+approved design.
 
 ## Diagnose execution and auth
 

@@ -23,5 +23,4 @@ pub struct TaskSession {
     pub interactive: bool,
     pub flow_session_id: Option<String>,
     pub completed_at: Option<i64>,
-    pub managed: bool,
 }

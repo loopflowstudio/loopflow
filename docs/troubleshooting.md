@@ -53,7 +53,7 @@ A quiet Wave needs no service restart.
 **Symptom:** A Task is still `ready`, but no useful work is advancing or its
 provider process stopped.
 
-Read its durable state before restarting anything:
+Read its durable state before launching anything:
 
 ```bash
 lf task status INF-123 --json
@@ -62,23 +62,23 @@ lf session list
 ```
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
-starting, running, waiting for review, blocked, idle, or unknown. Read its
-reason and selected execution before recovery. Wave status and roadmap use that same
-execution evidence for their recommendations. Dirty files under a live worker
-are ongoing progress.
+starting, running, stalled, blocked, idle, or unknown. It observes the Task's
+most recently launched Flow. Read its reason before recovery. Wave status and
+roadmap use that same execution evidence for their recommendations. Dirty files
+under a live Flow are ongoing progress.
 
 Task execution history includes independent helpers, whether recorded with the public
 issue identifier or internal Task ID. An idle Task Flow does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
-is closed. Inspect Sessions separately. Recover advancement through Task
-controls; reserve bound helper conversations for distinct contributions.
+is closed. Inspect Sessions separately. Reserve bound helper conversations
+for distinct contributions.
 
 Task status and `lf mon list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
-that no worker or Session remains active.
+that no Flow or Session remains active.
 
-Answer an exact pending question, send unsolicited durable direction through
-Steer, or resume a stopped process through the same Task Work:
+Answer an exact pending question, send durable direction through Steer, or
+launch fresh work for the same Task:
 
 ```bash
 lf session connect <session-id>
@@ -88,16 +88,17 @@ lf --task INF-123 flow start
 lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-`flow start` continues the captured Flow with the Task Work, Steers, worktree, and
-active PR. It refuses while another exact Task worker is live. A Task Steer
-is a Linear Task comment; the active Task worker receives new comments when
-possible and the next Skill seed always reads them. `task interrupt` ends the
+`flow start` launches a fresh Flow in the Task checkout with its Steers and
+active PR. It never continues an earlier Flow; a stopped one keeps its last
+position, failure and effect receipts as history. Unknown liveness stays
+unknown. A Task Steer is a Linear Task comment; the running Flow receives new
+comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
-path and branch to restore before resuming.
+path and branch to restore before launching.
 
 ## Rate limits
 
@@ -112,7 +113,7 @@ the account unavailable until its reported reset and immediately tries the next
 account in the grant. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-After repairing provider access, retry the Task or Project operation:
+After repairing provider access, launch the Task or Project operation again:
 
 ```bash
 lf --task INF-123 flow start --reason "provider credentials repaired"

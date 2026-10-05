@@ -1,5 +1,2 @@
+# Build to a published PR. Its review happens in the Task conversation.
 - flow: pursue
-- step:
-    id: review_delivery
-    name: pr-review
-    human: true

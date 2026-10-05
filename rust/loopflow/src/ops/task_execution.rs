@@ -1,13 +1,14 @@
-//! Read the existing Task Flow claim; Work's `ready` state does not mean idle.
+//! What a Task's most recently launched Flow is doing, read from its row and
+//! its processes. Observation only: no Flow is selected, claimed or resumed.
 
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{FlowSession, TaskId};
 use crate::engine::invocation::StepRef;
-use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
-use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
+use crate::journal::ProcessIdentityEvidence;
+use crate::ops::task_flow::{LatestTaskFlow, TaskFlowRecord};
 use crate::session_record::activity::{self, Activity};
-use crate::store::{SharedStore, StoreError, StoreResult};
+use crate::store::{SharedStore, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -16,7 +17,6 @@ pub enum TaskExecutionState {
     Starting,
     Running,
     Stalled,
-    Human,
     Blocked,
     Unknown,
 }
@@ -36,65 +36,48 @@ pub(crate) async fn task_execution(
     Ok(task_execution_and_flow(store, task_id).await?.0)
 }
 
-/// Execution and the Flow record read from the same saved position.
+/// Execution and the Flow record read from the same row.
 pub(crate) async fn task_execution_and_flow(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
-    let position = store.task_flow(task_id).await?;
-    let evidence = position
-        .as_ref()
-        .and_then(|position| position.claim.as_ref())
-        .map(|claim| task_worker_owner_evidence(&claim.owner));
-    let mut snapshot = project_execution(position.as_ref(), evidence);
-    if let Some(position) = position.as_ref().filter(|flow| flow.failure.is_none()) {
-        if let Some(exec) = store.sqlite.pending_flow_step_exec(position.id())? {
+    let latest = store.latest_task_flow(task_id).await?;
+    let flow = latest.as_ref().filter(|flow| !flow.finished);
+    let driver_live = flow.is_some_and(|flow| crate::ops::flow_run::driver_live(flow.id()));
+    let mut snapshot = project_execution(flow, driver_live);
+    if let Some(flow) = flow.filter(|flow| flow.failure.is_none()) {
+        if let Some(exec) = store.sqlite.pending_flow_step_exec(flow.id())? {
             match crate::journal::exec_process_evidence(&store.sqlite, &exec) {
                 ProcessIdentityEvidence::Live => {
                     snapshot.state = TaskExecutionState::Running;
                     snapshot.reason = format!(
                         "Step Exec {exec} is running {}",
-                        position.step_name().as_deref().unwrap_or("Flow completion")
+                        flow.step_name().as_deref().unwrap_or("Flow completion")
                     );
                 }
-                ProcessIdentityEvidence::Unknown => {
+                ProcessIdentityEvidence::Unknown if !driver_live => {
                     snapshot.state = TaskExecutionState::Unknown;
-                    snapshot.reason = format!("Step Exec {exec} has unknown process identity; inspect its pending effect before recovery");
+                    snapshot.reason = format!("Step Exec {exec} has unknown process identity; inspect its pending effect before launching further work");
                 }
-                ProcessIdentityEvidence::Dead => {}
+                ProcessIdentityEvidence::Unknown | ProcessIdentityEvidence::Dead => {}
             }
         }
     }
     if snapshot.state == TaskExecutionState::Running {
-        if let Some(attempt) = position
-            .as_ref()
-            .and_then(|flow| flow.current_attempt.as_ref())
-        {
+        if let Some(attempt) = flow.and_then(|flow| flow.current_attempt.as_ref()) {
             let captured = attempt.captured;
             match activity::read(&crate::store::lf_home_dir(), &attempt.run_id).await {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
-                    snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
+                    snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, inspect its effects, then launch fresh work.");
                 }
                 Activity::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
-                    snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before recovery.");
+                    snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before launching further work.");
                 }
                 Activity::Running => {}
             }
         }
-    }
-    if let Some(failure) = position
-        .as_ref()
-        .and_then(|position| position.failure.as_ref())
-    {
-        let recovery = if failure.restart_required {
-            "Only Stop & restart can clear this blocker".to_string()
-        } else {
-            let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
-            format!("Resolve the failure, then run `lf --task {} flow start --reason \"<what changed>\"`.", task.plan.identifier)
-        };
-        snapshot.reason.push_str(&format!(". {recovery}"));
     }
     // A retained cursor is history once its Task is terminal. Independent
     // Sessions remain discoverable through the Session inventory.
@@ -107,106 +90,85 @@ pub(crate) async fn task_execution_and_flow(
         snapshot.step = None;
         snapshot.captured = None;
     }
-    let record = match position.as_ref() {
-        Some(position) => TaskFlowRecord::Pinned(PinnedTaskFlow::new(position, &snapshot)),
-        None => match store
-            .task_events_after(task_id, 0)
-            .await?
-            .into_iter()
-            .rev()
-            .map(|event| event.kind)
-            .find(|kind| matches!(kind, crate::work::task::TaskEventKind::FlowFinished { .. }))
-        {
-            Some(crate::work::task::TaskEventKind::FlowFinished { flow, .. }) => {
-                snapshot.reason = format!("Flow {flow} finished; no further steps are scheduled");
-                TaskFlowRecord::Finished { flow }
-            }
-            _ => TaskFlowRecord::None,
-        },
+    let record = match latest.as_ref() {
+        Some(flow) if !flow.finished => {
+            TaskFlowRecord::Latest(LatestTaskFlow::new(flow, &snapshot))
+        }
+        Some(flow) => {
+            let flow = flow.invocation.flow.clone();
+            snapshot.reason = format!("Flow {flow} finished; nothing further is launched");
+            TaskFlowRecord::Finished { flow }
+        }
+        None => TaskFlowRecord::None,
     };
     Ok((snapshot, record))
 }
 
-fn project_execution(
-    position: Option<&FlowSession>,
-    evidence: Option<ProcessIdentityEvidence>,
-) -> TaskExecutionSnapshot {
-    let Some(position) = position else {
+fn project_execution(flow: Option<&FlowSession>, driver_live: bool) -> TaskExecutionSnapshot {
+    let Some(flow) = flow else {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
-            reason: "No active Task Flow; independent Sessions may still be active".to_string(),
+            reason: "No unfinished Task Flow; independent Sessions may still be active".to_string(),
             step: None,
             captured: None,
         };
     };
-    // The driver checkpoints past the last step before recording completion.
-    let Some(step) = position.current_checked() else {
+    // The driver records the cursor past the last step before completion.
+    let Some(step) = flow.current_checked() else {
         return TaskExecutionSnapshot {
-            state: match evidence {
-                Some(ProcessIdentityEvidence::Live) => TaskExecutionState::Running,
-                Some(ProcessIdentityEvidence::Unknown) => TaskExecutionState::Unknown,
-                Some(ProcessIdentityEvidence::Dead) | None => TaskExecutionState::Idle,
+            state: if driver_live {
+                TaskExecutionState::Running
+            } else {
+                TaskExecutionState::Idle
             },
-            reason: "Flow steps are complete; completion is awaiting settlement".into(),
+            reason: "Flow steps are complete; its driver is recording completion".into(),
             step: None,
             captured: None,
         };
     };
-    let captured = position
+    let captured = flow
         .current_attempt
         .as_ref()
         .map(|attempt| attempt.captured)
-        .or_else(|| {
-            position
-                .failure
-                .as_ref()
-                .and_then(|failure| failure.captured)
-        });
-    let (state, reason) = if let Some(failure) = &position.failure {
+        .or_else(|| flow.failure.as_ref().and_then(|failure| failure.captured));
+    let (state, reason) = if let Some(failure) = &flow.failure {
         (
             TaskExecutionState::Blocked,
-            match &failure.captured {
-                Some(event) => format!("{} (Session event {event})", failure.reason),
-                None => failure.reason.clone(),
-            },
+            format!(
+                "{}{}. Inspect its history and effects, then launch fresh work",
+                failure.reason,
+                failure
+                    .captured
+                    .map(|event| format!(" (Session event {event})"))
+                    .unwrap_or_default()
+            ),
         )
-    } else if position.is_human() {
+    } else if flow.is_human() {
         (
-            TaskExecutionState::Human,
-            format!("Waiting for your review at {}", step.step),
+            TaskExecutionState::Idle,
+            format!(
+                "Flow stopped at historical review {}; discuss it in the Task conversation and launch fresh work",
+                step.step
+            ),
+        )
+    } else if driver_live && captured.is_some() {
+        (
+            TaskExecutionState::Running,
+            format!("Flow is running {}", step.step),
+        )
+    } else if driver_live {
+        (
+            TaskExecutionState::Starting,
+            format!("Flow is starting {}", step.step),
         )
     } else {
-        match evidence {
-            Some(ProcessIdentityEvidence::Live) if captured.is_some() => (
-                TaskExecutionState::Running,
-                format!("Task worker is running {}", step.step),
+        (
+            TaskExecutionState::Idle,
+            format!(
+                "Flow stopped at {}; inspect its history and effects before launching fresh work",
+                step.step
             ),
-            Some(ProcessIdentityEvidence::Live) => (
-                TaskExecutionState::Starting,
-                format!("Task worker is starting {}", step.step),
-            ),
-            Some(ProcessIdentityEvidence::Unknown) => (
-                TaskExecutionState::Unknown,
-                format!(
-                    "Worker liveness is unknown at {}; inspect its Session before recovery",
-                    step.step
-                ),
-            ),
-            Some(ProcessIdentityEvidence::Dead) => (
-                TaskExecutionState::Idle,
-                format!(
-                    "Task worker stopped at {}; resume through Task controls",
-                    step.step
-                ),
-            ),
-            None => (
-                TaskExecutionState::Idle,
-                format!(
-                    "Task Flow is ready at {}; no advancement worker is claimed",
-                    step.step
-                ),
-            ),
-        }
+        )
     };
     TaskExecutionSnapshot {
         state,
@@ -219,11 +181,7 @@ fn project_execution(
 #[cfg(test)]
 mod tests {
     use super::{project_execution, TaskExecutionSnapshot, TaskExecutionState};
-    use crate::durable::{
-        test_flow_invocation, FlowAttempt, FlowSession, TaskId, TaskWorkerClaim, TaskWorkerOwner,
-    };
-    use crate::id::{ExecId, TraceId};
-    use crate::journal::ProcessIdentityEvidence;
+    use crate::durable::{test_flow_invocation, FlowAttempt, FlowSession, TaskFlowBlocker, TaskId};
     use time::OffsetDateTime;
 
     fn flow() -> FlowSession {
@@ -242,8 +200,6 @@ mod tests {
             model: None,
             current_attempt: None,
             pending_session_id: None,
-            worker_generation: 0,
-            claim: None,
             failure: None,
             finished: false,
             updated_at: OffsetDateTime::now_utc(),
@@ -251,64 +207,53 @@ mod tests {
     }
 
     #[test]
-    fn completed_steps_remain_readable_until_flow_settlement() {
-        let mut position = flow();
-        position.cursor.index = position.invocation.steps.len();
-        let snapshot = project_execution(Some(&position), Some(ProcessIdentityEvidence::Live));
+    fn completed_steps_remain_readable_until_the_driver_records_completion() {
+        let mut flow = flow();
+        flow.cursor.index = flow.invocation.steps.len();
+        let snapshot = project_execution(Some(&flow), true);
         assert_eq!(snapshot.state, TaskExecutionState::Running);
         assert!(snapshot.step.is_none());
-        assert!(snapshot.reason.contains("awaiting settlement"));
         assert_eq!(
-            project_execution(Some(&position), Some(ProcessIdentityEvidence::Dead)).state,
+            project_execution(Some(&flow), false).state,
             TaskExecutionState::Idle
         );
     }
 
     #[test]
-    fn worker_liveness_is_separate_from_durable_ready_work() {
-        let mut position = flow();
+    fn a_dead_driver_leaves_history_not_a_position_to_resume() {
+        let mut flow = flow();
         assert_eq!(
-            project_execution(Some(&position), None).state,
+            project_execution(None, false).state,
             TaskExecutionState::Idle
         );
         assert_eq!(
-            project_execution(Some(&position), Some(ProcessIdentityEvidence::Live)).state,
+            project_execution(Some(&flow), true).state,
             TaskExecutionState::Starting
         );
-        position.claim = Some(TaskWorkerClaim {
-            invocation_id: position.invocation.id.clone(),
-            generation: 1,
-            position_version: 1,
-            owner: TaskWorkerOwner {
-                trace_id: TraceId::new(),
-                exec_id: ExecId::new(),
-                pid: 123,
-                started_at: 1,
-            },
-            claimed_at: OffsetDateTime::now_utc(),
-        });
-        position.current_attempt = Some(FlowAttempt {
+        flow.current_attempt = Some(FlowAttempt {
             captured: 1,
             run_id: crate::session_record::new_artifact_key(),
             published: true,
             outcome: None,
         });
         assert_eq!(
-            project_execution(Some(&position), Some(ProcessIdentityEvidence::Live)).state,
+            project_execution(Some(&flow), true).state,
             TaskExecutionState::Running
         );
+        let stopped = project_execution(Some(&flow), false);
+        assert_eq!(stopped.state, TaskExecutionState::Idle);
+        assert!(stopped.reason.contains("launching fresh work"));
+        flow.failure = Some(TaskFlowBlocker::now("implement Run failed"));
         assert_eq!(
-            project_execution(Some(&position), Some(ProcessIdentityEvidence::Unknown)).state,
-            TaskExecutionState::Unknown
+            project_execution(Some(&flow), false).state,
+            TaskExecutionState::Blocked
         );
+        // A legacy review position is history; it neither waits nor blocks.
+        flow.failure = None;
+        flow.invocation = test_flow_invocation("review", 0, "demo", Some("demo"), true);
         assert_eq!(
-            project_execution(Some(&position), Some(ProcessIdentityEvidence::Dead)).state,
+            project_execution(Some(&flow), false).state,
             TaskExecutionState::Idle
-        );
-        position.invocation = test_flow_invocation("review", 0, "demo", Some("demo"), true);
-        assert_eq!(
-            project_execution(Some(&position), None).state,
-            TaskExecutionState::Human
         );
     }
 

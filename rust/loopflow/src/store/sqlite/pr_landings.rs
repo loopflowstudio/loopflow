@@ -129,13 +129,18 @@ impl super::SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn landing_has_pending_flow(&self, landing: &PrLandingId) -> StoreResult<bool> {
+    /// Unfinished Flows whose operation requested this landing.
+    pub(crate) fn landing_unfinished_flows(
+        &self,
+        landing: &PrLandingId,
+    ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_events event JOIN flow_sessions flow ON flow.id=event.flow_id
-             WHERE event.landing_id=?1 AND flow.state='current')",
-            [landing.as_str()], |row| row.get(0),
-        )?)
+        let mut query = conn.prepare(
+            "SELECT DISTINCT flow.id FROM flow_events event JOIN flow_sessions flow ON flow.id=event.flow_id
+             WHERE event.landing_id=?1 AND flow.state='current'",
+        )?;
+        let rows = query.query_map([landing.as_str()], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn operation_landing(&self, flow_id: &str) -> StoreResult<Option<PrLanding>> {

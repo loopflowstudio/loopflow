@@ -274,8 +274,8 @@ struct WorkspaceNavigationProofTests {
             .deletingLastPathComponent().deletingLastPathComponent()
         let flowData = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_flow.json"))
         let flows = try #require(JSONSerialization.jsonObject(with: flowData) as? [[String: Any]])
-        let pinned = try #require(flows[1]["record"] as? [String: Any])
-        let invocation = try #require(pinned["invocation_id"] as? String)
+        let latest = try #require(flows[1]["record"] as? [String: Any])
+        let invocation = try #require(latest["invocation_id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])

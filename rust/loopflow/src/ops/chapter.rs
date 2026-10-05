@@ -865,7 +865,6 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
 async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        worker_claimed: false,
         // This Home's missing Task row says nothing about work on another Home.
         authored: None,
         published: false,
@@ -899,7 +898,6 @@ async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskStartEvidence {
     pub begun: bool,
-    pub worker_claimed: bool,
     pub authored: Option<bool>,
     pub published: bool,
     pub abandoned: bool,
@@ -912,7 +910,6 @@ pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDispos
     if evidence.abandoned
         && !terminal
         && (state == Some("started")
-            || evidence.worker_claimed
             || evidence.begun
             || evidence.published
             || evidence.authored != Some(false))
@@ -937,19 +934,12 @@ pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDispos
         );
     }
     if terminal || evidence.completed {
-        if evidence.worker_claimed {
-            return (
-                TaskDisposition::Unresolved,
-                "terminal planning state conflicts with an active worker claim".into(),
-            );
-        }
         return (
             TaskDisposition::Historical,
             "work is already terminal".into(),
         );
     }
-    if evidence.worker_claimed
-        || evidence.begun
+    if evidence.begun
         || evidence.published
         || evidence.authored == Some(true)
         || state == Some("started")

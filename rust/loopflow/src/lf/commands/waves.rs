@@ -1114,7 +1114,6 @@ async fn snapshot_task_detail(
         }) {
             return NextMove {
                 owner: match execution.state {
-                    TaskExecutionState::Human => NextMoveOwner::User,
                     TaskExecutionState::Blocked | TaskExecutionState::Unknown => {
                         NextMoveOwner::Wave
                     }
@@ -1210,18 +1209,15 @@ async fn snapshot_task_detail(
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
     };
-    let flow_controls = crate::ops::task_flow::task_flow_controls(
-        &flow_record,
-        &crate::ops::task_flow::TaskFlowGate {
+    let flow_controls =
+        crate::ops::task_flow::task_flow_controls(&crate::ops::task_flow::TaskFlowGate {
             status: runtime.as_ref().map(|runtime| &runtime.status),
             plan_terminal_reason: item.terminal_reason(),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
-            resume_refusal: resume_refusal.as_deref(),
-        },
-    );
+        });
     let flow = TaskFlowSnapshot {
         recommended,
         record: flow_record,
@@ -1386,7 +1382,6 @@ fn derive_task_condition(
     {
         let state = match execution.state {
             TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
-            TaskExecutionState::Human => TaskConditionState::Waiting,
             TaskExecutionState::Blocked | TaskExecutionState::Stalled => {
                 TaskConditionState::Blocked
             }
@@ -2704,7 +2699,6 @@ mod tests {
         for (state, expected) in [
             (TaskExecutionState::Starting, TaskConditionState::Clear),
             (TaskExecutionState::Running, TaskConditionState::Clear),
-            (TaskExecutionState::Human, TaskConditionState::Waiting),
             (TaskExecutionState::Blocked, TaskConditionState::Blocked),
             (TaskExecutionState::Unknown, TaskConditionState::Unknown),
         ] {
@@ -2747,7 +2741,7 @@ mod tests {
             );
             assert_eq!(condition.state, expected);
             assert_eq!(condition.reason, execution.reason);
-            if state == TaskExecutionState::Human {
+            if state == TaskExecutionState::Blocked {
                 for status in [WorkStatus::Done, WorkStatus::Abandoned] {
                     let runtime = TaskRuntimeSnapshot {
                         work_id: "task-1".into(),

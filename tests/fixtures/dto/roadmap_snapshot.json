@@ -102,7 +102,7 @@
             "flow": {
               "recommended": "feature",
               "record": {
-                "kind": "pinned",
+                "kind": "latest",
                 "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
                 "graph": {
                   "name": "feature",
@@ -383,7 +383,6 @@
                 ],
                 "execution": "running",
                 "reason": "Worker is running realign",
-                "restart_required": false,
                 "iterations": [
                   [
                     2,
@@ -394,14 +393,6 @@
               "controls": [
                 {
                   "kind": "start",
-                  "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-                },
-                {
-                  "kind": "resume",
-                  "unavailable": "The Task worker is already advancing this Flow"
-                },
-                {
-                  "kind": "restart",
                   "unavailable": null
                 }
               ]
@@ -493,7 +484,7 @@
             "flow": {
               "recommended": "feature",
               "record": {
-                "kind": "pinned",
+                "kind": "latest",
                 "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
                 "graph": {
                   "name": "feature",
@@ -774,9 +765,8 @@
                     "traversals": 1
                   }
                 ],
-                "execution": "human",
+                "execution": "idle",
                 "reason": "Waiting for your review at demo",
-                "restart_required": false,
                 "iterations": [
                   [
                     1,
@@ -787,14 +777,6 @@
               "controls": [
                 {
                   "kind": "start",
-                  "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-                },
-                {
-                  "kind": "resume",
-                  "unavailable": "Waiting for your review at demo; continue it through its Session"
-                },
-                {
-                  "kind": "restart",
                   "unavailable": null
                 }
               ]
@@ -850,14 +832,6 @@
                 {
                   "kind": "start",
                   "unavailable": null
-                },
-                {
-                  "kind": "resume",
-                  "unavailable": "No pinned Flow to resume; start one"
-                },
-                {
-                  "kind": "restart",
-                  "unavailable": "Task has no Work yet; start a Flow instead"
                 }
               ]
             },
@@ -924,14 +898,6 @@
               "controls": [
                 {
                   "kind": "start",
-                  "unavailable": null
-                },
-                {
-                  "kind": "resume",
-                  "unavailable": "No pinned Flow to resume; start one"
-                },
-                {
-                  "kind": "restart",
                   "unavailable": null
                 }
               ]

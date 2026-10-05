@@ -11,7 +11,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::{FlowSession, WorkRef};
+use crate::durable::WorkRef;
 use crate::session::{AgentSession, WorkSource};
 use crate::session_record::{SessionCaptureManifest, SessionTitleSource};
 use crate::store::SharedStore;
@@ -274,7 +274,7 @@ pub enum SessionFlowOccurrence {
     Current,
     /// An earlier position of the invocation that is still active.
     Earlier,
-    /// An invocation that has finished or been replaced by a restart.
+    /// An invocation that has finished.
     Past,
 }
 
@@ -320,25 +320,6 @@ pub(crate) fn publish_prepared_input(
         .sqlite
         .session(&session.id)?
         .ok_or_else(|| session_not_found(&session.id))
-}
-
-/// The Task whose own Flow waits at this Run's review: the Run's invocation is
-/// the one the Task points at. Any other review naming a Task is a Flow about it.
-async fn managed_review(
-    store: &SharedStore,
-    session: &AgentSession,
-) -> crate::store::StoreResult<Option<(crate::durable::TaskId, FlowSession)>> {
-    if session.kind != crate::session::SessionKind::FlowReview {
-        return Ok(None);
-    }
-    let (Some(task_id), Some(invocation)) = (&session.task_id, &session.flow_session_id) else {
-        return Ok(None);
-    };
-    Ok(store
-        .task_flow(task_id)
-        .await?
-        .filter(|position| position.invocation.id == *invocation)
-        .map(|position| (task_id.clone(), position)))
 }
 
 pub(crate) async fn list(
@@ -488,17 +469,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let mut unavailable = None;
-    let remote = if session.managed {
-        match (&session.home_id, &session.home_route) {
-            (Some(id), Some(route)) => (route != "local").then_some(id),
-            _ => {
-                unavailable = Some("Session Home placement is unavailable".to_string());
-                None
-            }
-        }
-    } else {
-        None
-    };
+    // Sessions run where this registry recorded them; no read places one elsewhere.
+    let remote: Option<&crate::durable::HomeId> = None;
     let clients = if remote.is_none() && unavailable.is_none() {
         match (
             &session.provider,
@@ -1039,23 +1011,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let managed = match managed_review(store, session).await {
-        Ok(managed) => Ok(managed),
-        Err(crate::store::StoreError::InvalidData(reason)) => Err(reason),
-        Err(error) => return Err(error.into()),
-    };
-    // Only a Task's own review can wait on another Home.
-    let remote = match (&work, &managed) {
-        (Some(work @ WorkRef::Task(_)), Ok(Some(_))) => {
-            let placement = store.placement(work).await?;
-            let home = store
-                .home_by_id(&placement.home_id)
-                .await?
-                .ok_or_else(|| anyhow!("Session {} Home disappeared", session.id))?;
-            (home.route != "local").then_some(home.id)
-        }
-        _ => None,
-    };
+    let remote: Option<crate::durable::HomeId> = None;
     let dir = local_session_run_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
     let clients = match &session.provider {
@@ -1552,7 +1508,7 @@ mod tests {
     }
 
     #[test]
-    fn session_metadata_keeps_unknown_position_and_unavailable_placement_visible() {
+    fn session_metadata_keeps_unknown_position_visible() {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
@@ -1592,10 +1548,6 @@ mod tests {
             independent: false,
             wave_name: Some("Infrastructure".into()),
             task_identifier: Some("INF-123".into()),
-            // Missing Home must never fall back to a local launch/observation.
-            managed: true,
-            home_id: None,
-            home_route: None,
         };
         let row = super::summary_surface(&summary);
         assert_eq!(row.id, summary.id);
@@ -1611,12 +1563,6 @@ mod tests {
                 ..
             }
         ));
-        assert!(row.open_argv.is_empty());
-        assert!(row
-            .actions
-            .iter()
-            .all(|action| action.unavailable_reason.as_deref()
-                == Some("Session Home placement is unavailable")));
         summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Completed;
         let row = super::summary_surface(&summary);
         assert!(matches!(
@@ -1949,8 +1895,6 @@ mod tests {
             model: None,
             current_attempt: None,
             pending_session_id: None,
-            worker_generation: 0,
-            claim: None,
             failure: None,
             finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
@@ -2075,8 +2019,7 @@ mod tests {
                     if index != 0 {
                         store.publish_attempt(
                             flow.id(), flow.version,
-                flow.current_attempt.as_ref().unwrap().captured,
-                            None, "codex", None,
+                flow.current_attempt.as_ref().unwrap().captured, "codex", None,
                         ).await.unwrap();
                         let actor = store.sqlite.test_flow_turn(
                             &flow.current_attempt.as_ref().unwrap().run_id,
@@ -2087,12 +2030,12 @@ mod tests {
                         ).unwrap();
                         store.sqlite.test_finish_flow_turn(&actor, "completed");
                         flow = store
-                            .checkpoint_flow(flow.id(), flow.version, &cursor, None, None)
+                            .record_flow_cursor(flow.id(), flow.version, &cursor, None)
                             .await
                             .unwrap();
                     }
                     flow = store
-                        .reserve_attempt(flow.id(), flow.version, None, None)
+                        .reserve_attempt(flow.id(), flow.version, None)
                         .await
                         .unwrap();
                     let run_id = &flow.current_attempt.as_ref().unwrap().run_id;

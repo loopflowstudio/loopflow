@@ -733,13 +733,13 @@ fn print_task_snapshot(
             branch,
             pm_writeback,
         );
-        println!("  managed execution: {}", snapshot.execution.reason);
+        println!("  latest Flow: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
         }
         for session in &snapshot.work.sessions {
             println!(
-                "  Session: {}  {}  {}{}",
+                "  Session: {}  {}  {}",
                 session.id,
                 session.title,
                 if session.completed_at.is_some() {
@@ -747,16 +747,14 @@ fn print_task_snapshot(
                 } else {
                     "open"
                 },
-                if session.managed { "  [managed]" } else { "" }
             );
         }
         for flow in &snapshot.work.flows {
             println!(
-                "  Flow: {}  {}  {:?}{}",
+                "  Flow: {}  {}  {:?}",
                 flow.summary.id,
                 flow.summary.name.as_deref().unwrap_or("unnamed"),
                 flow.summary.state,
-                if flow.managed { "  [managed]" } else { "" }
             );
         }
         for exec in &snapshot.work.execs {
@@ -858,11 +856,10 @@ fn read_task_draft() -> anyhow::Result<String> {
 fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Result<()> {
     let agent = cli.model.as_deref();
     let _skill_options = EnvGuard::set(
-        loopflow::lf::TASK_SKILL_OPTIONS_ENV,
+        loopflow::lf::TASK_FLOW_OPTIONS_ENV,
         serde_json::to_string(&cli.step_args())?,
     );
     match command {
-        TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -942,7 +939,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                 report,
                 run.then(|| loopflow::ops::task::TaskExecOptions {
                     wave: None,
-                    retry: false,
                     reason: None,
                     agent: agent.map(str::to_string),
                     name: name.clone(),
@@ -1236,20 +1232,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
             let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
             print_task(&task, *json)
-        }
-        TaskCommand::Restart {
-            issue,
-            advice,
-            flow,
-            json,
-        } => {
-            let task = loopflow::ops::task::task_restart(
-                issue,
-                advice.clone(),
-                flow.clone(),
-                agent.map(str::to_string),
-            )?;
-            print_task_snapshot(&task, *json)
         }
     }
 }
@@ -1720,12 +1702,6 @@ fn execute_command(
                 )
             })
         }
-        Some(Commands::Task {
-            cmd: TaskCommand::Worker { task_id },
-        }) => in_repo_runtime(args, |_| {
-            tokio::runtime::Runtime::new()?
-                .block_on(loopflow::controller::task::run_worker(task_id.clone()))
-        }),
         // Local document access owns no Run lifecycle. Placement and the recorded
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
@@ -1831,7 +1807,6 @@ fn execute_command(
                     stack_on,
                     directive,
                     reason,
-                    retry,
                     json,
                 },
         }) => {
@@ -1855,7 +1830,7 @@ fn execute_command(
                 })?;
             let repo = loopflow::ops::task::task_repository(&directory, Some(&task))?;
             let _skill_options = EnvGuard::set(
-                loopflow::lf::TASK_SKILL_OPTIONS_ENV,
+                loopflow::lf::TASK_FLOW_OPTIONS_ENV,
                 serde_json::to_string(&cli.step_args())?,
             );
             let snapshot = loopflow::ops::task::task_run(
@@ -1863,7 +1838,6 @@ fn execute_command(
                 &task,
                 loopflow::ops::task::TaskExecOptions {
                     wave: cli.wave.clone(),
-                    retry: *retry,
                     reason: reason.clone(),
                     agent: cli.model.clone(),
                     name: name.clone(),

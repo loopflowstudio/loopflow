@@ -1056,7 +1056,6 @@ mod tests {
                 "LF_HOME",
                 "LF_RUN_ID",
                 "LF_RUN_DIR",
-                "LF_WORK_ADVANCE_CLAIM",
                 "LF_WAVE_ID",
                 "LF_ACCOUNT_LEASE",
                 "LF_HUMAN_SESSION",

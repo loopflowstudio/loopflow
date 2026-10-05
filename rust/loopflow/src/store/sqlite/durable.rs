@@ -15,16 +15,28 @@ use crate::work::task::{Task, TaskEventKind};
 use super::SqliteStore;
 
 impl SqliteStore {
+    /// A Task may launch a Flow while it is ready, not being abandoned, and
+    /// planned in its Wave's current chapter.
+    pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let work = WorkRef::Task(task_id.clone());
+        require_ready_work(&conn, &work)?;
+        let abandoning: bool = conn.query_row(
+            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
+            [task_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if abandoning {
+            return Err(StoreError::InvalidAuthority(
+                "Task cancellation is pending; retry task abandon".into(),
+            ));
+        }
+        require_current_task_chapter(&conn, &work)
+    }
+
     pub fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if super::flows::task_flow_in(&tx, task_id)?
-            .is_some_and(|position| position.claim.is_some())
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task acquired a worker; cancellation was not attempted".into(),
-            ));
-        }
         match work_status_in(&tx, &WorkRef::Task(task_id.clone()))? {
             WorkStatus::Done => {
                 return Err(StoreError::InvalidAuthority(
@@ -144,15 +156,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
         let (table, id) = work_table(work);
-        if let WorkRef::Task(task_id) = work {
-            if super::flows::task_flow_in(&tx, task_id)?
-                .is_some_and(|position| position.claim.is_some())
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "Task has a worker claim; settle execution before abandonment".into(),
-                ));
-            }
-        }
         if tx.execute(
             &format!(
                 "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
@@ -172,7 +175,6 @@ impl SqliteStore {
                 "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=NULL WHERE id=?1",
                 [task_id.as_str()],
             )?;
-            super::flows::retire_unclaimed_task_flow_in(&tx, task_id)?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -584,23 +586,6 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
     }
 }
 
-pub(super) fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    require_ready_work(conn, work)?;
-    if let WorkRef::Task(task) = work {
-        let abandoning: bool = conn.query_row(
-            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        if abandoning {
-            return Err(StoreError::InvalidAuthority(
-                "Task cancellation is pending; retry task abandon".into(),
-            ));
-        }
-    }
-    require_current_task_chapter(conn, work)
-}
-
 pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     let WorkRef::Task(task) = work else {
         return Ok(());
@@ -774,19 +759,13 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{
-        FlowSession, ProjectId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
-        TaskWorkerOwner,
-    };
-    use crate::engine::execution::NestedCursor;
-    use crate::engine::flow::{ConcretePath, ConcreteXor};
-    use crate::engine::transitions::{FlowDecision, FlowVerdict};
-    use crate::engine::{ConcreteStep, ExecutionCursor, Skill};
-    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::durable::{FlowSession, ProjectId, TaskId};
+
+    use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
-    use crate::store::StoreResult;
+
     use crate::work::project::Project;
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
@@ -942,93 +921,9 @@ mod durable_store_tests {
             model: None,
             current_attempt: None,
             pending_session_id: None,
-            worker_generation: 0,
-            claim: None,
             failure: None,
             finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    fn owner(pid: u32) -> TaskWorkerOwner {
-        TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
-            pid,
-            started_at: 1_700_000_000,
-        }
-    }
-
-    fn claim(store: &SqliteStore, task: &TaskId, flow: &FlowSession, pid: u32) -> TaskWorkerClaim {
-        match store
-            .claim_task_worker(
-                task,
-                &flow.invocation.id,
-                flow.version,
-                &owner(pid),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap()
-        {
-            TaskWorkerClaimOutcome::Claimed(claim) => claim,
-            outcome => panic!("unexpected claim outcome: {outcome:?}"),
-        }
-    }
-
-    /// Reserve the input explicitly when the fixture starts work.
-    fn reserved_capture(store: &SqliteStore, task: &TaskId) -> String {
-        let flow = store.task_flow(task).unwrap().unwrap();
-        store
-            .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
-            .unwrap()
-            .current_attempt
-            .unwrap()
-            .run_id
-    }
-
-    /// Launch the reserved Run: the worker's publication of its attempt.
-    fn publish(
-        store: &SqliteStore,
-        flow: &FlowSession,
-        run: &str,
-        claim: &TaskWorkerClaim,
-    ) -> StoreResult<()> {
-        store.publish_attempt(
-            flow.id(),
-            flow.version,
-            store.captured_sequence(run).unwrap().unwrap(),
-            Some(claim),
-            "codex",
-            None,
-        )
-    }
-
-    fn find_decision_index(steps: &[ConcreteStep]) -> usize {
-        steps
-            .iter()
-            .position(|step| matches!(step, ConcreteStep::Skill(skill) if skill.repeat.is_some()))
-            .expect("fixture Flow has a repeating decision")
-    }
-
-    fn retained_invocation(store: &SqliteStore, id: &str) -> (FlowSession, String) {
-        let flow = store.flow(id).unwrap().unwrap();
-        let state = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row("SELECT state FROM flow_sessions WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        (flow, state)
-    }
-
-    /// `flow` as its row reads once the Flow ended.
-    fn ended(flow: &FlowSession) -> FlowSession {
-        FlowSession {
-            finished: true,
-            claim: None,
-            ..flow.clone()
         }
     }
 
@@ -1070,9 +965,7 @@ mod durable_store_tests {
     fn session_admission_infers_ancestors_and_rejects_conflicts_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
+        let position = store.create_flow(&autonomous_position(&task_id)).unwrap();
         let mut conn = store.conn.lock().unwrap();
         let other_wave = WaveId::new();
         conn.execute(
@@ -1091,8 +984,8 @@ mod durable_store_tests {
         .unwrap();
         conn.execute(
             "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-            position_version,worker_generation,updated_at,state)
-            VALUES(?1,?2,'/repo',0,0,1,0,1,'current')",
+            position_version,updated_at,state)
+            VALUES(?1,?2,'/repo',0,0,1,1,'current')",
             rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
         )
         .unwrap();
@@ -1627,114 +1520,6 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn a_task_points_at_one_invocation_while_other_flows_name_it() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let managed = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        // `lf --task X flow review-design`: a Flow about the Task, not its Flow.
-        let about = crate::engine::invocation::QueuedInvocation::new(
-            "review-design",
-            managed.invocation.steps.clone(),
-        )
-        .unwrap();
-        store
-            .create_flow(&crate::durable::FlowSession {
-                invocation: about.clone(),
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                task_id: Some(task_id.clone()),
-                wave_id: Some(task.wave_id.clone()),
-                cwd: "/repo".into(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            })
-            .unwrap();
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(managed.clone()));
-
-        // Attributed conversations inherit this Flow's Task without changing its managed selection.
-        let session = store
-            .create_session(conversation(Some(about.id.clone()), None, None), None, None)
-            .unwrap();
-        assert_eq!(session.task_id, Some(task_id.clone()));
-        assert_eq!(session.wave_id, Some(task.wave_id.clone()));
-        let other_task = TaskId::new();
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-            SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
-            rusqlite::params![other_task.as_str(), task_id.as_str()],
-        )
-        .unwrap();
-        assert!(store
-            .create_session(
-                conversation(Some(about.id.clone()), Some(other_task.clone()), None),
-                None,
-                None
-            )
-            .is_err());
-        assert_eq!(
-            store
-                .sessions(&crate::session::SessionFilter {
-                    task: Some(task_id.to_string()),
-                    interactive: None,
-                    history: true,
-                    ..Default::default()
-                })
-                .unwrap()
-                .len(),
-            1
-        );
-
-        // Restart closes the Task's Flow and clears the pointer; the other Flow
-        // stays current, and the pointer accepts only an invocation naming X.
-        store
-            .restart_task_flow(
-                &task,
-                store.task_flow(&task.id).unwrap().as_ref(),
-                "checkpoint",
-            )
-            .unwrap();
-        assert_eq!(store.task_flow(&task_id).unwrap(), None);
-        assert_eq!(
-            retained_invocation(&store, &managed.invocation.id).1,
-            "replaced"
-        );
-        let conn = store.conn.lock().unwrap();
-        let state: String = conn
-            .query_row(
-                "SELECT state FROM flow_sessions WHERE id=?1",
-                [&about.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(state, "current");
-        let point = |task: &TaskId, invocation: &str| {
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id=?2 WHERE id=?1",
-                rusqlite::params![task.as_str(), invocation],
-            )
-        };
-        assert!(point(&other_task, &about.id).is_err());
-        point(&task_id, &about.id).unwrap();
-        drop(conn);
-        assert_eq!(
-            store
-                .task_flow(&task_id)
-                .unwrap()
-                .map(|position| position.invocation.id),
-            Some(about.id)
-        );
-    }
-
-    #[test]
     fn competing_session_assignments_start_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
@@ -1788,682 +1573,5 @@ mod durable_store_tests {
                 assert!(error.to_string().contains("binding is permanent"));
             }
         }
-    }
-
-    #[test]
-    fn worker_handoff_moves_process_ownership_without_replacing_progress() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        let launcher = claim(&store, &task_id, &position, 301);
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        let worker = owner(302);
-        let handed = store
-            .handoff_task_worker(&task_id, &launcher, &worker)
-            .unwrap();
-        let mut expected = before;
-        expected.claim = Some(handed.clone());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
-        assert_eq!(handed.owner, worker);
-        assert_eq!(handed.generation, launcher.generation);
-        assert_eq!(handed.claimed_at, launcher.claimed_at);
-        assert!(store
-            .handoff_task_worker(&task_id, &launcher, &owner(303))
-            .is_err());
-        assert!(store
-            .release_flow(position.id(), position.version, Some(&launcher))
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
-        store
-            .release_flow(position.id(), position.version, Some(&handed))
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().unwrap().claim.is_none());
-    }
-
-    #[test]
-    fn loop_verdict_survives_recovery_and_rejects_unrelated_runs() {
-        let (_dir, store, task_id) = store_with_task();
-        let mut position = autonomous_position(&task_id);
-        position.invocation = crate::engine::invocation::QueuedInvocation::load(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
-            "feature",
-        )
-        .unwrap();
-        position.cursor.index = find_decision_index(&position.invocation.steps);
-        let position = store.start_task_flow(&task_id, &position).unwrap();
-        let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_capture(&store, &task_id);
-        publish(&store, &position, &run, &first).unwrap();
-        let actor = store.test_flow_turn(&run);
-        let id = position.id();
-        let verdict = crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "repair the missing case".into(),
-        };
-        store.test_decision_output(&actor, &verdict).unwrap();
-        store.test_decision_output(&actor, &verdict).unwrap();
-        let different = crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "changed mind".into(),
-        };
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        assert!(store.test_decision_output(&actor, &different).is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        // The worker died: retain its output as history, without a navigation candidate.
-        store.test_finish_flow_turn(&actor, "interrupted");
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &first,
-                &owner(302),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        store.test_decision_output(&actor, &verdict).unwrap();
-        assert!(store.flow_output(id).is_err());
-        let recovered = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(recovered.cursor.progress.verdict, None);
-        assert_eq!(recovered.claim, Some(replacement.clone()));
-        assert_eq!(
-            recovered
-                .current_attempt
-                .as_ref()
-                .unwrap()
-                .outcome
-                .as_deref(),
-            Some("interrupted")
-        );
-        // A reported provider failure differs from a crash: its result cannot
-        // authorize a later retry; its output remains historical evidence.
-        let released = store
-            .release_flow(id, recovered.version, Some(&replacement))
-            .unwrap();
-        assert!(released.cursor.progress.verdict.is_none());
-        assert!(released.claim.is_none());
-        assert_eq!(released.current_attempt, recovered.current_attempt);
-        assert!(store.flow_output(id).is_err());
-        let retried = store.retry_flow(id, None).unwrap();
-        assert!(retried.current_attempt.is_none());
-    }
-
-    #[test]
-    fn stale_driver_recovery_preserves_the_replacement_claim_and_attempt() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_capture(&store, &task_id);
-        publish(&store, &position, &run, &first).unwrap();
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &first,
-                &owner(302),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        let events = store.task_events_after(&task_id, 0).unwrap();
-        assert_eq!(before.claim.as_ref(), Some(&replacement));
-        assert!(store.recover_flow(position.id(), Some(&first)).is_err());
-        assert!(store.recover_flow(position.id(), None).is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
-        assert!(store
-            .recover_flow(position.id(), Some(&replacement))
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        assert_eq!(before.current_attempt.unwrap().run_id, run);
-        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
-    }
-
-    #[test]
-    fn nested_cursor_recovers_routes_and_verdicts_under_exact_worker_authority() {
-        for routing in [true, false] {
-            let (_dir, store, task_id) = store_with_task();
-            let mut position = autonomous_position(&task_id);
-            let body = crate::engine::invocation::QueuedInvocation::load(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
-                "pursue",
-            )
-            .unwrap()
-            .steps;
-            let decision_index = find_decision_index(&body);
-            let branch = ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("nested-router"),
-                paths: ["chosen", "other"]
-                    .into_iter()
-                    .map(|name| {
-                        (
-                            name.into(),
-                            ConcretePath {
-                                description: name.into(),
-                                steps: body.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-                sources: Vec::new(),
-            });
-            let steps = if routing { vec![branch] } else { body };
-            position.invocation.steps = vec![ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("outer-router"),
-                paths: [(
-                    "outer".into(),
-                    ConcretePath {
-                        description: "outer".into(),
-                        steps,
-                    },
-                )]
-                .into_iter()
-                .collect(),
-                sources: Vec::new(),
-            })];
-            position.cursor.iteration = 7;
-            position.cursor.progress.repeats.insert("root".into(), 3);
-            let mut leaf = ExecutionCursor {
-                index: if routing { 0 } else { decision_index },
-                iteration: 2,
-                ..Default::default()
-            };
-            leaf.progress.repeats.insert("decide".into(), 1);
-            leaf.progress.direction = Some("preserved direction".into());
-            position.cursor.child = Some(Box::new(NestedCursor::Xor {
-                selected: "outer".into(),
-                cursor: leaf,
-            }));
-            let saved = store.start_task_flow(&task_id, &position).unwrap();
-            assert_eq!(saved.current().iteration, 7);
-            assert_eq!(
-                saved.current().step,
-                if routing {
-                    "nested-router"
-                } else {
-                    "loop-decide"
-                }
-            );
-            assert_eq!(saved.cursor, position.cursor);
-            let id = saved.id();
-            let held = claim(&store, &task_id, &saved, 501);
-            let run = reserved_capture(&store, &task_id);
-            publish(&store, &saved, &run, &held).unwrap();
-            let actor = store.test_flow_turn(&run);
-            let verdict = FlowVerdict {
-                decision: FlowDecision::Iterate,
-                summary: "next pass".into(),
-            };
-            if routing {
-                store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .unwrap();
-                store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .unwrap();
-                let before = store.task_flow(&task_id).unwrap().unwrap();
-                assert!(store
-                    .test_output(&actor, &serde_json::json!({"path": "other"}))
-                    .is_err());
-                assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-            } else {
-                store.test_decision_output(&actor, &verdict).unwrap();
-                assert!(store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .is_err());
-            }
-            let pending = store.task_flow(&task_id).unwrap().unwrap();
-            assert!(!pending.has_pending_decision());
-            assert_eq!(pending.cursor.progress, saved.cursor.progress);
-            store.test_finish_flow_turn(&actor, "interrupted");
-            let replacement = store
-                .reclaim_task_worker(
-                    &task_id,
-                    &held,
-                    &owner(502),
-                    time::OffsetDateTime::now_utc(),
-                )
-                .unwrap();
-            let recovered = store.task_flow(&task_id).unwrap().unwrap();
-            assert_eq!(recovered.cursor, pending.cursor);
-            assert!(
-                store.flow_output(id).is_err(),
-                "interrupted outputs cannot navigate"
-            );
-            assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), recovered);
-            let cleared = if routing {
-                store
-                    .fail_flow(
-                        id,
-                        recovered.version,
-                        Some(&replacement),
-                        &TaskFlowBlocker {
-                            captured: None,
-                            reason: "router failed after publishing".into(),
-                            restart_required: false,
-                            observed_at: time::OffsetDateTime::now_utc(),
-                        },
-                    )
-                    .unwrap()
-            } else {
-                store
-                    .release_flow(id, recovered.version, Some(&replacement))
-                    .unwrap()
-            };
-            assert_eq!(cleared.cursor, saved.cursor);
-            assert!(!cleared.has_pending_decision());
-            assert!(cleared.claim.is_none());
-        }
-    }
-
-    #[test]
-    fn headless_position_retains_attempts_and_rejects_the_replaced_run() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let mut initial = autonomous_position(&task_id);
-        let mut decision = initial.invocation.steps[0].clone();
-        let ConcreteStep::Skill(skill) = &mut decision else {
-            unreachable!()
-        };
-        skill.skill = Skill::named("loop-decide");
-        skill.id = Some("decide".into());
-        skill.repeat = Some(crate::engine::flow::RepeatPolicy {
-            from: "implement".into(),
-        });
-        initial.invocation.steps.push(decision);
-        initial.cursor.index = 1;
-        let position = store.start_task_flow(&task_id, &initial).unwrap();
-        let id = position.id();
-        let node = position.invocation.node_id(&position.cursor).unwrap();
-        let tuple = crate::engine::flow_graph::flow_iterations(
-            &position.invocation.steps,
-            &position.cursor,
-        );
-        let first_claim = claim(&store, &task_id, &position, 501);
-        let first = reserved_capture(&store, &task_id);
-        publish(&store, &position, &first, &first_claim).unwrap();
-        let first_actor = store.test_flow_turn(&first);
-        let verdict = FlowVerdict {
-            decision: FlowDecision::Advance,
-            summary: "candidate before failure".into(),
-        };
-        store.test_decision_output(&first_actor, &verdict).unwrap();
-        store.test_finish_flow_turn(&first_actor, "interrupted");
-        store
-            .release_flow(id, position.version, Some(&first_claim))
-            .unwrap();
-        let failed = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(failed.cursor.index, position.cursor.index);
-        assert_eq!(failed.cursor.iteration, position.cursor.iteration);
-        assert!(!failed.has_pending_decision());
-        assert_eq!(failed.current_attempt.as_ref().unwrap().run_id, first);
-        let failed = store.retry_flow(id, None).unwrap();
-        let second_claim = claim(&store, &task_id, &failed, 502);
-        let second = reserved_capture(&store, &task_id);
-        assert_ne!(first, second);
-        publish(&store, &failed, &second, &second_claim).unwrap();
-        let second_actor = store.test_flow_turn(&second);
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        store.test_decision_output(&first_actor, &verdict).unwrap();
-        assert!(
-            store.flow_output(id).is_err(),
-            "old output cannot satisfy the replacement"
-        );
-        assert!(store
-            .end_flow(id, position.version, Some(&first_claim), "")
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        let session = store.session_for_artifact(&second).unwrap().unwrap();
-        assert_eq!(
-            store.session_for_artifact(&first).unwrap().unwrap().id,
-            session.id
-        );
-        assert_eq!(session.node, Some(node));
-        assert_eq!(session.iterations.as_ref(), Some(&tuple));
-        let inputs = store.session_inputs(&session.id).unwrap();
-        assert_eq!(inputs.len(), 2);
-        assert!(inputs.contains(&first) && inputs.contains(&second));
-        let history = store.session_history(&session.id, 0, 0).unwrap();
-        store.test_decision_output(&second_actor, &verdict).unwrap();
-        store.test_finish_flow_turn(&second_actor, "completed");
-        store
-            .end_flow(
-                id,
-                failed.version,
-                Some(&second_claim),
-                "successful attempt",
-            )
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert_eq!(store.session_inputs(&session.id).unwrap(), inputs);
-        assert!(store
-            .end_flow(id, failed.version, Some(&second_claim), "")
-            .is_err());
-
-        let listed = store
-            .sessions(&crate::session::SessionFilter {
-                task: Some(task.plan.identifier.clone()),
-                interactive: None,
-                history: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].task_id, Some(task_id));
-        assert_eq!(listed[0].wave_id, Some(task.wave_id));
-        assert_eq!(
-            listed[0].flow_session_id.as_ref(),
-            Some(&position.invocation.id)
-        );
-        assert_eq!(listed[0].provider.as_deref(), Some("codex"));
-        let retained = store.session_history(&session.id, 0, 0).unwrap();
-        assert_eq!(&retained[..history.len()], history.as_slice());
-        assert_eq!(retained.last().unwrap().payload["status"], "completed");
-        store.assert_no_historical_runs();
-    }
-
-    #[test]
-    fn the_step_reserves_conversation_input_after_its_driver_claim() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        claim(&store, &work, &position, 77);
-        assert!(!store.task_started(&work).unwrap());
-        assert!(store
-            .task_flow(&work)
-            .unwrap()
-            .unwrap()
-            .current_attempt
-            .is_none());
-        reserved_capture(&store, &work);
-        let conn = store.conn.lock().unwrap();
-        let reserved: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM agent_sessions WHERE flow_session_id=?1 AND input_published=0",
-                [&position.invocation.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            reserved, 1,
-            "the step reserves the conversation's input before publication"
-        );
-        drop(conn);
-        assert!(store.task_started(&work).unwrap());
-        // The launch publishes that Run under the claim; nothing else can.
-        let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = flow.current_attempt.clone().unwrap();
-        assert!(!run.published);
-        assert!(store
-            .publish_attempt(flow.id(), flow.version, run.captured, None, "codex", None)
-            .is_err());
-        publish(&store, &flow, &run.run_id, flow.claim.as_ref().unwrap()).unwrap();
-        assert!(
-            store
-                .task_flow(&work)
-                .unwrap()
-                .unwrap()
-                .current_attempt
-                .unwrap()
-                .published
-        );
-        assert_eq!(
-            store
-                .sessions(&crate::session::SessionFilter {
-                    task: Some(work.to_string()),
-                    interactive: None,
-                    history: true,
-                    ..Default::default()
-                })
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn concurrent_task_worker_claims_choose_one_worker() {
-        let (dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let barrier = Arc::new(Barrier::new(20));
-        let stores = (0..20)
-            .map(|_| SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap())
-            .collect::<Vec<_>>();
-        let handles = stores
-            .into_iter()
-            .enumerate()
-            .map(|(index, store)| {
-                let work = work.clone();
-                let position = position.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    store
-                        .claim_task_worker(
-                            &work,
-                            &position.invocation.id,
-                            position.version,
-                            &owner(1_000 + u32::try_from(index).unwrap()),
-                            time::OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
-                        )
-                        .unwrap()
-                })
-            })
-            .collect::<Vec<_>>();
-        let outcomes = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .collect::<Vec<_>>();
-        let claimed = outcomes
-            .iter()
-            .filter_map(|outcome| match outcome {
-                TaskWorkerClaimOutcome::Claimed(claim) => Some(claim),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(claimed.len(), 1);
-        assert_eq!(claimed[0].generation, 1);
-        assert!(outcomes.iter().all(|outcome| match outcome {
-            TaskWorkerClaimOutcome::Claimed(claim) | TaskWorkerClaimOutcome::Busy(claim) =>
-                claim == claimed[0],
-            TaskWorkerClaimOutcome::Stale { .. } => false,
-        }));
-    }
-
-    #[test]
-    fn previously_disabled_tasks_can_launch_and_recover() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE work_placements SET enabled=0 WHERE task_id=?1",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        let claim = match store
-            .claim_task_worker(
-                &task_id,
-                &position.invocation.id,
-                position.version,
-                &owner(201),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap()
-        {
-            TaskWorkerClaimOutcome::Claimed(claim) => claim,
-            outcome => panic!("unexpected claim outcome: {outcome:?}"),
-        };
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &claim,
-                &owner(202),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        let recovered = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(recovered.invocation, position.invocation);
-        assert_eq!(recovered.cursor, position.cursor);
-        assert_eq!(replacement.generation, claim.generation + 1);
-        assert_eq!(recovered.claim, Some(replacement));
-    }
-
-    #[test]
-    fn only_the_claim_holder_settles_a_position() {
-        let (_dir, store, work) = store_with_task();
-        let mut initial = autonomous_position(&work);
-        initial.invocation = crate::durable::test_flow_invocation("task", 1, "review", None, false);
-        let position = store.start_task_flow(&work, &initial).unwrap();
-        let held = claim(&store, &work, &position, 101);
-        let mut next = position.cursor.clone();
-        next.index = 1;
-
-        assert!(store
-            .checkpoint_flow(
-                position.id(),
-                position.version,
-                &next,
-                None,
-                Some("advanced")
-            )
-            .is_err());
-        let version = store
-            .checkpoint_flow(
-                position.id(),
-                position.version,
-                &next,
-                Some(&held),
-                Some("advanced"),
-            )
-            .unwrap();
-        let settled = store.task_flow(&work).unwrap().unwrap();
-        assert_eq!(
-            (settled.version, version.version),
-            (position.version + 1, position.version + 1)
-        );
-        assert_eq!(settled.current().step, "review");
-        assert_eq!(settled.invocation, position.invocation);
-        assert_eq!(
-            settled.claim,
-            Some(held.clone()),
-            "the driver keeps the position until it stops"
-        );
-        assert!(
-            settled.current_attempt.is_none(),
-            "a new position has no attempt"
-        );
-        assert!(store
-            .checkpoint_flow(position.id(), position.version, &next, Some(&held), None)
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Progress { summary } if summary == "advanced"
-        ));
-    }
-
-    #[test]
-    fn only_the_claim_holder_finishes_a_position_without_a_successor() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let held = claim(&store, &work, &position, 111);
-        reserved_capture(&store, &work);
-        let final_position = store.task_flow(&work).unwrap().unwrap();
-
-        assert!(store
-            .end_flow(position.id(), position.version, None, "finished")
-            .is_err());
-        store
-            .end_flow(position.id(), position.version, Some(&held), "finished")
-            .unwrap();
-        assert!(store.task_flow(&work).unwrap().is_none());
-        assert_eq!(
-            retained_invocation(&store, &position.invocation.id),
-            (ended(&final_position), "completed".into())
-        );
-        let evidence = store.chapter_task_evidence(&work).unwrap();
-        assert!(evidence.begun);
-        assert!(!evidence.worker_claimed);
-        assert!(store
-            .end_flow(position.id(), position.version, Some(&held), "finished")
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::FlowFinished { summary, .. } if summary == "finished"
-        ));
-        let next = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        assert_eq!(next.version, position.version);
-        assert!(store
-            .end_flow(position.id(), position.version, Some(&held), "late finish")
-            .is_err());
-        assert_eq!(store.task_flow(&work).unwrap(), Some(next));
-        assert_eq!(
-            retained_invocation(&store, &position.invocation.id),
-            (ended(&final_position), "completed".into())
-        );
-    }
-
-    #[test]
-    fn reclaim_fences_the_old_worker_and_increments_generation() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let first = claim(&store, &work, &position, 201);
-        let replacement = store
-            .reclaim_task_worker(&work, &first, &owner(202), time::OffsetDateTime::now_utc())
-            .unwrap();
-
-        assert_eq!(replacement.generation, 2);
-        let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = reserved_capture(&store, &work);
-        assert!(publish(&store, &flow, &run, &first).is_err());
-        publish(&store, &flow, &run, &replacement).unwrap();
-        let failure = TaskFlowBlocker {
-            captured: None,
-            reason: "provider exited".to_string(),
-            restart_required: false,
-            observed_at: time::OffsetDateTime::now_utc(),
-        };
-        let failed = store
-            .fail_flow(flow.id(), flow.version, Some(&replacement), &failure)
-            .unwrap();
-        assert!(failed.claim.is_none());
-        assert_eq!(
-            failed.failure.as_ref(),
-            Some(&TaskFlowBlocker {
-                captured: store.captured_sequence(&run).unwrap(),
-                ..failure.clone()
-            })
-        );
-        assert!(store
-            .fail_flow(flow.id(), failed.version, Some(&first), &failure)
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Failed { error, resumable: true } if error == &failure.reason
-        ));
-
-        let retried = claim(&store, &work, &failed, 205);
-        assert_eq!(retried.generation, 3);
-        assert!(store.task_flow(&work).unwrap().unwrap().failure.is_none());
     }
 }

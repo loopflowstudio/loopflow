@@ -1288,15 +1288,18 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for the saved Flow and next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
+    // Only a Flow still being driven needs the checkout; a stopped one is history.
     if store
         .sqlite
-        .landing_has_pending_flow(&landing.id)
+        .landing_unfinished_flows(&landing.id)
         .map_err(|error| OpsError::Message(error.to_string()))?
+        .iter()
+        .any(|flow| crate::ops::flow_run::driver_live(flow))
     {
-        eprintln!("PR merged; retained its checkout for the saved Flow.");
+        eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());
     }
     if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {

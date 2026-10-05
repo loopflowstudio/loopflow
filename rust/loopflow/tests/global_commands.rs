@@ -168,7 +168,6 @@ fn installation_uses_candidate_authority_from_any_checkout() {
             cwd,
             &["home", "install", "promote", "--cli-target", "/unused/lf"],
         );
-        cmd.env("LF_WORK_ADVANCE_CLAIM", "obsolete");
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
         }

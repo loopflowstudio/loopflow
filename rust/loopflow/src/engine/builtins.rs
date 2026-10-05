@@ -339,12 +339,13 @@ mod tests {
 
         assert!(get_builtin_flow("task").is_none());
         let first = get_builtin_flow("task-design").expect("Task first flow");
-        assert!(first.contains("name: kickoff"));
-        assert_eq!(first.matches("human: true").count(), 1);
-        assert!(first.contains("id: review_kickoff"));
-        assert!(!get_builtin_flow("incident")
-            .expect("incident first flow")
-            .contains("human:"));
+        assert!(first.contains("- kickoff"));
+        // Review stages belong to the Task conversation, never to a builtin Flow.
+        for flow in ["task-design", "feature", "code", "incident"] {
+            assert!(!get_builtin_flow(flow)
+                .unwrap_or_else(|| panic!("{flow} is builtin"))
+                .contains("human:"));
+        }
         assert!(get_builtin_flow("pursue")
             .expect("Task loop flow")
             .contains("flow: refresh"));

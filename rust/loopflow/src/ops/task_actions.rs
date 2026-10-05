@@ -145,7 +145,10 @@ fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
     } else {
-        action(TaskAction::Resume, "continue the saved Task Flow with `lf flow start`; inspect independent Sessions before starting additional work")
+        action(
+            TaskAction::Resume,
+            "launch the next work with `lf flow start`; inspect earlier Flows and independent Sessions first",
+        )
     }
 }
 
@@ -236,7 +239,6 @@ mod tests {
             TaskExecutionState::Starting,
             TaskExecutionState::Running,
             TaskExecutionState::Unknown,
-            TaskExecutionState::Human,
             TaskExecutionState::Blocked,
         ] {
             let execution = TaskExecutionSnapshot {

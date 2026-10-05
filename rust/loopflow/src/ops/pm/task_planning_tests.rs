@@ -1440,32 +1440,27 @@ esac
                 .block_on(fixture.store.create_task(&task, &pr))
                 .unwrap();
             runtime
-                .block_on(fixture.store.start_task_flow(
-                    &task.id,
-                    crate::durable::FlowSession {
-                        task_id: Some(task.id.clone()),
-                        wave_id: Some(task.wave_id.clone()),
-                        cwd: task.worktree.clone(),
-                        message: None,
-                        model: None,
-                        finished: false,
-                        invocation: crate::durable::test_flow_invocation(
-                            "review",
-                            0,
-                            "review",
-                            Some("review"),
-                            true,
-                        ),
-                        current_attempt: None,
-                        pending_session_id: None,
-                        cursor: Default::default(),
-                        version: 0,
-                        worker_generation: 0,
-                        claim: None,
-                        failure: None,
-                        updated_at: timestamp,
-                    },
-                ))
+                .block_on(fixture.store.create_flow(crate::durable::FlowSession {
+                    task_id: Some(task.id.clone()),
+                    wave_id: Some(task.wave_id.clone()),
+                    cwd: task.worktree.clone(),
+                    message: None,
+                    model: None,
+                    finished: false,
+                    invocation: crate::durable::test_flow_invocation(
+                        "review",
+                        0,
+                        "review",
+                        Some("review"),
+                        true,
+                    ),
+                    current_attempt: None,
+                    pending_session_id: None,
+                    cursor: Default::default(),
+                    version: 0,
+                    failure: None,
+                    updated_at: timestamp,
+                }))
                 .unwrap();
             assert_eq!(
                 crate::ops::task::task_repository(&checkout, None).unwrap(),
@@ -1584,10 +1579,11 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
+            // The Flow row remains as history; abandonment retires nothing.
             assert!(runtime
-                .block_on(fixture.store.task_flow(&task.id))
+                .block_on(fixture.store.latest_task_flow(&task.id))
                 .unwrap()
-                .is_none());
+                .is_some());
             assert_eq!(
                 runtime
                     .block_on(

@@ -92,10 +92,10 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
     }
 
-    @Test func unresolvedReviewAndRetainedSessionSurviveHiddenHistory() throws {
+    @Test func unresolvedFlowAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
-        let pinned = PinnedTaskFlow(invocationId: "review", graph: FlowGraph(name: "feature", steps: [], interactions: InteractionGraph(stages: [], transitions: [])), current: nil, completed: [], returns: [], iterations: [], execution: .human, reason: "Review remains open", restartRequired: false)
-        let flow = TaskFlowSnapshot(recommended: "feature", record: .pinned(pinned), controls: [])
+        let latest = LatestTaskFlow(invocationId: "review", graph: FlowGraph(name: "feature", steps: [], interactions: InteractionGraph(stages: [], transitions: [])), current: nil, completed: [], returns: [], iterations: [], execution: .blocked, reason: "Release target is unavailable")
+        let flow = TaskFlowSnapshot(recommended: "feature", record: .latest(latest), controls: [])
         #expect(TaskHistoryFilter().includes(row.task, runtime: row.runtime, condition: row.condition, flow: flow, now: now))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
         let retained = WorkspaceTask(id: WorkspaceNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])

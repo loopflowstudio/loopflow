@@ -26,11 +26,11 @@ do next. No change is a valid report.
 Existing Tasks and their Flows own execution. You operate them; you never
 become a second driver.
 
-- Advance a Task through `lf --task <issue> flow start`, which starts
-  or continues its saved Flow. Do not edit a Task's checkout, implement its
+- Advance a Task through `lf --task <issue> flow start [flow]`, which
+  launches a fresh Flow in the background. Do not edit a Task's checkout, implement its
   change here, or decide its Flow's next step from this conversation.
-- Before acting on a Task, check for a live worker, a pending review, or a
-  recovery already under way. If one exists, leave it alone and say so.
+- Before acting on a Task, check for a live Flow or conversation already
+  doing the work. If one exists, leave it alone and say so.
 - A failed read, a stale plan or unknown liveness never proves an empty backlog,
   a finished Task, or a reason to close or restart work. Name the gap.
 - Read failed work's existing status and logs. Resolve impediments and

@@ -654,8 +654,8 @@ launch tests should prove that the canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task controller consumers: durable work reservation retains Started
-after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
+include Task consumers: durable work reservation retains Started after
+failure. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Experimental Homes hold
 this build's exact schema: use a fresh Home after changing it. Preserve
 populated historical fixtures for published migration coverage. A Task's draft is

@@ -405,8 +405,8 @@ frontmatter never changes scheduling.
 | **CLI** | `--mode interactive` (interactive), `--mode batch` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Flows declare a required User gate on the exact skill occurrence with a stable
-`id` and `human: true`; see [Authoring](authoring.md#flows).
+Flows hold autonomous steps only; a `human: true` step is rejected at launch.
+See [Authoring](authoring.md#flows).
 
 ### Chrome
 

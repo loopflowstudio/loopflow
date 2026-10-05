@@ -777,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_flows_keep_their_delivery_and_review_boundaries() {
+    fn builtin_flows_keep_their_delivery_boundaries_without_review_steps() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
             (
@@ -789,14 +789,27 @@ mod tests {
                     "realign",
                     "loop-decide",
                     "pr-publish",
-                    "pr-review",
                 ],
-                &[6],
+                &[],
+                1,
+            ),
+            (
+                "feature",
+                &[
+                    "kickoff",
+                    "implement",
+                    "compress",
+                    "sync",
+                    "realign",
+                    "loop-decide",
+                    "pr-publish",
+                ],
+                &[],
                 1,
             ),
             ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
             ("refresh", &["sync", "realign"], &[], 0),
-            ("task-design", &["kickoff", "review-design"], &[1], 0),
+            ("task-design", &["kickoff"], &[], 0),
             ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
             (
                 "pursue",
@@ -813,7 +826,6 @@ mod tests {
             ),
             ("deploy", &["gate", "pr land"], &[], 0),
             ("ship", &["gate", "pr land -c"], &[], 0),
-            ("ship-demo", &["gate", "demo", "pr land -c"], &[1], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
         for (name, labels, humans, returns) in cases {
@@ -862,7 +874,7 @@ mod tests {
     }
 
     #[test]
-    fn feature_has_one_pursuit_then_demo_and_forward_delivery() {
+    fn feature_designs_then_pursues_to_a_published_pr() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("feature", repo.path()).unwrap();
         let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
@@ -871,31 +883,28 @@ mod tests {
             labels,
             [
                 "kickoff",
-                "review-design",
                 "implement",
                 "compress",
                 "sync",
                 "realign",
                 "loop-decide",
                 "pr-publish",
-                "demo",
-                "compress",
-                "sync",
-                "realign",
-                "gate",
-                "pr land -c"
             ]
         );
-        let implement = graph.steps[2].key;
+        let implement = graph.steps[1].key;
         let returns: Vec<_> = graph
             .steps
             .iter()
             .filter_map(|node| node.returns_to.as_ref().map(|to| (node.id.clone(), to)))
             .collect();
         assert_eq!(returns, [(Some("decide".to_string()), &implement)]);
-        assert!(graph.steps[1].human && graph.steps[8].human);
-        assert_eq!(graph.steps[13].kind, FlowNodeKind::Op);
-        assert_eq!(graph.steps[5].sources, ["feature", "pursue", "refresh"]);
+        // Review and landing are the conversation's to launch, not this Flow's.
+        assert!(graph.steps.iter().all(|node| !node.human));
+        assert!(graph
+            .steps
+            .iter()
+            .all(|node| node.kind != FlowNodeKind::Op || node.label == "sync"));
+        assert_eq!(graph.steps[4].sources, ["feature", "pursue", "refresh"]);
     }
 
     #[test]
@@ -1061,8 +1070,8 @@ mod tests {
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
         ))
         .unwrap();
-        let TaskFlowRecord::Pinned(pinned) = fixture.record else {
-            panic!("pinned fixture")
+        let TaskFlowRecord::Latest(pinned) = fixture.record else {
+            panic!("launched Flow fixture")
         };
         let graph = FlowGraph::new("nested", &invocation.steps);
         assert_eq!(graph, pinned.graph);

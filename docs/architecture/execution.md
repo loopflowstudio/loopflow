@@ -32,8 +32,8 @@ argv -> Exec admission -> Skill discovery -> prompt -> provider route
 
 The same admission applies to headless and interactive skills, inline prompts,
 helpers and reviews. It needs no planning parents, but requires its Home's
-writable conversation store before provider launch. Optional Work enrichment does
-not confer a Flow claim. A failed admission cannot become an invisible file-only
+writable conversation store before provider launch. Optional Work enrichment
+confers no Flow authority. A failed admission cannot become an invisible file-only
 conversation. Large captured payloads remain outside SQLite behind indexed references.
 
 ## Capture intent once
@@ -77,7 +77,7 @@ Exec does not reserve agent work or mark a Task Started.
 4. Start or connect the native provider and retain exact engine/thread/client
    evidence, distinct from the conversation driver.
 5. Append correlated provider outcomes and usage; settle selected Flow work under
-   its separate claim, and command completion under its Exec lifetime.
+   its position version, and command completion under its Exec lifetime.
 
 Prepared rows without publication are recoverable preparation failures. A missing
 spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
@@ -101,9 +101,7 @@ new driver receives a new driver generation. Engine ownership and driver ownersh
 must not be collapsed into one counter.
 
 `session connect --replace` stops the exact owned clients and reconnects to the
-live engine, preserving the active turn and sibling conversations. Flow retry
-can resume the recorded native conversation after confirmed engine exit;
-the replacement provider generation excludes late writes from the old provider.
+live engine, preserving the active turn and sibling conversations.
 There is no separate Session engine-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
 authority, and recovery never authorizes killing a shared engine for one thread.
@@ -111,23 +109,24 @@ authority, and recovery never authorizes killing a shared engine for one thread.
 ## Outcomes, retries and usage
 
 AgentSession history owns provider outcomes. Exec owns command completion. A
-provider can succeed before the command fails later, and a parked Flow can outlive
-a successful command. Failed or interrupted conversation work remains history;
+provider can succeed before the command fails later, and a stopped Flow's history
+outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
 A Flow step consumes one exact successful AgentSession completion under its
-boundary/version/claim fence. Later conversation continuation does not rewrite
+boundary and position-version fence. Later conversation continuation does not rewrite
 that consumed result. A mechanical step records its own start/result in Flow
 history under its own child `lf` Exec, without inventing an AgentSession. The
-driver retains navigation authority and consumes the saved result. Recovery
-waits for a surviving step before replacing the driver claim; a missing result
-after process death still requires inspection before retry. Cursor movement
-cannot prove exactly-once external effects.
+driver holds the per-invocation driver lock, retains navigation authority and
+consumes the saved result. If it dies, the row keeps its last cursor, failure,
+events and effect receipts; nothing resumes it. The caller inspects them before
+launching fresh work. Unknown liveness stays unknown. Cursor movement cannot
+prove exactly-once external effects.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
-impediments or discusses missing judgment in its ongoing chat. Explicit retry
-retains the position and pass; unchanged failures do not automatically retry.
+impediments or discusses missing judgment in its ongoing chat. Nothing retries
+or resumes a stopped Flow.
 
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate

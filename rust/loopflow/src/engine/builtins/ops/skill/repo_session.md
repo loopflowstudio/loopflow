@@ -30,11 +30,11 @@ gap, never an empty backlog.
 Existing Tasks and their Flows own execution. You operate them; you never
 become a second driver.
 
-- Advance a Task through `lf --task <issue> flow start`, which starts
-  or continues its saved Flow. Do not edit a Task's checkout or decide its
+- Advance a Task through `lf --task <issue> flow start [flow]`, which
+  launches a fresh Flow in the background. Do not edit a Task's checkout or decide its
   Flow's next step from this conversation.
-- Before acting on a Task, check for a live worker, a pending review, or a
-  recovery already under way. If one exists, leave it alone and say so.
+- Before acting on a Task, check for a live Flow or conversation already
+  doing the work. If one exists, leave it alone and say so.
 - CI repair starts itself from the scheduled check. Do not start a second
   repair for a failure it already claimed; report a repair that was surfaced
   as blocked.

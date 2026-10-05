@@ -40,7 +40,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
     case unavailable
 }
 
-/// Whether a Session is an occurrence of its Task's managed Flow. Rust owns
+/// Whether a Session is an occurrence of a Flow. Rust owns
 /// this from the Flow position or the Run's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
@@ -128,7 +128,7 @@ public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
     case current
     /// An earlier position of the invocation that is still active.
     case earlier
-    /// An invocation that has finished or been replaced by a restart.
+    /// An invocation that has finished or been followed by a newer one.
     case past
 }
 

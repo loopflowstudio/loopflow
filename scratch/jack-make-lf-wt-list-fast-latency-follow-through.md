@@ -10,6 +10,16 @@ Ordinary store opens validate the migration ledger and schema and no longer run
 preflight keep the full scan. Evidence and numbers:
 `scripts/benchmarks/wt-list/README.md` (2026-10-05 section).
 
+## Installation tests leave the host suite (2026-10-05, Jack Heart's steer)
+
+`lf home install preflight`/`promote` resolve the OS account's Home through
+`getpwuid`, so three tests copied the live 1.1 GB database under live writers
+and stalled the gate (terminated after 30 minutes; `.lf/tmp/gate-rerun/rust.log`:
+2,100 passed, those three plus one signalled, 136 not run). They are now ignored
+installation proofs listed in `scripts/test_task_installation.py`, which CI's
+`task-installation` job runs in a disposable account. Production Home authority
+is unchanged.
+
 ## Delete — do not maintain
 
 Nothing slated. The five opens per process are now about 30 ms together; sharing
@@ -23,6 +33,11 @@ one connection is not worth a new owner.
 - ≤1 s warm p95 online is unmet: one GitHub round trip takes 1.4–1.8 s. Reaching
   it means answering PR state from something other than the remote, which the
   Task's truthfulness requirement does not obviously allow. Unselected.
+- The three moved proofs have not run in the container: Docker was not running
+  on this host. CI's `task-installation` job owns that result.
+- Installation preflight's store backup restarts whenever a writer commits, so
+  on a large busy Home it has no bound. Observed only through these tests;
+  unselected product work.
 - Text-mode tail (one 10.9 s sample at load 79) is unexplained; ten samples.
 
 ## Checks
@@ -30,3 +45,4 @@ one connection is not worth a new owner.
 `cargo test -p loopflow --lib store::` 215 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Affected suites belong to gate.
 Realign 2026-10-05: validator call sites read against the plan (open paths schema-only; doctor, install preflight and migrations keep the scan); no rerun, one doc comment corrected.
 Compress 2026-10-05: scan rationale moved onto `validate_foreign_keys`; `cargo test -p loopflow --lib store::migrations` 82 passed, `cargo fmt --check` clean.
+Installation isolation 2026-10-05: `cargo test -p loopflow --test global_commands --test exec_ownership_tests` 17 passed, 5 ignored (inherited `LF_*` cleared); `cargo fmt --check`, `ruff check` clean. Container proofs deferred to CI.

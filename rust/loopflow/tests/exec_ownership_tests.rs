@@ -323,6 +323,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 }
 
 #[tokio::test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");

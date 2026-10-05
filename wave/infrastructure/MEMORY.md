@@ -302,9 +302,10 @@ killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
   unrecorded; the start receipt still precedes the command. Timing lives beside
   the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
-  benchmarks; on-machine experience is post-merge validation, so landing leaves
-  the Task open. One installed sample is not a p95; ≤1 s warm p95 online is
-  unmet, and every staged run was on a host at load 30–80.
+  benchmarks; installed timing is post-merge validation, so the Task stays
+  open. One installed sample is not a p95; ≤1 s warm p95 online is unmet.
+- **Install preflight/promote read the OS account's Home whatever `LF_HOME`
+  says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
   admission or completion** without a completion receipt (Jack authorized).
   Live or unknown providers still block.

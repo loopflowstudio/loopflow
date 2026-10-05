@@ -190,8 +190,8 @@ impl TaskFlowBlocker {
     }
 }
 
-/// Read projection of the Flow's selected capture and its Session publication.
-/// The recorder outcome is historical evidence, not native turn settlement.
+/// Read projection of the Flow's selected capture, Session publication and
+/// selected native turn's completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedCapture {
     pub captured: i64,

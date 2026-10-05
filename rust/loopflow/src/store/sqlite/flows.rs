@@ -387,8 +387,8 @@ fn clear_candidate(cursor: &mut ExecutionCursor) {
     leaf.route = None;
 }
 
-/// Block the Flow at its position with `failure`; the failed attempt's Run is
-/// named on it. A Task's own Flow records the failure on the Task.
+/// Block the Flow at its position with `failure`, retaining its published capture.
+/// A Task's own Flow records the failure on the Task.
 fn fail_flow_in(
     tx: &Transaction<'_>,
     flow: &FlowSession,
@@ -484,7 +484,7 @@ fn end_flow_in(
     Ok(())
 }
 
-/// Store the step's Run before anything launches it. An attempt already at
+/// Reserve the step's captured input before launch. An input already at
 /// this position is kept: a reservation the launcher has not published, or a
 /// completed candidate the driver is about to settle.
 fn reserve_attempt_in(
@@ -636,7 +636,7 @@ fn consume_selected_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<
 }
 
 /// Recover mechanical results from Flow history and agent results from the
-/// selected native turn (or the transitional Run when no turn was selected).
+/// selected native turn.
 /// Missing mechanical completion is unknown, never an invented interruption.
 fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<FlowSession> {
     let id = flow.invocation.id.clone();
@@ -655,29 +655,26 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
         fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
         return current_flow_in(tx, &id);
     }
-    let Some(attempt) = &flow.selected_capture else {
+    let Some(capture) = &flow.selected_capture else {
         return Ok(flow);
     };
-    if !attempt.published {
+    if !capture.published {
         return Ok(flow);
     }
-    let outcome = match attempt.outcome.as_deref() {
-        Some(outcome) => outcome.to_owned(),
-        None => {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Flow {id} is waiting for Run {}; its completion is not recorded",
-                attempt.artifact_key
-            )))
-        }
-    };
+    let outcome = capture.outcome.as_deref().ok_or_else(|| {
+        StoreError::InvalidAuthority(format!(
+            "Flow {id} is waiting for capture {}; its completion is not recorded",
+            capture.artifact_key
+        ))
+    })?;
     if outcome == "completed" {
         return Ok(flow);
     }
     let mut failure = TaskFlowBlocker::now(format!(
-        "{} Run {outcome}",
+        "{} capture {outcome}",
         flow.step_name().unwrap_or_default()
     ));
-    failure.captured = Some(attempt.captured);
+    failure.captured = Some(capture.captured);
     fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
     current_flow_in(tx, &id)
 }
@@ -752,7 +749,7 @@ fn claim_task_worker_in(
     }
     if replacing.is_some() {
         match &flow.selected_capture {
-            // A reservation the dead worker never launched is nobody's Run.
+            // The dead worker never launched this reserved input.
             Some(attempt) if !attempt.published => {
                 tx.execute(
                     "UPDATE flow_sessions SET current_capture=NULL WHERE id=?1",
@@ -1024,7 +1021,7 @@ impl SqliteStore {
         Ok(flow)
     }
 
-    /// Store the step's Run for the driver about to launch it.
+    /// Reserve the step's captured input for the driver about to launch it.
     pub fn reserve_attempt(
         &self,
         id: &str,
@@ -2384,7 +2381,7 @@ mod tests {
             .failure
             .unwrap()
             .reason
-            .contains("loop-decide Run failed"));
+            .contains("loop-decide capture failed"));
         assert!(blocked.cursor.progress.verdict.is_none());
         assert!(store.flow_output(&id).is_err());
         let retried = store.retry_flow(&id, None).unwrap();

@@ -590,7 +590,7 @@ pub(crate) async fn list_attention(
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
-/// Connect/complete still enter owned_target and surface, with full validation.
+/// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     use crate::session::FlowSummaryState;
     let kind = match session.kind {
@@ -744,14 +744,6 @@ async fn find_session(
     let Some(session) = session_by_id(store, session_id).await? else {
         return Ok(None);
     };
-    owned_target(store, session, open_completed).await.map(Some)
-}
-
-async fn owned_target(
-    store: &SharedStore,
-    session: crate::session::AgentSession,
-    open_completed: bool,
-) -> Result<SessionTarget> {
     if session.completed_at.is_some()
         && !(open_completed && session.kind == crate::session::SessionKind::Conversation)
     {
@@ -763,9 +755,9 @@ async fn owned_target(
         {
             bail!("Session {} is no longer waiting", session.id);
         }
-        return Ok(SessionTarget::Row {
+        return Ok(Some(SessionTarget::Row {
             session: Box::new(session),
-        });
+        }));
     };
     if flow_id(&position)? != session.id {
         bail!("Session {} is no longer waiting", session.id);
@@ -787,10 +779,10 @@ async fn owned_target(
             session.id
         );
     }
-    Ok(SessionTarget::Flow {
+    Ok(Some(SessionTarget::Flow {
         task: Box::new(task),
         position: Box::new(position),
-    })
+    }))
 }
 
 /// The provider and local client receipts for a conversation's current input.
@@ -838,7 +830,8 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     if summary.is_empty() {
         bail!("ready summary cannot be empty");
     }
-    let artifact_key = active_capture_key()?;
+    let artifact_key = crate::session_record::inherited_capture_key()?
+        .ok_or_else(|| anyhow!("this command requires an active Session capture"))?;
     let id = match active_session_token()? {
         HumanSessionToken::Flow { token } => flow_token_id(&token),
         HumanSessionToken::StandaloneFlow { id } => id,
@@ -2253,11 +2246,6 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
         }
         HumanSessionToken::Primary { .. } => Ok(None),
     }
-}
-
-fn active_capture_key() -> Result<String> {
-    crate::session_record::inherited_capture_key()?
-        .ok_or_else(|| anyhow!("this command requires an active Session capture"))
 }
 
 #[cfg(test)]

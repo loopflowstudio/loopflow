@@ -187,7 +187,11 @@ pub fn inspect(
     println!("Status: {}", snapshot.status());
     println!(
         "Agent: {}",
-        format_agent(Some(&snapshot.harness), snapshot.model.as_deref())
+        snapshot
+            .model
+            .as_ref()
+            .map(|model| format!("{}:{model}", snapshot.harness))
+            .unwrap_or_else(|| snapshot.harness.clone())
     );
     println!(
         "Working directory: {}",
@@ -210,15 +214,6 @@ pub fn inspect(
         crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
     );
     Ok(())
-}
-
-fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
-    match (provider, model) {
-        (Some(provider), Some(model)) => format!("{provider}:{model}"),
-        (Some(provider), None) => provider.to_string(),
-        (None, Some(model)) => model.to_string(),
-        (None, None) => "-".to_string(),
-    }
 }
 
 pub(crate) fn format_tokens(value: i64) -> String {

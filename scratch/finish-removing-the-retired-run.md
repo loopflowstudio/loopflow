@@ -53,6 +53,13 @@ The metadata-open fixture must drain output while waiting for provider exit: its
 former pipe backpressure looked like a provider hang. File-backed output preserves
 the bounded assertion.
 
+October 5 reconciliation inspected the compression diff and the sole child Wave,
+Release (both top-level Markdown files). No new product decision changes the
+scope. The unresolved choice is technical: an external admission owner that
+survives converter/recovery death and protects shared namespaces without denying
+unrelated access. Autonomous source authorization covers selecting and proving
+that design in isolation; it supplies no configured maintenance authority.
+
 Remaining indivisible source work:
 
 - Implement offline conversion and candidate-owned recovery, including launch
@@ -66,12 +73,20 @@ Remaining indivisible source work:
 - Finish current-reference and native callback/Flow consumer audits, Desktop
   validation, populated released-Home fault matrix, final inventory/delta and gate.
 
+Source readback confirms `advance_switch_store` skips candidate execution at an
+exact schema and `recover_switch` can record advancement without layout work.
+`record_dir`, active-reader watch classification and ablation staging still use
+`runs/`. These are unfinished production paths, not failures a Linux permission
+probe alone can resolve. The probe's successful exit asserts that counterexamples
+occurred and fixture-assisted retries worked; it is not an exclusion verdict.
+
 The exclusion runner's pinned checksums were verified against published v0.13.3
 SHA256SUMS. Docker was unavailable; no container or hosted result is recorded.
-The executed macOS alias counterexample below remains contrary evidence. The expanded
-`capture-exclusion.yml` probe also tests inode sealing and external storage; it
-has no execution result. Its bounded fixture cannot establish arbitrary placement
-coverage or production quiescence.
+The executed macOS alias and recovery counterexamples below remain contrary
+evidence. `capture-exclusion.yml` also exercises privileged inode sealing,
+external storage and released writers; those Linux scenarios have no recorded
+execution result. Portable recovery results do not cover those scenarios, arbitrary
+placements or production quiescence.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -224,8 +239,7 @@ only a negative experiment. Descriptor-based mutation could avoid that particula
 wrong-inode write, but would neither prevent namespace replacement nor exclude
 new or retained writers; it is not selected as a conversion boundary.
 
-Dependent conversion remains stopped under the implement skill's architectural
-counterexample rule. No admission/namespace exclusion design is proved. Repeated
+Dependent conversion lacks a proved admission/namespace exclusion design. Repeated
 quiescence after interruption is also unproved: these fixtures own their children
 and cannot discover production writers. A replacement must provide an external,
 crash-persistent admission owner before touching metadata, preserve unrelated
@@ -436,6 +450,20 @@ Retain `resolve_manifest` as replay's selector owner, `inherited_capture_key` fo
 subordinate history and `journal::agent_caller` for Session/Exec provenance.
 Rename still needs its distinct managed-review lock/relookup path.
 
+Compression also removes the unused `engine::error::StoreError`, its public
+re-export, conversion and exclusive `CoreError` variant; repository consumers use
+the actual store's error type. History formatting drops impossible missing-provider
+branches. Flow recovery borrows the native-turn outcome from the selected-capture
+projection and names the capture in diagnostics, retaining missing-completion
+errors and failed-turn retry behavior. Its comments now match the SQL selection.
+The negative exclusion probes remain evidence, not a recovery implementation.
+
+Compression folds the single-caller `owned_target` into
+`find_session`, now that capture-selector dispatch is gone, and inlines
+readiness's `active_capture_key`. The same missing/completed Session checks,
+managed-review relookup and current-input comparison remain in the lookup;
+SQLite still owns mutation fencing. These remove forwarding helpers only.
+
 Direct-skill tests now use the shared `test_ambient::EnvGuard`; their private
 `EnvironmentRestore`, manual identity clearing and temporary key vector are
 removed. Save PATH before clearing it, and keep the guard inside the environment
@@ -555,4 +583,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, implement): `uv run python tests/e2e/capture_exclusion.py --probe-recovery` passed all five counterexample/retry cases; Ruff and `git diff --check` passed; privileged Linux cases remain CI-owned, not conversion acceptance.
+Check (October 5): compression recorded the isolated replacement-review test (1/1), formatting and all-target Clippy passing; realign `git diff --check` passed, with no behavioral rerun; privileged Linux exclusion remains CI-owned, conversion unproved.

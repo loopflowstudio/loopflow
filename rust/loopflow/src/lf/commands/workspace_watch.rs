@@ -180,16 +180,12 @@ impl Part {
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished Execs.
     fn changed(self, old: StoreRevisions, new: StoreRevisions) -> bool {
-        let planning = old.planning != new.planning;
-        let sessions = old.sessions != new.sessions;
-        let flows = old.flows != new.flows;
-        let execs = old.execs != new.execs;
         match self {
-            Part::Sessions => sessions || flows || planning,
-            Part::Activity => execs,
-            Part::Planning | Part::Task | Part::Wave | Part::WorkActivity => {
-                planning || sessions || flows || execs
+            Part::Sessions => {
+                StoreRevisions { execs: 0, ..old } != StoreRevisions { execs: 0, ..new }
             }
+            Part::Activity => old.execs != new.execs,
+            Part::Planning | Part::Task | Part::Wave | Part::WorkActivity => old != new,
         }
     }
 

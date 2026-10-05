@@ -475,6 +475,8 @@ costs seconds. This plan earns no KR by itself.
 
 - 2026-10-05 `desktop_performance.py write-visible --samples 3` on a Home
   copy: complete, 15/15.
+- 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 8/8;
+  `--lib -- workspace_watch` 2/2; clippy `--all-targets -D warnings` clean.
 - 2026-10-05 implement, second pass: `cargo test -p loopflow --test
   workspace_watch` 8/8; `--lib -- store_revisions store::changes` 6/6; clippy
   `--all-targets -D warnings` clean; `swift test --filter

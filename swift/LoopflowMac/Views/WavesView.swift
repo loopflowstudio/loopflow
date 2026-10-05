@@ -566,7 +566,6 @@ struct WavesView: View {
         }
     }
 
-
     /// A live screenshot can request one real Wave after the registry resolves.
     /// Fixture selection stays in `seedMockWaves`; production has no requested
     /// branch, so this is inert outside the explicit `live` harness.

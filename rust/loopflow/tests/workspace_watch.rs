@@ -56,7 +56,13 @@ fn lf(home: &Path, args: &[&str]) -> Command {
 
 impl Home {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let home = Self::at(tempfile::tempdir().unwrap());
+        home.plan(0);
+        home
+    }
+
+    /// Create the store and one Wave in `dir`.
+    fn at(dir: tempfile::TempDir) -> Self {
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
@@ -66,9 +72,7 @@ impl Home {
             repo.canonicalize().unwrap().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let home = Self { dir, store, wave };
-        home.plan(0);
-        home
+        Self { dir, store, wave }
     }
 
     fn path(&self) -> &Path {
@@ -136,29 +140,21 @@ impl Home {
     }
 
     fn watch(&self) -> Watch {
-        let mut child = lf(self.path(), &["monitor", "workspace", "--watch", "--json"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        let (send, frames) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in stdout.lines() {
-                let line = line.unwrap();
-                let frame: WorkspaceFrame = serde_json::from_str(&line)
-                    .unwrap_or_else(|error| panic!("invalid frame: {error}: {line}"));
-                if send.send(frame).is_err() {
-                    break;
-                }
-            }
-        });
-        Watch {
-            stdin: child.stdin.take(),
-            child,
-            frames,
-        }
+        Watch::open(self.path())
     }
+}
+
+/// One uninteresting transcript line, as a provider's output is recorded.
+fn transcript(conn: &rusqlite::Connection, line: usize) {
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+         VALUES('conversation','observed',?1,1,?2)",
+        [
+            format!("{INPUT}:events.jsonl:{line}"),
+            TRANSCRIPT_LINE.to_owned(),
+        ],
+    )
+    .unwrap();
 }
 
 fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
@@ -176,6 +172,32 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
 }
 
 impl Watch {
+    /// Start the reader on a Home, which need not hold a store yet.
+    fn open(home: &Path) -> Self {
+        let mut child = lf(home, &["monitor", "workspace", "--watch", "--json"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (send, frames) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in stdout.lines() {
+                let line = line.unwrap();
+                let frame: WorkspaceFrame = serde_json::from_str(&line)
+                    .unwrap_or_else(|error| panic!("invalid frame: {error}: {line}"));
+                if send.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            stdin: child.stdin.take(),
+            child,
+            frames,
+        }
+    }
+
     fn request(&mut self, request: serde_json::Value) {
         let stdin = self.stdin.as_mut().unwrap();
         writeln!(stdin, "{request}").unwrap();
@@ -327,7 +349,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
     let before = watch.heartbeat();
 
     for line in 0..2000 {
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,?2)", [format!("input:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
+        transcript(&conn, line);
         if line % 100 == 0 {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -353,7 +375,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
         let conn = home.raw();
         move || {
             for line in 2000..3000 {
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,1,?2)", [format!("input:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
+                transcript(&conn, line);
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
@@ -437,7 +459,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     // Transcript lines between those facts were never a reason to read.
     let before = watch.heartbeat()["sessions"];
     for line in 0..50 {
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('conversation','observed',?1,3,?2)", [format!("{INPUT}:events.jsonl:{line}"), TRANSCRIPT_LINE.to_owned()]).unwrap();
+        transcript(&conn, line);
     }
     watch.parts(Duration::from_millis(1500));
     assert_eq!(watch.heartbeat()["sessions"], before);
@@ -449,38 +471,15 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 #[test]
 fn a_store_created_after_the_reader_started_is_shown() {
     let dir = tempfile::tempdir().unwrap();
-    let mut child = lf(dir.path(), &["monitor", "workspace", "--watch", "--json"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let mut planning = |accept: &dyn Fn(&[String]) -> bool| loop {
-        let line = lines.next().expect("reader ended").unwrap();
-        let frame: WorkspaceFrame = serde_json::from_str(&line).unwrap();
-        if let WorkspaceContent::Planning(Some(part)) = frame.content {
-            let tasks = identifiers(&part.roadmap);
-            if accept(&tasks) {
-                return tasks;
-            }
-        }
-    };
-    assert!(planning(&|_| true).is_empty());
+    let watch = Watch::open(dir.path());
+    assert!(watch.planning(Duration::from_secs(30), |_| true).is_empty());
 
-    let repo = dir.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
-    let wave = Wave::new(
-        WaveId::new(),
-        "product".into(),
-        repo.canonicalize().unwrap().display().to_string(),
-    );
-    store.create_wave(&wave).unwrap();
-    let home = Home { dir, store, wave };
+    let home = Home::at(dir);
     home.plan(1);
-    assert_eq!(planning(&|tasks| !tasks.is_empty()), ["FIX-1"]);
-    child.kill().unwrap();
-    child.wait().unwrap();
+    assert_eq!(
+        watch.planning(Duration::from_secs(5), |tasks| !tasks.is_empty()),
+        ["FIX-1"]
+    );
 }
 
 #[test]
@@ -491,24 +490,15 @@ fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
         .unwrap()
         .execute_batch("CREATE TABLE elsewhere(x)")
         .unwrap();
-    let mut child = lf(dir.path(), &["monitor", "workspace", "--watch", "--json"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let watch = Watch::open(dir.path());
     let frame = loop {
-        let line = lines.next().expect("reader ended").unwrap();
-        let frame: WorkspaceFrame = serde_json::from_str(&line).unwrap();
+        let frame = watch.next(Duration::from_secs(30)).expect("reader ended");
         if matches!(frame.content, WorkspaceContent::Planning(_)) {
             break frame;
         }
     };
     assert!(matches!(frame.content, WorkspaceContent::Planning(None)));
     assert!(frame.unavailable.is_some());
-    child.kill().unwrap();
-    child.wait().unwrap();
 }
 
 #[test]

@@ -10,8 +10,9 @@ accepted. Product decisions in the Task brief are binding. Open choices are in
 Built on the branch: the `store_revisions` migration and coverage test, the
 change waiter, `lf monitor workspace --watch --json` with planning, Sessions,
 Task work, Wave detail, Work activity and process activity parts, the
-unfinished-Exec completion-gate read, and the Desktop cutover with every
-`lf`-spawning timer loop deleted. Not yet done:
+unfinished-Exec completion-gate read, and the Desktop cutover with the
+planning, Session, process-activity, Wave-detail and registry timer loops
+deleted. Not yet done:
 
 1. **Planning reading is about 2 s on a copy of Jack's store, not 300 ms.**
    Inside the retained process it was about 7.5 s before two changes: Git
@@ -45,6 +46,18 @@ unfinished-Exec completion-gate read, and the Desktop cutover with every
    set, and UI-test modes, which no longer re-read Sessions every 2 s.
 7. **`WavesView`** (Portfolio and repository windows) now follows the stream
    through its own model; unexercised beyond compiling.
+8. **One timer loop still spawns `lf`.** While a Task's file comparison is
+   shown, `TaskFilesView` re-reads its change list every 10 s (LOO-327; Git
+   metadata of a linked worktree can sit outside the watched checkout). It is
+   not a store read and was left alone, so "0 spawns from refresh paths" holds
+   only for a window not showing a comparison. Nobody decided whether it
+   belongs in this Task.
+9. **Rust coverage gaps against "Done when".** The transcript test writes its
+   2,000 lines in about a second, not ten, and does not count `activity`,
+   which reads on its clock. A truncating checkpoint is tested; a removed and
+   recreated `-wal` is not. No test walks each displayed Session field through
+   a second-process write, which is the only guard on the transcript predicate
+   being too wide (question 10).
 
 ## Decisions (Jack Heart, 2026-10-05 design review)
 
@@ -156,9 +169,10 @@ A domain follows what a write can change on screen, not which table it lands
 in. Provider transcript lines and `usage` events bump nothing (finding 7): no
 part of this stream displays them, and counting them would invalidate every
 part for ten hours a day. The `session_events` trigger therefore carries a
-`WHEN` predicate. Its exact form is a sketch — receipt key not matching
-`:events.jsonl:` and kind not `usage` — to be settled against what
-`session list` and the roadmap conditions read. Live transcript display is
+`WHEN` predicate. As built it exempts kind `usage`, and kind `observed` whose
+receipt key contains `:events.jsonl:`. Nobody has checked that against every
+receipt key `session list` and the roadmap conditions read (question 10). Live
+transcript display is
 LOO-293's; it adds its own domain when it has a reader for one.
 
 Triggers live in the schema, so every writer bumps them — any `lf` version,
@@ -170,7 +184,7 @@ listed there by predicate, not by table.
 A Rust `StoreChanges` reader holds one `query_only` connection and waits on
 filesystem events for `loopflow.db-wal` (generalizing the existing
 `session_record/active/events.rs` subscription, re-arming when the file is
-recreated). On wake it reads the four revisions. A 30 s check and an explicit
+recreated). On wake it reads the four revisions. A 1 s re-read and an explicit
 `refresh` cover missed events, checkpoints and sleep/wake. Revisions are the
 authority; events only say "look now".
 
@@ -181,7 +195,7 @@ its lifetime, reads on a `query_only` connection. It emits newline-framed
 envelopes:
 
 ```json
-{"part":"planning","sequence":41,"answers":7,"home":"…","revisions":{"planning":911,"flows":88,"sessions":402,"execs":5120},"body":{…RoadmapSnapshot…}}
+{"part":"planning","sequence":41,"answers":7,"home":"…","revisions":{"planning":911,"flows":88,"sessions":402,"execs":5120},"unavailable":null,"body":{…RoadmapSnapshot…}}
 ```
 
 Parts and what invalidates them:
@@ -206,8 +220,8 @@ an unsent one.
 
 As built, "differs" ignores the fields that only restate when a reading was
 taken (`generated_at`, `evidence_age_secs`, a condition's `observed_at`, the
-activity window's bounds); revisions are re-read every second as the
-missed-event check; and a request forces its parts to answer even unchanged.
+activity window's bounds), and a request forces its parts to answer even
+unchanged.
 
 Byte comparison hides wasted work: a projection that ran and produced the same
 bytes sends nothing and still cost its 300 ms. The heartbeat frame therefore
@@ -288,7 +302,7 @@ files, diffs, usage).
 | No store yet | Frames with empty bodies; the watch waits for the file to appear. |
 | Projection fails | Part frame carries the existing `Unavailable` evidence; Desktop keeps last good rows, marked. |
 | Stream ends or stalls past the heartbeat | Last good reading shown as unavailable; restart with backoff; no silent freeze. |
-| Missed event, checkpoint, sleep | 30 s revision check or `refresh` converges. |
+| Missed event, checkpoint, sleep | 1 s revision re-read or `refresh` converges. |
 | Record deleted | Next complete frame omits it; it is not resurrected from saved text. |
 | Liveness not verified | Stays unknown; a frame never upgrades it. |
 | Home or installed `lf` replaced | Watch exits on configuration change as the active reader does; the window reopens it and drops other-Home content. |
@@ -336,22 +350,22 @@ liveness was not observed.
 
 ## Internal slices
 
-1. **This slice — store revisions and the watch's planning part.** Migration
-   with triggers and the table-coverage test; `StoreChanges`; `monitor
-   workspace --watch` emitting `planning`; the completion-gate read fix.
-   Focused test: `cargo test -p loopflow --test workspace_watch`.
-2. Desktop cutover for planning: stream consumer, request/answer ordering,
-   delete the planning loop. `swift test --filter PodiumModelTests`.
-3. `sessions` and `task` parts with scope requests; delete the Session and
-   Wave-detail loops.
-4. `activity` and `active` parts; delete the process-activity loop and the
-   second watch process.
-5. Rendered benchmark scenario and the installed-app demo.
+1. Built: store revisions, `StoreChanges`, the watch's planning part and the
+   completion-gate read.
+2. Built: Desktop cutover for planning with request/answer ordering.
+3. Built: `sessions`, `task`, `wave` and `work_activity` parts with scope
+   requests; the Session and Wave-detail loops are gone.
+4. Partly built: `activity` is a part and its loop is gone; `active` is still
+   the second watch process (remaining work 2).
+5. Not built: the rendered benchmark scenario and the installed-app demo.
 
-Slices 1–4 land together (Jack's decision); they are ordered for building,
+Slices 1–4 land together (Jack's decision); they were ordered for building,
 not for separate delivery.
 
 ## Done when
+
+The acceptance below is unchanged. Where the branch falls short of it, the
+gap is in Remaining work (5, 6 and 9), not removed here.
 
 - `cargo test -p loopflow --test workspace_watch` passes, covering: a Task
   created by a second process appears exactly once in the next planning frame
@@ -388,23 +402,21 @@ costs seconds. This plan earns no KR by itself.
 ## Risks
 
 - **Trigger coverage drifts** when a table is added. The coverage test is the
-  guard; the 30 s check does not help, because it reads the same revisions.
+  guard; the 1 s re-read does not help, because it reads the same revisions.
 - **The transcript predicate can be wrong in either direction.** Too wide and a
-  displayed Session state stops updating, with nothing to catch it but the 30 s
-  check — which reads the same revisions and will not. Too narrow and the
-  stream reprojects continuously. A test per displayed Session field, written
-  against a second-process writer, is the guard for the first; the heartbeat
-  projection counts for the second.
+  displayed Session state stops updating, and the 1 s re-read reads the same
+  revisions, so nothing catches it. Too narrow and the stream reprojects
+  continuously. A test per displayed Session field, written against a
+  second-process writer, is the guard for the first and is not written; the
+  heartbeat projection counts guard the second and are tested.
 - **`execs` invalidates planning.** Cheap once Desktop's polls are gone (2,067
   a day). One landing means no interval in which a surviving poll loop bumps
-  it; during development, expect the planning projection to re-run on every
-  remaining poll until slice 4.
-- **FSEvents latency on `-wal`** is unmeasured; the probe used kqueue. The
-  integration test decides; kqueue on the file plus a directory watch is the
-  alternative.
-- **The 300 ms projection budget** rests on one sample attributing ~70% to the
-  Exec scan. The remainder (PM portfolio validation, metrics, Git) may need
-  the same treatment.
+  it. Desktop's remaining one-shot reads (file clicks, comments, the 10 s
+  comparison loop) each still write an Exec and re-run it (question 9).
+- **Commit-to-frame latency is observed only on a tiny store**: 309 ms and
+  718 ms in a debug build. Nothing measures the waiter on Jack's store.
+- **The 300 ms projection budget is missed** (about 2 s, remaining work 1).
+  The Exec scan was most of the cost but not all of it.
 - **A long-lived process holds one binary** across an `lf` upgrade. It must
   exit on configuration change, as the active reader does.
 - **Migration on a 1.1 GB store** adds triggers only, no backfill; cost should
@@ -425,3 +437,7 @@ costs seconds. This plan earns no KR by itself.
 - 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 5/5,
   `--lib workspace_watch` 2/2, clippy clean; `swift test --filter
   "PodiumModel|DTOFixture|ActiveRunsObservation"` 53/53.
+- 2026-10-05 realign: source inspection only, no test rerun; plan corrected to
+  the built 1 s revision re-read, the built transcript predicate, and the
+  surviving 10 s file-comparison loop. `status_tests` upgrade case still
+  deferred to gate.

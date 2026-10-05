@@ -19,7 +19,9 @@ Recorded 2026-10-05 during kickoff. Nobody has confirmed these.
 5. **Folding `monitor active --watch` into the workspace stream** reshapes a
    proven reader. Chosen to end with one process per window; if it destabilizes
    active-Session discovery, the fallback is to leave that reader separate and
-   say so, not to keep both paths for the same part.
+   say so, not to keep both paths for the same part. As built the fallback
+   was taken: `active` is still its own process, without evidence that folding
+   it in destabilizes anything.
 6. **Per-read Exec recording.** ~63,000 of 65,043 daily Exec rows come from
    Desktop polls. This plan removes the polls; it does not change whether
    one-shot read commands record an Exec. That stays a question for
@@ -37,9 +39,10 @@ Added 2026-10-05 in design review. Still unconfirmed.
    question 8 has a cost. Narrowing the `execs` domain to Execs the planning
    conditions can read (those inside a Task checkout, or unfinished) would
    remove it. Not designed here.
-10. **The transcript predicate is a sketch.** See finding 7 and Risks in the
-    design. Nobody has checked every `observed` receipt key that `session list`
-    reads.
+10. **The transcript predicate is built and unverified.** It exempts kind
+    `usage`, and kind `observed` with `:events.jsonl:` in the receipt key.
+    Nobody has checked every `observed` receipt key that `session list` reads,
+    and no test covers each displayed Session field.
 
 Added 2026-10-05 in implementation. Nobody has confirmed these.
 
@@ -61,3 +64,10 @@ Added 2026-10-05 in implementation. Nobody has confirmed these.
 16. **Session fixtures read once.** UI-test modes without a reader used to
     re-read Sessions every 2 s; they now read at launch and after local
     actions. No UI test was run.
+
+Added 2026-10-05 in realign. Nobody has confirmed these.
+
+17. **The Task-files comparison still re-reads every 10 s through `lf`** while
+    it is shown (LOO-327). Each read writes an Exec and re-runs planning in
+    the watch. Whether this Task removes that loop, or question 9 narrows the
+    `execs` domain instead, is undecided.

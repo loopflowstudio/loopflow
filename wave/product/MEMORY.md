@@ -20,10 +20,12 @@ and a miss ships with numbers and a follow-up Task.
   re-read everything for ten hours a day.
 - A reading restates when it was taken in several fields. Comparing bytes
   without removing them sends a frame for every reading.
+- Git facts are not commits. The watch reuses Git answers, so a dirty
+  checkout shows later than the 15 s poll showed it. Nobody chose that trade.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
-  replaces the 2–30 s loops. A planning reading is about 2 s on a copy of
-  Jack's store against a 300 ms target; no rendered latency is measured.
-  Remaining work and evidence limits are in the Task's scratch plan.
+  replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
+  A planning reading is about 2 s on a copy of Jack's store against a 300 ms
+  target; no rendered latency is measured.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -735,8 +737,7 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-Retired 2026-10-05: these described residents, listeners and a Home server Jack
-deleted on 2026-09-27. The text is in
+Retired 2026-10-05 with the Home server Jack deleted on 2026-09-27; see
 [git history](https://github.com/loopflowstudio/loopflow/blob/105372850/wave/product/MEMORY.md).
 
 ## Model (design invariants)

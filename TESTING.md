@@ -531,6 +531,12 @@ Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
 or successful retry, `--flow-blocked` for keyed feedback continuation, and
 `--public-connect` for a live headless-to-terminal handoff.
+Use `--connect-performance 1 --output <new-dir>` for a native Codex PTY smoke
+probe. It records output and input-response endpoints separately, with engine
+identity before/after, and exits unsuccessfully on a failed sample. It uses a
+held seed turn and synthetic responses; it does not establish retained-history,
+draft, Flow-review, authenticated-provider, or compositor performance. The
+input-response endpoint includes a deliberate 300 ms submission delay.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.

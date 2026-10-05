@@ -15,13 +15,16 @@ stopped resume and automatic replacement cannot count as a live attachment.
 Jack authorized autonomous publication/landing on October 4; no manual performance
 demo is required. This grants no Desktop sustained-use KR credit.
 
-At `58d3b5b3e`, Codex history writes leave the reactor but connection still awaits
-all recovery pages. Flow-review resume stops native clients and supplies no live
-relay endpoint: measuring the conversation route alone misses that gap. Upstream
-LOO-375 also shows why diagnostics cannot depend on a successful SQLite Exec
-receipt. Reuse its process clock and file-recording lessons; its listing speedup
-is not connection evidence. One isolated authenticated turn exists, but no live
-connection baseline, target, runner or optimization is established yet.
+Native Codex smoke probes now reproduce a startup rejection: remote resume
+rejects local permission overrides. The branch removes those overrides and
+proves one input exchange with the same engine birth stamp. Failed startup also
+closed the prior engine: driver transfer/cleanup needs a lifecycle revision
+before optimization. Flow-review still replaces native clients without the relay.
+The [dated evidence](../../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
+retains failures and synthetic-response limits. No representative baseline,
+target, durable diagnostic or speedup exists. SQLite-independent timing must
+separate usable endpoints from attached lifetime. Protocol fixtures alone missed
+the native rejection.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

@@ -23,6 +23,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from connect_performance import measure
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import unix_connect
 
@@ -39,6 +40,7 @@ class Responses(ThreadingHTTPServer):
         self.commands: dict[int, str] = {}
         self.invalid_decision_output = False
         self.decision_outputs: list[dict] = []
+        self.response_text = "Fixture complete."
         self.held = threading.Event()
         self.release = threading.Event()
         self.command = (
@@ -99,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             }
         else:
-            text = "Fixture complete."
+            text = self.server.response_text
             if output_format := request.get("text", {}).get("format"):
                 if output_format.get("type") == "json_schema":
                     schema = output_format["schema"]
@@ -216,12 +218,18 @@ def main() -> None:
     parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
+    parser.add_argument("--connect-performance", type=int, metavar="SAMPLES")
     parser.add_argument("--flow-blocked", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--flow-driver-loss", choices=("running", "completed", "both"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
-    args.launch = args.launch or args.shared_provider_home
+    if args.connect_performance is not None:
+        if args.connect_performance < 1:
+            parser.error("--connect-performance requires a positive sample count")
+        if args.output.exists():
+            parser.error("--connect-performance requires a new output directory")
+    args.launch = args.launch or args.shared_provider_home or args.connect_performance is not None
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
     if not args.launch:
@@ -273,7 +281,8 @@ enabled = false
                 engines.mkdir()
                 shim = binary.parent / "codex"
                 shim.write_text(
-                    f"#!{sys.executable}\nimport runpy\n"
+                    f"#!{sys.executable}\nimport runpy, sys\n"
+                    f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
                     f"runpy.run_path({str(Path(__file__).resolve())!r}, "
                     "run_name='fixture')['_provider_entry']()\n"
                 )
@@ -293,14 +302,31 @@ enabled = false
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
                 )
                 try:
+                    if args.connect_performance is not None:
+                        measure(
+                            binary,
+                            work,
+                            env,
+                            server,
+                            results,
+                            args.output,
+                            args.connect_performance,
+                        )
+                        if any(sample["status"] != "passed" for sample in results["samples"]):
+                            raise SystemExit(1)
+                        return
                     if args.shared_provider_home:
                         _shared_provider_home_contract(
                             binary, args.codex, root, work, env, server, results
                         )
                         return
                     if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(binary, work, env, server, shared_engine=True)
-                        results["owner_exit"] = _live_driver_contract(binary, work, env, server, shared_engine=False)
+                        results["public_connect"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=True
+                        )
+                        results["owner_exit"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=False
+                        )
                         return
                     if args.flow_blocked:
                         _flow_blocked_contract(binary, work, env, server, results)
@@ -423,6 +449,8 @@ def _terminate(signum: int, _frame: object) -> None:
 
 
 def _provider_entry() -> None:
+    if os.environ.get("LF_PROBE_NATIVE_UI") and "app-server" not in sys.argv:
+        os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if record := os.environ.get("LF_PROBE_LAUNCHES"):
         # What a launch handed the provider. A terminal resume is recorded and
         # not run: this proof is headless.

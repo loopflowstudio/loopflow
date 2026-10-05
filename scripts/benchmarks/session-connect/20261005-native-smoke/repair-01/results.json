@@ -1,0 +1,42 @@
+{
+  "binary_sha256": "a799dfe65bd574eced57808a908b0935211563235e35aafad6950ef21189db8c",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 795.6152499973541,
+      "input_response_ms": null,
+      "before": [
+        "session_907a78c207b646159c478346f9cd7d26",
+        "01a10a73-0d5b-7160-a538-9556e23845b2",
+        1,
+        25924,
+        1791176674,
+        "0720216e-872e-4ec5-8461-5fbfcc7ce590"
+      ],
+      "driver_claim_ms": 331.7442499974277,
+      "input_sent_ms": 795.6237499965937,
+      "after": [
+        "session_907a78c207b646159c478346f9cd7d26",
+        "01a10a73-0d5b-7160-a538-9556e23845b2",
+        1,
+        25924,
+        1791176674,
+        "a155a6aa-9f48-40c5-9801-ac4d4740f8ac"
+      ],
+      "continuity": true,
+      "status": "failed",
+      "elapsed_ms": 45029.81295900099,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn"
+    }
+  ],
+  "targets": null
+}

@@ -27,94 +27,88 @@ Jack supplied this reproduction: lf session connect task_7c24c806bfaa464a877352b
 
 Additional acceptance: retain connect phase timings keyed to the exact invocation and Session, and expose them through a supported diagnostic command/log view so Product can answer how long a specific connect took afterward. Separate lookup, preparation/connection, first output and verified input readiness from total attached lifetime; record unavailable readiness evidence explicitly.
 
-## Investigation and draft measurement design — October 4, 2026
+## Implementation evidence and revised design — October 5 UTC
 
-The earlier disposable-provider authentication blocker was resolved by one dated probe. No
-runner, baseline, numeric targets, diagnostics or production edits exist yet.
-One isolated provider turn proved the recipe; no connection probe has run.
+`tests/e2e/codex_connect.py --connect-performance N --output <new-dir>` now
+launches production `lf session connect` under an owned PTY, using a real Codex
+engine/native UI, synthetic local Responses and disposable Loopflow/provider
+Homes. Each sample starts a fresh held seed turn. It records driver claim,
+recognizable output and a unique input-response marker separately, preserves
+failures, checks recorded Session/thread/PID/generation and the OS birth stamp,
+and stops owned processes. Failed samples stop the run with a nonzero exit.
+It has no configured-account dependency. These are harness smoke checks, not
+retained-history or authenticated-provider acceptance.
 
-Source findings rechecked at `58d3b5b3e05135a3267d0f5340e435044440bb49` on October 5 UTC:
+The native baseline exposed a concrete failure: the resume command adds local
+permission overrides, which Codex 0.160.0 rejects on remote resume. The bounded
+production repair builds remote resume without local permission/model/workspace
+overrides; the live engine owns those values. Ordinary stopped resume remains
+unchanged. Two successful native probes reached output and a submitted response;
+the latest also checked the actual engine birth stamp. Failed attempts remain in
+[the dated evidence](../scripts/benchmarks/session-connect/20261005-native-smoke/README.md).
+The first probe timed out on disposable folder trust and its cleanup failed;
+a later probe separated text/Enter to avoid Codex paste handling. No installed
+Home, account route or unrelated Session was changed by these probes.
 
-- `lf/commands/session.rs::run` creates the runtime and journal before opening
-  the shared store and dispatching to `ops/human_session.rs::open`. Measure
-  those startup costs as well as lookup; a timer inside `open` alone misses them.
-- Conversation lookup resolves the retained Session, workspace admission and
-  provider reference. Codex's `connect_live_codex` probes the existing socket,
-  claims the driver, and calls `CodexConnection::recover_history` before launching
-  the native UI. Recovery still awaits every turn page and its recorded history before UI launch.
-  Upstream `7a6ae0d70` moved those writes off the reactor and added independently
-  timed fenced dispatch; the caller still awaits recovery. This remains a
-  candidate cost, not a measured bottleneck or permission to drop history.
-- Flow-review lookup follows a separate branch: lookup, launch lock, repeated
-  lookup to validate the same position, surface projection, then
-  `open_flow_locked` / `resume_native_session` or review launch. Preserve that
-  revalidation and locking; the conversation-only Codex path cannot establish
-  performance of Jack's supplied selector. `resume_native_session` currently
-  stops existing native clients and resumes with no live relay endpoint. That
-  route cannot be counted as preserving a live provider or its draft merely
-  because the selector resolves. The runner must classify the observed route
-  and retain this acceptance gap; reconciling live review connection may require
-  a substantial implementation change.
+### Lifecycle counterexample: dependent optimization stops
 
-Proposed runner: invoke the production binary through owned PTYs against an
-isolated Home/database and owned engines. Cover ordinary conversation and exact
-Flow-review selectors with short and paginated histories. Inventory live attachment
-support per provider; Claude/OpenCode do not use the Codex socket path. Record
-unsupported paths separately. Preserve engine PID, Session/thread identity and
-drafts during each connection; clean up only runner-owned processes.
+The baseline's rejected UI also cleared the pre-existing engine endpoint.
+`connect_live_codex` claims the driver before native UI startup, then calls
+`finish_session_driver` even when startup fails. The supported close operation
+ends the live engine. Removing one rejected flag repairs its observed trigger,
+but does not meet the accepted preservation contract for other startup failures.
+This is a reproduced contradiction in the attachment lifecycle, not an auth,
+display-server or performance-budget blocker.
 
-`connect_live_codex` finishes its claimed driver after UI exit, which can close
-the engine. For repeated samples, use supported driver transfers or separately
-owned live fixtures with equivalent history. Do not silently benchmark stopped
-Session resumes. This is a source finding, not provider acceptance.
+The design must distinguish unsuccessful UI attachment from an established
+controlling UI's ordinary exit, using the existing Session/driver authority.
+A candidate is preparing the native UI without transferring write authority,
+then transferring at a provider-confirmed boundary; that is a proposal, not an
+accepted change to takeover semantics. It must retain driver fences and survive
+failure without restoring stale authority. Merely skipping all driver cleanup
+would abandon current exit semantics and is not an adequate repair. Dependent
+latency optimization and delivery are paused for this lifecycle revision.
 
-Use an external monotonic start before spawning lf. Visible output requires
-recognizable retained conversation content at the PTY endpoint; input readiness
-requires a unique input/response exchange through the owned provider, separately
-timestamped. PTY bytes do not prove compositor display. Quiet output, socket
-acceptance and attached lifetime cannot substitute for either endpoint. Retain
-timeouts, failures, host/binary/data identities and at least 20 comparable samples
-per reported p95. Simulated transport cannot certify native provider usability.
+Flow-review selectors have another unresolved path: lock, repeated position
+validation, projection, then `resume_native_session`, which stops native clients
+and passes no live relay endpoint. The new runner does not exercise that selector
+yet. Preserve its revalidation/review token and prove existing provider/draft
+continuity when adapting it. A conversation-only success cannot stand in for
+Jack's exact selector. Claude/OpenCode remain unmeasured; their absence from the
+Codex relay path is not an all-provider support verdict.
 
-For durable diagnostics, prefer the existing file journal and reuse
-`journal::process_elapsed()` for entry-point timing, keeping the external PTY
-clock for the full invocation endpoint. Upstream `7a6ae0d70` demonstrated missing
-Exec ledger rows under SQLite contention; diagnostics must survive that case.
-`ops/wt_timing.rs` supplies an existing file-based timing/report precedent, not
-connection measurements. Journal schema and supported reader selection remain
-design work; no additional lifecycle store is proposed. Record the exact connect Exec, requested selector,
-resolved Session and monotonic elapsed phase values, including lookup,
-preparation/connection, first output and verified readiness. Flush observations
-while attached; total exit duration is a separate event. Mark unobservable
-endpoints unavailable with a reason. Select the supported diagnostic reader after
-checking existing journal commands. Transport RPC completion alone must not be
-labeled usable input.
+### Remaining implementation and acceptance
 
-Delete — do not maintain: no confirmed deletion target before measurement.
-Remove only measured redundant work; retain ownership fences, review revalidation,
-history and existing failure semantics.
+- Revise and implement failed-attachment preservation, then exercise failed and
+  successful native startup against a retained controlling client and draft.
+- Extend the production PTY runner to exact Flow-review selectors, completed
+  short/paginated history, repeated connections, retained drafts and supported
+  authenticated providers. Keep unsupported and unavailable routes explicit.
+- Capture comparable baseline samples and contributing startup/lookup/transport
+  costs before choosing numeric median/p95 targets. At least 20 comparable samples
+  are required for p95. The five changing smoke probes establish no distribution
+  and justify no latency target or optimization claim.
+- Implement file-based per-invocation diagnostics, keyed to exact Exec, selector
+  and resolved Session, with a supported reader. Reuse `journal::process_elapsed`
+  for in-process phases and the runner's external spawn clock for endpoints.
+  Keep lookup, connection preparation, first output, verified input and attached
+  lifetime separate; flush while attached. Unobservable endpoints need an
+  explicit unavailable reason. SQLite contention can hide Exec receipts, so the
+  diagnostic must not depend on a successful database write. No second lifecycle
+  store is proposed; the supported reader and observation boundary remain design.
+- Only then optimize measured redundant work, verify comparable before/after
+  results, and complete the existing acceptance and authorized delivery.
 
-Review finding: moving history recovery off the critical path without proving
-history ordering and provider readiness could create a false speedup. Remaining
-work is fixture/runner construction, baseline and numeric targets, durable timing
-and its supported reader, measured optimization, regression checks and the
-before/after report. Baseline must identify the binary revision because the older
-source predates the dispatch and receipt changes. No production reduction is
-justified yet. Source inspection establishes no speedup and no Desktop KR credit.
+Delete — do not maintain: remote resume no longer applies local launch overrides.
+No history-recovery deletion is justified. `recover_history` still awaits every
+page before UI startup; moving it requires proof of history ordering and readiness.
+Preserve ownership fences, review revalidation, historical data and failure evidence.
 
-### Authentication evidence and remaining fixture work
+Review findings: protocol fixtures previously replaced the native UI and missed
+its rejected launch arguments. A successful socket/driver claim did not establish
+usable input. The failed native UI also exposed destructive cleanup; timing alone
+would hide that regression. PTY bytes are not compositor presentation, synthetic
+responses are not provider service latency, and a single live seed turn is not
+representative retained history. Product has no child Wave memories in this checkout.
 
-The October 5 UTC probe returned an exact marker from one isolated batch turn
-using an existing managed Codex account. No credential was copied; the provider
-could refresh its login and wrote a rollout in the account home. The disposable
-Loopflow Home received its own database and runs. This proves authentication for
-that turn, not live connection, present capacity, or repeatable fixture cleanup.
-The dated recipe and account side effects remain in `scratch/questions.md`.
-
-A completed headless Flow-step engine is a candidate fixture, based on earlier
-observed surviving engines; a plain batch run closed its engine. Fixture creation,
-owned-process tracking, retained drafts and safe repeated connection remain
-unimplemented. Claude remains unmeasured; support and availability must be reported
-separately. No authentication blocker remains established by the supplied evidence.
-
-Check: source inspection at `58d3b5b3e` and `git diff --check` — plan reconciled with upstream; prose-only changes, no connection benchmark or tests rerun.
+Check: `cargo build -p loopflow --bin lf`, focused `preferred_name_resume_opens_every_provider_without_a_prompt`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, helper Ruff and `git diff --check` passed; native smoke passed with preserved engine birth stamp; full acceptance remains as listed above.

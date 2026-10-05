@@ -253,21 +253,13 @@ pub(crate) fn resume_session_with_env(
     remote: Option<&Path>,
 ) -> Result<()> {
     let user_name = crate::engine::config::participant_name()?;
-    let mut command = build_resume_session_command(
+    let command = build_resume_session_command(
         harness,
         model,
         worktree,
         &provider_session.provider_session_id,
+        remote,
     )?;
-    if let Some(remote) = remote {
-        if harness != "codex" {
-            bail!("This provider has no native remote connection");
-        }
-        command.args.splice(
-            1..1,
-            ["--remote".into(), format!("unix://{}", remote.display())],
-        );
-    }
     let mut environment = BTreeMap::from([
         (crate::durable::RUN_ID_ENV.to_string(), run_id.to_string()),
         (
@@ -555,8 +547,27 @@ fn build_resume_session_command(
     model: Option<&str>,
     worktree: &Path,
     provider_session_id: &str,
+    remote: Option<&Path>,
 ) -> Result<SessionCommand> {
     let cwd = absolute_path(worktree);
+    if let Some(remote) = remote {
+        if harness != "codex" {
+            bail!("This provider has no native remote connection");
+        }
+        // The live engine already owns its workspace and permission policy.
+        // Native remote resume rejects local permission overrides.
+        return Ok(SessionCommand {
+            program: "codex".to_string(),
+            args: vec![
+                "resume".to_string(),
+                "--remote".to_string(),
+                format!("unix://{}", remote.display()),
+                "--".to_string(),
+                provider_session_id.to_string(),
+            ],
+            cwd,
+        });
+    }
     let worktree_arg = cwd.to_string_lossy().to_string();
     let args = match harness {
         "claude" => {
@@ -1672,7 +1683,7 @@ mod tests {
         let provider = fake_provider(&temp, "for arg do printf '%s\\0' \"$arg\"; done > received");
         for harness in ["claude", "codex", "opencode"] {
             let command =
-                build_resume_session_command(harness, None, temp.path(), "recorded-session")
+                build_resume_session_command(harness, None, temp.path(), "recorded-session", None)
                     .unwrap();
             let status = Command::new(&provider)
                 .args(&command.args)

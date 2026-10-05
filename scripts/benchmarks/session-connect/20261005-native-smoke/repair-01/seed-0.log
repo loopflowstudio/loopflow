@@ -1,0 +1,12 @@
+[32m INFO[0m [1mrun[0m[1m{[0mSome("held conversation") [3mskill[0m[2m=[0mNone [3mhas_message[0m[2m=[0mtrue[1m}[0m[2m:[0m [2mloopflow::lf::commands::run[0m[2m:[0m preparing launch prompt
+── context ──────────────────────────────────
+  assembly        345  2 assets
+  operating_instructions  1,248  1 assets
+  surface_instructions    141  1 assets
+  user_message      2  1 assets
+  ───────────────────────────────────
+  total         1,736  
+
+  lf -m codex
+[32m INFO[0m [1mrun[0m[1m{[0mSome("held conversation") [3mskill[0m[2m=[0mNone [3mhas_message[0m[2m=[0mtrue[1m}[0m[2m:[0m [2mloopflow::lf::commands::run[0m[2m:[0m launching agent [3mharness[0m[2m=[0m"codex"
+

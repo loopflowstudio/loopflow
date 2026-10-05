@@ -129,142 +129,81 @@ fencing while selecting by the shared binding. Transition
 recovery, KRs-before-chapter creation, preserved backlog, Desktop activation and
 configured acceptance remain. No further cached-name policy decision is needed.
 
-### Preservation counterexample — October 5
+### Preservation boundary — October 5
 
-Source inspection invalidates the assumption that replacing the two SQL checks
-preserves the start/rotation boundary. `sessions.rs::create_session` and
-`bind_session` do not use either check. Released migration
-`0.12.29.001_release.sql` sets Started in `task_first_conversation_insert` and
-`task_first_conversation_bind`. `flows.rs::begin_flow_operation` also writes
-Started. The Wave rotation lock is not acquired by these writers. Session
-creation's checkout lock is a different lock, and binding acquires neither.
+Stabilize Task/checkout membership before changing selection. The earlier locking
+proposals and full interleavings are retained at
+`2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
+Three source-derived counterexamples determine the remaining cut; none is an
+executed provider-rotation proof:
 
-Counterexample for the proposed preserved-backlog path: rotation reads Task T as
-untouched; an existing conversation binds to T before the configuration switch;
-the trigger sets Started; rotation leaves T in the predecessor from its earlier
-classification, switches configuration and completes that Project. T started
-before the boundary but did not transfer. Another read without shared exclusion
-only moves this race. This is a source-derived interleaving, not an executed
-provider rotation. The focused public-store regression
-`session_binding_retains_a_task_in_completed_project_history` exercises the
-surviving constraint: binding after Project completion succeeds, records Started
-and preserves Task/checkout identity. It must not become a current-Project guard.
+- **First starts bypass chapter admission.** `sessions.rs::create_session` and
+  `bind_session` bypass the two SQL checks. Released
+  `0.12.29.001_release.sql` triggers `task_first_conversation_insert` and
+  `task_first_conversation_bind` set Started; `flows.rs::begin_flow_operation`
+  also writes it. These writers do not share the Wave rotation lock. Binding
+  after classification but before the configuration switch can strand started
+  work in the predecessor. Historical binding must nevertheless stay allowed.
+- **Started is not complete work evidence.** `chapter_task_evidence` reads
+  Started and the managed worker claim. An unbound, non-primary conversation
+  under a Task checkout can have neither, even without concurrency.
+  `reserve_session_in` correctly leaves its attribution null. Classification
+  must reuse `task_work.rs::session_membership`: direct binding, checkout and
+  Flow associations, with primary-scope exclusion. A second path counter or
+  explicit-ancestry lock would miss this contract.
+- **Registration changes membership without a Session write.**
+  `ops/task.rs::create_prepared_task` resolves a Project before existing-issue
+  registration via `Store::create_task_with_worktree`, holding a worktree lease
+  but no Wave planning lock. A provider-started issue can move remotely during
+  rotation, then register locally against the predecessor after checkout locks
+  were collected. Its earlier taskless conversations immediately become Task
+  work. Unknown unregistered backlog would block rotation; this example relies
+  on provider Started. Generic `update_task` can also relocate a checkout.
+  New-issue `pm_create_task_idempotent` already holds the Wave lock.
 
-Revise the preservation cut before implementing shared selection: serialize the
-final Task classification/transfer/configuration switch with every first-start
-writer, including direct Session creation, binding, review reservation and
-mechanical Flow start. The implementation must establish one lock order before
-taking SQLite writer transactions; taking the Wave lock from a helper already
-inside a transaction risks inversion with rotation. Inspect all entry points,
-not only worker claim and managed Flow admission. Historical binding remains
-allowed, and an unfinished transition receipt must not become a permanent
-start denial while ordinary use waits for a failed reset to recover.
+The proposed exclusion has one order: Wave planning locks, stable Task/checkout
+population, checkout admission locks in canonical-path order, then SQLite writes.
+Stabilize registration and membership-changing relocation through classification,
+transfer and the durable configuration switch. Resolve and revalidate the selected
+Project within that boundary; callers already holding the Wave lock must not
+reacquire it. The exact population-fence implementation remains open.
 
-The initial proposal put every first-start operation under the Wave lock before
-SQLite writes. The membership finding below supersedes that mechanism; explicit
-Task ancestry does not identify every conversation to preserve. Selection and
-rotation remain unimplemented; the name-cutover checkpoint is `eb8315a31`.
-
-### Checkout membership changes the exclusion boundary — October 5
-
-`store/sqlite/task_work.rs` includes an unbound, non-primary Session by its
-checkout path, including subdirectories. `reserve_session_in` preserves that
-Session's nullable Task attribution. The first-conversation triggers observe
-explicit `task_id`, while `chapter_task_evidence` reads Started and the managed
-worker claim, not checkout membership. Therefore a clean, unpublished Task can
-have a retained conversation without either start flag. The existing classifier
-can treat it as untouched; replacing expiration with preserved backlog would
-still leave that conversation's Task in the predecessor. This counterexample
-does not require a concurrent write. Locking explicit Task/Wave ancestry alone
-cannot fix it.
-
-The public-store regression
-`checkout_session_membership_survives_project_transfer_without_binding` creates
-an unbound conversation in a Task subdirectory and transfers the Task. It checks
-that membership, Session bytes and checkout identity survive without synthesizing
-a binding. It proves the preservation contract, not automatic rotation or the
-proposed exclusion. The classifier mismatch above is source-derived.
-
-Revised implementation proposal: reuse checkout admission for execution exclusion
-instead of adding a Wave lock to every start. Rotation owns Wave planning locks,
-then the affected checkout admission locks in stable canonical-path order, then
-SQLite writes. Start operations acquire their affected checkout locks before
-SQLite and never wait for Wave planning locks. Include both the execution checkout
-and an explicitly bound Task's checkout, deduplicated in the same order. Binding
-from elsewhere must acquire its target Task's checkout; taskless Session/Flow
-creation must participate through cwd. Resolve omitted ancestry before choosing
-locks and revalidate it after acquisition. The current helper's missing-path
-fallback uses the literal cwd, so subdirectories of removed checkouts need the
-same retained Task checkout identity used by membership; Git-root discovery alone
-is insufficient. No lock may be acquired while holding the store mutex or writer
+Execution starts acquire affected checkout locks before SQLite and never wait
+for Wave planning locks. Cover direct Session creation, review reservation,
+mechanical Flow starts, taskless starts through cwd, and binding from elsewhere.
+Include the execution and explicitly bound Task checkouts, deduplicated in the
+same order. Resolve omitted ancestry before locking and revalidate afterward.
+Missing checkout paths and their subdirectories must resolve the retained Task
+checkout identity; the current literal-cwd fallback and Git-root discovery are
+insufficient. Acquire no planning or checkout lock inside a store mutex or writer
 transaction.
 
-Final classification must consume the existing Task-work membership reader as
-well as explicit Started, authored and publication evidence. Ordinary inspection
-Execs still do not establish Started; membership grants neither process authority
-nor permission to rewrite attribution. Existing independent Sessions/Flows must
-remain associated and preserve their history. Do not copy a second path-matching
-implementation into chapter classification.
+Final classification combines complete Task-work membership with Started,
+authored and publication evidence. Preserve independent Sessions/Flows and their
+bytes; membership grants no signaling authority or attribution rewrite. Inspection
+Execs still do not establish Started.
 
-October 5 realign confirms that `task_work.rs::session_membership` excludes
-primary-scope conversations and includes Flow-associated Sessions, as well as
-direct binding and checkout membership. Reuse that complete rule; a broad count
-of conversations under a path would change preservation semantics. The latest
-PM compression does not change this reader, start admission or rotation.
-
-After failed reset, released checkout locks permit ordinary starts; recovery
-reclassifies while the predecessor remains configured. The durable configuration
-switch is the proposed boundary after which new historical bindings stay with
-the predecessor. Retry after that switch reconciles already selected transfers
-and predecessor completion without sweeping newly bound historical work into the
-successor. Prove response loss on each side of that boundary. Pending receipts
-alone never deny starts. This is a synchronization/recovery revision, not a new
-product decision or implemented fence; dependent selection work stopped here.
-
-October 5 reconciliation read Release's GOAL.md and full MEMORY.md, the only
-immediate child scope in this checkout. Its recovery finding applies here:
-helper-level proofs do not establish recovery through an operation's entry point.
-The CLI/ Desktop activation and rotation proofs below must exercise their own
-entry points and retain the actual failure outcome. Release publication and
+After a failed reset, released checkout locks permit ordinary starts. Recovery
+reclassifies while the predecessor remains configured. After the configuration
+switch, retry reconciles selected transfers and predecessor completion without
+sweeping new historical bindings into the successor. Pending receipts alone never
+deny starts. Prove both start/rotation orderings and response loss on both sides
+of this boundary through operation entry points, retaining actual failures.
+Release's recovery findings reinforce this requirement; its publication and
 installation evidence supplies no Project-readiness acceptance.
 
-### Task registration also changes membership — October 5
+Existing public-store regressions establish narrower preservation contracts:
 
-The checkout-lock proposal above is insufficient even if every listed Session
-and Flow writer participates. `ops/task.rs::create_prepared_task` resolves the
-Project before registering an existing issue through
-`Store::create_task_with_worktree`. This path holds a worktree lease, but no Wave
-planning lock. New-issue creation's `pm_create_task_idempotent` does hold the Wave
-lock; that protection does not cover existing-issue registration.
+- `session_binding_retains_a_task_in_completed_project_history`: historical
+  binding succeeds, sets Started and retains Task/checkout identity.
+- `checkout_session_membership_survives_project_transfer_without_binding`:
+  transfer retains unbound Session bytes, checkout identity and membership.
+- `task_registration_retains_earlier_checkout_conversations_without_binding`:
+  registration associates earlier Sessions without changing their bytes or
+  setting Started.
 
-Interleaving: admission resolves predecessor P for a provider-started issue
-without a local Task row, then pauses. Rotation collects registered checkouts,
-locks them, and moves that issue remotely (provider Started already classifies
-it as Move). Its local transfer finds no Task. After rotation's final Task read,
-admission registers the Task against the previously resolved P, associating an
-earlier taskless conversation immediately; rotation switches to Q and completes
-P. The new Task checkout was outside its lock set. Unregistered backlog with
-unknown evidence would block current rotation; this counterexample uses the
-provider-started case. Another inventory read only moves the race. Generic
-`update_task` also writes `worktree`, so population stability cannot be assumed
-from Session admission. This is a source-derived interleaving, not a provider test.
-
-`task_registration_retains_earlier_checkout_conversations_without_binding`
-exercises public SQLite registration: an earlier unbound conversation becomes
-Task work, retains its exact Session bytes, and does not acquire Started. It
-preserves required behavior; it does not assert that registration must bypass a
-future fence or prove the rotation interleaving.
-
-The revised exclusion must stabilize the Task/checkout population before
-collecting checkout locks, through final classification and the configuration
-switch. Registration of existing issues and membership-changing relocation must
-participate, as well as the previously identified Session/Flow entry points.
-Resolve and revalidate the selected Project inside that boundary. Existing
-new-issue callers already holding the Wave lock must not recursively acquire it.
-Do not acquire planning or checkout locks inside SQLite transactions. The exact
-population-fence implementation and operation-entry-point proofs remain open;
-dependent selection and rotation implementation stopped on this counterexample.
-Jack Heart's explicit-binding decision and historical binding policy are unchanged.
+These tests prove neither rotation nor its exclusion. Selection and rotation
+remain unimplemented; Jack Heart's explicit-binding policy is unchanged.
 
 ## Outcome and demo
 
@@ -699,24 +638,14 @@ multi-product platform are excluded.
 
 ## Review constraints
 
-Compression review, October 5: `LinearClient::adopt_project` is reached only for
-migration-marked Projects. Its no-Flow test proves that boundary, not ordinary
-ensure or end-to-end name preservation; the renamed test makes this limit explicit.
-The surviving renderer trims the optional Flow once; tests retain no-Flow KR
-round-trip and provider payload checks without repeated extraction or unused clones.
-Reteam carries one preserved Project name; its CLI prints that name and the source
-Teams, with no implied rename. The migration proof uses the shared draft/materialized
-SQL loader directly after seeding pre-cutover data, removing a boolean phase helper.
-Project error conversion uses one mapping function. Sync retains its diagnostic
-collection while checked reads reject the first slug conflict; combining these
-would change their reporting contracts.
-The compressed implementation asserts retained provider names and carries Projects
-directly through reteam, comparing Team IDs without a classification enum. Linear's
-ownership decoder supplies Task Project fields on acquisition; normalized planning
-projects the accepted slug on reads. Snapshot collection borrows Projects, retaining
-its association of list results with the selected Project because migration adoption
-can change those facts. Source inspection on October 5 confirms these owners;
-no start/rotation exclusion or shared selection follows from this reduction.
+Compression review, October 5: migration-only `LinearClient::adopt_project`
+coverage does not prove ordinary ensure. Preserve sync's collected diagnostics
+and checked reads' first-error contract. Linear ownership decoding supplies Task
+Project fields; normalized planning projects the accepted slug. Snapshot collection
+retains each list result's selected Project association because migration adoption
+can change those facts. Earlier reduction details remain at
+`2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
+This pass consolidates the preservation design only; it changes no runtime code.
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
@@ -728,4 +657,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `cargo test -p loopflow --lib task_registration_retains_earlier_checkout_conversations_without_binding` passes (1 test); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; earlier focused PM evidence is retained at `5d1b5a3b1`; population/admission fencing, selection, rotation, Desktop and configured acceptance remain unfinished.
+Checks: `git diff --check` passes; `lf context --skill compress` reports all sources within budget. Prose-only change, no behavioral rerun; unchanged code checks remain at `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`. Gate retains affected suites, the output-handle investigation and configured acceptance.

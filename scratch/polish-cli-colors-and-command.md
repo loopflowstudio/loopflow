@@ -1,9 +1,10 @@
 # Polish CLI colors and command blocks in Desktop (LOO-381)
 
-Status: draft plan from kickoff, 2026-10-05. Jack Heart requested the Task on
-2026-10-05; nothing below is approved by Jack beyond the Task's own scope and
-acceptance. Header contents, spacing and prompt ownership are kickoff choices
-and stay open to his demo review. Assumptions are in `scratch/questions.md`.
+Status: kickoff plan, implemented on the branch 2026-10-05; not demoed. Jack
+Heart requested the Task on 2026-10-05; nothing below is approved by Jack beyond
+the Task's own scope and acceptance. Header contents, spacing and prompt
+ownership are kickoff choices and stay open to his demo review. Assumptions are
+in `scratch/questions.md`. What is left is under Remaining.
 
 ## Problem
 
@@ -74,15 +75,25 @@ overlay and keeps `selectedCommandBlock: (id, text)`.
   sit up to half a cell off the rows.
 - The block list calls `selectCommandBlock` once per viewport row, each walking
   up to the prior prompt, at 10 Hz under the renderer mutex.
-- The real-PTY suite is `.requiresDisplay` (`LOOPFLOW_NATIVE_TESTS=1`); it does
-  not run headless. Hit-testing, layout and zsh-hook tests do.
+- The whole `GhosttyTerminalInputTests` suite is `.requiresDisplay`
+  (`LOOPFLOW_NATIVE_TESTS=1`), including tests that need no display. Behind that
+  gate the zsh-hook test had been failing since #1356 (`--mode interactive` is
+  not a zsh option). Layout, style and zsh-hook tests now live in the ungated
+  `GhosttyShellBlockTests`.
 
-**Feasible mechanisms, checked in Ghostty source** (local checkout at
-`0149fd71`, not the pinned `4c838723`; re-verify at the pin):
-`Row` is `packed struct(u64)` with 23 spare bits and reflow already copies
-`semantic_prompt` row to row (`PageList.zig`), so per-row command status is a
-small addition. `Screen` has tracked pins that survive reflow. The zsh
-integration marks multi-line prompts (`133;A;k=s`) and emits `133;D;<status>`.
+**Mechanisms, verified at the pinned `4c838723`.** `Row` is
+`packed struct(u64)` with 23 spare bits and reflow copies `semantic_prompt` row
+to row, so per-row command status is a small addition. `Screen` tracked pins
+survive reflow, and are marked garbage when their rows are evicted or reset. The
+zsh integration marks multi-line prompts (`133;A;k=s`) and emits `133;D;<status>`
+(no code after a bare Enter).
+
+**Found during implementation: a wrapped command line split its block.** Reflow
+copied `semantic_prompt = .prompt` onto the row a soft-wrap creates, so upstream
+treats a wrapped prompt or command line as two prompts, and unwrapping let a
+continuation row overwrite the first row's metadata. The patch makes the wrapped
+row a prompt continuation and keeps the first row's metadata on unwrap. One
+upstream test that asserted the old result is changed in the patch.
 
 ## Approach
 
@@ -116,8 +127,9 @@ Rejected: a clean environment only in `lf desktop`; other launchers stay tainted
   across the viewport.
 - `ghostty-build` runs the patch's Zig tests before building and fails on them.
 
-Contingency if tracked-pin ownership is unsound at the pinned revision: keep
-the selection in `Screen` as a plain pin and clear it on reflow. Still one owner.
+The tracked pin held at the pinned revision; no contingency was needed. The
+first status reported for a prompt row wins, so `clear` followed by `133;D`
+cannot rewrite an older command.
 
 Rejected: Swift pairing `command_finished` actions with block ids (ids do not
 survive reflow or scroll). Rejected: making the block a native rectangle
@@ -145,10 +157,11 @@ separately authorized action; see `scratch/questions.md`.
 
 ### 4. A Loopflow prompt for zsh shells that still have the system default
 
-A Loopflow-owned zsh script, chained in front of Ghostty's integration, replaces
-`PROMPT` on first `precmd` only when it equals macOS's default
-(`%n@%m %1~ %# `): line one is the context header (`~/src/loopflow` dim, branch
-in the accent color), line two is `❯ `. A customized prompt is left alone and
+A Loopflow-owned zsh `.zshenv`, written to a temporary `ZDOTDIR` at each shell
+launch and chained in front of Ghostty's integration, replaces `PROMPT` on first
+`precmd` only when it equals macOS's default (`%n@%m %1~ %# `): line one is the
+context header (`~/src/loopflow` dim, branch in the accent color), line two is
+`❯ `. It turns on `prompt_subst` in that shell so the branch stays current. A customized prompt is left alone and
 serves as its own header. Copy excludes the header because the block text is
 semantic input plus output. bash and fish keep their prompts.
 
@@ -185,28 +198,32 @@ retained environment for Sessions first started outside Desktop.
 `selectedCommandBlock`, `commandBlockMouseDown`, `readCommandBlock`,
 `clearCommandBlockSelection`; the centered-grid inset in `ghosttyViewportRow`
 and `ghosttyCommandBlockFrame`; the resting fill; `ghostty_surface_read_command_block`
-and the pointer-xor id in the patch. `commandBlockClickAndCopy`,
-`commandBlockHitTesting` and `commandBlockLayout` are rewritten against the new
-behavior, not kept beside it.
+and the pointer-xor id in the patch; `ghosttyCommandBlock(atViewportRow:in:)` and
+its `commandBlockHitTesting` test (Ghostty resolves the clicked block; its Zig
+tests cover that). All are gone. `commandBlockClickAndCopy` and
+`commandBlockLayout` are rewritten against the new behavior, not kept beside it.
 
 **Forbidden outcomes.** A Swift copy of selection state or exit status beside
 Ghostty's; a second patch file layered on `0001`; a committed local-path
 `binaryTarget`; block overlays on `.session` terminals; a failure color inferred
 from output text.
 
-## Slices
+## Remaining
 
-1. **This slice.** Environment hygiene. Test: `enriched` drops the listed names
-   and keeps `PATH`, `HOME`, `LF_HOME`, `LF_ACCOUNT`, `CODEX_HOME`; a child
-   spawned with the result prints no `NO_COLOR`.
-2. Patch `lf2` with Zig tests: failed status survives reflow; text and block
-   selection are mutually exclusive; selected block survives reflow; live prompt
-   is not a block. Build, record checksum.
-3. Swift selection routing, copy, rendering and padding, with the deletions above.
-4. zsh prompt script and its wiring.
-5. README updates and the demo walk-through.
-
-Slice 1 is independent. Slices 3 and 4 need the `lf2` artifact resolvable.
+- **Publish `GhosttyKit-4c83872-lf2.xcframework.zip`.** `Package.swift` pins its
+  URL and checksum (`92f1b61c…`); until the file is at `bin.loopflow.studio`,
+  no checkout can resolve the package, so `swift build`, the gate and the demo
+  build all wait on it. The built zip is in `swift/.build/artifacts/` (copy in
+  `swift/.build/local/`) on the machine that ran `ghostty-build`. Publication
+  was not authorized in this pass (`scratch/questions.md` 1). Until then, check
+  locally by swapping the pin for `path: ".build/local/GhosttyKit.xcframework"`
+  and reverting it before committing.
+- **Display checks.** The real-PTY suite (`LOOPFLOW_NATIVE_TESTS=1`) and the
+  demo walk-through have not run; overlay rows have not been compared with
+  rendered rows on screen.
+- **Color proof in a Desktop pane.** The environment fix is tested on the
+  launch environment Desktop computes; the Codex footer has not been looked at inside Desktop.
+- `swift/project.yml` (Xcode build) still links Ghostty-disabled stubs: LOO-280.
 
 ## Done when
 
@@ -223,9 +240,9 @@ Slice 1 is independent. Slices 3 and 4 need the `lf2` artifact resolvable.
 Gate, headless:
 
 - `cd swift && swift build` succeeds.
-- `cd swift && swift test --filter "GUIProcessEnvironment|GhosttyTerminal"` passes
-  (environment, hit-testing, frame math against padding, zsh hooks, prompt script
-  emitting `133;A`, `133;A;k=s`, `133;B` and `133;D;127` for a missing command).
+- `cd swift && swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"`
+  passes (environment, frame math against padding, block style, zsh hooks, prompt
+  script emitting `133;A`, `133;A;k=s`, `133;B` and `133;D;127` for a missing command).
 - `uv run python scripts/loopflow-dev.py ghostty-build` passes its Zig tests and
   prints the checksum pinned in `Package.swift`.
 
@@ -237,10 +254,14 @@ Interaction acceptance is Jack's demo review.
 ## Risks
 
 - A leaked name missing from the list reappears as a different symptom. The
-  child-environment test names the category; additions stay in one array.
+  launch-environment test names the category; additions stay in one array.
 - Overriding even the default prompt may be unwelcome; the header is the part
   most likely to change at demo.
 - Padding on provider TUIs changes their column count by about three cells.
+
+Check: against the local `lf2` framework (pin swapped to a path, then restored),
+`swift build` and `swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"`
+— 13 passed, three runs. Display suite and Zig tests not rerun; gate owns them.
 
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,

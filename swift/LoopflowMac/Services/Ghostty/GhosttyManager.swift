@@ -119,11 +119,15 @@ final class GhosttyManager: ObservableObject {
     // These settings load after user defaults. Resources enable Ghostty's
     // native shell integration for detected shells; provider Sessions launch
     // `lf`, so they receive no shell hooks. Keep their historical TERM value
-    // even though the matching Ghostty terminfo is now bundled.
+    // even though the matching Ghostty terminfo is now bundled. The padding
+    // is fixed here because block overlays are laid out from the same numbers.
     private static let embeddedConfig = """
     term = xterm-256color
     shell-integration = detect
     scrollback-limit = 10000000
+    window-padding-x = \(Int(GhosttyTerminalPadding.x))
+    window-padding-y = \(Int(GhosttyTerminalPadding.y))
+    window-padding-balance = false
     image-storage-limit = 67108864
     """
 

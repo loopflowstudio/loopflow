@@ -47,14 +47,21 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ```
 
 Shell panes with Ghostty shell integration group each completed command and its
-output into a full-width block. Click anywhere in a block to select the whole
-unit, then use Command-C or the terminal's context menu to copy the command and
-all of its output.
+output into a full-width block. A command that exited non-zero has a red
+background. Click anywhere in a block to select the whole unit; drag to select
+text instead. There is one selection at a time, and Command-C or the context
+menu copies it: a block copies its command and all of its output.
 Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
 Session/provider panes keep their native TUI behavior and do not expose shell
 command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
-excluded by the pinned Ghostty build.
+excluded by the pinned Ghostty build. A zsh shell still on the macOS default
+prompt gets a directory-and-branch line above each command; any other prompt is
+left as it is.
+
+Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
+`TERM`, pager and agent variables do not reach them, so provider CLIs keep their
+colors however Desktop was opened.
 
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.

@@ -40,6 +40,22 @@ enum GUIProcessEnvironment {
                     "LF_TERMINAL_ID", "LF_TERMINAL_TTY"] {
             copy.removeValue(forKey: key)
         }
+        // Embedded terminals are their own terminal. A launcher's terminal
+        // session and agent output policy (`open` passes both through) would
+        // otherwise strip color and paging from every pane. CODEX_HOME is
+        // account authority, not output policy.
+        for key in copy.keys where key != "CODEX_HOME"
+            && (launcherTerminalKeys.contains(key)
+                || launcherTerminalPrefixes.contains(where: key.hasPrefix)) {
+            copy.removeValue(forKey: key)
+        }
         return copy
     }
+
+    private static let launcherTerminalKeys: Set<String> = [
+        "NO_COLOR", "FORCE_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "COLORTERM",
+        "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TMUX", "TMUX_PANE",
+        "CI", "PAGER", "GIT_PAGER", "GH_PAGER", "AI_AGENT", "CLAUDECODE",
+    ]
+    private static let launcherTerminalPrefixes = ["WARP_", "CLAUDE_CODE_", "CODEX_"]
 }

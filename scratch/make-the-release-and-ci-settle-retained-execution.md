@@ -26,23 +26,34 @@ without inventing an outcome. Neither proof exists in the recorded observation.
 Preserve unknown status. Rebooting is outside this pass; Task completion must
 run outside this Task's active contribution, whose own Exec gates completion.
 
-Prevention must preserve exact identity across three source paths:
+Prevention remains unimplemented. Source reconciliation on October 5 confirms
+the receipt lifetime crosses four removal/replacement paths:
 
 - Terminal emission in `journal/mod.rs` removes the receipt even when the ledger
   write fails.
 - `write_exec_process_receipt` replaces receipts keyed by reusable PID.
 - `run_prune` in `lf/commands/top.rs` removes stale receipts.
+- `ensure_exec_context` registers receipt removal as interrupt cleanup.
 
-These paths are not a proven cause of this incident. Test failed terminal writes,
-PID reuse and pruning together; prevention cannot recover the missing identity
-retroactively. No source repair or Task completion is established.
+These paths are not a proven cause of this incident. The required regression
+starts with a recorded, unfinished Exec, fails its terminal write, then exercises
+interrupt cleanup, PID reuse and pruning without losing its exact identity.
+Existing write-lock tests cover a missing start and later ledger recovery; they
+do not prove preservation of an already-recorded Exec's process evidence.
+Live identities and failed process observations must still block completion;
+confirmed death must preserve the absent outcome and history. Prevention cannot
+recover the missing identity retroactively or by itself complete this Task.
 
-## Delete — do not maintain
+## Preservation boundary
 
-No concrete deletion target selected. Replace the loss-prone identity lifetime
-as one preservation-tested change; retain history and live/unknown blocking.
-Do not add a read-only-command exemption.
+The replacement for the loss-prone identity lifetime is still a design choice;
+no schema or storage mechanism has been selected. There is no read-only-command
+exemption. Release's October 4 retained-landing incident supplies a useful
+counterexample: an exact receipt proved death without a terminal outcome, while
+separate release leases established re-entry authority. Process evidence must
+survive cleanup; it does not replace operation-specific lease ownership.
 
-Prior checks: `lf monitor show` retained unknown outcome; receipt/journal inspection
-found no exact exit evidence; `lf monitor prune --dry-run --json` reported zero
-errors without mutation. This prose-only compression requires no build.
+Prior readback found no exact exit evidence; monitor prune dry-run reported zero
+errors. No new runtime observation or Task settlement is established here.
+
+Check: `git diff --check` — passed; source review confirmed four identity-loss paths; prose-only reconciliation, no behavioral tests rerun.

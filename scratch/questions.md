@@ -20,6 +20,4 @@ Jack Heart resolved 1, 2, 3, 4, 8 and 9 in design review on 2026-10-05; see
 
 Still open after review:
 
-- Where `wave/session`'s persistent-workspace and publication section goes once
-  the session file holds only continuity.
 - How a Task changes its Flow. Jack wants it; no design exists. Out of this Task.

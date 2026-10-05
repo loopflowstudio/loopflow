@@ -17,6 +17,7 @@ below. Mechanisms not listed there remain proposals.
    basically end at landing." If a Task's selected Flow does not end at
    landing, the Task either changes its Flow (wanted, not yet designed) or
    waits on Jack. "If there is a defined flow, we need to proceed."
+5. **How a Task changes its Flow stays TBD.**
 4. **`task/session` is a plain skill**, launched with
    `lf --task <issue> skill task/session`. "This is the right entry point."
    A primary Task session is "just a smaller wrapper around this that saves
@@ -137,10 +138,14 @@ the composed text; `wave/operate` remains its own skill. No frontmatter include
 feature, no run-time `lf help` read, and no hand-kept condensed copy or inline
 invariant. The session file itself contains no operating steps.
 
-Paying for this: `wave/session`'s 44-line persistent-workspace and publication
-section is mechanics, not conversation. It moves to the skill that exercises it
-or to user docs if one already covers it; otherwise it stays and the composed
-prompt is simply longer. Cross-scope application (`wave/operate` applying
+Both `wave/session` and `repo/session` end with the same ~40-line "Persistent
+workspace and document publication" section: how the conversation's own
+checkout keeps MEMORY.md and scratch, syncs, and publishes a document PR. It is
+about the conversation's workspace, not about operating Tasks, and appears in
+no operate skill, so it stays in the session files. Its sync-conflict recovery
+detail overlaps the `sync-conflicts` skill and can shrink to a pointer if that
+skill covers it. "No operating steps" means no Task-operation steps.
+Cross-scope application (`wave/operate` applying
 `task/operate` per Task, `repo/operate` applying `wave/operate` per Wave) keeps
 whatever form it has today; only the same-scope pairing is composed.
 

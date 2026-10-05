@@ -280,8 +280,7 @@ retaining original evidence and strict subsequent conflicts. Atomic ingestion/pr
 Replay and generic planning writers are deleted; restart retains accepted facts.
 Rotation readbacks replace durable-only writes (`661622ee2`). Reteam lacks full readbacks, Team acceptance and acquisition locks. Lock Waves before reads through acceptance; reuse held locks.
 
-October 5's cold-detail regression disproved durable identity as Wave ownership:
-foreign-Initiative detail overwrote a retained plan without normalized planning.
+Cold detail overwrote retained plans from foreign-Initiative facts on October 5.
 Both shortcuts are deleted. Detail resolves configured Initiative/Wave ownership;
 association and projection commit together without advancing full-Wave age.
 Store/operation proofs cover same-Wave refresh, foreign/unmapped preservation and

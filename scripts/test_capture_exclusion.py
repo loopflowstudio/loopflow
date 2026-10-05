@@ -21,20 +21,18 @@ def main() -> None:
         archive.add(fixture / "capture_exclusion.Dockerfile", arcname="Dockerfile")
         archive.add(fixture / "capture_exclusion.py", arcname="capture_exclusion.py")
     identity = f"lf-capture-exclusion-{uuid.uuid4().hex}"
-    built = False
-    created = False
+    subprocess.run(
+        ["docker", "build", "--tag", identity, "-"],
+        input=context.getvalue(),
+        check=True,
+        timeout=600,
+    )
     try:
-        subprocess.run(
-            ["docker", "build", "--tag", identity, "-"],
-            input=context.getvalue(),
-            check=True,
-            timeout=600,
-        )
-        built = True
+        # Foreground run propagates the experiment's exit status directly.
         subprocess.run(
             [
                 "docker",
-                "create",
+                "run",
                 "--name",
                 identity,
                 "--network",
@@ -58,18 +56,12 @@ def main() -> None:
                 identity,
             ],
             check=True,
-            timeout=30,
+            timeout=300,
         )
-        created = True
-        subprocess.run(["docker", "start", "--attach", identity], check=True, timeout=300)
-        # Attach success alone does not establish the container's exit status.
-        result = subprocess.check_output(["docker", "wait", identity], text=True, timeout=10)
-        if result.strip() != "0":
-            raise SystemExit(f"Capture exclusion experiment failed (exit {result.strip()}).")
     finally:
-        if created:
+        try:
             subprocess.run(["docker", "rm", "--force", identity], check=True, timeout=30)
-        if built:
+        finally:
             subprocess.run(["docker", "image", "rm", identity], check=True, timeout=30)
 
 

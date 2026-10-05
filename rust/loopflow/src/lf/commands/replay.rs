@@ -18,7 +18,7 @@ pub fn run(selector: &str) -> Result<()> {
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let (_, source) = crate::session_record::resolve_manifest(home, selector)
         .with_context(|| format!("cannot read capture {selector}"))?;
-    let request = source.exec.clone().ok_or_else(|| {
+    let mut request = source.exec.ok_or_else(|| {
         anyhow!(
             "capture {} did not record a replayable headless request",
             source.artifact_key
@@ -55,8 +55,10 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     };
     crate::engine::agent::pin_provider_account_id_blocking(&mut config)
         .map_err(anyhow::Error::from)?;
-    let mut replay_request = request;
-    replay_request.account_id = config.provider_account_id.clone();
+    request.account_id = config.provider_account_id.clone();
+    let capabilities = AgentCapabilities {
+        chrome: request.chrome,
+    };
     let spec = SessionCaptureSpec {
         harness,
         model,
@@ -77,19 +79,16 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         flow: crate::session_record::SessionFlowMembership::Independent,
         work: None,
     };
-    let capture =
-        CaptureHandle::begin_replay_at(home, spec, replay_request.clone(), source.artifact_key)
-            .map_err(|error| {
-                anyhow!("failed to publish replay capture before execution: {error}")
-            })?;
-    capture.record_input("replay", &replay_request.task_prompt);
+    let capture = CaptureHandle::begin_replay_at(home, spec, request, source.artifact_key)
+        .map_err(|error| anyhow!("failed to publish replay capture before execution: {error}"))?;
+    capture.record_input("replay", &config.task_prompt);
     let artifact_key = capture.artifact_key();
-    let mut context_file = if replay_request.system_prompt.trim().is_empty() {
+    let context_file = if config.system_prompt.trim().is_empty() {
         None
     } else {
         let mut file =
             tempfile::NamedTempFile::new().context("create private replay system-prompt file")?;
-        file.write_all(replay_request.system_prompt.as_bytes())
+        file.write_all(config.system_prompt.as_bytes())
             .context("write replay system-prompt file")?;
         Some(file)
     };
@@ -98,16 +97,10 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         stream: true,
         stream_format: StreamFormat::Human(false),
         capture: Some(capture.clone().into()),
-        context_file: context_file.as_mut().map(|file| file.path().to_path_buf()),
+        context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = exec_agent(
-        &config,
-        &process,
-        &AgentCapabilities {
-            chrome: replay_request.chrome,
-        },
-    );
+    let result = exec_agent(&config, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

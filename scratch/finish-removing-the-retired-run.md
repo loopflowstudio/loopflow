@@ -72,9 +72,15 @@ Recorded compression checks passed 29 Session-record tests, Clippy and formattin
 the preceding 49-pass Session/controller evidence remains at
 `fc911bc18:scratch/finish-removing-the-retired-run.md`. Neither covers conversion.
 
-Check (implement, October 5): capture-exclusion fixture Ruff checks, CLI help and host-refusal smoke passed; `git diff --check` and `lf context --skill implement` passed; Docker exclusion execution unavailable (missing daemon socket), deferred to a disposable-container runner before dependent conversion; conversion and full gate remain unproved.
+October 5 evidence at `9d4d97e72:scratch/finish-removing-the-retired-run.md`
+records fixture lint/help/host-refusal passes and three isolated replay, inherited
+capture and review tests passing, followed by replay's final resolver check,
+formatting and Clippy. Docker exclusion execution was unavailable; neither those
+passes nor the checkpoint establishes conversion or a full gate.
 
-Check (compress, October 5): isolated `cargo nextest run -p loopflow --lib -E 'test(replay_uses_recorded_request) | test(inherited_capture_requires) | test(review_actions_preserve_selected_capture)' --no-fail-fast` passed 3/3; replay passed again after resolver simplification; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; conversion acceptance remains with implementation/gate.
+The preceding implementation verified the exclusion runner's pinned checksums against published v0.13.3 SHA256SUMS; no container or hosted exclusion result is established.
+
+Check (compress, October 5): isolated `cargo nextest run -p loopflow --lib -E 'test(replay_uses_recorded_request)' --no-fail-fast` passed 1/1; compilation, `cargo fmt --check`, all-target Clippy, runner Ruff lint/format and `git diff --check` passed. Docker refusal remains explicit (missing daemon socket); hosted exclusion and conversion acceptance remain with implementation/gate.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -94,8 +100,9 @@ before activation, while `promotion_lock.rs` serializes installers only.
 `recover_switch` can also finalize advancement without candidate migration work.
 A layout receipt must participate in both paths. Candidate recovery and startup
 exclusion must be effective before the first filesystem mutation; direct retained
-binaries additionally require external launch exclusion. That operational mechanism
-and its isolated proof remain implementation work.
+binaries additionally require external launch exclusion. The privileged experiment
+below proposes that boundary; production targeting, recovery and isolated proof
+remain implementation work.
 
 ### Released writer bypass — October 5 source counterexample
 
@@ -163,9 +170,16 @@ until forward validation completes; do not automatically unlock in error cleanup
 macOS ACLs and retained open handles also require platform proof. None of this
 authorizes administrator changes on the configured machine.
 
-The container service is unavailable in this execution environment: `docker info`
-fails connecting to `/Users/jack/.orbstack/run/docker.sock` (no such file).
-The experiment therefore remains unexecuted. Candidate account targeting,
+`scripts/test_capture_exclusion.py` now builds a disposable Ubuntu 24.04 image
+from only the fixture sources and the checksum-pinned published v0.13.3 Linux
+CLI. Preparation downloads precede a network-disabled execution with no mounts
+or credentials; the runner checks the container exit and removes its own resources.
+`.github/workflows/capture-exclusion.yml` schedules that proof on relevant PR
+changes independently of the ordinary gate's scratch-clear condition. It has
+not run: all three local Docker endpoints were unavailable on October 5, and no
+hosted result is established. Wiring the runner does not prove exclusion.
+
+Candidate account targeting,
 crash-safe privilege restoration and complete quiescence detection remain source
 design/implementation work; layout deletion is still dependent on their proof.
 
@@ -300,9 +314,10 @@ The authorized installer owns conversion, using its existing pinned candidate an
 switch recovery receipt. Ordinary history/status/replay reads never initiate it.
 The window must exclude old CLI/app/provider launch sources at the OS/installation
 boundary, including retained executable invocations. Neither an empty PID sample
-nor a controlled fixture launcher establishes this. The external exclusion owner,
-target-account access and crash-persistent recovery mechanism remain undesigned;
-the sequence below is conditional on that proof. Isolated acceptance must attempt
+nor a controlled fixture launcher establishes this. The proposed administrator-owned
+Home boundary has only an unexecuted exclusion fixture; target-account selection,
+recovery and restoration still need implementation. The sequence below remains
+conditional on that proof. Isolated acceptance must attempt
 direct released commands after converter death as well as during conversion.
 Configured deployment additionally requires authorization for the operational
 freeze; fixture success cannot establish installed acceptance.
@@ -374,6 +389,13 @@ silently dropping its provenance. Its fixture uses the shared environment guard.
 `journal::agent_caller`'s Session/Exec provenance. Review opening shares one
 previous-capture branch across resume and replacement checks.
 
+Replay now moves its retained request into the capture and reuses the execution
+config for prompt recording and the temporary context file, removing two complete
+request clones. The exclusion runner uses foreground `docker run` exit status,
+removing create/attach/wait orchestration and success flags. Cleanup still removes
+its named container after timeout and attempts image removal even if container
+cleanup fails. Local `lf commit` returned an empty `Error:`; incoming notes are
+preserved and this compression remains a working-tree diff.
 
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
@@ -383,8 +405,12 @@ The released-writer exclusion finding above still prevents that dependent cut.
 
 ## Remaining implementation sequence
 
-1. Specify and prove crash-persistent external launch exclusion, including direct
-   retained binaries and candidate access to the correct OS account's installation.
+1. Evaluate the privileged whole-account-Home proposal with the existing isolated
+   released-binary experiment, including direct commands after worker death and
+   the retained-descriptor counterexample. This fixture proves no conversion or
+   candidate account targeting. Complete explicit OS-account selection, durable
+   privilege/recovery ownership, restoration and platform-specific exclusion proof.
+   Candidate access must resolve the intended account's installation, not root's.
    Then implement offline conversion/recovery through the installation boundary,
    including exact-schema advancement and recovery. Inventory mutable absolute
    references before choosing their rewrite and validation rules. Preserve frozen

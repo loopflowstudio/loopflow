@@ -1481,24 +1481,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(claim)
     }
-
-    /// The saved Flow waiting on this review Session.
-    pub fn waiting_review(&self, session_id: &str) -> StoreResult<FlowSession> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let flow = conn
-            .query_row(
-                &format!("{FLOW_SELECT} WHERE f.pending_session_id=?1 AND f.state='current'"),
-                [session_id],
-                read_flow,
-            )
-            .optional()?
-            .transpose()?
-            .filter(FlowSession::is_human)
-            .ok_or_else(|| {
-                StoreError::InvalidAuthority("Flow Session is stale or already decided".into())
-            })?;
-        Ok(flow)
-    }
 }
 
 pub(super) fn decode_flow_cursor(

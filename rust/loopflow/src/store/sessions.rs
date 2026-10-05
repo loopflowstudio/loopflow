@@ -118,11 +118,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
     }
 
-    pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
-        let session_id = session_id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
-    }
-
     pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await

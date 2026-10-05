@@ -3,7 +3,6 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{FlowSession, TaskId};
-use crate::engine::ExecutionCursor;
 use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
@@ -1000,25 +999,6 @@ impl SqliteStore {
         let mut query = conn.prepare(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()
-    }
-
-    /// The Flow and cursor node of the saved Flow waiting on this review. A
-    /// Task's own Flow waits through its position instead.
-    pub fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_sessions
-             WHERE pending_session_id=?1 AND state='current'
-             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=flow_sessions.id)",
-            [session_id],
-            |row| Ok((row.get(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?
-        .map(|(flow, cursor)| {
-            let cursor: ExecutionCursor = serde_json::from_str(&cursor)?;
-            Ok((flow, cursor.node_key()))
-        })
-        .transpose()
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {

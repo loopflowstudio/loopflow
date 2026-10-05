@@ -17,12 +17,6 @@ pub use crate::engine::target::{DefinitionKind, Target};
 
 /// Execution may fetch external skills; read-only callers use the local resolver.
 pub fn resolve_definition(repo: &Path, name: &str, kind: Option<DefinitionKind>) -> Result<Target> {
-    // Review launches select their captured Skill before touching mutable sources.
-    if kind == Some(DefinitionKind::Skill) {
-        if let Some(skill) = crate::ops::human_session::active_flow_skill(name)? {
-            return Ok(Target::Skill(skill));
-        }
-    }
     match resolve_local_definition(repo, name, kind) {
         Ok(target) => Ok(target),
         Err(error)
@@ -650,6 +644,43 @@ mod tests {
     use super::{discover_skill, resolve_definition, Target};
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn ordinary_skill_discovery_ignores_legacy_review_instructions() {
+        let _lock = crate::journal::test_env_lock();
+        let _environment = crate::test_ambient::EnvGuard::clear(&["LF_HUMAN_SESSION"]);
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+        fs::write(
+            repo.path().join(".lf/skills/review.md"),
+            "Current instructions",
+        )
+        .unwrap();
+        let mut captured = crate::engine::Skill::named("review");
+        captured.content = Some("Retired captured instructions".into());
+        std::env::set_var(
+            "LF_HUMAN_SESSION",
+            serde_json::json!({
+                "kind": "flow",
+                "token": {
+                    "task_id": crate::work::task::TaskId::new(),
+                    "invocation_id": "legacy",
+                    "flow": "legacy",
+                    "node_id": "review",
+                    "skill": captured,
+                    "iteration": 0
+                }
+            })
+            .to_string(),
+        );
+
+        let Target::Skill(skill) =
+            resolve_definition(repo.path(), "review", Some(super::DefinitionKind::Skill)).unwrap()
+        else {
+            panic!("explicit skill must resolve to a skill");
+        };
+        assert_eq!(skill.content.as_deref(), Some("Current instructions"));
+    }
 
     #[test]
     fn operate_resolves_to_repo_and_wave_operate_stays_explicit() {

@@ -221,11 +221,7 @@ fn exec_bound(
         bound_message(binding, message)
     };
     let cli = &launch;
-    let resolved_skill = skill
-        .map(crate::ops::human_session::active_flow_skill)
-        .transpose()?
-        .flatten();
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd, resolved_skill)?;
+    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
@@ -315,12 +311,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    let saved = skill
-        .map(crate::ops::human_session::active_flow_skill)
-        .transpose()?
-        .flatten();
-    let native = saved.is_none();
-    build_prompt_at(skill, message, cli, repo_root, native, None, saved)
+    build_prompt_at(skill, message, cli, repo_root, true, None, None)
 }
 
 fn build_bound_prompt_at(
@@ -328,7 +319,6 @@ fn build_bound_prompt_at(
     message: &str,
     cli: &Cli,
     repo_root: &Path,
-    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     // A Work-bound launch carries context that cannot be reconstructed by a
     // vendor skill sigil: the selected Work seed and the Task worktree's exact
@@ -343,7 +333,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        resolved_skill,
+        None,
     )
 }
 
@@ -1365,8 +1355,7 @@ mod tests {
                     }
                     let cli = Cli::parse_from(args);
                     let built =
-                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
-                            .unwrap();
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path()).unwrap();
                     assert_eq!(
                         built
                             .components
@@ -1423,14 +1412,9 @@ mod tests {
             .unwrap();
             // Each assembly reloads personal config, including the correction.
             for _ in 0..2 {
-                let built = build_bound_prompt_at(
-                    None,
-                    "choose the prototype path",
-                    &cli,
-                    repo.path(),
-                    None,
-                )
-                .unwrap();
+                let built =
+                    build_bound_prompt_at(None, "choose the prototype path", &cli, repo.path())
+                        .unwrap();
                 assert_eq!(
                     built.components.user_name.as_deref(),
                     if name.trim().is_empty() {
@@ -1453,7 +1437,7 @@ mod tests {
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
-        let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
         assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
@@ -1476,7 +1460,7 @@ mod tests {
         let cli = Cli::parse_from(["lf", "--mode", "batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
-            let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+            let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
             assert!(built.agent_config.task_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
@@ -1804,8 +1788,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .unwrap()
             .success());
 
-        let built =
-            build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1830,8 +1813,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built =
-            build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
 
         let committed = built
             .agent_config
@@ -1871,7 +1853,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             &cli,
             repo.path(),
-            None,
         )
         .unwrap();
         repo.create_file(

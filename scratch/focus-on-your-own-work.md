@@ -93,7 +93,10 @@ captures and effect history. Read-only historical review projections still exist
 and worker control columns still execute. Their store/driver removal remains the
 next runtime cut; deleting the review branch is not complete worker removal. Public
 saved Flow resume, Ready/Complete, `exec_driver` and completion-only `stop-client`
-are already deleted. Worker-exclusive controller tests are retired with the review
+are already deleted. Compression also removes review launch tokens, captured-skill
+overrides of ordinary discovery, duplicate review open/rename dispatch, and the
+unused waiting-review store queries. Open and rename use stored conversation identity;
+native process fencing and captured history remain. Worker-exclusive controller tests are retired with the review
 path; ordinary Flow tests carry execution and crash/effect proof.
 
 Attention still projects Review/Reply and `--needs-me`; Task primaries, workflows,
@@ -292,15 +295,17 @@ modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
   branches in `lf/commands/flow.rs`. Keep shared engine graph/cursor traversal.
 - Review reservation/launch in `ops/flow_session.rs`, `serve-flow`, review capture
   reservation/publication and automatic review checkpoint/push are deleted. The draft
-  converts legacy review kinds without resolving their boundaries. Retained token/read
-  branches in `ops/human_session.rs` still need pruning with managed projections.
+  converts legacy review kinds without resolving their boundaries. Review launch tokens,
+  skill overrides and duplicate open/rename paths are deleted, including `ops/flow_session.rs`;
+  managed review projections still need the worker cut.
 - Ready/Complete and hidden `stop-client` CLI handlers, store mutations, Session action/Ready state,
   Desktop completion controls and pane-resolution callback are deleted. Historical
   feedback remains in the read DTOs, sourced from Session evidence. Generated
   instructions and affected docs no longer prescribe those commands. Preserve
   provider Completed, historical completion timestamps and primary-successor
   bookkeeping. New review reservation/serve-flow and legacy kind conversion are cut;
-  the remaining managed projection and restart consumers still need deletion.
+  review-token/open/rename dispatch is deleted; managed projection and restart
+  consumers still need deletion.
 - Resume scheduling in `ops/task_automation.rs` and cron consumers; singular-Flow
   conditions/actions in `ops/task_execution.rs`, `ops/task_flow.rs`,
   `ops/task_actions.rs` and Task controller projections. Retain unrelated cron
@@ -370,8 +375,8 @@ One coherent runtime/UI change, with no intermediate release of two executors:
    proves review-kind conversion while retaining unresolved links and effect history.
 2. Separate workflow source guidance from executable operational graphs; implement
    canonical autonomous loops/XOR composition and the loop-or-next catalog rename.
-   Prune retained review-specific token/read branches with the managed projections;
-   new review launch and settlement APIs are deleted. Add
+   Review-specific tokens, launch reads and duplicate open/rename dispatch are deleted;
+   prune remaining managed projections. New review launch and settlement APIs are deleted. Add
    ordinary `-b` launch, Task primary selection and caller-owned recovery paths.
 3. Cut all Flow views to the shared lazy detail renderer; implement Waiting through
    Rust/provider mappings. Remove managed fields, controls, automation, exclusive
@@ -460,4 +465,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.
+Checks: `cargo build -p loopflow --bin lf`; seven focused `cargo test -p loopflow` cases (five in `--test flow_tests`: operational review rejection, ordinary crash/effects, authored execution, inspection without Started, bound contributions; Session CLI contract; populated draft conversion); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; `git diff --check` — passed. `lf context --skill implement`: memory 15,962/16,000 and scratch within budget; stored goal exceeds its source budget by 1,276 tokens and remains excerpted, with authored steers unchanged. Compression recheck: `cargo test -p loopflow --lib -- ops::human_session lf::discovery lf::commands::run` and `--test session_cli_tests` pass with inherited `LF_FLOW_STEP`/`LF_RUN_*` unset; inside a Flow step two `lf::commands::run` cases read the ambient step token and fail (hermeticity gap, owner: gate). Worker/store deletion, final schema cut, gate and configured demo remain outstanding; no live Home or saved invocation was mutated.

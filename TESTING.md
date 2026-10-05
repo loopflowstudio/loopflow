@@ -1014,5 +1014,5 @@ suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 
 ```bash
-cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1
+cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```

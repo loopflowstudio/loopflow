@@ -696,8 +696,6 @@ fn resume_shorthand_help_and_empty_worktree() {
         assert!(output.status.success(), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
     }
-    let flow = run(home.path(), &["flow", "resume", "--help"]);
-    assert!(flow.status.success(), "{flow:?}");
     for args in [&["resume"][..], &["session", "resume"]] {
         let output = command(home.path(), args)
             .current_dir(home.path())

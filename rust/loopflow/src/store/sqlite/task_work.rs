@@ -62,6 +62,21 @@ fn exec_ids(selector: &str) -> String {
         tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
 }
 
+/// The same membership as `exec_ids`, reached from the unfinished Execs.
+fn unfinished_exec_filter(selector: &str) -> String {
+    format!(
+        "e.completed_at IS NULL AND (EXISTS(SELECT 1 FROM ({}) tw WHERE {})
+        OR EXISTS(SELECT 1 FROM session_events se WHERE se.exec_id=e.id AND se.session_id IN ({}))
+        OR EXISTS(SELECT 1 FROM agent_sessions a WHERE a.driver_exec_id=e.id AND a.id IN ({}))
+        OR EXISTS(SELECT 1 FROM flow_events fe WHERE fe.exec_id=e.id AND fe.flow_id IN ({})))",
+        tasks(selector),
+        checkout("e.cwd"),
+        session_ids(selector),
+        session_ids(selector),
+        flow_ids(selector)
+    )
+}
+
 impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -79,6 +94,17 @@ impl SqliteStore {
 
     /// Read all three owners in one SQLite snapshot, including closed history.
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
+        self.read_task_work(task, &format!("e.id IN ({})", exec_ids("?1")))
+    }
+
+    /// Sessions and Flows in full, with only the Execs still unfinished.
+    /// Completion and recovery ask nothing of finished execution, and a
+    /// checkout's Exec history grows without bound.
+    pub(crate) fn task_open_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
+        self.read_task_work(task, &unfinished_exec_filter("?1"))
+    }
+
+    fn read_task_work(&self, task: &TaskId, execs: &str) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let sessions = tx
@@ -115,9 +141,8 @@ impl SqliteStore {
         }
         let execs = tx
             .prepare(&format!(
-                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-                super::execs::EXEC_SELECT,
-                exec_ids("?1")
+                "{} WHERE {execs} ORDER BY e.started_at DESC,e.id",
+                super::execs::EXEC_SELECT
             ))?
             .query_map([task.as_str()], super::execs::read_exec)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -386,6 +411,22 @@ mod tests {
             [("independent", false), ("managed", true)]
         );
         assert_eq!(work.execs.len(), 2);
+        // The open reading agrees with the full one about unfinished Execs.
+        assert!(store.task_open_work(&task).unwrap().execs.is_empty());
+        let unfinished = ExecId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)", params![unfinished, TraceId::new()]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+        }
+        let open = store.task_open_work(&task).unwrap();
+        assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
+        assert_eq!(open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(), [&unfinished]);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM session_events WHERE receipt_key='open'", []).unwrap();
+            conn.execute("DELETE FROM execs WHERE id=?1", [&unfinished]).unwrap();
+        }
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
         assert!(work.execs.iter().any(|exec| exec.id == bound_exec));
         assert_eq!(

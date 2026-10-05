@@ -61,7 +61,7 @@ pub struct WaveSnapshot {
 
 /// `lf wave status <wave>`: current planning, Task conditions and Session history.
 /// Wire type; no defaults.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
@@ -484,19 +484,7 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return no_registry(json, "[]");
         };
-        let waves = store
-            .list_waves(None)
-            .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-        let waves = scope_waves_to_repo(waves, all)?;
-        let mut snapshots = Vec::with_capacity(waves.len());
-        for wave in waves {
-            let snapshot = snapshot_wave(&store, &wave).await?;
-            if !current || current_wave(&snapshot) {
-                snapshots.push(snapshot);
-            }
-        }
-        snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+        let snapshots = wave_snapshots(&store, all, current).await?;
         if json {
             println!("{}", serde_json::to_string(&snapshots)?);
         } else {
@@ -504,6 +492,28 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// The rows of `lf wave list`, in its order.
+pub(crate) async fn wave_snapshots(
+    store: &SharedStore,
+    all: bool,
+    current: bool,
+) -> Result<Vec<WaveSnapshot>> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
+    let waves = scope_waves_to_repo(waves, all)?;
+    let mut snapshots = Vec::with_capacity(waves.len());
+    for wave in waves {
+        let snapshot = snapshot_wave(store, &wave).await?;
+        if !current || current_wave(&snapshot) {
+            snapshots.push(snapshot);
+        }
+    }
+    snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+    Ok(snapshots)
 }
 
 fn current_wave(wave: &WaveSnapshot) -> bool {
@@ -518,35 +528,39 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             return no_registry(json, "null");
         };
         let wave = resolve_status_wave(&store, wave).await?;
-        let repository_waves = store
-            .list_waves(Some(wave.repo()))
-            .await
-            .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-        validate_pm_portfolio(&store, &repository_waves).await?;
-        let snapshot = snapshot_wave(&store, &wave).await?;
-        let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
-        let metric_portfolio =
-            crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
-        let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
-                crate::lf::commands::WorkFilter {
-                    wave: Some(wave.slug()),
-                    project: None,
-                    task: None,
-                },
-            )),
-            wave: snapshot,
-            projects: project_planning(&store, &wave).await,
-            tasks: task_snapshots.tasks,
-            metric_portfolio,
-            unavailable_tasks: task_snapshots.unavailable_tasks,
-        };
+        let status = wave_detail(&store, &wave).await?;
         if json {
             println!("{}", serde_json::to_string(&status)?);
         } else {
             print_status(&status);
         }
         Ok(())
+    })
+}
+
+/// One Wave's `lf wave status` reading.
+pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<WaveDetailSnapshot> {
+    let repository_waves = store
+        .list_waves(Some(wave.repo()))
+        .await
+        .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
+    validate_pm_portfolio(store, &repository_waves).await?;
+    let snapshot = snapshot_wave(store, wave).await?;
+    let task_snapshots = wave_tasks(store, wave, true, None).await?;
+    let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
+    Ok(WaveDetailSnapshot {
+        runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
+            crate::lf::commands::WorkFilter {
+                wave: Some(wave.slug()),
+                project: None,
+                task: None,
+            },
+        )),
+        wave: snapshot,
+        projects: project_planning(store, wave).await,
+        tasks: task_snapshots.tasks,
+        metric_portfolio,
+        unavailable_tasks: task_snapshots.unavailable_tasks,
     })
 }
 
@@ -614,67 +628,87 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
             }
             Err(other) => return Err(anyhow!(other)),
         };
-        // A Wave filter narrows presentation, not repository ownership checks.
-        let ownership_waves = if waves.len() == 1 {
-            store
-                .list_waves(Some(waves[0].repo()))
-                .await
-                .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?
-        } else {
-            waves.clone()
-        };
-        validate_pm_portfolio(&store, &ownership_waves).await?;
-        let mut roadmaps = Vec::with_capacity(waves.len());
-        for wave in &waves {
-            let snapshot = snapshot_wave(&store, wave).await?;
-            if !include_history && !current_wave(&snapshot) {
-                continue;
-            }
-            let task_snapshots =
-                wave_tasks(&store, wave, false, task)
-                    .await
-                    .unwrap_or_else(|error| WaveTasks {
-                        tasks: Evidence::Unavailable {
-                            reason: error.to_string(),
-                        },
-                        unavailable_tasks: Vec::new(),
-                    });
-            if task.is_some()
-                && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
-            {
-                continue;
-            }
-            roadmaps.push(WaveRoadmap {
-                wave: snapshot,
-                projects: project_planning(&store, wave).await,
-                tasks: match task_snapshots.tasks {
-                    Evidence::Ok { items, truncated } => Evidence::Ok {
-                        items: items.into_iter().map(roadmap_task).collect(),
-                        truncated,
-                    },
-                    Evidence::Unavailable { reason } => Evidence::Unavailable { reason },
-                },
-                unavailable_tasks: task_snapshots.unavailable_tasks,
-                metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
-                    &store,
-                    wave,
-                    evaluation_time,
-                )
-                .await?,
-            });
-        }
-        roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
-        let roadmap = RoadmapSnapshot {
-            generated_at: format_time(evaluation_time)
-                .expect("current timestamp formats as RFC 3339"),
-            waves: roadmaps,
-        };
+        let roadmap =
+            roadmap_snapshot(&store, waves, include_history, task, evaluation_time).await?;
         if json {
             println!("{}", serde_json::to_string(&roadmap)?);
         } else {
             print_roadmap(&roadmap);
         }
         Ok(())
+    })
+}
+
+/// `lf roadmap --all`: every current Wave in every repository.
+pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
+    roadmap_snapshot(store, waves, false, None, now()).await
+}
+
+async fn roadmap_snapshot(
+    store: &SharedStore,
+    waves: Vec<Wave>,
+    include_history: bool,
+    task: Option<&str>,
+    evaluation_time: time::OffsetDateTime,
+) -> Result<RoadmapSnapshot> {
+    // A Wave filter narrows presentation, not repository ownership checks.
+    let ownership_waves = if waves.len() == 1 {
+        store
+            .list_waves(Some(waves[0].repo()))
+            .await
+            .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?
+    } else {
+        waves.clone()
+    };
+    validate_pm_portfolio(store, &ownership_waves).await?;
+    let mut roadmaps = Vec::with_capacity(waves.len());
+    for wave in &waves {
+        let snapshot = snapshot_wave(store, wave).await?;
+        if !include_history && !current_wave(&snapshot) {
+            continue;
+        }
+        let task_snapshots =
+            wave_tasks(store, wave, false, task)
+                .await
+                .unwrap_or_else(|error| WaveTasks {
+                    tasks: Evidence::Unavailable {
+                        reason: error.to_string(),
+                    },
+                    unavailable_tasks: Vec::new(),
+                });
+        if task.is_some()
+            && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
+        {
+            continue;
+        }
+        roadmaps.push(WaveRoadmap {
+            wave: snapshot,
+            projects: project_planning(store, wave).await,
+            tasks: match task_snapshots.tasks {
+                Evidence::Ok { items, truncated } => Evidence::Ok {
+                    items: items.into_iter().map(roadmap_task).collect(),
+                    truncated,
+                },
+                Evidence::Unavailable { reason } => Evidence::Unavailable { reason },
+            },
+            unavailable_tasks: task_snapshots.unavailable_tasks,
+            metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
+                store,
+                wave,
+                evaluation_time,
+            )
+            .await?,
+        });
+    }
+    roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
+    Ok(RoadmapSnapshot {
+        generated_at: format_time(evaluation_time)
+            .expect("current timestamp formats as RFC 3339"),
+        waves: roadmaps,
     })
 }
 

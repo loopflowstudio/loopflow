@@ -550,7 +550,7 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
 
 /// Completion cannot implicitly settle another Flow's work.
 pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let work = store.sqlite.task_open_work(&task.id).map_err(task_error)?;
     let mut blockers = execution_blockers(store, &work, ExecutionCheck::RetainWork)?;
     for flow in work.flows.iter().filter(|flow| !flow.managed) {
         if flow.summary.state == crate::session::FlowSummaryState::Current {
@@ -570,7 +570,7 @@ pub(super) fn associated_execution_blockers(
 ) -> OpsResult<Vec<String>> {
     execution_blockers(
         store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
+        &store.sqlite.task_open_work(&task.id).map_err(task_error)?,
         ExecutionCheck::RetainWork,
     )
 }
@@ -582,7 +582,7 @@ pub(super) fn recovery_execution_blockers(
 ) -> OpsResult<Vec<String>> {
     execution_blockers(
         store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
+        &store.sqlite.task_open_work(&task.id).map_err(task_error)?,
         ExecutionCheck::ResumeFlow,
     )
 }

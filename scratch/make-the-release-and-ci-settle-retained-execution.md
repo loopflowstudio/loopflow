@@ -20,9 +20,8 @@ closure, trace completion and elapsed time do not establish child death.
 ## Remaining work
 
 The prior iteration's “prevention remains unimplemented” finding is superseded
-by the implementation and focused proofs below. Remaining work is affected gate
-verification, delivery and installed acceptance, plus the independent retained
-Exec recovery. Prevention alone does not satisfy Task completion.
+by the implementation and focused proofs below. Remaining work is CI verification after the host-interrupted local gate,
+delivery and installed acceptance, plus the independent retained Exec recovery. Prevention alone does not satisfy Task completion.
 
 Recover an independently retained PID/start-time receipt for the existing
 liveness reader, or observe a subsequent machine boot: `exec_process_evidence`
@@ -57,9 +56,9 @@ formats and retains unfinished history while removing settled dead receipts.
 
 ## Remaining verification and recovery
 
-Focused checks passed. Gate owns the broader affected suites. The source
-repair does not establish installed behavior or recover the existing missing
-identity. Release's October 4 retained-landing incident remains relevant: exact
+The affected gate reached 1,903 Rust passes before host security pressure
+stopped it; CI owns the unfinished verification. The source repair does not
+establish installed behavior or recover the existing missing identity. Release's October 4 retained-landing incident remains relevant: exact
 process evidence proved death, while separate leases established re-entry
 permission. Neither Session closure nor a known process exit supplies an outcome.
 
@@ -72,4 +71,11 @@ Its slow-transfer recovery distinguishes the total artifact deadline from retry
 policy; that release-owned fix does not change this receipt repair's scope.
 No implementation mismatch was found; existing focused results remain applicable.
 
-Check: `cargo test -p loopflow --lib journal::tests` (20), `cargo test -p loopflow --test exec_ownership_tests monitor_prune` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed after compression with inherited execution authority cleared for tests; prior Task-blocker check unchanged; broader affected verification deferred to gate/CI.
+Gate review found no further code or documentation mismatch. The changed retention,
+public prune and interruption regressions passed under external-network isolation.
+The runner stopped four active tests after syspolicyd exceeded its pressure
+threshold; 333 tests never ran. These are interrupted results, not established
+product defects or passes. Preserve the failed gate receipt; capable CI must
+finish the Rust suite. Logs: `.lf/tmp/gate/run-56255/rust/rust.log`.
+
+Check: `uv run python scripts/test.py --base 8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3 --reuse-passing` — architecture, fmt, all-target Clippy and website (78 passed, 3 skipped) passed; release-materialized Rust recorded 1,903 passes, 4 SIGTERM interruptions, 333 not run and 17 skipped under host security pressure; Rust completion deferred to CI; inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout.

@@ -67,8 +67,10 @@ an outcome. These loss paths are not proved causes of the original incident.
 Release's October 4 retained-landing evidence remains the counterexample: its
 receipt proved death while separate leases established re-entry authority.
 This source repair cannot recover the missing identity or complete LOO-326;
-focused journal/prune/Task-blocker checks and Clippy passed; installed behavior
-remains unproved.
+October 5 gate passed architecture, formatting, Clippy and 78 website tests.
+Rust reached 1,903 passes before host security pressure interrupted four tests
+and left 333 unrun (17 skipped). Receipt regressions passed; CI owns unfinished
+verification. Installed behavior remains unproved.
 
 Release's October 5 recovery adds a separate download lesson: bounded retries
 cannot compensate for an overall deadline that kills healthy slow transfers.

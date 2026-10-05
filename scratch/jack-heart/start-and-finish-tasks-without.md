@@ -97,81 +97,22 @@ purpose, context and continuity; execution and delivery are optional. There is
 no Task workflow to introduce. The mechanisms below describe branch implementation;
 acceptance remains incomplete and implementation does not imply additional product approval.
 
-## Working product direction · 2026-10-04
+<a id="working-product-direction--2026-10-04"></a>
 
-During the code walkthrough, Jack Heart questioned making Task association without
-a checkout the primary experience. Jack described the common path as an open-ended
-Session becoming focused on a Task, then said: “I *think* its better to default to
-having a worktree just in case they start editing stuff”. Record this as a preferred
-default under discussion, not final acceptance of the implementation.
+## Review history and ownership
 
-Revise the normal conversation-to-Task path around having a worktree ready for edits.
-The no-checkout capability below remains branch behavior and an earlier acceptance
-scenario; it no longer establishes the desired default. Separate worktree creation
-from PR and Flow obligations. Before implementation, resolve how the existing
-conversation continues in that worktree and how any edits already made in its
-original directory are preserved. No move, restart, or transfer policy is agreed yet.
-Current first-checkout allocation also creates a PR record; simply calling that
-operation during binding would preserve the coupling this review is questioning.
+The accepted revision above supersedes the October 3 no-checkout default and
+October 4 tentative wording. Jack Heart's original feedback and confirmation
+remain in [the review note](../task-purpose-demo.md). The full earlier plan,
+including the tentative direction and predecessor architecture, is preserved at
+`d9fabaaea360be123f6165651d25b5546eb3f519:scratch/jack-heart/start-and-finish-tasks-without.md`.
+Do not treat that historical plan as a second implementation specification.
 
-Jack then required that completing a Task associated with an opened worktree clears
-that worktree even when nothing landed. A speculative worktree must be reclaimable
-after research or a no-change outcome; publication or merge is not a prerequisite
-for its cleanup. This supersedes the current gate's refusal of an empty first
-unpublished PR when that record exists solely because checkout allocation created
-it. Allocation must not manufacture a delivery promise.
-
-Implementation direction: separate the default checkout from delivery obligations,
-then use the existing completion/cleanup owners to remove an otherwise disposable
-Task worktree without a merged predecessor. Preserve the October 2 conversation
-continuity requirement. Determine how an open conversation leaves a disposable
-checkout so cleanup can happen safely; merely leaving it retained forever would
-not meet Jack's requested outcome. Actual unfinished edits, independent live work
-and real unresolved delivery retain their protections; Jack did not request a
-blanket discard operation.
-
-Required proof: focus a conversation into a Task with a fresh worktree, record a
-research/no-change outcome, complete without publishing or merging anything, and
-observe the worktree removed while Task identity, outcome and conversation history
-remain. Also prove that real retained-work blockers still explain what must be
-resolved. The existing first-allocation fixture simulates a merged PR, so it does
-not establish this no-landed-change scenario.
-
-The remainder describes the existing implementation and earlier plan. Review remains
-open; this direction authorizes no delivery or Task completion. Feedback is retained
-in [the review note](../task-purpose-demo.md).
-
-### Related removal work · October 4 readback
-
-Jack Heart reported separate work removing Task workers and possibly the completion
-API. Fresh `lf task status LOO-353 --json` identifies
-[LOO-353](https://linear.app/loopflow/issue/LOO-353) as the worker-removal owner.
-Its October 4 brief requires deleting privileged managed-Flow selection and all
-special Task-worker machinery, using ordinary background execution, and showing
-equally rich progress for every associated Flow. It also removes `lf session ready`
-and `lf session complete`, with review feedback staying in the ongoing conversation.
-These are accepted directions in that Task, not evidence of implementation here.
-
-Do not deepen this branch's managed-versus-independent UI split or preserve worker
-mechanisms merely to satisfy its earlier plan. Item 7's general Flow display is the
-right direction; a common presentation for all associated Flows is the candidate
-integration target. Coordinate remaining cuts with LOO-353 rather than duplicate
-its deletion work. LOO-353 explicitly leaves Task admission/completion with LOO-367;
-its brief removes Session completion APIs, not explicitly `lf task complete`.
-The Task-completion API's final disposition therefore remains unresolved despite
-Jack's expectation that completion API work is being removed elsewhere.
-
-The walkthrough's question about Task outcome, continuing conversation and retained
-execution asks whether finishing work leaves an understandable visible result:
-the Task disposition, continued access to the same conversation, and removal of its
-disposable worktree or a concrete reason for retention. It does not propose three
-new user-facing statuses or require retaining the existing completion handshake.
-
-Jack Heart subsequently confirmed this visible result and the common Flow-display
-direction: “yeah that all sounds right”. Treat outcome visibility, continued
-conversation access, no-landing cleanup and concrete retention explanations as
-accepted experience. This does not accept the existing implementation, settle the
-exact conversation handoff, remove another API, or authorize delivery.
+LOO-353 owns worker/privileged-Flow removal and the ongoing conversation machinery;
+its brief removes Session ready/complete APIs, not Task completion. LOO-364 owns
+broader Session wake/switch UX. LOO-366 owns Project availability and optional
+chapter resets. LOO-379 owns cancellation/deletion confirmation; its independent
+[research and filing receipt](../execution-independence-research.md) remain separate.
 
 ## Review decision · 2026-10-02
 
@@ -266,76 +207,24 @@ so the current Exec evidence is explicitly seeded in the PM fixture; it cannot b
 presented as a real provider turn. Older detailed source findings remain at
 `528625dc17ba4dd6440d7365c1a3073e1c71d205:scratch/jack-heart/start-and-finish-tasks-without.md`.
 
-## Earlier architecture — revision required
+## Surviving contracts
 
-Keep one Task, one shared Flow engine and the existing planning completion writer.
-The following describes the earlier cut, preserved to explain its implementation.
-Items 3, 5 and 6 are not the October 4 target: allocation must lose PR coupling,
-LOO-353 retires managed selection, and safe handoff must permit eventual checkout
-removal while preserving the conversation. The counterexample above identifies
-the missing mechanism rather than treating retained placement as success.
+Keep one Task, the shared Flow driver and the existing planning completion writer.
+Admission and inspection remain independent of execution/delivery. A Task's optional
+path/slug pair distinguishes no placement from a lost checkout; reads never invent
+placement. Binding is write-once association, not Started, process control or Flow
+authority. Preserve prospective usage attribution and historical identity.
 
-1. Make Task placement explicitly optional. Represent the path and workspace slug
-   together as `Option<TaskWorkspace>` in Rust so a half-present placement cannot
-   escape the store. Existing nullable columns retain present placement unchanged; absent
-   placement is SQL NULL, never an empty string or the caller's directory.
-   The Task keeps its existing identity, Project, Wave, outcome and event history.
-   No second Task table or workflow policy record is needed.
-2. Separate registration of existing issue identity from checkout/PR preparation
-   inside `ops/task`. A shared admission function is used by explicit Task
-   attribution and Session binding when the issue has no runtime row. It resolves
-   the existing owned issue, ensures its existing durable ancestors and writes
-   the Task once, without reserving work or setting Started. Pure inspection and
-   planning-only filing/completion still need no runtime row. Registration races
-   converge by issue identity; terminal Tasks are never implicitly reopened.
-3. `task_checkout` attaches placement through the existing LOO-355 allocation,
-   restoration and PR machinery. Preserve existing checkout command semantics;
-   ordinary registration must not call it. Retain initializing/recovery receipts
-   and leases. A placement allocation failure leaves the admitted Task recoverable
-   under the same identity and cannot silently create a replacement Task.
-4. Context and work readers accept no workspace and no PR. Task purpose and known
-   ancestry still render; PR-specific context appears only when present. A direct
-   attributed command without placement runs in the explicitly supplied caller
-   cwd. Recording that command does not adopt the whole directory as Task-owned.
-   With retained placement, preserve current placement routing. Explicit binds
-   remain additive and prospective usage attribution remains unchanged.
-5. Route explicit `flow start <template>` through the shared capture/driver with
-   optional Task attribution. Preserve the managed marker, claim and saved resume
-   path where a managed Flow is selected; absence of delivery placement is not a
-   reason to create it. Bare Task Flow start may use its Project default or resume
-   its captured managed Flow. Taskless start requires a template. Placement flags
-   remain explicit requests for the existing checkout operation before launch.
-   Replacing a managed Flow uses existing stop/restart fencing and preserves
-   independent Flows and Task identity. LOO-364 owns broader Session wake/switch UX;
-   this change only removes delivery admission assumptions from those operations.
-6. Registered completion uses `complete_task` and its existing gate. Always check
-   associated work, outcome conflicts and unresolved effects. Check dirty files,
-   committed ranges and cleanup only for actual placement; check PR settlement
-   only for recorded PRs. No placement means no files to clean, not permission to
-   ignore explicitly associated work. A missing previously allocated checkout
-   remains missing evidence and retains existing recovery protections.
-   The requesting conversation's current turn and its exact completion invocation
-   must not block the Task transition. Resolve that relationship from existing
-   authoritative Session/Exec evidence; cwd, membership and causal ancestry alone
-   grant no exemption or control. Other unfinished work, pending review boundaries,
-   unknown execution and unresolved delivery still block through their existing
-   owners. Do not broaden a shared idle check: cleanup and abandonment retain their
-   own protections. Completion must not terminate the requesting conversation,
-   settle its Flow or delete a checkout it still uses. Retained cleanup is reported
-   separately and remains retryable without changing the original outcome.
-7. Confirm planning mutations by the affected issue's fresh authoritative facts
-   through existing normalized ingestion. Keep revision ordering, ownership checks,
-   cancellation/duplicate conflict handling and idempotent creation/summary markers.
-   Whole-Wave refresh may update coordination separately but cannot invalidate an
-   already confirmed lower-level operation. A failed issue confirmation remains
-   explicitly unconfirmed. Preserve registered completion's pending writeback
-   contract and expose it; never label it confirmed provider completion.
-8. Project operation-specific availability in existing Rust snapshots/actions.
-   An unavailable Flow or agent cannot disable a legal completion or inspection.
-   Desktop exposes outcome entry and completion for planning-only and registered
-   Tasks using the same command, and renders optional placement in Files/Session
-   launch controls. No Swift lifecycle or policy matrix. Agents use the same CLI
-   and explanations. Update DTO fixtures in every mirrored language together.
+Confirm mutations using the affected issue through normalized planning ingestion,
+retaining revision ordering, ownership checks, creation/summary markers and pending
+writeback. Never report an unknown provider outcome as confirmed completion.
+Completion checks associated unfinished work and real delivery promises. Only the
+exact requesting conversation may remain active during completion; that allowance
+never authorizes checkout removal. Failed cleanup retains the original outcome.
+
+CLI, agents and Desktop consume the same Rust operations and explanations. DTO
+changes update the Rust/Swift fixtures together. No Swift lifecycle, alternate
+completion subsystem, force switch or broad directory adoption is needed.
 
 ### Requirement audit
 
@@ -343,7 +232,7 @@ the missing mechanism rather than treating retained placement as success.
 |---|---|---|
 | File | Existing selected Project/Wave routing, provider mutation authority, idempotent issue identity | Agent, Flow, checkout and PR only for explicitly requested execution/delivery |
 | Inspect | Known issue or retained Task identity; report freshness/missingness | No launch authority, current chapter or agent account; remote failure must retain available local history |
-| Start ordinary work | Exact Session/Exec authority, valid attribution and actual cwd | No managed claim, PR or newly allocated checkout; managed progression retains its planning checks |
+| Start ordinary work | Exact Session/Exec authority, valid attribution and actual cwd | Default focused conversations to placement without a PR/Flow obligation; unplaced execution remains supported |
 | Associate existing work | Exact Session/Task identities, write-once bind and ancestry consistency | No active PR, managed Flow, Started transition or reopening of terminal Task |
 | Record outcome | Nonempty summary and authoritative issue/Task writer | No Flow success or merge unless that evidence is part of the requested outcome |
 | Complete | Outcome conflicts, associated unfinished work, unresolved effects and idempotent transition | File/PR/merge evidence only for retained placement and delivery promises |
@@ -367,41 +256,16 @@ completion; retain it only as delivery regression coverage. Do not extend
 driver. LOO-353 owns their replacement/removal boundary. These deletions remain
 unimplemented, as does the revised default binding path.
 
-Delete unconditional workspace/PR requirements from registration, context,
-non-delivery completion and Task action derivation. Replace the Task-only
-`FlowCommand::Start` dispatch; do not retain a parallel ordinary start engine.
-Remove tests that assert these obsolete prerequisites, replacing them with
-behavior proofs. Correct the Task module's claim that every Task owns Flow
-progression and a PR chain.
+Already removed: mandatory placement in admission/context/binding, unconditional
+checkout inspection during completion, whole-Wave mutation confirmation, inherited
+Flow cwd and Task-Done-driven Flow settlement. The current implementation section
+records behavior and proof limits; earlier compression details remain in the Git
+reference above. These completed cuts are not remaining deletion targets.
 
-Removed: mandatory Task placement, PR-dependent context and Session binding,
-unconditional checkout inspection during completion, whole-Wave post-mutation
-confirmation, inherited Flow cwd, and Task-completion-driven Flow settlement.
-
-Compression review on October 3 removed the obsolete Task clone that rewrote
-placement solely for steer publication; publication already resolves the owning
-Wave repository. Binding now calls admission directly, and checkout restoration,
-cleanup and their tests retain one workspace reference. PR observation again takes
-its mutation lock before reading the PR, preventing a stale pre-lock row from
-replacing a concurrent publication. PR observation acquires no checkout lock for unplaced Tasks.
-
-The follow-up implementation removed: managed launch/restart's unconditional delivery
-allocation, checkpoint and no-active-PR prerequisites; saved-Flow resumption's
-workspace lookup; and Desktop's managed-only Flow display. Exact managed claims,
-review boundaries, captured graphs and placed-Task delivery recovery remain.
-
-The follow-up compression removes the temporary replacement Task built during
-first-checkout allocation: existing admission is retained directly before attaching
-placement. Rotation and missing-checkout checks reuse their validated workspace;
-PR recovery errors name the checkout holding the stash. Unplaced context avoids an
-irrelevant Git branch lookup. The independent Flow DTO fixture now contains only
-two research steps, with completed and current progress checked in Rust and Swift,
-instead of duplicating the feature graph's unrelated review and routing topology.
-No deletion target remains from this pass; broader acceptance stays with gate.
-
-Keep `task_complete`, `complete_planning_task`, the existing gate, PR settlement,
-managed claim fencing, LOO-355 checkout/rotation operations and LOO-358 membership.
-Do not repair or duplicate those mechanisms as a prerequisite to deleting coupling.
+Retain Task completion, planning-only completion, associated-work protection,
+real PR settlement and exact execution authority. Replace PR-dependent placement
+facts and the managed/independent presentation only with their surviving owners;
+do not polish worker or review machinery LOO-353 removes.
 
 Use one migration draft for this Task, generated by `scripts/new_migration.py`.
 Migrate released rows without changing IDs, paths, PR links, managed Flow selection,
@@ -416,16 +280,18 @@ as execution authority, broad directory adoption or fake checkout creation.
 
 ## Ordered work and acceptance
 
-One coherent architectural change; these are internal steps, not compatibility
-stages to ship independently.
+One coherent architectural change; the October 4 deletion inventory and handoff
+interface remain before acceptance. Earlier focused passes do not prove them.
 
 The core admission, context, explicit startup, completion and optional-placement
 consumer changes exist. This remains one architectural PR, not a completed Task.
 
 Commits `f656edf5f` and `25d339fb1` address the prior feedback about managed
 placement and independent Flow display; that feedback no longer describes missing
-implementation. Local main is the already-integrated `8c72e591e` (v0.12.32),
-including #1415 recovery; no newer upstream facts were fetched. Gate
+implementation. The October 3 pass integrated `8c72e591e` (v0.12.32), including #1415
+recovery. The October 4 research found newer local-main restart/review changes
+(#1413 and #1429); preserve them during integration without restoring remote
+restart prerequisites. No sync or fetch is claimed here. Gate
 owns the provider/review/retry and Desktop interaction scenarios below. The failed
 managed-launch regression proves capture, replacement, retained identity and zero
 delivery allocation after a missing driver identity; it does not prove a successful
@@ -479,8 +345,8 @@ identity. Failure would be an apparently successful completion hiding live work
 or an unknown provider result. Explicit absent placement, preserved membership,
 per-operation checks and confirmation/retry proofs are the safeguards.
 
-Simulated review: the domain pair removes invented empty paths, admission has one
-transactional owner, and completion keeps destructive retention separate. This
+October 3 review (historical): the domain pair removes invented empty paths, admission has one
+transactional owner, and completion keeps destructive retention separate. That
 pass caught two residual couplings: managed planning still required a checkout,
 and restart could validate one directory then capture from another. Owning-repo
 planning and pre-captured replacement fix them. The allocation fixture also
@@ -488,8 +354,14 @@ confirmed that an unpublished PR blocks completion until delivery settles. A sta
 controller test still expected Task completion to end its Flow; it is replaced by
 separate preservation/new-launch-refusal and final-step-completion proofs.
 
+Earlier focused receipts remain at
+`d9fabaaea360be123f6165651d25b5546eb3f519:scratch/jack-heart/start-and-finish-tasks-without.md`;
+no production code changed in this compression. Review removed superseded default,
+architecture and completed-deletion instructions that competed with the accepted
+revision. Safe Session handoff, PR-free placement and their proofs remain unresolved.
+
 Earlier focused passes remain at `25d339fb1` and `f656edf5f`; gate retains provider/review/retry and Desktop acceptance.
 
 Sync check (October 4, main `a1d2f8a591`): `cargo test -p loopflow --lib task_without_delivery` passed (9); `cargo test -p loopflow --test task_restart_tests restart_uses_old_valid_planning_and_preserves_invalid_work` passed (1); `cargo test -p loopflow --lib steer_failure_preserves_confirmed_or_uncertain_publication` passed (1); formatting and diff checks passed; broader checks remain with gate/CI.
 
-Check (October 4): source/LOO-353 brief inspection only; `git diff --check` passed; no production change or new runtime proof. Safe Session handoff remains unresolved before dependent implementation.
+Check: `git diff --check` passed; prose-only compression, no runtime rerun; gate owns revised behavior acceptance after implementation.

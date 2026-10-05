@@ -19,22 +19,24 @@ in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, source evidence 2026-10-05)
 
-Jack Heart authorized autonomous source delivery, not installed conversion or live
-interruption. Capture keys select history, Session IDs select mutations, and Session/Exec
-provenance supplies authority.
-Missing payload cannot erase a resumable native conversation's SQLite identity.
+Jack Heart authorized source delivery, not installed conversion or interruption.
+Capture keys select history; Session IDs select mutations; Session/Exec provenance
+supplies authority. Missing payload cannot erase resumable SQLite identity.
 
-SQLite compatibility cannot prove layout completion; v0.13.3 journals before checks. macOS probes demonstrate:
-newly opened hard links modify payload/SQLite despite Home traversal denial;
-after worker death during partial sealing, a writable shared parent permits
-namespace replacement. Fresh recovery preserves both histories but requires fixture
-namespace repair before restoration; identity checks cannot fence swaps. Linux
-probes remain unexecuted. Reader death after full sealing proves neither interrupted
-sealing nor recovery; portable probes establish no conversion or power-loss proof.
+SQLite compatibility cannot prove layout completion; v0.13.3 journals before checks.
+macOS probes demonstrate writable hard-link aliases despite Home traversal denial
+and shared-parent replacement after partial sealing. October 5's deterministic
+race replaces the path after recovery checks its inode: recovery changes the
+replacement's permissions and reports success. Reject that restoration mechanism.
 
-Durable restoration and candidate recovery must precede exclusion mutations.
-Quiescence follows sealing and repeats on recovery. Preserve unrelated access;
-ACLs, mounts and aliases remain obligations. `runs/` and conversion gaps remain.
+Five portable interruption/race cases preserve bytes; metadata retry requires
+fixture namespace repair. Ownership changes remain Linux/CI-owned and unexecuted.
+No conversion, production quiescence or power-loss proof follows. Prior detail:
+`05c3267df4aa585903d0d4af22a37f21b096c359:wave/infrastructure/MEMORY.md`.
+
+External admission/namespace exclusion and candidate recovery must precede metadata
+mutation. Preserve unrelated access and repeat quiescence on recovery; ACLs,
+mounts and aliases remain obligations. `runs/` and conversion gaps remain.
 
 ## Review replacement (2026-10-04)
 
@@ -943,7 +945,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.

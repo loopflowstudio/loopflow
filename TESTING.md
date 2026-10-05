@@ -887,15 +887,19 @@ Reproduce interrupted sealing with a writable shared parent:
 uv run python tests/e2e/capture_exclusion.py --probe-recovery
 ```
 
-The probe fsyncs original inode identities and metadata before a child changes
-one file's mode and dies by SIGKILL, leaving its directory unsealed. A fresh
-process replaces the payload path while continuing unrelated writes. Recovery
-in another process refuses the changed inode without altering either history.
-After the fixture restores the original namespace, two fresh recovery processes
-restore the saved metadata from the receipt. This portable test proves a namespace
-counterexample and metadata restoration, not privileged exclusion or quiescence.
-The container also runs it with root-owned file sealing and an unprivileged
-process replacing the path.
+The probe fsyncs original inode identities and metadata, then kills workers at
+ownership/mode boundaries during sealing and restoration. The portable variant
+changes modes only; ownership mutations require the container. A shared-parent
+replacement before recovery is detected without changing either history. A
+replacement **after** recovery's identity check instead receives the original
+file's permissions while recovery reports success. Pipe barriers reproduce this
+race without sleeps, and unrelated writes continue in both cases.
+
+Only the fixture repairs the namespace. Two fresh processes then restore metadata
+from the receipt, including after interrupted restoration. These are counterexamples
+and conditional retry proofs, not safe installer recovery, admission exclusion,
+quiescence or power-loss proof. The container repeats the cases with root-owned
+inodes and an unprivileged replacing process.
 
 Probe released commands, hard links and external storage in isolation:
 

@@ -201,13 +201,36 @@ ownership/mode mutation, and candidate-owned recovery remain unproved. The small
 fixture recovery helper is not installer code and does not select a deployment
 mechanism.
 
-Review finding: the fixture waits for its known renamer to exit before recovery.
-Identity prechecks do not fence a concurrent path swap or discover unknown writers;
-production recovery still needs exclusion and a repeated quiescence observation.
-The interruption is one fixed point after file ownership/mode changes and fsync,
-before directory sealing; it does not cover death between chown and chmod or
-during restoration. Fresh-process retry proves metadata restoration only after
-the fixture repairs the namespace, not automatic recovery of that namespace.
+### Recovery check/write race — October 5 executed counterexample
+
+The expanded `--probe-recovery` pauses a recovery process after it accepts every
+saved inode identity. Another process replaces the directory and writes unrelated
+content; recovery then changes the replacement file from mode 0600 to the saved
+0644 and exits successfully. The displaced original remains sealed at 0400. Both
+histories retain their bytes. Explicit pipe barriers establish the interleaving;
+this is executed unprivileged macOS evidence, not a probabilistic stress result.
+
+Four other cases interrupt at sealing owner/mode and restoration owner/mode
+boundaries. After the fixture repairs the namespace, two fresh-process retries
+restore metadata and retained bytes from the durable receipt. Portable ownership
+stages perform no chown; the Linux variant performs it but remains CI-owned.
+Restoration interruptions occur on the directory before the payload is restored;
+these cases do not cover every inode, ACL, mount or power-loss boundary.
+
+**Design disposition:** reject pathname identity prechecks followed by pathname
+restoration as candidate recovery. They are not merely incomplete validation:
+a successful return can modify unrelated replacement metadata. The helper remains
+only a negative experiment. Descriptor-based mutation could avoid that particular
+wrong-inode write, but would neither prevent namespace replacement nor exclude
+new or retained writers; it is not selected as a conversion boundary.
+
+Dependent conversion remains stopped under the implement skill's architectural
+counterexample rule. No admission/namespace exclusion design is proved. Repeated
+quiescence after interruption is also unproved: these fixtures own their children
+and cannot discover production writers. A replacement must provide an external,
+crash-persistent admission owner before touching metadata, preserve unrelated
+shared-directory access, and keep candidate recovery effective through restart.
+Further permission-helper refinements cannot stand in for selecting that owner.
 
 ## Problem and observable outcome
 
@@ -532,4 +555,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, realign): `git diff --check` passed; reused compress’s Ruff and portable-probe passes without rerunning unchanged code; privileged Linux sealing/recovery remains CI-owned (Docker previously unavailable).
+Check (October 5, implement): `uv run python tests/e2e/capture_exclusion.py --probe-recovery` passed all five counterexample/retry cases; Ruff and `git diff --check` passed; privileged Linux cases remain CI-owned, not conversion acceptance.

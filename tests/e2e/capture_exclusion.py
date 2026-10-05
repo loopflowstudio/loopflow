@@ -34,33 +34,49 @@ def _sync(path: Path) -> None:
         os.close(descriptor)
 
 
-def _recover_metadata(receipt: Path) -> None:
+def _metadata_boundary(stage: str, interrupt_at: str | None, pause_at: str | None) -> None:
+    if stage == interrupt_at:
+        os.kill(os.getpid(), signal.SIGKILL)
+    if stage == pause_at:
+        print("opened", flush=True)
+        if sys.stdin.readline().strip() != "continue":
+            raise SystemExit("fixture boundary was not released")
+
+
+def _recover_metadata(
+    receipt: Path, interrupt_at: str | None = None, pause_at: str | None = None
+) -> None:
     entries = json.loads(receipt.read_text())
     # Check every identity before restoring any access. A pathname alone cannot
     # safely identify an object after an interrupted namespace exclusion.
-    # The fixture's renamer has exited; this check does not fence concurrent swaps.
+    # The concurrent-swap case deliberately disproves this check as a fence.
     for entry in entries:
         metadata = Path(entry["path"]).lstat()
         if (metadata.st_dev, metadata.st_ino) != (entry["dev"], entry["ino"]):
             raise SystemExit("recovery target changed; metadata left untouched")
+    _metadata_boundary("checked", interrupt_at, pause_at)
     for entry in reversed(entries):
         path = Path(entry["path"])
         if os.geteuid() == 0:
             os.chown(path, entry["uid"], entry["gid"])
+        _metadata_boundary("restore-owner", interrupt_at, pause_at)
         path.chmod(entry["mode"])
+        _metadata_boundary("restore-mode", interrupt_at, pause_at)
         _sync(path)
 
 
-def _run_metadata_worker(operation: str, receipt: Path) -> subprocess.CompletedProcess[str]:
+def _run_metadata_worker(
+    operation: str, receipt: Path, *args: str
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, __file__, operation, str(receipt)],
+        [sys.executable, __file__, operation, str(receipt), *args],
         capture_output=True,
         text=True,
         timeout=10,
     )
 
 
-def _probe_interrupted_metadata() -> None:
+def _probe_metadata_boundary(boundary: str) -> None:
     # This narrow counterexample deliberately leaves the shared parent writable.
     # The privileged variant uses root-owned inodes and an unprivileged renamer;
     # the portable variant proves pathname replacement, not ownership exclusion.
@@ -77,6 +93,8 @@ def _probe_interrupted_metadata() -> None:
         storage.mkdir()
         payload = storage / "events.jsonl"
         payload.write_text("retained history\n")
+        payload.chmod(0o644)
+        storage.chmod(0o755)
         if account:
             for path in (storage, payload):
                 os.chown(path, account.pw_uid, account.pw_gid)
@@ -100,33 +118,69 @@ def _probe_interrupted_metadata() -> None:
         receipt.chmod(0o600)
         _sync(receipt)
         _sync(root)
-        worker = _run_metadata_worker("--interrupt-metadata", receipt)
-        assert worker.returncode == -signal.SIGKILL, worker.stderr
-        assert stat.S_IMODE(payload.stat().st_mode) == 0o400
-        assert stat.S_IMODE(storage.stat().st_mode) == entries[1]["mode"]
-        # A fresh account process can keep unrelated work moving, but can also
-        # replace the protected path without opening its sealed payload inode.
-        replacement = subprocess.run(
-            [
-                *(["runuser", "-u", ACCOUNT, "--"] if privileged else []),
-                sys.executable,
-                "-c",
-                "import sys; from pathlib import Path; p=Path(sys.argv[1]); "
-                "(p/'unrelated').write_text('before'); "
-                "(p/'payloads').rename(p/'displaced'); (p/'payloads').mkdir(); "
-                "(p/'payloads/events.jsonl').write_text('replacement'); "
-                "(p/'unrelated').write_text('after')",
-                str(shared),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
+        seal_boundary = boundary if boundary.startswith("seal-") else "seal-mode"
+        worker = _run_metadata_worker(
+            "--interrupt-metadata", receipt, "--interrupt-at", seal_boundary
         )
-        assert replacement.returncode == 0, replacement.stderr
-        before = _snapshot(shared)
-        recovery = _run_metadata_worker("--recover-metadata", receipt)
-        assert recovery.returncode != 0 and "target changed" in recovery.stderr
-        assert _snapshot(shared) == before
+        assert worker.returncode == -signal.SIGKILL, worker.stderr
+        assert stat.S_IMODE(payload.stat().st_mode) == (
+            entries[0]["mode"] if seal_boundary == "seal-owner" else 0o400
+        )
+        assert stat.S_IMODE(storage.stat().st_mode) == entries[1]["mode"]
+        # In the race case, recovery is alive and has accepted all identities
+        # before another process replaces the path. No timing sleep is involved.
+        recovery_process = None
+        try:
+            if boundary == "checked":
+                recovery_process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        __file__,
+                        "--recover-metadata",
+                        str(receipt),
+                        "--pause-at",
+                        "checked",
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                _await_open(recovery_process)
+            replacement = subprocess.run(
+                [
+                    *(["runuser", "-u", ACCOUNT, "--"] if privileged else []),
+                    sys.executable,
+                    "-c",
+                    "import sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                    "(p/'unrelated').write_text('before'); "
+                    "(p/'payloads').rename(p/'displaced'); (p/'payloads').mkdir(); "
+                    "(p/'payloads/events.jsonl').write_text('replacement'); "
+                    "(p/'payloads/events.jsonl').chmod(0o600); "
+                    "(p/'unrelated').write_text('after')",
+                    str(shared),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert replacement.returncode == 0, replacement.stderr
+            before = _snapshot(shared)
+            if recovery_process is not None:
+                _, error = recovery_process.communicate("continue\n", timeout=10)
+                assert recovery_process.returncode == 0, error
+                assert _snapshot(shared) != before, "race did not alter replacement metadata"
+                assert stat.S_IMODE(payload.stat().st_mode) == entries[0]["mode"]
+                assert stat.S_IMODE((shared / "displaced/events.jsonl").stat().st_mode) == 0o400
+            else:
+                recovery = _run_metadata_worker("--recover-metadata", receipt)
+                assert recovery.returncode != 0 and "target changed" in recovery.stderr
+                assert _snapshot(shared) == before
+        finally:
+            if recovery_process is not None and recovery_process.poll() is None:
+                recovery_process.kill()
+                recovery_process.communicate(timeout=10)
+        assert payload.read_text() == "replacement"
         assert (shared / "unrelated").read_text() == "after"
         assert (shared / "displaced/events.jsonl").read_text() == "retained history\n"
         # Only the fixture restores the known namespace. Recovery then uses the
@@ -134,6 +188,18 @@ def _probe_interrupted_metadata() -> None:
         payload.unlink()
         storage.rmdir()
         (shared / "displaced").rename(storage)
+        if boundary.startswith("restore-"):
+            if privileged:
+                os.chown(storage, 0, 0)
+            storage.chmod(0o700)
+            recovery = _run_metadata_worker(
+                "--recover-metadata", receipt, "--interrupt-at", boundary
+            )
+            assert recovery.returncode == -signal.SIGKILL, recovery.stderr
+            assert stat.S_IMODE(storage.stat().st_mode) == (
+                0o700 if boundary == "restore-owner" else entries[1]["mode"]
+            )
+            assert stat.S_IMODE(payload.stat().st_mode) == 0o400
         for _ in range(2):
             recovery = _run_metadata_worker("--recover-metadata", receipt)
             assert recovery.returncode == 0, recovery.stderr
@@ -145,10 +211,12 @@ def _probe_interrupted_metadata() -> None:
                 entry["mode"],
             )
         assert payload.read_text() == "retained history\n"
-    print(
-        "Counterexample confirmed: partial sealing leaves shared namespace replaceable; "
-        "fresh recovery preserves replacement and retained history."
-    )
+    print(f"Metadata boundary {boundary}: counterexample and fixture recovery verified.")
+
+
+def _probe_interrupted_metadata() -> None:
+    for boundary in ("seal-owner", "seal-mode", "checked", "restore-owner", "restore-mode"):
+        _probe_metadata_boundary(boundary)
 
 
 def _probe_retained_aliases() -> None:
@@ -401,6 +469,10 @@ def main() -> None:
     modes.add_argument("--interrupt-metadata", type=Path)
     modes.add_argument("--recover-metadata", type=Path)
     parser.add_argument("--excluded", action="store_true")
+    parser.add_argument(
+        "--interrupt-at", choices=("seal-owner", "seal-mode", "restore-owner", "restore-mode")
+    )
+    parser.add_argument("--pause-at", choices=("checked",))
     args = parser.parse_args()
     if os.geteuid() == 0 and not Path("/.dockerenv").exists():
         raise SystemExit("Privileged probes require the disposable container.")
@@ -409,11 +481,13 @@ def main() -> None:
         path = Path(entry["path"])
         if os.geteuid() == 0:
             os.chown(path, 0, 0)
+        _metadata_boundary("seal-owner", args.interrupt_at, None)
         path.chmod(0o400)
+        _metadata_boundary("seal-mode", args.interrupt_at, None)
         _sync(path)
         os.kill(os.getpid(), signal.SIGKILL)
     if args.recover_metadata:
-        _recover_metadata(args.recover_metadata)
+        _recover_metadata(args.recover_metadata, args.interrupt_at, args.pause_at)
         return
     if args.probe_recovery:
         if os.geteuid() == 0:

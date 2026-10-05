@@ -26,7 +26,7 @@ and a miss ships with numbers and a follow-up Task.
   `:events.jsonl:` with transcript lines; exempting the key silenced about
   1,270 displayed rows a day. Exempt the types readers skip. Usage still
   moves nothing, so token totals lag: nobody chose that either.
-- An unreadable store must not read as an empty workspace.
+- An unreadable store must not read as empty.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
   replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
   Rendered on a copy of Jack's store (debug, 3 samples): a Task change in

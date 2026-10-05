@@ -630,6 +630,11 @@ fn execution_blockers(
             .sqlite
             .session_has_pending_turn(&session.id)
             .map_err(task_error)?
+            && (session.completed_at.is_none()
+                || crate::ops::task_automation::session_engine_unresolved(
+                    &store.sqlite,
+                    &session.id,
+                )?)
         {
             blockers.push(format!(
                 "Session {} has an unresolved provider turn",

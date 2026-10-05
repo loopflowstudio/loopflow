@@ -368,6 +368,7 @@ final class PodiumModel {
     static func window(query: RegistryQuery, launchCandidates: [String] = []) -> PodiumModel {
         let model = PodiumModel(query: query, launchCandidates: launchCandidates,
                                 cache: AppTestMode.current() == nil ? .home : nil)
+        LaunchJournal.home.mark(.restored, ["cache": model.showsSavedWorkspace ? "hit" : "miss"])
         PodiumFixture.applyIfRequested(to: model)
         return model
     }
@@ -384,8 +385,12 @@ final class PodiumModel {
         case (nil, nil): break
         }
         if roadmap.isLoading || (repoPath != nil && sessions.isLoading) { return .loading }
-        if showsSavedPlanning || savedSessionRepos.contains(repoPath ?? "") { return .updating }
-        return .current
+        return showsSavedWorkspace ? .updating : .current
+    }
+
+    /// Whether any part shown is saved text instead of a read from this launch.
+    var showsSavedWorkspace: Bool {
+        showsSavedPlanning || savedSessionRepos.contains(repoPath ?? "")
     }
 
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
@@ -418,7 +423,9 @@ final class PodiumModel {
     }
 
     private func endLaunchWhenCurrent() {
-        if workspaceStatus == .current { Perf.end(Perf.workspaceCurrent, id: "launch") }
+        guard workspaceStatus == .current else { return }
+        Perf.end(Perf.workspaceCurrent, id: "launch")
+        LaunchJournal.home.mark(.fresh)
     }
 
     /// Reads now come from `id`. A workspace saved under another Home is dropped
@@ -537,6 +544,7 @@ final class PodiumModel {
         isRefreshing = true
         defer { isRefreshing = false }
 
+        let started = ContinuousClock.now
         let previousRoadmap = roadmap.value
         let generation = roadmapGeneration
         let previousWaves = waves.value
@@ -549,6 +557,7 @@ final class PodiumModel {
         if waves != nextWaves { waves = nextWaves }
         let result = await roadmapResult
         if generation == roadmapGeneration { publishRoadmap(result, lastGood: previousRoadmap) }
+        LaunchJournal.home.refreshed("planning", ms: started.elapsedMs, ok: roadmap.errorMessage == nil)
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
@@ -825,6 +834,7 @@ final class PodiumModel {
         let includingHeadless = navigation.showsHeadlessSessions
         let wire = WireCapture()
         let query = query.recording(wire.record)
+        let started = ContinuousClock.now
         do {
             repeat {
                 let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
@@ -843,12 +853,14 @@ final class PodiumModel {
                 after = page.next
             } while after != nil
             savedSessionRepos.remove(repoPath)
+            LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: true)
             endLaunchWhenCurrent()
             // Explicit history is read on request, never restored at launch.
             if !includingHeadless { cache?.saveSessions(wire.texts, repo: repoPath) }
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                   !Task.isCancelled else { return }
+            LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
             sessions = .unavailable(lastGood: sessions.value, reason: error.localizedDescription)
         }
     }

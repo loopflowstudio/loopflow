@@ -221,6 +221,15 @@ List worktrees (read-only; reflects the last-synced main)
 | `--sync` | Fetch origin and fast-forward main before listing (mutates the canonical checkout). Off by default so a list never touches it Default: false. |
 | `--help / -h` | Print help |
 
+## lf wt timing
+
+Report how long `lf wt list` has taken on this machine
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wt prune
 
 Remove clean terminal or inactive worktrees

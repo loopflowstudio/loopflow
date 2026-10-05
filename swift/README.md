@@ -21,6 +21,14 @@ opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Delete the file to start from **Loading workspace…**.
 
+```sh
+uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
+```
+
+Each launch records when its first frame, saved workspace and fresh workspace
+arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
+the Home. Durations and command names only; the files stay on this machine.
+
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Home. Disabling stops scheduled

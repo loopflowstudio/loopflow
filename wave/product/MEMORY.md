@@ -873,8 +873,8 @@ no owning Task (LOO-375 owns `wt list` only).
   CPU and the 400/1000 ms targets are unmeasured.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-  Still owed on LOO-376 after PR #1425: recorded timing of real launches and
-  refreshes with a documented report command. Not complete without it.
+- PR 2 has the app journal real launches and reads in the Home; `timings.py`
+  reports them. No real launch is recorded yet: read it before completing.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

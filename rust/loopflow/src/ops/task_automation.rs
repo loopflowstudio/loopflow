@@ -69,7 +69,9 @@ pub(crate) fn admission_blocker(
                 return Ok(Some(format!("Session {} has a reserved input", session.id)));
             }
         }
-        if store.session_has_pending_turn(&session.id).map_err(error)? {
+        if store.session_has_pending_turn(&session.id).map_err(error)?
+            && (session.completed_at.is_none() || session_engine_unresolved(store, &session.id)?)
+        {
             return Ok(Some(format!(
                 "Session {} has an unresolved provider turn",
                 session.id

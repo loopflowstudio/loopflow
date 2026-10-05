@@ -210,6 +210,14 @@ was not used as a test setup step. CI owns the isolated Linux probe; macOS seali
 ACL preservation and the complete boundary remain separate gaps. Candidate-owned
 conversion and the atomic consumer cut remain dependent work.
 
+Source review at `fbf69ba6a` distinguishes process death from interrupted sealing:
+the fixture kills a privileged SQLite reader only after all metadata changes have
+finished. The sealing controller survives with its restoration list in memory.
+Even a passing Linux result would prove persistence of completed permission changes,
+not recovery from partial sealing or loss of that list. The production fault matrix
+therefore needs interruption between metadata mutations and a fresh recovery process
+using only durable evidence, with unrelated shared-directory access preserved.
+
 ## Problem and observable outcome
 
 The original inventory found capture keys called Run IDs, presence-based execution
@@ -349,7 +357,12 @@ direct released commands after converter death as well as during conversion.
 Configured deployment additionally requires authorization for the operational
 freeze; fixture success cannot establish installed acceptance.
 
-1. With external launch admission stopped, inspect all exact selected-Home Exec,
+1. Establish candidate recovery and durably record restoration evidence before
+   any exclusion mutation, including ownership/ACL changes before the layout move.
+   Under a proved external admission boundary, stabilize the resolved-object and
+   namespace inventory, establish exclusion, then validate quiescence. Recovery
+   must repeat that validation; permissions cannot revoke retained handles.
+   Inspect all exact selected-Home Exec,
    provider and client evidence. Any live writer, unresolved process identity or
    active sequencer retains the old layout and blocks conversion with the owner
    named. A bounded check returns; it never waits indefinitely or signals a process.
@@ -522,4 +535,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, compression): `uv run ruff check tests/e2e/capture_exclusion.py` and `uv run python tests/e2e/capture_exclusion.py --probe-aliases` passed; `uv run python scripts/test_capture_exclusion.py` could not reach Docker (Linux writer-lifetime/sealing probe deferred to CI); conversion and full gate remain outstanding.
+Check (October 5, realign): `git diff --check` passed; retained `uv run ruff check tests/e2e/capture_exclusion.py` and `uv run python tests/e2e/capture_exclusion.py --probe-aliases` passes; Linux sealing remains deferred to CI after Docker was unavailable; no behavioral checks rerun for prose reconciliation.

@@ -24,16 +24,16 @@ interruption. Capture keys name subordinate history; durable Session IDs select
 conversation mutations, and current Session/Exec provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove layout completion. Candidate recovery
-must precede mutation; exclusion must survive until validation. Released v0.13.3
-journals before installation checks. An isolated macOS probe opened outside hard
-links after denying Home traversal and changed original payload and SQLite bytes;
-no descriptor survived the freeze. Directory ownership cannot revoke child-inode
-aliases. The unexecuted fixture now probes inode sealing, hard links and external
-storage after worker death. Complete quiescence, ACLs, shared namespaces and
-durable restoration remain design gaps before conversion, beyond that Linux
-check. Account targeting depends on this boundary. `runs/` remains; conversion
-and installed preservation are unproved.
+Exact SQLite compatibility does not prove layout completion. Released v0.13.3
+journals before installation checks. An isolated macOS probe changed payload and
+SQLite bytes through newly opened hard links after Home traversal was denied;
+no descriptor survived. Directory ownership cannot revoke child-inode aliases.
+The unexecuted Linux probe seals inodes and kills a reader after sealing finishes;
+it cannot prove interrupted sealing or durable recovery.
+Candidate recovery and durable restoration evidence must precede even exclusion
+mutations. Quiescence must follow sealing and repeat on recovery. ACLs, shared
+namespaces and external storage remain design gaps; account targeting depends on
+that boundary. `runs/` remains; conversion and installed preservation are unproved.
 
 ## Review replacement (2026-10-04)
 

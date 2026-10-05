@@ -881,7 +881,7 @@ its payload and SQLite database. No descriptor survives from before exclusion.
 The probe restores permissions and removes its own files; it uses no installed
 Home. This disproves directory permissions as the sole conversion boundary.
 
-Probe released commands through the protected pathname separately:
+Probe released commands, hard links and external storage in isolation:
 
 ```bash
 uv run python scripts/test_capture_exclusion.py
@@ -898,11 +898,17 @@ unavailable check, never a passing exclusion result.
 The fixture creates its own account and Home. It attempts direct released
 preflight, doctor and screenshot commands before exclusion, while a privileged
 worker accesses that Home, and after worker death. It compares database/payload
-bytes and filesystem ownership, including retained-descriptor and alias counterexamples.
-The fixture account's Home stays root-owned until container disposal.
-This experiment does not exercise a candidate converter,
-populated Session preservation, macOS privileged exclusion or recovery targeting.
-A passing pathname probe does not establish exclusion through other aliases.
+bytes and filesystem ownership, retaining the directory-only and open-descriptor
+counterexamples. Inode sealing additionally tests `chmod` through outside hard
+links, an aliased database selected by `LF_HOME`, and external payload storage
+reached through a symlink. Namespace replacement must fail while sealed. Writes
+must succeed again after restoring the fixture's original ownership and modes.
+The privileged reader uses immutable SQLite access to avoid creating its own WAL.
+
+Fixed fixture roots and in-memory metadata are not production discovery or durable
+recovery. This experiment does not establish ACL/mount coverage, shared-namespace
+preservation, general quiescence, a candidate converter, populated Session
+preservation, macOS privileged exclusion or recovery targeting.
 
 ## Nightly Package Tests
 

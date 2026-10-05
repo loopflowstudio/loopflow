@@ -29,11 +29,11 @@ must precede mutation; exclusion must survive until validation. Released v0.13.3
 journals before installation checks. An isolated macOS probe opened outside hard
 links after denying Home traversal and changed original payload and SQLite bytes;
 no descriptor survived the freeze. Directory ownership cannot revoke child-inode
-aliases. The hosted fixture tests pathname denial and reproduces that bypass;
-even a green job cannot prove complete exclusion. No Linux result is recorded.
-This is a design gap before privileged recovery or layout mutation, not just an
-unavailable check. Account targeting depends on the replacement design. `runs/`
-remains; conversion and installed preservation are unproved.
+aliases. The unexecuted fixture now probes inode sealing, hard links and external
+storage after worker death. Complete quiescence, ACLs, shared namespaces and
+durable restoration remain design gaps before conversion, beyond that Linux
+check. Account targeting depends on this boundary. `runs/` remains; conversion
+and installed preservation are unproved.
 
 ## Review replacement (2026-10-04)
 

@@ -68,9 +68,10 @@ Remaining indivisible source work:
 
 The exclusion runner's pinned checksums were verified against published v0.13.3
 SHA256SUMS. Docker was unavailable; no container or hosted result is recorded.
-The executed macOS alias counterexample below remains contrary evidence. A green
-`capture-exclusion.yml` job would confirm pathname denial and the alias bypass,
-not prove the replacement boundary required for conversion.
+The executed macOS alias counterexample below remains contrary evidence. The expanded
+`capture-exclusion.yml` probe also tests inode sealing and external storage; it
+has no execution result. Its bounded fixture cannot establish arbitrary placement
+coverage or production quiescence.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -153,12 +154,13 @@ Resolved out-of-Home storage and pre-existing file aliases must be covered by
 the exclusion boundary, along with retained descriptors and launch sources.
 An empty process inventory cannot establish this. The design's dependent
 privileged recovery and layout mutation are stopped, not implemented on this
-contradicted premise. No replacement boundary has yet been selected or proved.
+contradicted premise. No complete replacement boundary has been proved; the inode-sealing proposal
+below is the next isolated experiment.
 
 The existing network-isolated Ubuntu runner retains the checksum-pinned v0.13.3
 pathname checks, including direct preflight, doctor and screenshot after worker
-death. It now also runs the alias counterexample as its unprivileged fixture
-account and labels success as pathname-only. Docker remains unavailable locally;
+death. It retains the unprivileged alias counterexample and now probes inode sealing
+separately, without treating either result as conversion acceptance. Docker remains unavailable locally;
 there is no hosted or Linux execution result. Its empty released store and
 synthetic payload never establish populated conversion.
 
@@ -171,6 +173,42 @@ silently reject them or substitute a new advisory lock. Keep candidate-owned
 recovery, frozen backup, original access restoration after validation, and the
 populated fault matrix. No installed interruption or administrator mutation is
 authorized by source development.
+
+### Inode-sealing proposal — October 5, unproved
+
+The next experiment changes ownership of the protected **file inodes**, as well
+as their directory entry boundaries. A privileged maintenance owner would retain
+exclusive access until the candidate validates conversion. Outside hard links
+then share the protected ownership; changing only mode while retaining the original
+owner would let that owner restore write permission through an alias.
+
+The disposable Linux fixture now covers a `runs` symlink to external storage,
+payload/database hard links in a still-writable directory, attempted `chmod`
+through those aliases, released journaling through an aliased `LF_HOME`, and
+external-directory replacement. It asserts successful writes before exclusion
+and after metadata restoration, with unchanged protected bytes during exclusion
+and after killing its privileged reader. A second writer deliberately retains an
+open descriptor through inode sealing; the snapshot follows its exit. The reader
+uses immutable read-only SQLite access so its own WAL creation cannot be mistaken
+for an excluded writer. These are authored checks, not observed passes.
+
+This selects an experiment, not a complete deployment boundary. Production still
+needs a stable inventory of resolved objects and directory-entry ancestors,
+including ACLs, writable mappings, inherited descriptors and external mounts.
+A shared external ancestor cannot be silently seized merely to protect one child;
+namespace exclusion and restoration must preserve supported placements and unrelated
+owners. Metadata changes must be journaled durably before each mutation, with
+candidate recovery effective even after partial sealing. Sealing must precede
+final quiescence validation, and recovery must repeat that validation: permissions
+do not revoke existing handles. The fixture's fixed roots and in-memory saved
+metadata deliberately supply none of that production discovery or crash recovery.
+Do not transplant its helper into the installer as a proven boundary.
+
+The Docker runner cannot connect to its daemon. Starting the available VM manager
+without a machine selector would resume all previously running machines, so that
+was not used as a test setup step. CI owns the isolated Linux probe; macOS sealing,
+ACL preservation and the complete boundary remain separate gaps. Candidate-owned
+conversion and the atomic consumer cut remain dependent work.
 
 ## Problem and observable outcome
 
@@ -397,7 +435,8 @@ in isolation, without another product approval.
    design covering all access paths, not only original pathnames. Retain both
    released-writer and newly opened alias counterexamples. Select and prove that
    boundary before dependent privilege/recovery implementation; no replacement is
-   currently selected. Then implement any required OS-account targeting, durable
+   currently proved. The inode-sealing experiment above is the next proof target.
+   Then implement any required OS-account targeting, durable
    recovery/restoration, and candidate-owned conversion through exact-schema
    advancement and recovery. Inventory mutable absolute references, preserve the
    frozen SQLite/payload/executable pair and prove released writers stay excluded.
@@ -477,4 +516,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5 realign): `git diff --check` passed; unchanged code reuses compression's 31/31 direct-skill tests, build, formatting and Clippy at `8a46c8675996aa0114504b2015b55e7d91557ee1`. Hosted pathname experiment belongs to CI; replacement exclusion, conversion and affected gate remain outstanding.
+Check (October 5): `uv run ruff check tests/e2e/capture_exclusion.py` and unprivileged `--probe-aliases` passed; `scripts/test_capture_exclusion.py` could not reach Docker (Linux probe deferred to CI); conversion and full gate remain outstanding.

@@ -26,6 +26,15 @@ mod migration_schema;
 /// registers as `wave/clarify`); `-` remains a word separator.
 const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
+/// Each ongoing conversation carries its scope's operating procedure inline:
+/// the registered session skill is its own file followed by the body of its
+/// operate skill. The operate skill stays registered on its own.
+const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
+    ("repo/session", "repo/operate"),
+    ("wave/session", "wave/operate"),
+    ("task/session", "task/operate"),
+];
+
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
@@ -305,7 +314,50 @@ fn generate_kind_map(
             }
         }
     }
+    if kind == "skill" {
+        compose_sessions(
+            &mut entries,
+            out_path.parent().expect("generated map has a directory"),
+        );
+    }
     emit_map(&mut entries, map_name, out_path);
+}
+
+fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
+    let composed_dir = out_dir.join("composed_skills");
+    fs::create_dir_all(&composed_dir).expect("create composed skill directory");
+    for (session, operate) in SESSION_OPERATE_PAIRS {
+        let source = |name: &str| {
+            let path = entries
+                .iter()
+                .find(|(entry, _)| entry == name)
+                .map(|(_, path)| path)
+                .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"));
+            fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        };
+        let composed = format!(
+            "{}\n# Operating procedure: `{operate}`\n\n{}",
+            source(session),
+            skill_body(&source(operate))
+        );
+        let path = composed_dir.join(format!("{}.md", session.replace('/', "_")));
+        fs::write(&path, composed).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+        let entry = entries
+            .iter_mut()
+            .find(|(entry, _)| entry == session)
+            .expect("session entry was read above");
+        entry.1 = path;
+    }
+}
+
+fn skill_body(content: &str) -> &str {
+    let after_open = content
+        .strip_prefix("---")
+        .expect("operate skill opens with frontmatter");
+    let end = after_open
+        .find("\n---")
+        .expect("operate skill closes its frontmatter");
+    after_open[end + 4..].trim_start_matches('\n')
 }
 
 fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) {

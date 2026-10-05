@@ -16,8 +16,10 @@ delivering PR #1421's Session filtering after the unpublished v0.13.1 bump.
 Manual runner recovery supplies neither a verified public receipt nor LOO-285's
 two unattended settlements. Keep publication, installation and public verification
 separate; preserve the retained publisher checkout lease for supported recovery.
-Exact evidence and remaining validator/smoke repairs belong in
-[Release memory](release/MEMORY.md).
+Exact evidence belongs in [Release memory](release/MEMORY.md). Local source
+history now includes #1441 (`e1ec32929`): settlement drops the retired UI receipt
+and public smoke uses `lf list --json`. This supersedes its pending-source-repair
+wording, without proving installation or either unattended settlement.
 
 ## Review replacement (2026-10-04)
 
@@ -157,9 +159,8 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
-
-Release-specific findings live in [release memory](release/MEMORY.md).
+Renamed from `systems` on 2026-07-08. Current objectives and configured release
+schedule supersede historical nightly/weekly notes.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
@@ -235,13 +236,13 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 October 5 source permits empty Flow and preserves provider names. Jack Heart's
 comment `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only
 correction, preserving original evidence and strict subsequent conflicts.
-Planning/markers are atomic; durable projection is not. Public-store regressions
-cover transfer, restart-status, acquisition-age and interrupted reteam. Reteam
-persists an identifier alone before final refresh; accepted old planning can
-reverse it. Retain full mutation readbacks before projection. Accepted observations
-must own planning fields exclusively, including restart, Task-update content and
-reteam identifiers and each entity's age. Operation recovery is unproved;
-selection, ensure, rotation and Desktop remain unfinished and uninstalled.
+Planning/markers are atomic; durable projection is not. Five recorded store
+regressions fail across transfers, restart-status, entity age and interrupted
+reteam. Accept and project observations in one transaction; retain full mutation
+readbacks before projection. Remove captured planning writes from restart and
+Task updates and identifier-only reteam writes. Keep each entity's acquisition
+age and local execution choices. Store proofs cannot establish operation recovery.
+Selection, ensure, rotation and Desktop remain unfinished and uninstalled.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
 autonomous Intelligence repair without another review Session. The reported
@@ -782,10 +783,9 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
-store gate keys on the registered installation path, not the bytes, so a demo
-app must route through the installed `lf` (`LoopflowDevControl.json` →
-`lf_path`) or be promoted.
+The superseded source-install staging incident remains at
+`1452f58d3:wave/infrastructure/MEMORY.md` under “Data model and performance
+decisions”; current published-installation policy governs verification.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

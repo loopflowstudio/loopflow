@@ -1507,6 +1507,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        task.plan.pm_snapshot_synced_at = 1;
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.snapshot.items[0].name = task.plan.title.clone();
+        snapshot.snapshot.items[0].description = task.plan.description.clone();
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+
+        // Reteam persists the returned identifier, then stops before its final
+        // repository refresh. It has retained neither revision nor acquisition.
+        store
+            .rebind_task_issue_identifier(task.plan.id.as_str(), &task.plan.identifier, "NEXT-8")
+            .await
+            .unwrap();
+        let rebound = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(rebound.plan.identifier, "NEXT-8");
+
+        // An earlier detail response arrives after the interrupted operation.
+        store
+            .put_pm_task(
+                "/repo",
+                "linear",
+                crate::store::PmTaskRecord {
+                    item: snapshot.snapshot.items[0].clone(),
+                    project: Some(snapshot.snapshot.projects[0].clone()),
+                    observed_at: snapshot.synced_at,
+                },
+            )
+            .await
+            .unwrap();
+        let accepted = store
+            .pm_task_observation("/repo", "linear", task.plan.id.as_str())
+            .await
+            .unwrap()
+            .record
+            .unwrap();
+        // Task-update reconciliation projects the accepted detail, not a stale
+        // captured Task. No concurrent writer or delayed local read is needed.
+        store
+            .update_task_plan(
+                &task.id,
+                &TaskPlan {
+                    id: task.plan.id.clone(),
+                    identifier: accepted.item.identifier,
+                    title: accepted.item.name,
+                    description: accepted.item.description,
+                    pm_snapshot_synced_at: accepted.observed_at,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), rebound);
+    }
+
+    #[tokio::test]
     async fn delayed_restart_project_projection_preserves_completed_provider_status() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(

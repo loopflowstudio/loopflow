@@ -1,7 +1,12 @@
+use std::fs::{File, OpenOptions};
 use std::num::NonZeroU32;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
+use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
+use sha2::{Digest, Sha256};
 
 use crate::exec::{
     AgentCaller, Exec, ExecCursor, ExecFilter, ExecOutcomeFilter, ExecPage, ExecWorkFilter,
@@ -387,24 +392,69 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Serialize native dispatch with driver transfer. The bounded transport
-    /// write finishes before a replacement can acquire the same Session.
+    // Dispatch and driver changes share a per-Session OS lock, never a SQLite
+    // transaction across provider I/O. Do not unlink lock files: another process
+    // may already have the inode open. Process exit releases ownership.
+    pub(super) fn lock_session_driver(&self, session: &str) -> StoreResult<File> {
+        let database = self
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .path()
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                StoreError::InvalidData("Session dispatch requires a file-backed store".into())
+            })?;
+        let root = Path::new(&database)
+            .canonicalize()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .with_extension("session-locks");
+        std::fs::create_dir_all(&root)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        // A synchronous caller must never wait indefinitely on a dispatch whose
+        // reactor it might be driving. This bound uses the OS clock, not Tokio.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(file),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(StoreError::InvalidData(format!(
+                            "Session {session} dispatch is still busy; retry after the current send finishes"
+                        )));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(StoreError::InvalidData(error.to_string())),
+            }
+        }
+    }
+
+    /// Serialize native dispatch with driver transfer without blocking history
+    /// or unrelated database writes while the bounded transport write runs.
     pub(crate) fn with_session_driver<T>(
         &self,
         session: &str,
         expected: &SessionDriver,
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if expected.exec_id.is_none() || driver_in(&tx, session)?.as_ref() != Some(expected) {
-            return Err(StoreError::InvalidAuthority(
-                "Session driver changed".into(),
-            ));
+        let _dispatch = self.lock_session_driver(session)?;
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            if expected.exec_id.is_none() || driver_in(&conn, session)?.as_ref() != Some(expected) {
+                return Err(StoreError::InvalidAuthority(
+                    "Session driver changed".into(),
+                ));
+            }
         }
-        let result = write()?;
-        tx.commit()?;
-        Ok(result)
+        write()
     }
 
     /// Read current conversation attribution and exact retained client membership.
@@ -487,8 +537,18 @@ impl SqliteStore {
         exec: &ExecId,
         replace_provider: bool,
     ) -> StoreResult<SessionDriver> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let closed_review: bool = tx.query_row(
+            "SELECT kind='flow_review' AND completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
+            [session], |row| row.get(0),
+        )?;
+        if closed_review {
+            return Err(StoreError::InvalidAuthority(
+                "review has been closed".into(),
+            ));
+        }
         let current = driver_in(&tx, session)?;
         if current.as_ref() != expected {
             return Err(StoreError::InvalidAuthority(
@@ -531,6 +591,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionDriver,
     ) -> StoreResult<SessionDriver> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut current = driver_in(&tx, session)?.ok_or(StoreError::NotFound)?;
@@ -549,13 +610,16 @@ impl SqliteStore {
         Ok(current)
     }
 
-    /// Record the exact driver's exit without settling a Flow review.
+    /// Close the exact driver's runtime and record its exit under the same
+    /// transaction as ownership transfer, without settling a Flow review.
     pub(crate) fn finish_session_driver(
         &self,
         session: &str,
         expected: &SessionDriver,
         outcome: &str,
+        close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
+        let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if driver_in(&tx, session)?.as_ref() != Some(expected) {
@@ -563,6 +627,7 @@ impl SqliteStore {
                 "Session driver changed".into(),
             ));
         }
+        let closed = close_provider()?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let payload = serde_json::json!({
             "type": "driver_exit", "outcome": outcome, "generation": expected.generation
@@ -587,8 +652,9 @@ impl SqliteStore {
             params![session, now, outcome],
         )?;
         tx.execute(
-            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1 WHERE id=?1",
-            [session],
+            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1,
+                provider_endpoint=CASE WHEN ?2 THEN NULL ELSE provider_endpoint END WHERE id=?1",
+            params![session, closed],
         )?;
         tx.commit()?;
         Ok(())

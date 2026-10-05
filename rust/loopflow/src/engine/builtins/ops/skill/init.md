@@ -200,15 +200,15 @@ Tasks use the current Project and its required `flow:` default.
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
 `lf repo new-chapter <name> --dry-run --json`, then apply with
-`lf repo new-chapter <name> --json` only under that authorization. Every Wave
+`lf repo new-chapter <name> --json` to apply those dispositions. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
 with no Projects receives an empty plan with `flow: feature`, unless an authored
 Planned successor supplies its content. Existing successors and predecessors
 retain identity; rotation completes predecessors rather than deleting them.
 
 Author future content in the Planned Linear Project through an available
-authorized provider interface. For an existing current Project,
-`lf wave update-plan --wave <wave> --plan <plan.json>` replaces its complete
+provider interface. For an existing current Project,
+`lf update-plan --wave <wave> --plan <plan.json>` replaces its complete
 content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
 There is no future-plan writer or historical chapter selector in these commands.
 Missing access or competing current Projects stays an explicit next action;
@@ -264,11 +264,11 @@ commands. The remote process can select from subscription accounts forwarded
 for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
-required accounts, and the intended route. `lf home observe` records the
+required accounts, and the intended route. `lf observe` records the
 mutable SSH route for the stable HomeId. Placement is allowed only while no execution
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
-`lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
-changing placement, or starting a Wave; each changes durable execution state.
+`lf ssh <home-id>` to run on the remote Home. Observing a route,
+changing placement, and starting a Wave each change durable execution state.
 
 ## 6. Prove the result
 

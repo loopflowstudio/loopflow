@@ -6,7 +6,7 @@ use crate::engine::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned,
 };
-use crate::engine::worktrees::{list_worktrees_local, main_repo_root, sibling_worktree_name};
+use crate::engine::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
 use crate::ops::{OpsError, OpsResult, Progress};
 
 #[derive(Debug)]
@@ -37,14 +37,13 @@ pub(crate) fn prepare_delete(
     force: bool,
 ) -> OpsResult<BranchDeletion> {
     let repo = main_repo_root(repo)?;
-    let matches = list_worktrees_local(&repo)?
-        .1
+    let matches = list_porcelain(&repo)?
         .into_iter()
-        .filter(|wt| {
-            wt.branch.as_deref() == Some(selector)
-                || wt.path.to_string_lossy() == selector
-                || sibling_worktree_name(&wt.path).as_deref() == Some(selector)
-                || wt.path.file_name().is_some_and(|name| name == selector)
+        .filter(|(path, branch)| {
+            branch.as_deref() == Some(selector)
+                || path.to_string_lossy() == selector
+                || sibling_worktree_name(path).as_deref() == Some(selector)
+                || path.file_name().is_some_and(|name| name == selector)
         })
         .collect::<Vec<_>>();
     if matches.len() > 1 {
@@ -54,8 +53,7 @@ pub(crate) fn prepare_delete(
     }
     let worktree = matches.into_iter().next();
     let branch = match &worktree {
-        Some(wt) => wt
-            .branch
+        Some((_, branch)) => branch
             .clone()
             .ok_or_else(|| OpsError::Message("detached checkout has no branch to delete".into()))?,
         None => selector.to_string(),
@@ -64,13 +62,15 @@ pub(crate) fn prepare_delete(
         &repo,
         &["check-ref-format", &format!("refs/heads/{branch}")],
     )?;
-    if branch == get_default_branch(&repo)? || worktree.as_ref().is_some_and(|wt| wt.path == repo) {
+    if branch == get_default_branch(&repo)?
+        || worktree.as_ref().is_some_and(|(path, _)| *path == repo)
+    {
         return Err(OpsError::Message(
             "cannot delete the primary checkout or default branch".into(),
         ));
     }
-    if let Some(wt) = &worktree {
-        if wt.path.try_exists()? && !force && !is_clean(&wt.path)? {
+    if let Some((path, _)) = &worktree {
+        if path.try_exists()? && !force && !is_clean(path)? {
             return Err(OpsError::Message(
                 "worktree has uncommitted changes; use --force to discard them".into(),
             ));
@@ -97,7 +97,7 @@ pub(crate) fn prepare_delete(
             .transpose()?,
         repo,
         branch,
-        worktree: worktree.map(|wt| wt.path),
+        worktree: worktree.map(|(path, _)| path),
         remote_head,
         force,
     })
@@ -168,6 +168,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
             &repo,
             &path,
             lease.as_ref().expect("worktree has a deletion lease"),
+            &|_| {},
         )?;
     }
     if ref_exists(&repo, &format!("refs/heads/{branch}"))? {

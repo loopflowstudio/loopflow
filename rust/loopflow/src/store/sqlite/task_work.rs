@@ -141,13 +141,17 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// A turn runs in a local provider process, so one that began before this
+    /// machine booted can no longer finish; its missing completion stays in history.
     pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events start WHERE start.session_id=?1
-            AND start.kind='started' AND NOT EXISTS(SELECT 1 FROM session_events done
+            AND start.kind='started' AND (?2 IS NULL OR start.observed_at>=?2)
+            AND NOT EXISTS(SELECT 1 FROM session_events retired WHERE retired.session_id=start.session_id AND retired.receipt_key='task_restart:stopped')
+            AND NOT EXISTS(SELECT 1 FROM session_events done
                 WHERE done.session_id=start.session_id AND done.kind='completed'
                 AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))",
-            [session], |row| row.get(0))?)
+            rusqlite::params![session, crate::journal::machine_booted_at()], |row| row.get(0))?)
     }
 }
 

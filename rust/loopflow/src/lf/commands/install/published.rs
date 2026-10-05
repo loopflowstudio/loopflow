@@ -95,13 +95,15 @@ fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool 
     }) {
         return false;
     }
-    let published = inspect(&directory.join("lf"), &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|preview| {
-            preview["candidate"]["authority"] == "published"
-                && preview["verdict"]["kind"] == "promote"
-        });
+    let published = inspect(
+        &directory.join("lf"),
+        &["home", "install", "preflight", "--json"],
+    )
+    .filter(|output| output.status.success())
+    .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
+    .is_some_and(|preview| {
+        preview["candidate"]["authority"] == "published" && preview["verdict"]["kind"] == "promote"
+    });
     published && applications.is_none_or(|root| has_release_app(root, version))
 }
 
@@ -176,7 +178,7 @@ fn run_verified_installer(
         .context("start the published installer")?;
     if !status.success() {
         bail!(
-            "published installation failed ({status}); fix the error above and rerun `lf install`"
+            "published installation failed ({status}); fix the error above and rerun `lf home install`"
         );
     }
     Ok(())
@@ -184,7 +186,7 @@ fn run_verified_installer(
 
 pub fn schedule(frequency: InstallFrequency) -> Result<()> {
     if !cfg!(target_os = "macos") {
-        bail!("automatic installation currently uses macOS launchd; run `lf install` to update manually");
+        bail!("automatic installation currently uses macOS launchd; run `lf home install` to update manually");
     }
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     let binary = install_dir()?.join("lf");
@@ -217,7 +219,9 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
             .status()?
             .success()
     {
-        bail!("could not unload the previous installation schedule; rerun `lf install schedule`");
+        bail!(
+            "could not unload the previous installation schedule; rerun `lf home install schedule`"
+        );
     }
     fs::write(&path, payload)?;
     if !Command::new("launchctl")
@@ -226,7 +230,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
         .status()?
         .success()
     {
-        bail!("could not load the installation schedule; rerun `lf install schedule`");
+        bail!("could not load the installation schedule; rerun `lf home install schedule`");
     }
     let cadence = match frequency {
         InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
@@ -269,7 +273,7 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>com.loopflow.refresh</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
+<key>ProgramArguments</key><array><string>{binary_path}</string><string>home</string><string>install</string></array>
 <key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 <key>RunAtLoad</key><true/>
 <key>StartCalendarInterval</key>{calendar}

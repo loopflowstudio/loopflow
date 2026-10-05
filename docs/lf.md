@@ -39,12 +39,26 @@ lf --task EXP-12 flow start incident # choose a template for new work
 it cannot override a Task's owning Wave. A named direct Flow creates an
 independent FlowSession. `flow start` preserves the Task's selected Flow and
 saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
-explicitly replaces the Task's workflow.
+explicitly replaces the Task's workflow. A waiting review is retired with its
+history intact; its exact service, driver and provider execution must exit before
+the replacement starts. Retirement does not approve the review. If interruption
+leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
+unresolved process ownership still block admission. `flow end ID` ends a stopped
+Flow without running its remaining steps; it lists as `replaced` and keeps its
+failure and history.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
 remain separate even when their text matches. IDE launches with Wave documents
 use the assembled prompt so those references reach the provider.
+
+Existing Task restart and continuation use valid cached planning regardless of age.
+Known invalidation, removal, terminal state or ownership changes still block.
+`lf task restart ISSUE` works without Linear; adding advice requires successful
+Linear publication before replacing the worker. Failed advice publication preserves
+the old Flow but may already have checkpointed local edits. Status retains the
+planning observation's original age.
+
 
 ## Connect planning and create work
 
@@ -63,6 +77,11 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
+After Linear accepts a Task creation or update, Loopflow confirms that issue
+directly without another Wave-wide snapshot. If Linear commits but issue
+confirmation fails, the error names the retained issue. Retry the same command
+with the original creation options to reuse it without filing a duplicate.
+
 ## Inspect and continue
 
 ```bash
@@ -80,6 +99,7 @@ lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
+lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
 The repository and each Wave have one ongoing conversation. `session ensure`
@@ -103,9 +123,9 @@ lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
 lf --task EXP-12 land -c            # also request completion after merge
-lf task sync --plan                     # preview integration with main or stack parent
+lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
-lf release check                   # inspect release eligibility
+lf check                   # inspect release eligibility
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
@@ -187,9 +207,9 @@ lf help feature
 lf list skill
 ```
 
-Omit owners when the remaining command resolves uniquely: `lf land`, `lf ps`,
-`lf top`, and `lf mon list`. `mon` is a unique prefix, not an alias. Ambiguity
-lists canonical choices and performs no action. Exact commands take precedence
+Use shortcuts: `lf land`, `lf ps`, and `lf mon list`.
+Omit owners or abbreviate command names when the result is unique. Ambiguous
+shortcuts list their matching command paths. Exact commands take precedence
 over authored definitions; `lf skill NAME` and `lf flow NAME` select a kind.
 
 Help and catalog reads launch no agent. The [command reference](lf-reference.md)
@@ -212,10 +232,53 @@ Task destinations open details; selecting a Flow opens its folded template.
 
 ```bash
 lf task status LOO-358 --json
-lf session list --task LOO-358 --history
+lf session list --task LOO-358 --interactive all --history
 ```
+
+`lf session list` defaults to unfinished interactive conversations and current
+Flow reviews. `--needs-me` narrows that selection to immediate attention;
+`--all` changes repository scope, `--interactive all` includes background work,
+and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
 including headless and completed work. Managed marks the Flow advanced by
 `lf --task … flow start`; the managed execution line describes only that worker. Independent
 work remains visible and preserves the checkout while unfinished or unresolved.
+
+## Keep a document workspace
+
+```bash
+lf session ensure                    # persistent repository conversation
+lf session ensure --wave product     # separate persistent Wave conversation
+```
+
+Inside the conversation's persistent checkout:
+
+```bash
+lf commit -m "Record accepted decisions" wave/product/MEMORY.md
+lf pr publish
+```
+
+`lf wt create planning --persistent` also creates or reuses an independent document
+workspace; enter its printed path before editing.
+
+Primary conversations reuse their respective worktrees, including after replacement.
+They display a workspace without gaining Task membership. Moved checkouts are
+rediscovered; missing checkouts recover committed branch state. Live conversations
+keep their placement until an idle driver boundary.
+
+Persistent workspaces retain scratch locally through commit, sync, publication and
+landing. Selected-path commits preserve unrelated staged edits. Publication pushes
+the committed range, leaving later local edits alone. Inspect the complete range
+before publishing. PR landing clears scratch in non-persistent workspaces, whether
+or not the work belongs to a Task.
+
+If a sync resolver creates a file where an untracked file was stashed, sync restores
+the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or the
+next unused number). Read both notes and reconcile them locally. Tracked conflicts
+retain the recovery stash and report its identity; resolve them before restoring it.
+
+Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and after a
+merged document PR. Network failures leave local work usable; conflicts stay visible
+and use `lf sync --continue` or `lf sync --abort`. Persistent branches remain reusable
+and survive automatic pruning. Memory updates do not require PRs or a schedule.

@@ -4,4 +4,4 @@
     id: review_demo
     name: demo
     human: true
-- cmd: task pr land -c
+- cmd: pr land -c

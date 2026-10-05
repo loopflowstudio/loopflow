@@ -70,7 +70,7 @@ The implementation follows the same order as the diagram:
 The Skill runner is useful by itself. The rest of Loopflow grows outward by
 adding one kind of capability at each layer. Tracked Work owns autonomous
 progression; attributed conversations consume the same execution and delivery
-operations available to helpers without becoming resident Work identities.
+operations available to helpers without becoming standing Work identities.
 
 ```text
 one Skill run

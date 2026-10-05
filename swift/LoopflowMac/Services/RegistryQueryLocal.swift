@@ -25,9 +25,14 @@ enum RegistryQueryLocal {
         }.value
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
-            try await Task.detached(priority: .userInitiated) {
+            let started = ContinuousClock.now
+            var ok = false
+            defer { LaunchJournal.home.read(args, ms: started.elapsedMs, ok: ok) }
+            let output = try await Task.detached(priority: .userInitiated) {
                 try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
             }.value
+            ok = true
+            return output
         }
     }
 }

@@ -25,6 +25,16 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+/// Entry emitted by `lf list --json`.
+public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let kind: String
+    public let source: String
+    public let description: String
+    public let invocation: String
+    public var id: String { name }
+}
+
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
@@ -42,6 +52,16 @@ public struct RegistryQuery: Sendable {
         self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveSessions
+    }
+
+    /// A copy that also reports each successful read's wire text, so a caller
+    /// can retain exactly what it decoded.
+    public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
+        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
+            let stdout = try await run(args, cwd)
+            record(stdout)
+            return stdout
+        }
     }
 
     /// Current Waves across the machine. The shared
@@ -149,6 +169,13 @@ public struct RegistryQuery: Sendable {
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
         let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {
+        let stdout = try await run(["list", "--json"], cwd)
+        return try Self.decode([DiscoveryEntry].self, from: stdout)
+            .filter { $0.kind == "skill" }
+            .sorted { $0.name < $1.name }
     }
 
     /// Every selectable Flow with the topology it would pin, via the shared loader.
@@ -354,7 +381,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(DoctorReport.self, from: stdout)
     }
 
-    private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
+    /// Decode retained wire text through the decoder live reads use.
+    public static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
         // `lf` prints one JSON line; trim any surrounding whitespace/newline.
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = trimmed.data(using: .utf8) else {

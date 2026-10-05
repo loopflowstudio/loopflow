@@ -4,11 +4,6 @@ Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
 listener and `lf wave status` contracts consumed by the Mac app. Every absent field
 is a parse error or an explicit null.
 
-listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
-`GET /resident/context` — see `rust/loopflow/src/wave/wire.rs`). Both ends are
-the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
-consume this wire.
-
 `task_status.json` pins the planning/execution envelope for available, unavailable,
 invalid, removed and absent planning. Rust round-trips it; Swift decodes the `TaskStatus` model
 returned by `RegistryQuery.taskStatus`. These cases have no execution. Complete

@@ -316,7 +316,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         finish(&mut position).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "task sync", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(!finish(&mut position).unwrap());
             }
@@ -343,61 +343,18 @@ mod planning_tests {
         assert_eq!(position.current().step, "demo");
         assert_eq!(position.cursor.iteration, 9);
         assert!(position.cursor.progress.verdict.is_none());
-        position.cursor.progress.direction = Some("Human requested a delivery correction".into());
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "loop-decide");
-        assert!(position.cursor.progress.verdict.is_none());
-        assert_eq!(position.cursor.iteration, 9);
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "Human requested a delivery correction".into(),
-        });
+        position.cursor.progress.direction = Some("Delivery reviewed".into());
         assert!(!finish(&mut position).unwrap());
-        assert_eq!(position.current().step, "implement");
         assert_eq!(
             position.cursor.progress.direction.as_deref(),
-            Some("Human requested a delivery correction")
+            Some("Delivery reviewed")
         );
-        for _ in 0..4 {
-            finish(&mut position).unwrap();
-        }
-        assert_eq!(position.current().step, "loop-decide");
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "Continue the human-requested revision".into(),
-        });
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "implement");
-        assert_eq!(position.cursor.progress.repeats["decide"], 10);
-        // Final Advance is the only edge into queue and landing. This traverses
-        // the authored plan without invoking any publication operation.
-        for _ in 0..4 {
-            finish(&mut position).unwrap();
-        }
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "Revision proved".into(),
-        });
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "pr-publish");
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "demo");
-        finish(&mut position).unwrap();
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "Human feedback addressed".into(),
-        });
-        finish(&mut position).unwrap();
-        for expected in [
-            "compress",
-            "task sync",
-            "realign",
-            "gate",
-            "task pr land -c",
-        ] {
+        assert!(position.cursor.progress.verdict.is_none());
+        assert_eq!(position.cursor.iteration, 9);
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
-            assert_eq!(finished, expected == "task pr land -c");
+            assert_eq!(finished, expected == "pr land -c");
         }
     }
 
@@ -893,7 +850,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: task sync --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -936,8 +893,8 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "task");
-        assert_eq!(active_op.item.args, ["sync", "--plan"]);
+        assert_eq!(active_op.item.command, "sync");
+        assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();
         let crate::engine::ConcreteStep::Skill(future_skill) = future.current_plan() else {
@@ -1589,6 +1546,12 @@ mod planning_tests {
             step.id.as_deref(),
             true,
         );
+        let current = store.task_flow(&task.id).await.unwrap().unwrap();
+        store.sqlite.retire_task_review(&current).unwrap();
+        store
+            .sqlite
+            .review_execution_stopped(current.pending_session_id.as_ref().unwrap())
+            .unwrap();
         store
             .restart_task_flow(
                 &task,
@@ -1769,7 +1732,13 @@ mod planning_tests {
         use crate::engine::transitions::{FlowDecision, FlowVerdict};
         use crate::engine::{ConcretePath, ConcreteStep, ConcreteXor, Skill};
         let (store, task, _) = human_task_fixture().await;
-        let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+        let flows = task.worktree.join(".lf/flows");
+        std::fs::create_dir_all(&flows).unwrap();
+        std::fs::write(
+            flows.join("review-loop.yaml"),
+            "- flow: pursue\n- step:\n    id: review_delivery\n    name: demo\n    human: true\n- step:\n    id: decide_delivery\n    name: loop-decide\n    repeat:\n      from: implement\n",
+        ).unwrap();
+        let mut flow = super::start_task_flow(&task, "review-loop").unwrap();
         let body = flow.invocation.steps.clone();
         let suffix = body[0].clone();
         flow.invocation.steps = vec![

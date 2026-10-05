@@ -1,4 +1,4 @@
-//! `lf usage --weekly` — what context costs, and what it does to turn time.
+//! `lf monitor usage --weekly` — what context costs, and what it does to turn time.
 //!
 //! Weeks are seven days anchored on the 2026-09-30 baseline, so every report
 //! shows the same trend line. A step is one captured Session input; unknown

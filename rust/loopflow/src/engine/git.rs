@@ -1,9 +1,11 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -40,19 +42,59 @@ pub struct LandResult {
 #[derive(Debug)]
 pub(crate) struct WorktreeLease {
     path: PathBuf,
-    _file: File,
+    file: File,
+}
+
+impl WorktreeLease {
+    pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            path: self.path.clone(),
+            file: self.file.try_clone()?,
+        })
+    }
+
+    /// Keep ordinary checkout removal excluded while this child uses it.
+    pub(crate) fn inherit(&self, command: &mut Command) {
+        let fd = self.file.as_raw_fd();
+        command.env("LF_WORKTREE_LEASE_FD", fd.to_string());
+        // SAFETY: the lease outlives child launch; fcntl is async-signal-safe
+        // and changes only this owned descriptor's inheritance in the child.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
-    Ok(Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()?)
+    run_git_inheriting(repo, args, &|_| {})
 }
 
-fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = run_git(repo, args)?;
+fn run_git_inheriting(
+    repo: &Path,
+    args: &[&str],
+    inherit: &impl Fn(&mut Command),
+) -> Result<Output, GitError> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo).args(args);
+    inherit(&mut command);
+    Ok(command.output()?)
+}
+
+pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+    git_stdout_inheriting(repo, args, &|_| {})
+}
+
+fn git_stdout_inheriting(
+    repo: &Path,
+    args: &[&str],
+    inherit: &impl Fn(&mut Command),
+) -> Result<String, GitError> {
+    let output = run_git_inheriting(repo, args, inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
@@ -124,7 +166,16 @@ fn list_conflicts(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
 
 /// Fetch a remote ref (e.g., "origin/main").
 pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["fetch", remote, refspec])?;
+    fetch_inheriting(repo, remote, refspec, &|_| {})
+}
+
+pub(crate) fn fetch_inheriting(
+    repo: &Path,
+    remote: &str,
+    refspec: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["fetch", remote, refspec], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git fetch {} {}", remote, refspec),
@@ -265,8 +316,13 @@ pub fn ref_exists(repo: &Path, ref_name: &str) -> Result<bool, GitError> {
 }
 
 /// Push and set upstream tracking.
-pub fn push_with_upstream(repo: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["push", "-u", remote, branch])?;
+pub fn push_with_upstream(
+    repo: &Path,
+    remote: &str,
+    branch: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["push", "-u", remote, branch], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git push -u {} {}", remote, branch),
@@ -288,7 +344,15 @@ pub fn delete_remote_branch(repo: &Path, remote: &str, branch: &str) -> Result<(
 }
 
 pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["branch", "-D", branch])?;
+    delete_local_branch_inheriting(repo, branch, &|_| {})
+}
+
+pub(crate) fn delete_local_branch_inheriting(
+    repo: &Path,
+    branch: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["branch", "-D", branch], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git branch -D {}", branch),
@@ -505,8 +569,8 @@ fn worktree_state_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<String,
 }
 
 /// Stage all changes.
-pub fn stage_all(repo: &Path) -> Result<(), GitError> {
-    git_stdout(repo, &["add", "-A"])?;
+pub fn stage_all(repo: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+    git_stdout_inheriting(repo, &["add", "-A"], inherit)?;
     Ok(())
 }
 
@@ -539,11 +603,11 @@ fn has_git_identity(repo: &Path) -> bool {
 /// committer via `-c user.name/-c user.email` so headless commits (e.g. the
 /// release version bump on a CI runner) succeed. A configured identity is
 /// never overridden.
-pub fn commit(repo: &Path, message: &str) -> Result<(), GitError> {
+pub fn commit(repo: &Path, message: &str, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     if has_git_identity(repo) {
-        git_stdout(repo, &["commit", "-m", message])?;
+        git_stdout_inheriting(repo, &["commit", "-m", message], inherit)?;
     } else {
-        git_stdout(
+        git_stdout_inheriting(
             repo,
             &[
                 "-c",
@@ -554,6 +618,7 @@ pub fn commit(repo: &Path, message: &str) -> Result<(), GitError> {
                 "-m",
                 message,
             ],
+            inherit,
         )?;
     }
     Ok(())
@@ -778,6 +843,15 @@ pub(crate) fn acquire_worktree_lease(
     path: &Path,
     owner: &str,
 ) -> Result<WorktreeLease, GitError> {
+    acquire_worktree_lease_wait(repo, path, owner, Duration::ZERO)
+}
+
+pub(crate) fn acquire_worktree_lease_wait(
+    repo: &Path,
+    path: &Path,
+    owner: &str,
+    timeout: Duration,
+) -> Result<WorktreeLease, GitError> {
     let lock_path = worktree_lease_path(repo, path)?;
     let mut file = OpenOptions::new()
         .create(true)
@@ -785,8 +859,13 @@ pub(crate) fn acquire_worktree_lease(
         .write(true)
         .truncate(false)
         .open(&lock_path)?;
-    if let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
+    let deadline = Instant::now() + timeout;
+    while let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
         if error.kind() == std::io::ErrorKind::WouldBlock {
+            if Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
             let active_owner = fs::read_to_string(&lock_path)
                 .ok()
                 .map(|value| value.trim().to_string())
@@ -808,31 +887,20 @@ pub(crate) fn acquire_worktree_lease(
     file.flush()?;
     Ok(WorktreeLease {
         path: normalized_worktree_path(repo, path),
-        _file: file,
+        file,
     })
 }
 
-fn remove_worktree_unchecked(repo: &Path, path: &Path) -> Result<(), GitError> {
-    let path_str = path.to_string_lossy();
-    let output = run_git(repo, &["worktree", "remove", "--force", path_str.as_ref()])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git worktree remove --force {}", path.to_string_lossy()),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
-    let _lease = acquire_worktree_lease(repo, path, "worktree removal")?;
-    remove_worktree_unchecked(repo, path)
+    let lease = acquire_worktree_lease(repo, path, "worktree removal")?;
+    worktree_remove_owned(repo, path, &lease, &|_| {})
 }
 
 pub(crate) fn worktree_remove_owned(
     repo: &Path,
     path: &Path,
     lease: &WorktreeLease,
+    inherit: &impl Fn(&mut Command),
 ) -> Result<(), GitError> {
     let path = normalized_worktree_path(repo, path);
     if lease.path != path {
@@ -841,7 +909,22 @@ pub(crate) fn worktree_remove_owned(
             stderr: format!("lease does not own {}", path.display()),
         });
     }
-    remove_worktree_unchecked(repo, &path)
+    let path_str = path.to_string_lossy();
+    let output = run_git_inheriting(
+        repo,
+        &["worktree", "remove", "--force", path_str.as_ref()],
+        &|command| {
+            lease.inherit(command);
+            inherit(command);
+        },
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git worktree remove --force {}", path.display()),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Move a worktree to a new path.
@@ -879,6 +962,16 @@ pub fn worktree_add(
     branch: &str,
     mode: WorktreeBranch<'_>,
 ) -> Result<(), GitError> {
+    worktree_add_inheriting(repo, path, branch, mode, &|_| {})
+}
+
+pub(crate) fn worktree_add_inheriting(
+    repo: &Path,
+    path: &Path,
+    branch: &str,
+    mode: WorktreeBranch<'_>,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
     let args: Vec<&str> = match mode {
         WorktreeBranch::New { start_point } => {
@@ -907,7 +1000,7 @@ pub fn worktree_add(
             vec!["worktree", "add", path_str.as_ref(), branch]
         }
     };
-    let output = run_git(repo, &args)?;
+    let output = run_git_inheriting(repo, &args, inherit)?;
     if !output.status.success() {
         // A failing post-checkout hook causes git to exit non-zero even when
         // the worktree was created successfully. Verify before reporting failure.
@@ -1057,14 +1150,15 @@ pub fn merge(
         // Git has populated the index/worktree with its normal three-way merge.
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
-        if fork_base.is_some() {
+        let preserve_scratch =
+            fork_base.is_some() || crate::engine::worktrees::is_persistent_worktree(worktree)?;
+        if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves
             // modify/delete conflicts which a text merge driver cannot handle.
             restore_scratch_from_head(worktree)?;
         }
-        if output.status.success() || (fork_base.is_some() && list_conflicts(worktree)?.is_empty())
-        {
+        if output.status.success() || (preserve_scratch && list_conflicts(worktree)?.is_empty()) {
             return continue_merge(worktree, None);
         }
     } else if !output.status.success() {
@@ -1283,12 +1377,16 @@ pub fn create_branch(worktree: &Path, name: &str) -> Result<BranchInfo, GitError
     })
 }
 
-pub fn push(worktree: &Path, force_with_lease: bool) -> Result<(), GitError> {
+pub fn push(
+    worktree: &Path,
+    force_with_lease: bool,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
     let mut args = vec!["push"];
     if force_with_lease {
         args.push("--force-with-lease");
     }
-    git_stdout(worktree, &args)?;
+    git_stdout_inheriting(worktree, &args, inherit)?;
     Ok(())
 }
 
@@ -1419,6 +1517,23 @@ mod tests {
     }
 
     #[test]
+    fn waiting_for_worktree_lease_never_displaces_its_owner() {
+        let repo = init_repo();
+        let lease = acquire_worktree_lease(repo.path(), repo.path(), "active repair").unwrap();
+        let error = acquire_worktree_lease_wait(
+            repo.path(),
+            repo.path(),
+            "cleanup",
+            Duration::from_millis(50),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("owned by active repair"));
+        assert!(repo.path().exists());
+        drop(lease);
+        assert!(acquire_worktree_lease(repo.path(), repo.path(), "cleanup").is_ok());
+    }
+
+    #[test]
     fn commit_supplies_fallback_identity_when_none_configured() {
         // Isolate from the developer's global/system git identity so the
         // no-identity path (as on a CI runner) is exercised deterministically.
@@ -1433,8 +1548,8 @@ mod tests {
         );
 
         fs::write(dir.path().join("README.md"), "hello").expect("write file");
-        stage_all(dir.path()).expect("stage");
-        commit(dir.path(), "add readme")
+        stage_all(dir.path(), &|_| {}).expect("stage");
+        commit(dir.path(), "add readme", &|_| {})
             .expect("commit should succeed without configured identity");
 
         let email =
@@ -1525,11 +1640,11 @@ mod tests {
         .expect("add remote");
 
         // Initial push to set upstream
-        push_with_upstream(repo.path(), "origin", "main").expect("initial push");
+        push_with_upstream(repo.path(), "origin", "main", &|_| {}).expect("initial push");
 
         // Now test force-with-lease push
         commit_file(repo.path(), "second.txt", "second commit");
-        push(repo.path(), true).expect("push force-with-lease");
+        push(repo.path(), true, &|_| {}).expect("push force-with-lease");
     }
 
     #[test]
@@ -1644,8 +1759,8 @@ mod tests {
         let dirty = worktree_state(repo.path()).expect("dirty state");
         assert_ne!(dirty, initial);
 
-        stage_all(repo.path()).expect("stage all");
-        commit(repo.path(), "update readme").expect("commit");
+        stage_all(repo.path(), &|_| {}).expect("stage all");
+        commit(repo.path(), "update readme", &|_| {}).expect("commit");
         let committed = worktree_state(repo.path()).expect("committed state");
         assert_ne!(committed, initial);
         assert_ne!(committed, dirty);
@@ -1694,8 +1809,8 @@ mod tests {
         let path = repo.path().join("stage.txt");
         fs::write(&path, "staged").expect("write file");
 
-        stage_all(repo.path()).expect("stage all");
-        commit(repo.path(), "add staged").expect("commit");
+        stage_all(repo.path(), &|_| {}).expect("stage all");
+        commit(repo.path(), "add staged", &|_| {}).expect("commit");
         assert!(is_clean(repo.path()).expect("clean after commit"));
     }
 
@@ -1719,7 +1834,7 @@ mod tests {
 
         checkout_new_branch(repo.path(), "feature").expect("create feature");
         commit_file(repo.path(), "feature.txt", "feature");
-        push_with_upstream(repo.path(), "origin", "feature").expect("push with upstream");
+        push_with_upstream(repo.path(), "origin", "feature", &|_| {}).expect("push with upstream");
 
         // Verify upstream is set
         let tracking = git_stdout(

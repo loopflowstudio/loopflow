@@ -42,7 +42,7 @@ lf submit                            # done; the user clicks merge
 lf arm                               # request auto-merge; return
 lf land                              # watch CI, repair, and finish merged
 lf land -c                           # complete the Task after merge
-lf task sync --plan                  # show strategy; bare `lf task sync` applies it
+lf sync --plan                  # show strategy; bare `lf sync` applies it
 lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 
@@ -101,7 +101,7 @@ Execution placement is durable state, not authored goal text. A Work names one
 stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
-lf home id                                      # this machine's HomeId
+lf id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home

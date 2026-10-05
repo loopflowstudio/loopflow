@@ -130,93 +130,51 @@ ownership would select the wrong installation. Source authorization permits
 designing this mechanism in isolation, but supplies no installed maintenance
 authority. No storage path, receipt version or schema is changed by this finding.
 
-### Home-permission proposal rejected as sole boundary — October 5
+### Pathname exclusion rejected; inode sealing unproved — October 5
 
-The preceding proposal and its recovery obligations are preserved at
+Full proposal/probe history is preserved at
+`a7cb724ed3ae9166fb53808d288fc5aea3e06c2a:scratch/finish-removing-the-retired-run.md`.
+The earlier whole-Home ownership proposal is at
 `e4858f2e540055cca60a25544480495f0ba47c9a:scratch/finish-removing-the-retired-run.md`.
-An administrator would own the whole account Home with mode 0700, while its
-parent prevents replacement. This denies original pathnames after worker death,
-but does not exclude all access to the same data.
 
-The executed `tests/e2e/capture_exclusion.py --probe-aliases` counterexample
-created hard links to synthetic payload and SQLite files outside a temporary
-Home. It closed every database/file handle before denying traversal of that
-Home. New opens through the aliases then changed both original files; SQLite
-checkpointed WAL through the alias. Reading the original payload pathname was
-confirmed denied. The probe restored permissions and removed only its temporary
-files. This ran unprivileged on macOS; it is not a released-CLI or privileged
-account experiment. Changing ownership of the containing directory cannot change
-access through an outside hard link to its child inode.
+The executed unprivileged macOS `--probe-aliases` counterexample closes every
+handle, denies traversal of a temporary Home, then opens outside hard links to
+its payload and SQLite database. Both originals change; SQLite checkpoints WAL
+through the alias. The original pathname is confirmed inaccessible. Permissions
+are restored and only fixture files removed. This disproves directory exclusion
+even with no surviving descriptor or process; it is not a privileged or
+released-CLI reproduction.
 
-Therefore quiescence plus ownership/mode of the account Home is insufficient.
-No surviving descriptor, provider or process is needed for this counterexample.
-Resolved out-of-Home storage and pre-existing file aliases must be covered by
-the exclusion boundary, along with retained descriptors and launch sources.
-An empty process inventory cannot establish this. The design's dependent
-privileged recovery and layout mutation are stopped, not implemented on this
-contradicted premise. No complete replacement boundary has been proved; the inode-sealing proposal
-below is the next isolated experiment.
+Inode sealing instead changes file ownership as well as directory boundaries.
+Hard links share that ownership; mode changes alone let the original owner
+restore access through an alias. The authored Linux probe covers external storage
+through a `runs` symlink, payload/database aliases, alias `chmod`, released
+journaling through aliased `LF_HOME`, and external-directory replacement. Writes
+must succeed before sealing and after restoration, with protected bytes unchanged
+while sealed and after reader death. Known retained writers exit before snapshots;
+the privileged reader uses immutable SQLite access to avoid creating its own WAL.
 
-The existing network-isolated Ubuntu runner retains the checksum-pinned v0.13.3
-pathname checks, including direct preflight, doctor and screenshot after worker
-death. It retains the unprivileged alias counterexample and now probes inode sealing
-separately, without treating either result as conversion acceptance. Docker remains unavailable locally;
-there is no hosted or Linux execution result. Its empty released store and
-synthetic payload never establish populated conversion.
+Docker cannot connect to its daemon; Linux execution remains CI-owned. The VM
+manager was not started without a selector because that would resume unrelated
+machines. No hosted result, populated conversion or privileged macOS proof exists.
+The released store is empty and its payload synthetic.
 
-Before implementing target-account selection and restoration, revise the offline
-boundary to exclude access through every alias after worker death. Inventory
-canonical Home/payload/native paths and file link counts, including storage outside
-the account Home; these facts inform a design, not automatic permission to mutate.
-A complete replacement must preserve existing supported placements and cannot
-silently reject them or substitute a new advisory lock. Keep candidate-owned
-recovery, frozen backup, original access restoration after validation, and the
-populated fault matrix. No installed interruption or administrator mutation is
-authorized by source development.
+The full-sealing fixture uses fixed roots and an in-memory restoration list.
+Its privileged reader dies only after sealing finishes while the controller
+survives. Even a pass would prove persistence of completed permissions, not
+interrupted sealing or recovery after losing that list. The interruption probe
+below retains the missing boundary as contrary evidence.
 
-### Inode-sealing proposal — October 5, unproved
-
-The next experiment changes ownership of the protected **file inodes**, as well
-as their directory entry boundaries. A privileged maintenance owner would retain
-exclusive access until the candidate validates conversion. Outside hard links
-then share the protected ownership; changing only mode while retaining the original
-owner would let that owner restore write permission through an alias.
-
-The disposable Linux fixture now covers a `runs` symlink to external storage,
-payload/database hard links in a still-writable directory, attempted `chmod`
-through those aliases, released journaling through an aliased `LF_HOME`, and
-external-directory replacement. It asserts successful writes before exclusion
-and after metadata restoration, with unchanged protected bytes during exclusion
-and after killing its privileged reader. A second writer deliberately retains an
-open descriptor through inode sealing; the snapshot follows its exit. The reader
-uses immutable read-only SQLite access so its own WAL creation cannot be mistaken
-for an excluded writer. These are authored checks, not observed passes.
-
-This selects an experiment, not a complete deployment boundary. Production still
-needs a stable inventory of resolved objects and directory-entry ancestors,
-including ACLs, writable mappings, inherited descriptors and external mounts.
-A shared external ancestor cannot be silently seized merely to protect one child;
-namespace exclusion and restoration must preserve supported placements and unrelated
-owners. Metadata changes must be journaled durably before each mutation, with
-candidate recovery effective even after partial sealing. Sealing must precede
-final quiescence validation, and recovery must repeat that validation: permissions
-do not revoke existing handles. The fixture's fixed roots and in-memory saved
-metadata deliberately supply none of that production discovery or crash recovery.
-Do not transplant its helper into the installer as a proven boundary.
-
-The Docker runner cannot connect to its daemon. Starting the available VM manager
-without a machine selector would resume all previously running machines, so that
-was not used as a test setup step. CI owns the isolated Linux probe; macOS sealing,
-ACL preservation and the complete boundary remain separate gaps. Candidate-owned
-conversion and the atomic consumer cut remain dependent work.
-
-Source review at `fbf69ba6a` distinguishes process death from interrupted sealing:
-the fixture kills a privileged SQLite reader only after all metadata changes have
-finished. The sealing controller survives with its restoration list in memory.
-Even a passing Linux result would prove persistence of completed permission changes,
-not recovery from partial sealing or loss of that list. The production fault matrix
-therefore needs interruption between metadata mutations and a fresh recovery process
-using only durable evidence, with unrelated shared-directory access preserved.
+Production needs stable resolved Home/payload/native objects, link counts and
+namespace ancestors, including external storage, ACLs, mounts, writable mappings
+and inherited descriptors. Preserve supported placements and unrelated owners;
+seizing a shared ancestor or rejecting the placement cannot supply exclusion.
+Candidate recovery and durable restoration evidence must precede each metadata
+mutation; seal before final quiescence and repeat quiescence on recovery, because
+permissions cannot revoke handles. Keep the frozen backup, validated restoration
+and populated fault matrix. No fixture helper establishes these obligations or
+belongs in the installer as a proven boundary. Target-account implementation and
+the layout cut remain dependent on a replacement exclusion design.
 
 ### Interrupted sealing and shared namespace — October 5 counterexample
 
@@ -463,6 +421,11 @@ could mistake the first writer's text for the second writer's success. SQLite
 count readers close explicitly before the next phase, and snapshots classify
 entries from their existing `lstat` result. Linux execution remains with CI.
 
+The exclusion probe now separates command dispatch from the released-writer
+scenario, reuses one fsync helper and one bounded metadata-worker launcher.
+Recovery still runs in fresh processes from the durable receipt; the full-sealing
+probe retains its distinct in-memory metadata and unproved recovery boundary.
+
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
 together with recoverable conversion and surviving-path preservation tests.
@@ -565,4 +528,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, implement): `uv run ruff check tests/e2e/capture_exclusion.py`, `uv run python tests/e2e/capture_exclusion.py --probe-recovery` and `git diff --check` passed; `uv run python scripts/test_capture_exclusion.py` could not connect to Docker; privileged interruption/sealing remains CI-owned.
+Check (October 5, compress): `uv run ruff check tests/e2e/capture_exclusion.py`, both portable probes (`--probe-recovery`, `--probe-aliases`) and `git diff --check` passed; privileged Linux sealing/recovery remains CI-owned (Docker unavailable in the preceding implementation check).

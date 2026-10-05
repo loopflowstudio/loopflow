@@ -51,6 +51,15 @@ def _recover_metadata(receipt: Path) -> None:
         _sync(path)
 
 
+def _run_metadata_worker(operation: str, receipt: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, __file__, operation, str(receipt)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
 def _probe_interrupted_metadata() -> None:
     # This narrow counterexample deliberately leaves the shared parent writable.
     # The privileged variant uses root-owned inodes and an unprivileged renamer;
@@ -91,12 +100,7 @@ def _probe_interrupted_metadata() -> None:
         receipt.chmod(0o600)
         _sync(receipt)
         _sync(root)
-        worker = subprocess.run(
-            [sys.executable, __file__, "--interrupt-metadata", str(receipt)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        worker = _run_metadata_worker("--interrupt-metadata", receipt)
         assert worker.returncode == -signal.SIGKILL, worker.stderr
         assert stat.S_IMODE(payload.stat().st_mode) == 0o400
         assert stat.S_IMODE(storage.stat().st_mode) == entries[1]["mode"]
@@ -120,12 +124,7 @@ def _probe_interrupted_metadata() -> None:
         )
         assert replacement.returncode == 0, replacement.stderr
         before = _snapshot(shared)
-        recovery = subprocess.run(
-            [sys.executable, __file__, "--recover-metadata", str(receipt)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        recovery = _run_metadata_worker("--recover-metadata", receipt)
         assert recovery.returncode != 0 and "target changed" in recovery.stderr
         assert _snapshot(shared) == before
         assert (shared / "unrelated").read_text() == "after"
@@ -136,11 +135,8 @@ def _probe_interrupted_metadata() -> None:
         storage.rmdir()
         (shared / "displaced").rename(storage)
         for _ in range(2):
-            subprocess.run(
-                [sys.executable, __file__, "--recover-metadata", str(receipt)],
-                check=True,
-                timeout=10,
-            )
+            recovery = _run_metadata_worker("--recover-metadata", receipt)
+            assert recovery.returncode == 0, recovery.stderr
         for entry in entries:
             metadata = Path(entry["path"]).stat()
             assert (metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)) == (
@@ -391,11 +387,7 @@ def _seal_fixture_inodes(roots: list[Path]) -> list[tuple[Path, os.stat_result]]
             continue
         os.chown(path, 0, 0)
         path.chmod(0o700 if stat.S_ISDIR(metadata.st_mode) else 0o600)
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        _sync(path)
     return saved
 
 
@@ -438,7 +430,11 @@ def main() -> None:
         return
     if not Path("/.dockerenv").exists() or os.geteuid() != 0:
         raise SystemExit("Requires root inside a disposable container without host mounts.")
-    assert hashlib.sha256(CLI.read_bytes()).hexdigest() == args.released_sha256
+    _probe_released_writers(args.released_sha256)
+
+
+def _probe_released_writers(released_sha256: str) -> None:
+    assert hashlib.sha256(CLI.read_bytes()).hexdigest() == released_sha256
     version = subprocess.check_output([str(CLI), "--version"], text=True).strip()
     assert version == "lf 0.13.3", version
     subprocess.run(["useradd", "--create-home", ACCOUNT], check=True)
@@ -488,11 +484,7 @@ def main() -> None:
         # only .lf would leave its writable parent able to rename and recreate it.
         os.chown(home, 0, 0)
         home.chmod(0o700)
-        directory = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync(home)
     _attempt_released_writes(home, excluded=True)
     # Directory exclusion still permits newly opened aliases and external paths.
     _attempt_alias_writes(home, aliases, excluded=False)

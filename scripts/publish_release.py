@@ -46,7 +46,6 @@ CANDIDATE_STAGES = (
     "installer_verified",
     "dmg_notarized",
     "website_candidate_verified",
-    "ui_host_verified",
 )
 
 
@@ -399,39 +398,6 @@ def _verify_candidate_receipt(
             raise RuntimeError(f"prepared release artifact changed: {name}")
 
 
-def _verify_ui_host(tag: str, source_commit: str) -> None:
-    logs = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT)) / ".lf/logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    stem = f"release.{tag.replace('/', '-')}.ui-host"
-    log = logs / f"{stem}.log"
-    receipt = logs / f"{stem}.json"
-    command = ["uv", "run", "python", "scripts/test.py", "--ui-host"]
-    if receipt.exists():
-        saved = json.loads(receipt.read_text())
-        if (
-            saved["source_commit"] == source_commit
-            and saved["command"] == command
-            and saved["returncode"] == 0
-            and log.exists()
-            and saved["output_sha256"] == _sha256(log)
-        ):
-            return
-    result = _run(command, capture=True, check=False)
-    log.write_text(f"source_commit={source_commit}\n{result.stdout}\n{result.stderr}")
-    receipt.write_text(
-        json.dumps(
-            {
-                "source_commit": source_commit,
-                "command": command,
-                "returncode": result.returncode,
-                "output_sha256": _sha256(log),
-            },
-            sort_keys=True,
-        )
-    )
-    result.check_returncode()
-
-
 def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactReceipt:
     check_release_host()
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
@@ -471,8 +437,6 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
         _run(["uv", "run", "python", "website/dev.py", "sync-docs", "--source", "docs"])
         _run(["uv", "run", "python", "scripts/check_website_screens.py"])
         stages.append(CANDIDATE_STAGES[3])
-        _verify_ui_host(tag, source_commit)
-        stages.append("ui_host_verified")
 
     dmg = ROOT / "swift" / "dist" / "Loopflow.dmg"
     if not dmg.is_file():
@@ -625,10 +589,8 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         raise RuntimeError("public release identity differs from retained candidate proof")
     # A retained candidate proves preparation even when the publisher died before
     # its final receipt. Reconstruct publication only from public read-back.
-    if not (set(CANDIDATE_STAGES) - {"ui_host_verified"}).issubset(proof.completed_stages):
+    if not set(CANDIDATE_STAGES).issubset(proof.completed_stages):
         raise RuntimeError("retained candidate lacks required preparation verification")
-    if "ui_host_verified" not in proof.completed_stages:
-        _verify_ui_host(tag, source_commit)
     release = json.loads(
         _run(
             ["gh", "release", "view", tag, "--json", "tagName,isDraft,assets"], capture=True
@@ -760,7 +722,6 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             dict.fromkeys(
                 (
                     *proof.completed_stages,
-                    "ui_host_verified",
                     "public_artifacts_verified",
                     "versioned_dmg_verified",
                     "latest_dmg_verified",

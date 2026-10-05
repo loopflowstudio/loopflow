@@ -103,8 +103,9 @@ before activation, while `promotion_lock.rs` serializes installers only.
 A layout receipt must participate in both paths. Candidate recovery and startup
 exclusion must be effective before the first filesystem mutation; direct retained
 binaries additionally require external launch exclusion. The privileged experiment
-below proposes that boundary; production targeting, recovery and isolated proof
-remain implementation work.
+below tests pathname denial only. The retained-alias
+counterexample invalidates it as the sole boundary; select a boundary covering
+all access paths before implementing privileged targeting or recovery.
 
 ### Released writer bypass — October 5 source counterexample
 
@@ -140,58 +141,48 @@ ownership would select the wrong installation. Source authorization permits
 designing this mechanism in isolation, but supplies no installed maintenance
 authority. No storage path, receipt version or schema is changed by this finding.
 
-### Privileged exclusion experiment — October 5
+### Home-permission proposal rejected as sole boundary — October 5
 
-The next candidate mechanism uses an external administrator, with the target
-account offline. Protect the **whole OS account Home**, under a non-writable,
-administrator-owned parent, with administrator ownership and mode 0700. Protecting
-only `.lf` is insufficient: the account can rename that directory and create a
-replacement through its writable parent. Permission changes survive converter
-death; old retained executables may start but cannot reach the frozen data.
-Open descriptors and existing provider connections survive permission changes,
-so account quiescence remains a prerequisite, not a consequence of this mechanism.
+The preceding proposal and its recovery obligations are preserved at
+`e4858f2e540055cca60a25544480495f0ba47c9a:scratch/finish-removing-the-retired-run.md`.
+An administrator would own the whole account Home with mode 0700, while its
+parent prevents replacement. This denies original pathnames after worker death,
+but does not exclude all access to the same data.
 
-`tests/e2e/capture_exclusion.py` encodes that Linux experiment against the exact
-checksum-verified v0.13.3 binary. Each bypass command must first demonstrably add
-an Exec to the released store. The fixture then compares the whole Home after
-direct commands during exclusion and after privileged worker death. A retained
-descriptor must still write before its owner exits. Synthetic capture bytes are
-explicitly not a populated Session fixture. No converter is exercised.
+The executed `tests/e2e/capture_exclusion.py --probe-aliases` counterexample
+created hard links to synthetic payload and SQLite files outside a temporary
+Home. It closed every database/file handle before denying traversal of that
+Home. New opens through the aliases then changed both original files; SQLite
+checkpointed WAL through the alias. Reading the original payload pathname was
+confirmed denied. The probe restored permissions and removed only its temporary
+files. This ran unprivileged on macOS; it is not a released-CLI or privileged
+account experiment. Changing ownership of the containing directory cannot change
+access through an outside hard link to its child inode.
 
-This mechanism is **proposed, unproved**, not enabled installation behavior.
-`machine_install::account_home` uses `geteuid`; root recovery currently resolves
-root's installation. Production recovery would need an explicit target-account
-argument resolved through the OS account database, carried through candidate
-handoff, store selection, receipt lookup and promotion locking. A privileged
-receipt must preserve target UID/GID, canonical Home, original ownership/mode,
-candidate hash and backup location before changing access. No caller environment
-or changed `HOME` may impersonate that selection. Recovery must retain exclusion
-until forward validation completes; do not automatically unlock in error cleanup.
-macOS ACLs and retained open handles also require platform proof. None of this
-authorizes administrator changes on the configured machine.
+Therefore quiescence plus ownership/mode of the account Home is insufficient.
+No surviving descriptor, provider or process is needed for this counterexample.
+Resolved out-of-Home storage and pre-existing file aliases must be covered by
+the exclusion boundary, along with retained descriptors and launch sources.
+An empty process inventory cannot establish this. The design's dependent
+privileged recovery and layout mutation are stopped, not implemented on this
+contradicted premise. No replacement boundary has yet been selected or proved.
 
-`scripts/test_capture_exclusion.py` now builds a disposable Ubuntu 24.04 image
-from only the fixture sources and the checksum-pinned published v0.13.3 Linux
-CLI. Preparation downloads precede a network-disabled execution with no mounts
-or credentials; the runner checks the container exit and removes its own resources.
-`.github/workflows/capture-exclusion.yml` schedules that proof on relevant PR
-changes independently of the ordinary gate's scratch-clear condition. It has
-not run: all three local Docker endpoints were unavailable on October 5, and no
-hosted result is established. Wiring the runner does not prove exclusion.
+The existing network-isolated Ubuntu runner retains the checksum-pinned v0.13.3
+pathname checks, including direct preflight, doctor and screenshot after worker
+death. It now also runs the alias counterexample as its unprivileged fixture
+account and labels success as pathname-only. Docker remains unavailable locally;
+there is no hosted or Linux execution result. Its empty released store and
+synthetic payload never establish populated conversion.
 
-The experiment seeds an empty released SQLite store and synthetic payload; it
-owns the one retained writer explicitly. It neither discovers arbitrary writers
-nor restores account access. A passing result therefore establishes only pathname
-exclusion for those released commands on Linux, including after worker death.
-
-Candidate account targeting, crash-safe privilege restoration and complete
-quiescence detection remain source design/implementation work. Their isolated
-fault matrix must cover death after each ownership/mode change, recovery using
-the saved target rather than the caller's account, and repeated restoration of
-original access only after validation. Missing recovery evidence must retain
-exclusion. The receipt's durable location and recovery invocation must remain
-accessible to the administrator while the target account is excluded. Layout
-mutation remains dependent on these proofs; this experiment alone cannot enable it.
+Before implementing target-account selection and restoration, revise the offline
+boundary to exclude access through every alias after worker death. Inventory
+canonical Home/payload/native paths and file link counts, including storage outside
+the account Home; these facts inform a design, not automatic permission to mutate.
+A complete replacement must preserve existing supported placements and cannot
+silently reject them or substitute a new advisory lock. Keep candidate-owned
+recovery, frozen backup, original access restoration after validation, and the
+populated fault matrix. No installed interruption or administrator mutation is
+authorized by source development.
 
 ## Problem and observable outcome
 
@@ -324,10 +315,10 @@ The authorized installer owns conversion, using its existing pinned candidate an
 switch recovery receipt. Ordinary history/status/replay reads never initiate it.
 The window must exclude old CLI/app/provider launch sources at the OS/installation
 boundary, including retained executable invocations. Neither an empty PID sample
-nor a controlled fixture launcher establishes this. The proposed administrator-owned
-Home boundary has only an unexecuted exclusion fixture; target-account selection,
-recovery and restoration still need implementation. The sequence below remains
-conditional on that proof. Isolated acceptance must attempt
+nor a controlled fixture launcher establishes this. The administrator-owned Home
+proposal is insufficient because outside aliases remain writable. Target-account selection, recovery and restoration depend on a
+replacement boundary. The sequence below remains conditional on that design and
+proof. Isolated acceptance must attempt
 direct released commands after converter death as well as during conversion.
 Configured deployment additionally requires authorization for the operational
 freeze; fixture success cannot establish installed acceptance.
@@ -412,20 +403,18 @@ Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
 together with recoverable conversion and surviving-path preservation tests.
 Do not polish those predecessor paths or remove immutable keys/receipt fields.
-The released-writer exclusion finding above still prevents that dependent cut.
+The released-writer and retained-alias counterexamples above prevent that dependent cut.
 
 ## Remaining implementation sequence
 
-1. Evaluate the privileged whole-account-Home proposal with the existing isolated
-   released-binary experiment, including direct commands after worker death and
-   the retained-descriptor counterexample. This fixture proves no conversion or
-   candidate account targeting. Complete explicit OS-account selection, durable
-   privilege/recovery ownership, restoration and platform-specific exclusion proof.
-   Candidate access must resolve the intended account's installation, not root's.
-   Then implement offline conversion/recovery through the installation boundary,
-   including exact-schema advancement and recovery. Inventory mutable absolute
-   references before choosing their rewrite and validation rules. Preserve frozen
-   SQLite/payload/executable evidence and prove exclusion of released writers.
+1. Replace the contradicted whole-account-Home boundary with an offline exclusion
+   design covering all access paths, not only original pathnames. Retain both
+   released-writer and newly opened alias counterexamples. Select and prove that
+   boundary before dependent privilege/recovery implementation; no replacement is
+   currently selected. Then implement explicit OS-account targeting, durable
+   recovery/restoration, and candidate-owned conversion through exact-schema
+   advancement and recovery. Inventory mutable absolute references, preserve the
+   frozen SQLite/payload/executable pair and prove released writers stay excluded.
 2. Cut storage, watcher classification, replay and ablation/tooling to `captures/`
    together; remove the old runtime layout reader only with recoverable conversion.
    `record_dir` still derives `runs/`, watch paths hard-code its depth/root, and
@@ -502,4 +491,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (realign, October 5): `git diff --check` passed; source and Release-memory inspection reused recorded checks; `lf context --skill realign` confirms budgets; conversion, exclusion execution and full gate remain outstanding.
+Check (October 5): `uv run python tests/e2e/capture_exclusion.py --probe-aliases` reproduced payload/SQLite writes through aliases; Ruff lint/format and `git diff --check` passed. Docker unavailable; hosted pathname proof remains with CI, and the replacement boundary/conversion remain design and implementation work.

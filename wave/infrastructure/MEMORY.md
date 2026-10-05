@@ -24,15 +24,16 @@ interruption. Capture keys name subordinate history; durable Session IDs select
 conversation mutations, and current Session/Exec provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove layout completion; advancement and recovery
-must retain the candidate before moving bytes. Released v0.13.3 can journal before
-installation checks; receipt versions and installer locks cannot exclude it.
-The hosted exclusion experiment is wired but unexecuted; its empty store and
-synthetic payload cannot prove conversion. Permissions survive worker death but
-cannot revoke open descriptors. Quiescence, target-account recovery and access restoration
-remain unimplemented; recovery must retain exclusion until validation succeeds.
-`runs/` remains in use. Source inspection and runtime tests prove neither conversion
-nor installed preservation; Linux exclusion alone would not prove macOS behavior.
+Exact SQLite compatibility does not prove layout completion. Retain candidate
+recovery before moving bytes and exclusion until validation succeeds. Released
+v0.13.3 journals before installation checks; receipts and installer locks cannot
+exclude it. Home permissions also fail as a sole boundary: an isolated macOS
+probe opened outside hard links after denying traversal and changed the original
+payload and SQLite database. No descriptor survived the freeze. Directory
+ownership cannot revoke an outside alias to a child inode. The Linux released-writer
+fixture remains unexecuted; pathname denial proves neither alias exclusion nor
+populated conversion. Replace the boundary before privileged recovery or layout
+mutation. `runs/` remains; conversion and installed preservation are unproved.
 
 ## Review replacement (2026-10-04)
 

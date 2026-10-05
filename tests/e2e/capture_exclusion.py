@@ -1,8 +1,9 @@
-"""Probe a privileged capture-maintenance boundary in a disposable Linux container.
+"""Probe the limits of capture-maintenance pathname exclusion.
 
 This is an exclusion experiment, not a converter or installation acceptance.
-Copy the checksum-verified v0.13.3 Linux CLI to /fixture/prior/lf. No host Home,
-installation, or credentials may be mounted. The container must be discarded.
+The alias counterexample runs unprivileged in temporary directories. Released
+CLI checks require a disposable Linux container with checksum-verified v0.13.3
+at /fixture/prior/lf and no host Home, installation, or credential mounts.
 """
 
 import argparse
@@ -14,10 +15,59 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
+from contextlib import closing
 from pathlib import Path
 
 CLI = Path("/fixture/prior/lf")
 ACCOUNT = "lf-capture-exclusion"
+
+
+def _probe_retained_aliases() -> None:
+    if os.geteuid() == 0:
+        raise SystemExit("Run the alias counterexample as an unprivileged account.")
+    with tempfile.TemporaryDirectory(prefix="lf-capture-alias-") as temporary:
+        root = Path(temporary)
+        home = root / "home"
+        home.mkdir()
+        payload = home / "events.jsonl"
+        payload.write_text("before\n")
+        database = home / "loopflow.db"
+        with closing(sqlite3.connect(database)) as store:
+            store.execute("PRAGMA journal_mode=WAL")
+            store.execute("CREATE TABLE evidence (value TEXT NOT NULL)")
+            store.execute("INSERT INTO evidence VALUES ('before')")
+            store.commit()
+        payload_alias = root / "retained-events.jsonl"
+        database_alias = root / "retained.db"
+        os.link(payload, payload_alias)
+        os.link(database, database_alias)
+        original_mode = stat.S_IMODE(home.stat().st_mode)
+        home.chmod(0)
+        try:
+            try:
+                payload.read_bytes()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError("the original pathname is still accessible")
+            # Both writers open after exclusion; no retained descriptor or
+            # process is required to reach these same inodes through aliases.
+            with payload_alias.open("a") as output:
+                output.write("after exclusion\n")
+            with closing(sqlite3.connect(database_alias)) as store:
+                store.execute("INSERT INTO evidence VALUES ('after exclusion')")
+                store.commit()
+                assert store.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+        finally:
+            home.chmod(original_mode)
+        assert payload.read_text() == "before\nafter exclusion\n"
+        with closing(sqlite3.connect(database)) as store:
+            assert store.execute("SELECT value FROM evidence ORDER BY rowid").fetchall() == [
+                ("before",),
+                ("after exclusion",),
+            ]
+    print("Counterexample confirmed: retained aliases bypass Home pathname exclusion.")
 
 
 def _invoke(
@@ -94,8 +144,13 @@ def _attempt_released_writes(home: Path, excluded: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--released-sha256", required=True)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--released-sha256")
+    modes.add_argument("--probe-aliases", action="store_true")
     args = parser.parse_args()
+    if args.probe_aliases:
+        _probe_retained_aliases()
+        return
     if not Path("/.dockerenv").exists() or os.geteuid() != 0:
         raise SystemExit("Requires root inside a disposable container without host mounts.")
     assert hashlib.sha256(CLI.read_bytes()).hexdigest() == args.released_sha256
@@ -103,6 +158,12 @@ def main() -> None:
     assert version == "lf 0.13.3", version
     subprocess.run(["useradd", "--create-home", ACCOUNT], check=True)
     account = pwd.getpwnam(ACCOUNT)
+    subprocess.run(
+        ["runuser", "-u", ACCOUNT, "--", sys.executable, __file__, "--probe-aliases"],
+        check=True,
+        timeout=30,
+        cwd="/tmp",
+    )
     home = Path(account.pw_dir)
     parent = home.parent.stat()
     assert parent.st_uid == 0 and not parent.st_mode & 0o022
@@ -184,7 +245,7 @@ def main() -> None:
     assert home.stat().st_uid == 0
     assert stat.S_IMODE(home.stat().st_mode) == 0o700
     _attempt_released_writes(home, excluded=True)
-    print("Exclusion probe passed; candidate targeting and conversion remain unproved.")
+    print("Pathname probe passed; retained aliases still defeat the proposed boundary.")
 
 
 if __name__ == "__main__":

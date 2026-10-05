@@ -870,7 +870,18 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
-Probe the proposed capture-conversion exclusion boundary separately:
+Reproduce the retained-alias counterexample without Docker or privileges:
+
+```bash
+uv run python tests/e2e/capture_exclusion.py --probe-aliases
+```
+
+Newly opened hard links outside an inaccessible temporary directory can modify
+its payload and SQLite database. No descriptor survives from before exclusion.
+The probe restores permissions and removes its own files; it uses no installed
+Home. This disproves directory permissions as the sole conversion boundary.
+
+Probe released commands through the protected pathname separately:
 
 ```bash
 uv run python scripts/test_capture_exclusion.py
@@ -887,10 +898,11 @@ unavailable check, never a passing exclusion result.
 The fixture creates its own account and Home. It attempts direct released
 preflight, doctor and screenshot commands before exclusion, while a privileged
 worker accesses that Home, and after worker death. It compares database/payload
-bytes and filesystem ownership, including a retained-descriptor counterexample.
+bytes and filesystem ownership, including retained-descriptor and alias counterexamples.
 The fixture account's Home stays root-owned until container disposal.
 This experiment does not exercise a candidate converter,
-populated Session preservation, macOS exclusion or recovery targeting.
+populated Session preservation, macOS privileged exclusion or recovery targeting.
+A passing pathname probe does not establish exclusion through other aliases.
 
 ## Nightly Package Tests
 

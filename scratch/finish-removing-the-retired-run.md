@@ -74,6 +74,8 @@ the preceding 49-pass Session/controller evidence remains at
 
 Check (implement, October 5): capture-exclusion fixture Ruff checks, CLI help and host-refusal smoke passed; `git diff --check` and `lf context --skill implement` passed; Docker exclusion execution unavailable (missing daemon socket), deferred to a disposable-container runner before dependent conversion; conversion and full gate remain unproved.
 
+Check (compress, October 5): isolated `cargo nextest run -p loopflow --lib -E 'test(replay_uses_recorded_request) | test(inherited_capture_requires) | test(review_actions_preserve_selected_capture)' --no-fail-fast` passed 3/3; replay passed again after resolver simplification; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; conversion acceptance remains with implementation/gate.
+
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
 
@@ -363,6 +365,15 @@ a fresh key, inherited caller and present context. `begin_with_request` now uses
 The current build also exposed three stale `current_attempt` fixture fields in
 `ops/task.rs` and `tests/task_restart_tests.rs`; use `selected_capture` throughout.
 Keep rename's distinct managed-review lock/relookup and ordinary Session paths.
+
+Removed replay's duplicate SQLite selector lookup and `verified_caller` manifest
+reader. `resolve_manifest` already resolves Session IDs/history selectors and
+validates the payload path; replay retains that source key without a second read
+silently dropping its provenance. Its fixture uses the shared environment guard.
+`inherited_capture_key` now names the capture selector explicitly, distinct from
+`journal::agent_caller`'s Session/Exec provenance. Review opening shares one
+previous-capture branch across resume and replacement checks.
+
 
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface

@@ -885,7 +885,7 @@ pub(crate) fn require_current_review_actor(
 ) -> Result<()> {
     // Validate inherited payload context before checking the same SQLite fence
     // used by the settlement transaction.
-    crate::session_record::inherited_caller()?;
+    crate::session_record::inherited_capture_key()?;
     store
         .sqlite
         .require_current_session_actor(&flow_id(position)?)?;
@@ -1513,8 +1513,6 @@ async fn open_flow_locked(
         )? {
             return Ok(artifact_key.clone());
         }
-    }
-    if let Some(artifact_key) = &previous {
         let input = store
             .sqlite
             .input_history(artifact_key.as_str())
@@ -2258,7 +2256,7 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
 }
 
 fn active_capture_key() -> Result<String> {
-    crate::session_record::inherited_caller()?
+    crate::session_record::inherited_capture_key()?
         .ok_or_else(|| anyhow!("this command requires an active Session capture"))
 }
 

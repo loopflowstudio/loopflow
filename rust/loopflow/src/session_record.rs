@@ -1991,7 +1991,7 @@ impl CaptureHandle {
             &home,
             spec,
             new_artifact_key(),
-            inherited_caller()?,
+            inherited_capture_key()?,
             exec,
             Some(context),
         )
@@ -2005,7 +2005,7 @@ impl CaptureHandle {
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
-        let caller = inherited_caller()?;
+        let caller = inherited_capture_key()?;
         Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }
 
@@ -2030,20 +2030,20 @@ impl CaptureHandle {
         )))))
     }
 
+    /// Retain the source key already resolved by the replay reader.
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
         spec: SessionCaptureSpec,
         exec: AgentExecRequest,
         caller_artifact_key: String,
     ) -> StoreResult<Self> {
-        let caller_artifact_key = verified_caller(lf_home, caller_artifact_key);
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_at_with_id(
             lf_home,
             spec,
             new_artifact_key(),
-            caller_artifact_key,
+            Some(caller_artifact_key),
             Some(exec),
             Some(&context),
         )
@@ -2055,7 +2055,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller()?,
+            inherited_capture_key()?,
             None,
             None,
         )
@@ -2073,7 +2073,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller()?,
+            inherited_capture_key()?,
             Some(exec),
             Some(&context),
         )
@@ -2778,7 +2778,7 @@ fn database_in(home: &Path) -> StoreResult<PathBuf> {
     }
 }
 
-pub(crate) fn inherited_caller() -> StoreResult<Option<String>> {
+pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
     let Some(value) = std::env::var_os(CAPTURE_KEY_ENV) else {
         return Ok(None);
     };
@@ -2822,13 +2822,6 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSess
         Err(error) => return Err(record_error(error)),
     }
     Ok((dir, owner))
-}
-
-fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
-    let dir = record_dir(lf_home, &artifact_key)?;
-    let manifest = fs::read(dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
-    (manifest.artifact_key == artifact_key).then_some(artifact_key)
 }
 
 // Session captures retain their published on-disk layout; the directory name
@@ -3229,21 +3222,21 @@ mod tests {
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let key = capture.artifact_key();
         std::env::set_var(super::CAPTURE_KEY_ENV, &key);
-        assert_eq!(super::inherited_caller().unwrap(), Some(key.clone()));
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key.clone()));
         std::env::set_var(super::CAPTURE_KEY_ENV, super::new_artifact_key());
-        assert!(super::inherited_caller().is_err());
+        assert!(super::inherited_capture_key().is_err());
         std::env::set_var(super::CAPTURE_KEY_ENV, "../another-home");
-        assert!(super::inherited_caller().is_err());
+        assert!(super::inherited_capture_key().is_err());
         std::env::set_var(super::CAPTURE_KEY_ENV, &key);
         let path = capture.artifact_dir().join("manifest.json");
         let mut manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
         manifest.artifact_key = super::new_artifact_key();
         fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-        assert!(super::inherited_caller().is_err());
+        assert!(super::inherited_capture_key().is_err());
         fs::write(&path, b"invalid manifest").unwrap();
-        assert!(super::inherited_caller().is_err());
+        assert!(super::inherited_capture_key().is_err());
         fs::remove_file(path).unwrap();
-        assert_eq!(super::inherited_caller().unwrap(), Some(key));
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key));
     }
 
     #[test]

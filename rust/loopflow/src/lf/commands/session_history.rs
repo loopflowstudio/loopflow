@@ -92,7 +92,7 @@ pub(crate) fn collect_history(
 
 /// Record a provider callback against its owning Session capture.
 pub fn observe_provider_session() -> Result<()> {
-    let key = crate::session_record::inherited_caller()?
+    let key = crate::session_record::inherited_capture_key()?
         .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
     let capture_dir = crate::session_record::capture_dir(&key)?;
     let mut payload = String::new();

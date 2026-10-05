@@ -16,22 +16,7 @@ pub fn run(selector: &str) -> Result<()> {
 }
 
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
-    let database = crate::store::database_path_from_env()?;
-    let artifact = if database.is_file() {
-        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
-        match store.resolve_history_input(selector) {
-            Ok(selected) => store
-                .session(&selected)?
-                .map(|session| session.artifact_key)
-                .unwrap_or(selected),
-            Err(crate::store::StoreError::NotFound) => selector.to_owned(),
-            Err(error) => return Err(error.into()),
-        }
-    } else {
-        // Retained pre-import artifacts remain replayable without a catalog.
-        selector.to_owned()
-    };
-    let (_, source) = crate::session_record::resolve_manifest(home, &artifact)
+    let (_, source) = crate::session_record::resolve_manifest(home, selector)
         .with_context(|| format!("cannot read capture {selector}"))?;
     let request = source.exec.clone().ok_or_else(|| {
         anyhow!(
@@ -147,29 +132,6 @@ mod tests {
     use super::replay_at;
     use crate::session_record::{AgentExecRequest, CaptureHandle, SessionCaptureSpec};
 
-    struct EnvironmentRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
-
-    impl EnvironmentRestore {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self(
-                keys.iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvironmentRestore {
-        fn drop(&mut self) {
-            for (key, value) in self.0.drain(..).rev() {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-
     #[test]
     fn replay_uses_recorded_request_without_the_planning_store() {
         let _lock = crate::journal::test_env_lock();
@@ -185,16 +147,13 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
         let keys = ["PATH", "LF_BIN", "LF_HOME", "LF_TEST_REPLAY_EVIDENCE"];
-        let _environment = EnvironmentRestore::capture(&keys);
-        std::env::set_var(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        );
+        let _environment = crate::test_ambient::EnvGuard::clear(&keys);
+        std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_TEST_REPLAY_EVIDENCE", &evidence);

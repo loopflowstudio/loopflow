@@ -68,7 +68,7 @@ pub(crate) async fn publish_issue_comment(
     if steer {
         return publish_direction(client, issue, text).await;
     }
-    let capture = crate::session_record::inherited_caller()
+    let capture = crate::session_record::inherited_capture_key()
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let provenance =
         capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id));

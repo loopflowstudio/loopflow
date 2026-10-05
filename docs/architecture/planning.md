@@ -87,6 +87,12 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
+The `project_readiness` migration preserves original Linear Project bodies and
+acquisition evidence before a one-time name/slug correction from fresh provider
+facts. Only pre-cutover rows receive this exception; all non-name conflict checks
+remain, and later equal-revision name conflicts are rejected. Rejected ingestion
+cannot consume the exception or update durable Project facts first.
+
 List coverage never removes a Project merely because a later response omits it.
 Without removal evidence, refresh fails and retains the previous observation.
 Project revisions do not establish ordering for separate Initiative/Team

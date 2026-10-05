@@ -1835,7 +1835,12 @@ impl SqliteStore {
         // Canonicalization changes one repository identity, including every Wave
         // and shared planning entity under that alias. Move them atomically;
         // uniqueness conflicts must preserve both observations, never merge them.
-        for table in ["waves", "pm_projects", "pm_items"] {
+        for table in [
+            "waves",
+            "pm_projects",
+            "pm_items",
+            "pm_project_name_cutover",
+        ] {
             tx.execute(
                 &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
                 params![expected_repo, target_repo],

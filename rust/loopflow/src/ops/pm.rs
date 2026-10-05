@@ -20,7 +20,6 @@ use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProviderKind, PmSnapshot, PmWave,
-    ProjectContent,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
@@ -167,7 +166,6 @@ pub struct PmReteamProjectMove {
     pub wave: String,
     pub id: String,
     pub name: String,
-    pub target_name: String,
     pub from_teams: Vec<String>,
 }
 
@@ -881,7 +879,6 @@ async fn store_pm_snapshot(
     let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
-    super::chapter::sync_projects(store, &registered, snapshot).await?;
     store
         .put_pm_snapshot(PmSnapshotRow {
             wave_id: registered.id().clone(),
@@ -891,7 +888,13 @@ async fn store_pm_snapshot(
             snapshot: snapshot.clone(),
         })
         .await
-        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
+        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
+    let accepted = store
+        .pm_snapshot(registered.id())
+        .await
+        .map_err(|err| OpsError::Message(err.to_string()))?
+        .ok_or_else(|| OpsError::Message("stored PM snapshot is unavailable".into()))?;
+    super::project::sync_projects(store, &registered, &accepted.snapshot).await
 }
 
 pub(crate) async fn refresh_pm_snapshot(
@@ -1297,7 +1300,7 @@ pub(crate) async fn pm_update_async(
         let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        super::chapter::sync_projects(&store, &registered, &PmSnapshot {
+        super::project::sync_projects(&store, &registered, &PmSnapshot {
             projects: vec![record.project.clone()],
             items: vec![item.clone()],
         }).await?;
@@ -1768,7 +1771,7 @@ async fn inspect_task_planning_async(
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let Some((mut item, mut project)) = observation else {
+        let Some((mut item, project)) = observation else {
             store
                 .invalidate_pm_task(&scope, provider.as_str(), selector)
                 .await
@@ -1781,16 +1784,8 @@ async fn inspect_task_planning_async(
                 item.identifier, item.team_id, repository.team_id
             )));
         }
-        if let Some(project) = project.as_mut() {
-            // Exact inspection also permits unbound Projects. Bound Projects use
-            // the same names as Wave snapshots before comparing provider revisions.
-            if let Ok(wave) = singular_project_initiative(project)
-                .and_then(|initiative| wave_for_initiative(repo, &initiative))
-            {
-                let title_path = canonical_wave_title_path_with_store(repo, &wave, &store).await?;
-                canonicalize_project_name(&title_path, &wave, project)?;
-                item.project = Some(project.slug.clone());
-            }
+        if let Some(project) = &project {
+            item.project = Some(project.slug.clone());
         }
         store
             .put_pm_task(
@@ -1849,13 +1844,10 @@ pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult
     let ResolvedTask {
         wave,
         mut item,
-        mut project,
+        project,
         ..
     } = resolve_owned_issue(repo, issue).await?;
     let initiative_id = singular_project_initiative(&project)?;
-    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
-    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
     item.project_id = Some(project.id.clone());
     item.project = Some(project.slug.clone());
     Ok(PmResolvedTask {
@@ -1938,12 +1930,6 @@ struct ResolvedReteamContext {
     repository: RepositoryPmContext,
     team_key: String,
     store: Store,
-}
-
-#[derive(Debug, Clone)]
-struct ReteamProjectState {
-    project: PmProject,
-    target_name: String,
 }
 
 fn reteam_comment_marker(old_identifier: &str, team_key: &str) -> String {
@@ -2055,7 +2041,6 @@ async fn apply_or_plan_repository_reteam(
             .list_projects(&initiative)
             .await
             .map_err(pm_to_ops)?;
-        let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
         for project in projects {
             if !seen_projects.insert(project.id.clone()) {
                 return Err(OpsError::Message(format!(
@@ -2072,14 +2057,11 @@ async fn apply_or_plan_repository_reteam(
                     project.initiative_ids.join(", ")
                 )));
             }
-            let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
-            let target_name = format!("{title_path} — {canonical_name}");
-            if project_needs_reteam(team_id, &project.team_ids) || project.name != target_name {
+            if project_needs_reteam(team_id, &project.team_ids) {
                 project_moves.push(PmReteamProjectMove {
                     wave: wave.clone(),
                     id: project.id.clone(),
                     name: project.name.clone(),
-                    target_name: target_name.clone(),
                     from_teams: project.team_ids.clone(),
                 });
             }
@@ -2135,28 +2117,25 @@ async fn apply_or_plan_repository_reteam(
                     }),
                 }
             }
-            states.push(ReteamProjectState {
-                project,
-                target_name,
-            });
+            states.push(project);
         }
     }
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
-        for state in &states {
-            if !state.project.team_ids.iter().any(|team| team == team_id) {
-                let mut teams = state.project.team_ids.clone();
+        for project in &states {
+            if !project.team_ids.iter().any(|team| team == team_id) {
+                let mut teams = project.team_ids.clone();
                 teams.push(team_id.clone());
                 progress.status(&format!(
                     "attaching team {team_key} to Project `{}`",
-                    state.project.name
+                    project.name
                 ));
                 resolved
                     .repository
                     .client
-                    .set_project_teams(&state.project.id, &teams)
+                    .set_project_teams(&project.id, &teams)
                     .await
                     .map_err(pm_to_ops)?;
             }
@@ -2224,32 +2203,16 @@ async fn apply_or_plan_repository_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        for state in &states {
-            if project_needs_reteam(team_id, &state.project.team_ids) {
+        for project in &states {
+            if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
-                    state.project.name
+                    project.name
                 ));
                 resolved
                     .repository
                     .client
-                    .move_project_to_team(&state.project.id, team_id)
-                    .await
-                    .map_err(pm_to_ops)?;
-            }
-            if state.project.name != state.target_name {
-                resolved
-                    .repository
-                    .client
-                    .update_project(
-                        &state.project.id,
-                        &state.target_name,
-                        &ProjectContent {
-                            metric_targets: state.project.metric_targets.clone(),
-                            flow: state.project.flow.clone(),
-                            krs: state.project.krs.clone(),
-                        },
-                    )
+                    .move_project_to_team(&project.id, team_id)
                     .await
                     .map_err(pm_to_ops)?;
             }
@@ -2435,7 +2398,6 @@ async fn pm_sync_async(
             _ => {}
         }
 
-        let title_path = canonical_wave_title_path_async(repo, wave).await?;
         let projects = client
             .list_projects(&initiative_id)
             .await
@@ -2484,35 +2446,20 @@ async fn pm_sync_async(
                     blocking.push(message);
                 }
             }
-            let canonical_name = match canonical_project_name(&title_path, wave, &project.name) {
-                Ok(name) => name,
-                Err(error) => {
-                    let message = error.to_string();
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
-                    continue;
-                }
-            };
-            let slug = crate::pm::project_slug(&canonical_name);
-            if let Some(existing) = slugs.insert(slug.clone(), canonical_name.clone()) {
+            let name = &project.name;
+            let slug = &project.slug;
+            if let Some(existing) = slugs.insert(slug.clone(), name.clone()) {
                 let message = format!(
-                    "Linear Projects `{existing}` and `{canonical_name}` in wave/{wave} both derive slug `{slug}`"
+                    "Linear Projects `{existing}` and `{name}` in wave/{wave} both derive slug `{slug}`"
                 );
                 diagnostics.push(message.clone());
                 blocking.push(message);
-            }
-            let expected_project_name = format!("{title_path} — {canonical_name}");
-            if project.name != expected_project_name {
-                actions.push(format!(
-                    "rename Linear Project `{}` ({}) to `{expected_project_name}`",
-                    project.name, project.id
-                ));
             }
 
             let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
             if items.iter().all(|item| item.completed) {
                 diagnostics.push(format!(
-                    "Linear Project `{canonical_name}` ({}) in wave/{wave} has no open tasks",
+                    "Linear Project `{name}` ({}) in wave/{wave} has no open tasks",
                     project.id
                 ));
             }
@@ -2572,21 +2519,6 @@ async fn pm_sync_async(
             };
             let store = pm_store().await?;
             super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
-            let title_path = canonical_wave_title_path_async(repo, wave).await?;
-            for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
-                if project_is_foreign(&project, &team_id) {
-                    continue;
-                }
-                validate_project_ownership(&project, wave, &initiative, &team_id)?;
-                let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
-                let expected_name = format!("{title_path} — {canonical_name}");
-                if project.name != expected_name {
-                    client
-                        .rename_project(&project.id, &expected_name)
-                        .await
-                        .map_err(pm_to_ops)?;
-                }
-            }
             refresh_pm_snapshot(repo, wave, &ctx).await?;
         }
     }
@@ -2861,7 +2793,6 @@ async fn checked_projects_with_store(
     wave: &str,
     store: &Store,
 ) -> OpsResult<Vec<PmProject>> {
-    let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
     let mut projects = ctx
         .client
         .list_projects(&ctx.initiative)
@@ -2904,9 +2835,8 @@ async fn checked_projects_with_store(
         }
     }
     projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
-    for project in &mut projects {
+    for project in &projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
-        canonicalize_project_name(&title_path, wave, project)?;
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
@@ -2958,37 +2888,6 @@ pub(crate) async fn linear_project_name(
         canonical_wave_title_path_async(repo, wave).await?,
         canonical_name.trim()
     ))
-}
-
-fn canonicalize_project_name(
-    title_path: &str,
-    wave: &str,
-    project: &mut PmProject,
-) -> OpsResult<()> {
-    project.name = canonical_project_name(title_path, wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
-    Ok(())
-}
-
-fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> OpsResult<String> {
-    let expected = format!("{title_path} — ");
-    if let Some(name) = linear_name.strip_prefix(&expected) {
-        return Ok(name.trim().to_string());
-    }
-    let leaf = wave.rsplit('/').next().unwrap_or(wave);
-    for legacy in [title_case(wave), title_case(leaf)] {
-        let prefix = format!("{legacy} — ");
-        if let Some(name) = linear_name.strip_prefix(&prefix) {
-            return Ok(name.trim().to_string());
-        }
-    }
-    if linear_name.contains(" — ") {
-        return Err(OpsError::Message(format!(
-            "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             inspect `lf home doctor --planning` and correct the provider title before retrying"
-        )));
-    }
-    Ok(linear_name.trim().to_string())
 }
 
 pub fn canonical_wave_title_path(repo: &Path, wave: &str) -> OpsResult<String> {
@@ -3366,30 +3265,6 @@ mod tests {
         assert!(error.to_string().contains("PRD-44"));
     }
 
-    #[test]
-    fn project_titles_strip_only_recognized_wave_paths() {
-        assert_eq!(
-            canonical_project_name("Survival", "survival", "Survival — A real task").unwrap(),
-            "A real task"
-        );
-        assert_eq!(
-            canonical_project_name(
-                "Survival / Infrastructure",
-                "infrastructure",
-                "Infrastructure — Gmail",
-            )
-            .unwrap(),
-            "Gmail"
-        );
-        assert!(canonical_project_name(
-            "Survival / Infrastructure",
-            "infrastructure",
-            "Another Wave — Gmail",
-        )
-        .is_err());
-        assert_eq!(default_team_key("loopflow"), "LOO");
-    }
-
     #[tokio::test]
     async fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
         let repo = tempfile::tempdir().unwrap();
@@ -3438,7 +3313,7 @@ mod tests {
         );
         let new_infrastructure = migration_project_node(
             "project-infrastructure",
-            "Survival / Infrastructure — Gmail",
+            "Infrastructure — Gmail",
             "initiative-infrastructure",
             &["team-loo"],
         );
@@ -3483,7 +3358,6 @@ mod tests {
             ),
             project_update_response("project-survival"),
             project_update_response("project-infrastructure"),
-            project_update_response("project-infrastructure"),
             projects_response(json!([new_survival])),
             issues_response(json!([migration_issue_node(
                 "issue-open",
@@ -3498,7 +3372,7 @@ mod tests {
                 "issue-done",
                 "LOO-2",
                 "project-infrastructure",
-                "Survival / Infrastructure — Gmail",
+                "Infrastructure — Gmail",
                 "team-loo",
                 true,
             )])),
@@ -3556,9 +3430,20 @@ mod tests {
             .filter(|request| request.body.contains("SetProjectTeams"))
             .count();
         assert_eq!(attached_before_move, 2);
-        assert!(requests
+        assert_eq!(
+            result
+                .project_moves
+                .iter()
+                .map(|project| project.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Survival — A real task reaches done",
+                "Infrastructure — Gmail"
+            ]
+        );
+        assert!(!requests
             .iter()
-            .any(|request| { request.body.contains("Survival / Infrastructure — Gmail") }));
+            .any(|request| request.body.contains("UpdateProject(")));
     }
 
     #[tokio::test]

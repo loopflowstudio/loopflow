@@ -357,9 +357,9 @@ lf task complete 1207... --summary "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
-Team. Project titles include the canonical Wave ancestry for orientation
-(`Survival / Infrastructure — Gmail`), but stable ids and Project membership —
-never titles or issue prefixes — resolve Work.
+Team. Project titles remain as authored in Linear, including ordinary names such
+as `Summer work — customer requests`. Refresh, sync and reteam preserve them;
+stable IDs and Project membership resolve Work.
 
 ## Tasks
 

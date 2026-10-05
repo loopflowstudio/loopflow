@@ -239,16 +239,15 @@ receipts cannot select it; Git publication is no opening prerequisite. The desig
 uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
-October 5 branch code removes empty-Flow refusals and the invented default.
-The name cutover remains unresolved: bound reads strip names, while unbound
-Task inspection can store exact names in the same row without provenance.
-Migration marking cannot distinguish a repair from a genuine same-revision
-name conflict. The design records the unselected tradeoff: preserve original
-evidence and permit one historical name-only replacement, or require explicit
-repair. Archived bytes do not preserve conflict rejection. Iteration direction
-retains that protection without selecting an exception.
-Sync/reteam and both SQL admission callers must join the cut. Binding, ensure,
-recovery, Desktop and configured proof remain unfinished.
+October 5 code permits empty Flow and preserves names through inspection, sync
+and reteam. Jack Heart's comment
+`5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name correction,
+retaining original bodies and acquisition/revision evidence. All non-name checks
+and subsequent equal-revision rejection remain strict. Planning and conversion
+markers settle atomically; durable Project synchronization follows acceptance
+separately. Rejected planning cannot update durable facts first. Shared selection,
+SQL admission, ensure, rotation and Desktop remain unfinished. Release's lesson:
+prove operation entry points. Installed/configured acceptance remains unproved.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

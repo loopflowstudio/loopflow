@@ -982,10 +982,7 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
             } else {
                 format!("team(s) [{}]", pm.from_teams.join(", "))
             };
-            println!(
-                "    wave/{}: {} → {}  (from {from})",
-                pm.wave, pm.name, pm.target_name
-            );
+            println!("    wave/{}: {}  (from {from})", pm.wave, pm.name);
         }
     }
 

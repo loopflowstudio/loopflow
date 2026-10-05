@@ -117,17 +117,6 @@ async fn planning_graphql(
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
     } else if query.contains("query ListInitiatives") {
         json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
-    } else if query.contains("mutation RenameProject") {
-        if let Some(project) = state
-            .extra_projects
-            .iter_mut()
-            .find(|project| project["id"] == vars["id"])
-        {
-            project["name"] = vars["name"].clone();
-        } else {
-            state.project_name = Some(vars["name"].as_str().unwrap().into());
-        }
-        json!({"projectUpdate":{"success":true}})
     } else if query.contains("query ListInitiativeProjects") {
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
@@ -1675,7 +1664,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
-            assert_eq!(provider.project_name.as_deref(), Some("Product — Chapter"));
+            assert_eq!(provider.project_name, None);
             let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
             let snapshot = row.snapshot;
             assert_eq!(snapshot.projects.len(), 1);

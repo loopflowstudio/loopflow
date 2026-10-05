@@ -55,7 +55,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let mut provider_project = project();
-    provider_project["name"] = "Product — Chapter".into();
+    provider_project["name"] = "Summer work — customer requests".into();
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(provider_project.clone())),
@@ -69,8 +69,14 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .await
                 .unwrap();
             assert_eq!(record.item.name, "Inspect a planning-only Task");
-            assert_eq!(record.project.as_ref().unwrap().name, "Chapter");
-            assert_eq!(record.item.project.as_deref(), Some("chapter"));
+            assert_eq!(
+                record.project.as_ref().unwrap().name,
+                "Summer work — customer requests"
+            );
+            assert_eq!(
+                record.item.project.as_deref(),
+                Some("summer-work-customer-requests")
+            );
             assert_eq!(
                 record.item.branch_name.as_deref(),
                 Some("dev/fix-1-existing")
@@ -145,6 +151,46 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             );
         })
         .await;
+}
+
+#[tokio::test]
+async fn rejected_project_snapshot_preserves_durable_project_facts() {
+    let fixture = Fixture::new().await;
+    let (repo, wave) = fixture.planning_repo().await;
+    let mut snapshot: PmSnapshot = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/dto/task_history_planning.json"
+    ))
+    .unwrap();
+    snapshot.items.clear();
+    snapshot.projects.truncate(1);
+    snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
+    let ctx = super::PmContext {
+        repository: super::RepositoryPmContext {
+            client: crate::pm::linear::LinearClient::with_base_url(
+                "fixture".into(),
+                Some("team-1".into()),
+                "http://127.0.0.1:1".into(),
+            ),
+            provider: crate::pm::PmProviderKind::Linear,
+            repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
+            team_id: "team-1".into(),
+        },
+        initiative: "initiative-1".into(),
+    };
+    super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 1, &fixture.store)
+        .await
+        .unwrap();
+    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
+    snapshot.projects[0].name = "Conflicting name".into();
+    assert!(
+        super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 2, &fixture.store)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        fixture.store.list_projects(Some(wave.id())).await.unwrap(),
+        retained
+    );
 }
 
 #[tokio::test]

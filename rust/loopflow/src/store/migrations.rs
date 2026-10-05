@@ -59,6 +59,20 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
     apply_set(conn, &MIGRATIONS[..count]).unwrap();
 }
 
+#[cfg(test)]
+pub(crate) fn apply_before_project_name_cutover_fixture(conn: &rusqlite::Connection) {
+    let count = MIGRATIONS
+        .iter()
+        .position(|migration| {
+            migration
+                .sql
+                .lines()
+                .any(|line| line == "-- draft: project_readiness")
+        })
+        .unwrap_or(MIGRATIONS.len());
+    apply_set(conn, &MIGRATIONS[..count]).unwrap();
+}
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that

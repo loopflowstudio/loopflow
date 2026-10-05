@@ -365,6 +365,12 @@ fn put_project(
     if previous.as_ref().is_some_and(|(_, _, archived)| *archived) {
         return Ok(());
     }
+    let pending_name_cutover: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
+         WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL)",
+        params![repo, provider, project.id],
+        |row| row.get(0),
+    )?;
     let revision = revision_nanos(project.revision.as_deref())?;
     if let Some((previous, acquired, _)) = previous {
         let previous: PmProject = serde_json::from_str(&previous)?;
@@ -377,6 +383,10 @@ fn put_project(
         // Relationship sets were checked independently; their traversal order is immaterial.
         comparable.initiative_ids = previous.initiative_ids.clone();
         comparable.team_ids = previous.team_ids.clone();
+        if pending_name_cutover {
+            comparable.name.clone_from(&previous.name);
+            comparable.slug.clone_from(&previous.slug);
+        }
         if comparable != previous && (revision.is_none() || revision == previous_revision) {
             return Err(StoreError::InvalidData(format!(
                 "unordered or conflicting Project facts for {}; refresh planning",
@@ -394,6 +404,13 @@ fn put_project(
          ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,project.id,observed_at,serde_json::to_string(project)?],
     )?;
+    if pending_name_cutover {
+        conn.execute(
+            "UPDATE pm_project_name_cutover SET converted_at=?4
+             WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL",
+            params![repo, provider, project.id, observed_at],
+        )?;
+    }
     Ok(())
 }
 
@@ -493,29 +510,79 @@ mod tests {
     use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[test]
-    fn project_name_representation_change_requires_a_cutover() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE pm_projects(repo TEXT,provider TEXT,id TEXT,observed_at INTEGER,body TEXT,archived INTEGER DEFAULT 0,PRIMARY KEY(repo,provider,id));").unwrap();
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        let mut project = snapshot.projects[0].clone();
-        project.revision = Some("2026-10-05T12:00:00Z".into());
-        project.name = "Customer requests".into();
-        project.slug = "customer-requests".into();
-        super::put_project(&conn, "/repo", "linear", 1, &project).unwrap();
-        let stored = serde_json::to_string(&project).unwrap();
-        project.name = "Product — Customer requests".into();
-        project.slug = "product-customer-requests".into();
-        let error = super::put_project(&conn, "/repo", "linear", 2, &project).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("unordered or conflicting Project facts"));
-        let retained: String = conn
-            .query_row("SELECT body FROM pm_projects", [], |row| row.get(0))
+    fn project_name_cutover_retains_both_histories_and_rejects_later_conflicts() {
+        // "Customer requests" represents both a projected prefixed name and a
+        // verbatim plain provider name. The same input must accept both histories.
+        // An already exact prefixed name also consumes the exception once.
+        for historical_name in ["Customer requests", "Product — Customer requests"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            crate::store::migrations::apply_before_project_name_cutover_fixture(&conn);
+            let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+                "../../../../../tests/fixtures/dto/task_history_planning.json"
+            ))
             .unwrap();
-        assert_eq!(retained, stored);
+            let mut project = snapshot.projects[0].clone();
+            project.revision = Some("2026-10-05T12:00:00Z".into());
+            project.name = historical_name.into();
+            project.slug = crate::pm::project_slug(historical_name);
+            let original = serde_json::to_string(&project).unwrap();
+            conn.execute(
+                "INSERT INTO pm_projects(repo,provider,id,observed_at,body)
+                VALUES('/repo','linear',?1,10,?2)",
+                params![project.id, original],
+            )
+            .unwrap();
+            conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
+                "project_readiness",
+            ))
+            .unwrap();
+            project.name = "Product — Customer requests".into();
+            project.slug = crate::pm::project_slug(&project.name);
+
+            let mut conflict = project.clone();
+            conflict.summary.push_str("conflict");
+            assert!(super::put_project(&conn, "/repo", "linear", 11, &conflict).is_err());
+            super::put_project(&conn, "/repo", "linear", 9, &project).unwrap();
+            let retained: String = conn
+                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(retained, original);
+            // Failed outer work cannot spend the one-time exception.
+            {
+                let tx = conn.transaction().unwrap();
+                super::put_project(&tx, "/repo", "linear", 11, &project).unwrap();
+            }
+            let pending: Option<i64> = conn
+                .query_row(
+                    "SELECT converted_at FROM pm_project_name_cutover",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(pending, None);
+            let tx = conn.transaction().unwrap();
+            super::put_project(&tx, "/repo", "linear", 12, &project).unwrap();
+            tx.commit().unwrap();
+            let evidence: (String, i64, Option<i64>) = conn
+                .query_row(
+                    "SELECT body,observed_at,converted_at FROM pm_project_name_cutover",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(evidence, (original, 10, Some(12)));
+            let accepted = serde_json::to_string(&project).unwrap();
+            project.name = "Another name".into();
+            assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
+            let retained: String = conn
+                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(retained, accepted);
+            project.id = "post-cutover".into();
+            super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
+            project.name = "Conflict on a new record".into();
+            assert!(super::put_project(&conn, "/repo", "linear", 14, &project).is_err());
+        }
     }
 
     #[test]

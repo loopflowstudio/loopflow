@@ -456,7 +456,7 @@ async fn local_task(
         .await
         .unwrap()
         .unwrap();
-    let parent = super::record_project(
+    let parent = crate::ops::project::record_project(
         &context.store,
         &wave,
         &project(
@@ -1197,7 +1197,7 @@ async fn legacy_home(path: &std::path::Path, repo: &std::path::Path, url: &str) 
         .unwrap()
         .unwrap();
     for (id, name) in [("a-next", "next"), ("a-archived", "archive")] {
-        super::record_project(
+        crate::ops::project::record_project(
             &home.store,
             &wave,
             &project(id, name, ProjectStatus::Planned),

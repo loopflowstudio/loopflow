@@ -35,12 +35,22 @@ Remove the obsolete receipt requirement and use `lf list --json`; keep all actua
 public verification stages required. The scheduled regression exercises published,
 no-change, telemetry failure/recovery, missing proof and smoke failure without a
 UI receipt. Publisher fixtures now reject unknown CLI commands instead of returning
-a version for every invocation. The follow-up is not yet shipped at this curation.
+a version for every invocation. The follow-up landed in PR #1441 and shipped in
+v0.13.3, published at 2026-10-05 08:40:22 UTC from
+`8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3` after
+[candidate 37283026406](https://github.com/loopflowstudio/loopflow/actions/runs/37283026406)
+passed. The normal installed CLI completed that release without the temporary
+recovery CLI. CLI and Desktop then installed as 0.13.3 without another migration.
 
 A Docker startup failure recovered through one failed-job rerun on a fresh GitHub
 runner. This manual recovery does not satisfy LOO-285's two unattended scheduled
-settlements. Public read-back/smoke verification remains distinct from publication
-and local installation; no verified public receipt was produced by the manual run.
+settlements. Direct public read-back for 0.13.3 matched all seven GitHub asset
+digests and both versioned/latest DMG downloads against the prepared checksums;
+the website and crate registry reported 0.13.3. Installed CLI discovery and the
+default Session inventory passed (43 interactive, zero headless, zero closed).
+These observations are manual acceptance, not a scheduled verified receipt or
+proof of two unattended settlements. Reopening Desktop remains necessary to
+load the new UI in an already-running application.
 Publisher checkout cleanup reported a retained lease at
 `/Users/jack/src/loopflow.publish-default-v0-13-2`; preserve it for supported
 reconciliation rather than removing it manually.

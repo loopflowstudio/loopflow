@@ -177,3 +177,13 @@ journal recording. That separate boundary did not cause hosted Swift CI to
 fail. #1308's branch/Home isolation landed during this investigation; its
 merge alone proves neither installed recovery nor publication. Preserve the
 populated Home and historical receipts rather than rewriting the failed attempt.
+
+## Preserve the pending release version (2026-10-05)
+
+Jack Heart requested autonomous 5whys and prevention after the v0.13.1 gap.
+Incorrect earlier preparation commits may remain in history; a corrected commit
+must retain and publish the same pending version. This supersedes recovery's
+previous automatic patch-successor policy. The sourced causal analysis and
+prevention live in `release/v0.13.1/RECOVERY.md`. Existing published artifacts,
+tags and migration bytes remain immutable. The historical gap is not repaired
+by this source change; installed activation requires a later published release.

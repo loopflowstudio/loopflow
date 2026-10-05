@@ -1,6 +1,10 @@
 # Desktop performance
 
 ```sh
+# Every real launch on this machine, already recorded: samples, median, p95, failures, by app version.
+uv run python scripts/benchmarks/desktop-performance/timings.py
+uv run python scripts/benchmarks/desktop-performance/timings.py --json
+
 # Real usage on this machine: record the running app for a minute, then read the report.
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process LoopflowMac   # dev build
@@ -15,6 +19,27 @@ uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /t
 # The older capture/OCR journeys and their hash-pinned baseline.
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
 ```
+
+The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
+`reads.ndjson` whenever it runs outside a test mode; `timings.py` only reads
+them. Each file keeps its newest half past 256 KB. Lines hold durations, `lf`
+subcommand words, the workspace part and the app version: no arguments, output
+or error text. Delete the directory to start over.
+
+| Row | Milliseconds from kernel process start to |
+|---|---|
+| `pre_main` | `LoopflowApp.init` |
+| `restored` | the saved workspace looked up (`saved workspace: hit/miss`) |
+| `first_frame` | the first window's content committed to the render server |
+| `usable_saved` / `usable_fresh` | outline rows observed, then the next main-queue callback; split by whether any part was saved text |
+| `fresh` | every part of the workspace read by this launch |
+
+`lf read` and `refresh` rows are durations of one subprocess read and one
+planning or Sessions refresh, with failures counted apart. Reads have no
+timeout, so a hung read shows as a launch that never reached `fresh`. A launch
+still running, or quit early, is counted the same way. `first_frame` is a
+commit, not on-glass presentation; CPU, memory and main-thread stalls are
+`record_live.py`'s.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes

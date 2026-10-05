@@ -338,19 +338,26 @@ chapter metric targets; source reduction is supporting evidence, not a won KR.
 
 ## Demo
 
-In a disposable OS account/container, start with a populated released Home and
-known Session/review IDs. Observe `lf session list --json`, `lf mon show <input>`
-and `lf usage --json`. Attempt capture conversion while a released provider writer
-is alive: conversion reports that writer and leaves all data/selection unchanged.
-After controlled quiescence, convert through the candidate's installation recovery
-path, interrupt it after the directory move, then retry. The same commands show
+In an isolated original OS, start with a populated released Home and known
+Session/review IDs. Observe `lf session list --json`, `lf mon show <input>` and
+`lf usage --json`. While that OS or another storage writer retains access,
+conversion must remain unstarted and leave data/selection unchanged. A disposable
+account or container alone does not prove this boundary.
+
+The proposed external owner stops the original OS, durably withholds every
+affected volume, and verifies the frozen backup before candidate mutation.
+Interrupt recovery and reboot its owner; attempt original-OS startup and direct
+released commands before retrying with the pinned candidate. Prove storage stays
+withheld, including after the directory move and reference updates. After verified
+completion and explicit storage release, the same commands show
 the same history, feedback, usage and native conversation identity. Resume that
 Session, run a nested direct skill and an agent-issued command, and complete the
 saved review through `lf session ready` / `lf session complete`. One Flow advances
 once; new bytes appear only under `captures/`; no `runs/` alias remains.
 
-This is a headless fixture demo with provider stubs. Real installed/provider proof
-is separate and requires authorization; neither kickoff nor Task creation grants it.
+This proposed headless fixture uses provider stubs and requires an external
+storage/boot owner that is not yet implemented or proved. Real installed/provider
+proof is separate and requires authorization.
 
 ## Findings and inventory
 
@@ -439,7 +446,7 @@ person's steer or a nested contribution into a top-level checkpoint.
 
 ### Offline, recoverable layout conversion
 
-**Selected source design; configured deployment not authorized:** one controlled offline
+**Unimplemented target behavior; configured deployment not authorized:** one controlled offline
 maintenance window for the capture-layout transition. Old writers finish naturally;
 this Task does not authorize killing them, changing schedules or installing code.
 Before the window, the published CLI continues using its single existing layout.
@@ -612,4 +619,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5): `git diff --check` passed; prose-only compression, no behavioral rerun; prior design/check detail at `b6cfe0521`, offline conversion and affected gate remain open.
+Check (October 5): `git diff --check` passed; source and Release child documents inspected, prose-only reconciliation with no behavioral rerun; offline conversion and affected gate remain open.

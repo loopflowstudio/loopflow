@@ -35,11 +35,11 @@ Detail:
 `05c3267df4aa585903d0d4af22a37f21b096c359:wave/infrastructure/MEMORY.md`.
 
 Jack Heart's October 5 steers select offline recovery investigation, with the
-original OS absent. Recovery boot alone proves no crash-persistent exclusion:
-an external owner must retain storage custody through reboot, with a frozen
-backup before mutation. No Mac owner is proved. An opaque `runs/` root changes acceptance and is unapproved.
-Conversion and installer schema shortcuts remain unresolved. Stop permission-helper
-polishing; the design owns the comparison and required reboot proof.
+original OS absent. Neither Recovery boot nor account/container isolation proves
+storage custody through reboot. An external owner must retain it, with a frozen
+backup before mutation. No Mac owner is proved. Keeping opaque `runs/` paths
+changes acceptance and is unapproved. Conversion and installer schema shortcuts
+remain unresolved; permission helpers cannot supply the required reboot proof.
 
 ## Review replacement (2026-10-04)
 

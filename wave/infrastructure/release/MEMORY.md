@@ -23,6 +23,13 @@ The current recovery builds the CLI in the supplied checkout and uses a disposab
 Home to resume the exact candidate without migrating the live Home. Publication
 and installed acceptance remain pending until fresh receipts establish them.
 
+Recovery exposed a second boundary: the five-minute download deadline covers
+all four platforms together. The 76 MB candidate progressed at about 200 KiB/s,
+so healthy transfers exceeded the deadline and retries discarded their progress.
+The local repair allows fifteen minutes for the complete set while preserving
+bounded retries and exact candidate identity. Focused retry tests, formatting,
+and all-target Clippy passed; delivery of this repair remains pending.
+
 ## Retained landing incident and minor recovery (2026-10-04)
 
 Jack Heart authorized autonomous recovery and delivery under Infrastructure;

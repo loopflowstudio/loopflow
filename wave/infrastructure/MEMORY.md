@@ -29,16 +29,17 @@ and shared-parent replacement after partial sealing. October 5's deterministic
 race replaces the path after recovery checks its inode: recovery changes the
 replacement's permissions and reports success. Reject that restoration mechanism.
 
-Five portable interruption/race cases preserve bytes but expose metadata damage;
-a passing negative probe is not safe recovery. Retry needs fixture namespace repair.
-Privileged Linux cases remain CI-owned; no quiescence or power-loss proof follows.
-Prior detail:
+Five portable cases expose metadata damage despite preserved bytes; retry needs
+fixture namespace repair. Linux remains CI-owned; quiescence/power-loss are unproved.
+Detail:
 `05c3267df4aa585903d0d4af22a37f21b096c359:wave/infrastructure/MEMORY.md`.
 
-External admission/namespace exclusion and candidate recovery must precede metadata
-mutation. Preserve unrelated access and repeat quiescence on recovery; ACLs,
-mounts and aliases remain obligations. No exclusion owner is selected. `runs/`
-and installer schema shortcuts remain; another permission probe cannot select one.
+Jack Heart's October 5 steers select offline recovery investigation, with the
+original OS absent. Recovery boot alone proves no crash-persistent exclusion:
+an external owner must retain storage custody through reboot, with a frozen
+backup before mutation. No Mac owner is proved. An opaque `runs/` root changes acceptance and is unapproved.
+Conversion and installer schema shortcuts remain unresolved. Stop permission-helper
+polishing; the design owns the comparison and required reboot proof.
 
 ## Review replacement (2026-10-04)
 

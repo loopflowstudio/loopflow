@@ -2157,7 +2157,7 @@ mod durable_store_tests {
         assert!(store
             .claim_session_driver(id, retired_driver.as_ref(), &exec, false)
             .is_err());
-        assert!(store.reserve_review_run(&flow).is_err());
+        assert!(store.reserve_review_capture(&flow).is_err());
         assert!(store
             .ready_session(id, before.captured, "late approval")
             .is_err());

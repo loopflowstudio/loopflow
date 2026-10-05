@@ -821,7 +821,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let bin = home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let provider = bin.join("codex");
-    std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$CODEX_HOME/opened\"\n").unwrap();
+    std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$CODEX_HOME/opened\"\n").unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),

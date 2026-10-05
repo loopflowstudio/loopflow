@@ -33,3 +33,7 @@ October 5: capacity no longer blocks source verification. Rust compilation,
 focused Session/authority/history tests and all-target Clippy now pass. The
 conversion and populated released-Home matrix remain implementation work;
 no installed data or unrelated writer was changed.
+
+October 5 sync onto `8ea0bec9c`: retained native conversation selection/reopening and review retirement, using capture-owned paths and excluding capture mutation aliases; accepted main's shared memory curation.
+
+Check: materialized `cargo test -p loopflow --test session_cli_tests --no-fail-fast` passed 9/10; repaired the new stub's retired environment reader, then the exact failing test passed (1/1); broader gate/CI remains with the caller.

@@ -412,7 +412,7 @@ final class WorkspaceNavigation {
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
-    /// Tasks whose recent Runs are disclosed; the Runs are read only then.
+    /// Tasks whose Session history is disclosed; history is read only then.
     var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []

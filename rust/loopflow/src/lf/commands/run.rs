@@ -725,7 +725,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 .unwrap_or(&artifact_key);
             Some(
                 uuid::Uuid::parse_str(raw_id)
-                    .expect("Run IDs always carry a UUID")
+                    .expect("capture keys always carry a UUID")
                     .to_string(),
             )
         } else {

@@ -160,7 +160,7 @@ mod environment_tests {
     }
 
     #[test]
-    fn agent_receives_only_fresh_generic_run_identity() {
+    fn agent_receives_only_fresh_capture_context() {
         let mut command = tokio::process::Command::new("vendor");
         command
             .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")

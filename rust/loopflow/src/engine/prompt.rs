@@ -1775,8 +1775,8 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
 /// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
-/// `{trace_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
-/// runs) — it joins the log to the run's journal and token-usage records.
+/// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
+/// to its command trace.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
 pub fn write_prompt_log(
@@ -1798,11 +1798,11 @@ pub fn write_prompt_log(
         }
         _ => safe_skill,
     };
-    let run_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
+    let trace_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
-    let filename = match run_part {
+    let filename = match trace_part {
         Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
         None => format!("{}-{}.md", timestamp, name_part),
     };

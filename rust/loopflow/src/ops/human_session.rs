@@ -879,30 +879,16 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowSession)
     })
 }
 
-pub(crate) async fn require_current_review_actor(
+pub(crate) fn require_current_review_actor(
     store: &SharedStore,
     position: &FlowSession,
 ) -> Result<()> {
-    let Some(active) = crate::session_record::inherited_caller()? else {
-        return Ok(());
-    };
-    let id = flow_id(position)?;
-    if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
-        let driver = store.sqlite.session_driver(&id)?;
-        if !driver.is_some_and(|driver| {
-            driver.exec_id.is_some()
-                && driver.provider_generation == caller.provider_generation
-                && driver.provider_exec_id == caller.origin_exec_id
-        }) {
-            bail!("superseded provider cannot complete this Session");
-        }
-    }
-    let owner = store.session_for_artifact(&active).await?;
-    if owner.is_some_and(|session| session.id == id)
-        && position.review_artifact_key() != Some(&active)
-    {
-        bail!("superseded review input cannot complete this Session");
-    }
+    // Validate inherited payload context before checking the same SQLite fence
+    // used by the settlement transaction.
+    crate::session_record::inherited_caller()?;
+    store
+        .sqlite
+        .require_current_session_actor(&flow_id(position)?)?;
     Ok(())
 }
 
@@ -1755,7 +1741,7 @@ pub(crate) async fn rename(
     let position = match &target {
         SessionTarget::Row { session } => {
             store
-                .rename_session(&session.id, None, title, title_source)
+                .rename_session(&session.id, title, title_source)
                 .await?;
             let session = store
                 .session(&session.id)
@@ -1776,7 +1762,7 @@ pub(crate) async fn rename(
         .ok_or_else(|| session_not_found(session_id))?;
     if let SessionTarget::Flow { position, .. } = &target {
         store
-            .rename_session(&flow_id(position)?, None, title, title_source)
+            .rename_session(&flow_id(position)?, title, title_source)
             .await?;
     }
     session_surface(store, &target).await

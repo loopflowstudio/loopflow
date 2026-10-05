@@ -141,14 +141,13 @@ impl Store {
     pub async fn rename_session(
         &self,
         id: &str,
-        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, expected_capture, &title, source)
+            store.rename_session(&id, &title, source)
         })
         .await
     }

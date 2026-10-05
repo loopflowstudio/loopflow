@@ -1,6 +1,6 @@
 # Finish the Run cutover — LOO-370
 
-Draft for feature Flow design review, 2026-10-02. Jack Heart requested cleanup
+Design begun 2026-10-02; reconciled 2026-10-05. Jack Heart requested cleanup
 while preserving conversations, history and work. This plan is not approval of an
 installed-Home migration. Base: `a278d6bc1bd4373f78f27027b8ae249100ef14d3`.
 Source implementation is authorized by the October 4 direction below.
@@ -13,7 +13,7 @@ conversation, without further interactive design/demo approvals. Jack suggested
 not approval of a particular layout or conflation of capture keys with Session IDs.
 Resolve the layout against the actual owner, preserving retained identity and history.
 
-The earlier design-review hold below is superseded for source implementation.
+The earlier design-review hold is superseded for source implementation.
 Choose and prove the recoverable conversion strategy autonomously in isolated
 released-Home fixtures. A maintenance boundary may be part of the designed deployment;
 no interruption of live conversations, installed-Home conversion, installation,
@@ -24,116 +24,115 @@ Jack's request; preserve Task, branch, checkout and history.
 
 ## Source implementation status — October 5
 
-The runtime slice now builds with public history DTO exports retained under
-`session_history`. Removing these exports had broken external DTO/watch consumers;
-the private capture implementation remains private. Connect, rename, complete and
-bind select durable Session IDs, while history/replay retain capture selectors.
-The obsolete input-selector lookup and its duplicate target field are deleted.
-Git-operation evidence is named Trace/Exec in Rust; released receipt field names
-remain unchanged. Replay, capture admission and prompt-log variables name their
-actual capture or Trace owner.
+The runtime slice uses `LF_CAPTURE_KEY` for subordinate history and the resolved
+Session/Exec caller for ancestry and checkpoint composition. Native resume exports
+its claimed driver's AgentCaller. Session mutations take durable IDs; history and
+replay retain capture selectors. Public history DTO exports remain available under
+`session_history`. Definition-only Run helpers and unused provider-fill wrappers
+are deleted. Git owner fields name Trace/Exec while released JSON fields remain.
+SQLite rename/readiness/completion and Task review settlement fence replaced
+providers and stale captures inside their mutation transactions.
 
-Review found standalone completion lacked the provider-generation fence already
-used by Task review. Session rename/readiness/completion and Task review settlement
-now validate the actor in their SQLite transaction. Completion also checks before
-provider-stop side effects. The public replacement proof rejects stale captures
-and replaced providers while preserving feedback, identity and a single completion.
-Binding still accepts closed Sessions without rewriting prior attribution.
+Compression removed rename's obsolete expected-capture argument: naming targets
+the conversation, and the actor fence rejects stale providers/inputs. Review
+prechecks reuse the storage fence rather than duplicate generation and capture
+comparisons. Two controller fixtures exercised removed mutation aliases;
+the repaired replacement-race fixture uses durable Session IDs and retains feedback,
+client ownership, lock handoff and exactly-once completion assertions. Public CLI
+coverage retains capture-key/prefix rejection and stale-actor mutation rejection.
 
-Source conversion is **not implemented**. Installer advancement and recovery still
-have exact-SQLite shortcuts; public entry-gate replacement still occurs after
-candidate advancement. No payload root has moved. The existing offline preservation
-strategy and full acceptance below remain required; this runtime checkpoint cannot
-be published as the finished cutover or landed independently.
+Earlier runtime/compression findings and exact checks are preserved at
+`c79203717c5e812284835591fe514d37b543d813:scratch/finish-removing-the-retired-run.md`.
+That checkpoint records passing Session CLI/lifecycle, PR authority, history/DTO,
+Session-owner, formatting, architecture and Clippy checks, with a Session skip.
+Those earlier checks did not cover the controller alias fixtures; the October 5
+focused pass below covers their repair. Conversion and full gate remain unproved.
+The earlier disk-capacity limitation is superseded by October 5 source builds.
 
-Check: isolated Session CLI/lifecycle (26 passed, one skip), PR authority (12 passed after clearing inherited Task authority), watch/DTO (19 passed), replacement/binding focused proofs, all-target Clippy, fmt/diff and architecture checks passed; 15 Session-owner library tests passed (`ops::human_session::tests` and `captured_reservation_survives_interruption_and_fences_replacement`; the earlier `sessions::tests` filter selected zero). Conversion, Desktop, full gate and configured installation proof remain outstanding.
+Preservation findings remain binding: a native conversation can resume without its
+old manifest; validate present payload without making absence erase SQLite identity.
+The metadata-open fixture must drain output while waiting for provider exit: its
+former pipe backpressure looked like a provider hang. File-backed output preserves
+the bounded assertion.
 
-## Earlier runtime implementation — October 4
+Remaining indivisible source work:
 
-The runtime slice is implemented in the working tree, not published. Old
-`LF_RUN_ID`/`LF_RUN_DIR` exports and policy readers are removed; one
-`LF_CAPTURE_KEY` resolves subordinate history through Home-local SQLite.
-Session/Exec caller context owns nested checkpoint behavior. Native resume now
-exports its claimed driver's AgentCaller; readiness checks provider identity inside
-its transaction. Definition-only Run events/errors/helpers are deleted, and the
-Flow input projection is `SelectedCapture`. Current history modules, Desktop Task
-history naming and environment instructions are updated. No migration draft or
-installed data was changed. This is not the complete cutover.
+- Implement offline conversion and candidate-owned recovery, including launch
+  exclusion, frozen backup and operational-reference inventory. Installer
+  advancement and recovery both have exact-SQLite shortcuts; neither proves
+  filesystem conversion. Candidate recovery must become effective before the
+  first layout mutation, rather than at later entry-gate activation.
+- Move capture storage, watch classification, replay and ablation/tooling together
+  to `captures/`. No payload root has moved. Keep the old layout until this cut
+  can preserve populated history and interrupted conversion.
+- Finish current-reference and native callback/Flow consumer audits, Desktop
+  validation, populated released-Home fault matrix, final inventory/delta and gate.
 
-Remaining source work retains the indivisible delivery boundary:
+Check: realign `git diff --check` and `lf context --skill realign` passed (memory/scratch within budget); reused October 5 isolated `cargo test -p loopflow --lib controller::task::planning_tests` and `cargo test -p loopflow --test session_cli_tests --test session_lifecycle_tests` passed 49 tests (one disposable-Linux-account skip); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` and `uv run python scripts/check_architecture.py` passed; conversion/installed proof and full gate remain with implementation/gate.
 
-- Implement and prove the offline conversion, including external launch exclusion,
-  frozen backup, operational reference inventory and candidate-owned recovery.
-  `advance_switch_store` currently skips the candidate when SQLite is already
-  exact; `recover_switch` has an exact-candidate fast path too. Neither may treat
-  exact schema as proof of completed filesystem conversion. The machine entry
-  gate is currently replaced during activation, after candidate advancement;
-  recovery selection must be effective before the first layout mutation.
-- Cut `record_dir`, watch classification, replay and ablation/tooling paths to one
-  capture layout together. They still use `runs/` in this internal slice.
-- Finish the current-reference audit beyond the completed Git Trace/Exec names
-  and durable Session mutation selectors. Preserve released Git receipt fields
-  and historical input selectors in read/replay paths.
-- Prove stale-provider review settlement and native callback/Flow paths after
-  all consumers move. Recheck the final history-module renames and missing-registry
-  caller predicate; they postdate the passing Rust checks. Desktop was not built.
-- Run the populated released-Home preservation/fault matrix and final gate, then
-  record the final retained-reference inventory and production delta. No configured
-  conversion, production release or installed acceptance follows from source tests.
+This runtime slice cannot land independently as the finished cutover. No installed
+conversion, interruption, installation or production release is authorized.
 
-Inspection corrected two assumptions. A recorded native conversation remains
-resumable without its old manifest: validate a present manifest, but do not turn
-missing payload into missing Session identity. The metadata-open fixture's apparent
-provider wait was stdout backpressure: an owned process sample showed `session::open`
-blocked in `write`, because the test polled exit without draining JSON. File-backed
-capture preserves the bounded metadata-open assertion without pipe-capacity dependence.
-The native resume fixture now also checks the exported caller against SQLite's
-Session, provider generation and origin Exec.
+## Deployment boundary
 
-Check: isolated `cargo test` Session CLI/lifecycle/PR-authority + capture/process subsets passed 75 tests (one isolated-install skip); earlier journal/progress/resume subsets passed; Python materialization tests passed 3; all-target Clippy passed before final module/predicate edits; fmt/diff checks pass. Further build, Desktop and conversion checks deferred: resource recovery failed below the 32 GiB reserve. The controller filter selected zero tests and supplies no proof.
+The selected source design uses an offline transition: conversations finish writing,
+launch sources close, the frozen Home and executable are preserved, conversion
+completes, then the same conversations reopen. Jack Heart's October 4 direction
+permits designing and testing this boundary autonomously in isolation. It does not
+authorize a configured interruption or installation. Duration remains unmeasured.
 
-## Compression review — October 4
+October 5 source inspection confirms that
+`machine_install.rs::startup_selection_during_switch` still selects the prior binary
+before activation, while `promotion_lock.rs` serializes installers only.
+`advance_switch_store` skips the candidate at an exact SQLite frontier;
+`recover_switch` can also finalize advancement without candidate migration work.
+A layout receipt must participate in both paths. Candidate recovery and startup
+exclusion must be effective before the first filesystem mutation; direct retained
+binaries additionally require external launch exclusion. That operational mechanism
+and its isolated proof remain implementation work.
 
-Removed the unused `fill_capture_provider` Store/SQLite pair and CLI-layer history
-type re-exports. Capture resolution now reads its owning Session once and shares
-that result with caller validation. The existing ownership test now distinguishes
-malformed payload from missing payload; it has not been rerun after this edit.
-Desktop query/navigation names consistently use history, and its documentation
-matches the complete `usage --days 0 --task ID --json` reader.
+### Released writer bypass — October 5 source counterexample
 
-Review found fixture-only capture-path duplication deriving the shard from `run_`
-and one unset path variable. Provider stubs now call the existing
-`__provider-session` callback and propagate failure; unrelated stubs no longer
-compute capture paths. `LF_PREPARED_CAPTURE` avoids the retired `LF_SESSION*`
-namespace. Swift scrubs both current reservation variables. Historical scrub names
-remain inert and unchanged. These repairs need the focused Flow/capture suites.
+Inspection of released tag `v0.13.3` at
+`8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3` rules out treating an
+installation-receipt version bump as the complete offline boundary:
 
-Check: `cargo fmt --check`, `git diff --check`, `uv run python scripts/check_architecture.py`, and changed Swift `swiftc -frontend -parse` passed; `check_migrations.py` reports main's missing `0.13.1.001_release.sql` (sync owns reconciliation); resource recovery failed at 13.3/32 GiB, so build, focused Rust/Flow tests, Clippy and Desktop build defer to capable gate/CI. No runtime acceptance or landing follows.
+- `bin/lf.rs::run` bypasses ordinary machine dispatch for installation, doctor
+  and screenshot commands, then calls `journal::observe_process` before their
+  command-specific checks. Direct retained binaries need not traverse the
+  replaceable entry-gate executable.
+- `journal::observe_process` opens `SqliteStore::open_existing_execs` and writes
+  process evidence. That opener checks the Exec columns, not the installation
+  receipt or migration frontier. An unknown receipt version or a new migration
+  therefore cannot establish that the frozen database has no released writers.
+- A SQLite write lock would exclude those writes only while its process lives.
+  A converter crash releases it before recovery, so it cannot substitute for the
+  persistent external launch exclusion required by this design.
 
-## Earlier maintenance proposal
+This is source counterevidence, not an executed released-binary reproduction.
+The conversion cut remains blocked on a concrete, crash-persistent offline
+boundary. Its isolated proof must attempt direct released `install preflight`,
+doctor and screenshot invocations both during conversion and after converter
+death, checking the database as well as capture bytes. A test launcher that only
+cooperatively declines new commands does not prove that boundary.
 
-The proposed user experience is one scheduled pause: let existing conversations
-finish writing, close launch sources, preserve the frozen Home and executable,
-convert, then reopen the same conversations. Session IDs, pending feedback and
-Task membership remain unchanged. No duration is promised before measuring the
-populated backup and validation. Jack Heart has not yet accepted this interruption.
+Before dependent implementation, specify the external owner that prevents the
+original OS account from launching retained executables, how the pinned candidate
+accesses that account's installation/Home while exclusion persists, and how
+recovery retains exclusion after its own death. The existing installer resolves
+the running OS account; running it as another account without explicit target
+ownership would select the wrong installation. Source authorization permits
+designing this mechanism in isolation, but supplies no installed maintenance
+authority. No storage path, receipt version or schema is changed by this finding.
 
-Review inspection on 2026-10-02 confirmed that
-`machine_install.rs::startup_selection_during_switch` selects the prior binary
-before activation and `promotion_lock.rs` locks only promotion. Consequently,
-post-move recovery must prevent ordinary startup from choosing that prior binary;
-merely recording an unfinished switch is insufficient. Direct retained-binary
-launches still require the external maintenance boundary described below.
-
-If an offline window is unacceptable, the deployment design needs revision before
-implementation; a naming-only delivery does not satisfy the requested cleanup.
-Accepting this design would not authorize a configured installation or migration.
+Check: released-source entry/ledger inspection and `git diff --check` passed; no runtime check was run for this documentation-only finding; offline conversion and its released-Home proof remain unimplemented.
 
 ## Problem and observable outcome
 
-Maintainers still encounter capture keys called Run IDs, execution policy selected
-by environment-variable presence, and Session payloads beneath `runs/`. This makes
-it easy to target the wrong identity or overlook live history during cleanup.
+The original inventory found capture keys called Run IDs, presence-based execution
+policy and Session payloads beneath `runs/`. The runtime slice removes that policy
+coupling; payload storage and tooling still retain the old layout. The complete
+cutover must prevent wrong-identity targeting and loss of live history.
 
 After this change, new and resumed conversations keep their AgentSession identity;
 captured inputs remain subordinate history, FlowSession owns progression and Exec
@@ -247,7 +246,7 @@ person's steer or a nested contribution into a top-level checkpoint.
 
 ### Offline, recoverable layout conversion
 
-**Proposed deployment requirement for design review:** one controlled offline
+**Selected source design; configured deployment not authorized:** one controlled offline
 maintenance window for the capture-layout transition. Old writers finish naturally;
 this Task does not authorize killing them, changing schedules or installing code.
 Before the window, the published CLI continues using its single existing layout.
@@ -312,41 +311,30 @@ SQL, receipts and historical payloads are never rewritten to satisfy vocabulary.
 Success means Jack can resume saved work without learning a migration identity.
 Failure would be a cosmetically clean source tree that strands a pending review,
 loses late recorder writes or downgrades into the old layout after partial conversion.
-The review must judge the offline boundary explicitly; cleanup authorization does
-not manufacture acceptance of that operational requirement.
+Isolated acceptance must prove the offline boundary; source-delivery authorization
+does not establish configured launch exclusion or installed preservation.
 
-## Delete — do not maintain
+## Remaining implementation sequence
 
-Delete `engine/event.rs::EngineEvent`, `engine/worktrees.rs::short_run_id`,
-`StoreError::{RunNotFound,StepRunNotFound}`, the `LF_RUN_ID`/`LF_RUN_DIR`
-execution inputs and presence-based policy, and the old capture layout reader.
-Keep historical artifact keys, immutable migration SQL and exact Session/Exec
-control fences. `FlowAttempt` becomes the transient selected-capture projection,
-without a new lifecycle or table. The definition-only symbols and unused
-`fill_capture_provider` wrappers are removed. The old layout reader and conversion remain. Current-input mutation aliases are
-removed and Git-operation owner fields name Trace/Exec, retaining released JSON
-field names for receipt preservation.
-
-## Implementation sequence (one coherent end state)
-
-1. **This slice: remove runtime identity coupling.** Delete definition-only Run
-   helpers/events/errors, resolve capture vs Session vs Trace/Exec names, replace
-   presence checks and cut fresh/native-resume/review paths together. Keep the old
-   on-disk layout until the conversion integration is complete; do not publish this
-   as the finished Task. Focused proof: nested/direct checkpoint behavior, caller
-   ancestry, provenance and stale-review rejection in `session_cli_tests`,
-   `task_pr_authority_tests` and existing journal tests.
-2. Implement the offline conversion/recovery at the installation boundary; cut
-   capture paths, watcher/process readers, replay, ablation tooling and mutable
-   reference resolution together. Prove old active writer refusal before deletion
-   of old runtime path readers. There is one final path, no mixed-mode deployment.
-3. Align Swift names/fixtures, current docs/skills/config and error guidance. Delete
-   duplicated readers and superseded tests only after preserving their behavioral
-   counterexamples in the remaining owner tests. Keep final retention inventory.
-4. Gate the complete tree once. Measure production additions/deletions separately
-   from tests/docs and file moves against this base; do not count renamed lines as
-   architectural deletion. No release or installed conversion is part of delivery
-   authorization supplied here.
+1. Implement offline conversion/recovery through the installation boundary,
+   including exact-schema advancement and recovery. Inventory mutable absolute
+   references before choosing their rewrite and validation rules. Preserve frozen
+   SQLite/payload/executable evidence and prove exclusion of released writers.
+2. Cut storage, watcher classification, replay and ablation/tooling to `captures/`
+   together; remove the old runtime layout reader only with recoverable conversion.
+   `record_dir` still derives `runs/`, watch paths hard-code its depth/root, and
+   `scripts/context_ablation.py` still exposes `--runs` and stages that layout.
+3. Finish the cross-language/reference audit and native callback/Flow proofs.
+   Desktop history names and environment scrub lists have changed; Desktop build
+   and behavior remain unverified. Keep released receipt fields and historical
+   artifact keys unchanged. The removed helpers, `SelectedCapture` projection and
+   Session mutation repairs are completed runtime work, not conversion evidence.
+4. Run the populated released-Home fault matrix and affected gate once on the
+   complete tree. Record retained-reference paths and production additions/deletions
+   against `a278d6bc1bd4373f78f27027b8ae249100ef14d3`, separating Rust/Swift/Python/
+   scripts from tests, prose and moves. The current integration base is
+   `8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3`; distinguish upstream changes from this
+   Task's delta. No release or installed conversion is part of source delivery.
 
 ## Done when / headless acceptance
 
@@ -391,20 +379,19 @@ outstanding; file moves must not count as architectural deletion.
 The final count must report Rust/Swift/Python/scripts production separately, excluding
 builtin prose, tests/fixtures, historical SQL and generated outputs, and name its base.
 
-Check: temporary-directory rename/reopen probe — reproduced missing pathname reopen
-and two-root split; source inventory/review only, no runtime or installed proof.
+## Adjacent interfaces — reconciled October 5
 
-## Adjacent interfaces
+Infrastructure memory records Jack Heart's October 4 closure of LOO-292 on actual
+installation and checkout evidence; the earlier waiting-at-demo snapshot is stale.
+That acceptance does not cover this capture conversion. LOO-285's merged delivery
+still lacks its two qualifying unattended settlements. Preserve due/outcome linkage,
+unknown-publication handling and legitimate GitHub workflow run identities.
 
-Read-only `lf task status` observations (snapshot 1791000703) show LOO-285 retained
-release accounting with its managed Flow blocked at task sync, and LOO-292 waiting
-at demo. Neither state authorizes intervention. Their checkouts remain untouched.
-LOO-285 retains due-opportunity/outcome linkage, unknown-publication handling,
-verification and two-settlement commitment; GitHub workflow run identity is valid
-and must survive this cleanup. LOO-292 retains published installation/main-checkout
-and configured macOS/wake proofs. This Task owns capture preservation scenarios and
-must integrate through existing installation recovery APIs without claiming those
-other Tasks' proofs or altering schedules. Read-only coordination does not establish integration acceptance or authorize
-mutation of those Tasks. The Release child memory also records that operation
-results must reach cron unchanged; returning a successful report of failure cannot
-count as successful release execution.
+The only immediate child, Release, has been read in full (GOAL.md and MEMORY.md).
+It records v0.13.2 publication/install, but no verified public receipt from manual
+recovery. Upstream `e1ec32929` (#1441), included in this branch's base, removes the
+retired UI receipt prerequisite and replaces removed `lf catalog` smoke with
+`lf list --json`; source integration does not establish installed or scheduled
+acceptance. Required headless and public-artifact checks remain. The conversion
+fixture must use the existing candidate-owned recovery interface without claiming
+these adjacent proofs or changing their schedules/checkouts.

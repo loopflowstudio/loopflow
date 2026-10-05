@@ -1,6 +1,6 @@
 # infrastructure wave memory
 
-## Release follow-through (2026-10-04)
+## Release follow-through (reconciled 2026-10-05)
 
 Jack Heart directed Infrastructure to take responsibility for finishing every
 release. Release owns the release-specific execution and evidence; Infrastructure
@@ -11,9 +11,25 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-The v0.13.1 version PR merged while v0.13.0 remained the latest published release.
-That gap left the Session filtering in PR #1421 absent from the installed Desktop.
-Release-specific recovery evidence belongs in [Release memory](release/MEMORY.md).
+Release memory records v0.13.2 publication and installation with PR #1421 filtering,
+but no verified public receipt from manual recovery or two unattended settlements.
+Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke;
+source integration is not configured acceptance. Exact recovery evidence belongs
+in [Release memory](release/MEMORY.md).
+
+## Capture cutover (LOO-370, source evidence 2026-10-05)
+
+Jack Heart authorized autonomous source delivery, not installed conversion or live
+interruption. Capture keys name subordinate history; durable Session IDs select
+conversation mutations, and current Session/Exec provenance supplies authority.
+Missing payload cannot erase a resumable native conversation's SQLite identity.
+
+Exact SQLite compatibility does not prove filesystem compatibility. Both installer
+advancement and recovery must honor layout completion, with candidate recovery
+established before moving bytes. A promotion lock or empty process sample cannot
+exclude released writers that reopen paths; retained binaries require an external
+launch boundary. `runs/` remains in use pending this indivisible conversion.
+Runtime checks do not establish populated released-Home preservation or installation.
 
 ## Review replacement (2026-10-04)
 
@@ -320,7 +336,8 @@ the other names nothing read. One list of Exec-context names drives both the
 session shell's `unset` and the tmux client's environment, because a tmux server
 copies its first client's environment into every later session. Fixtures open
 their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
-`LF_RUN_ID` presence still decides three behaviours without validating the Run.
+LOO-370 removes those presence-based decisions in its runtime slice; conversion
+and complete source delivery remain unfinished.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

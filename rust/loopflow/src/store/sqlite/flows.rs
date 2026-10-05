@@ -2233,7 +2233,6 @@ mod tests {
         store
             .rename_session(
                 &session.id,
-                run.captured,
                 "Investigation",
                 crate::session::TitleSource::Human,
             )

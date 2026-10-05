@@ -59,13 +59,16 @@ settle it. Session closure does not prove child exit. Preserve the unknown
 outcome until exact exit evidence or a subsequent boot establishes death;
 completion remains outside this Task's active contribution.
 
-Source inspection found identity-loss paths in failed terminal writes, interrupt
-cleanup, PID-keyed receipt replacement and monitor pruning; none is proved as this
-incident's cause. Preserve exact identity across all four without inventing
-historical outcomes. Release's October 4 retained-landing evidence illustrates
-why: a receipt proved death despite a missing terminal record; separate leases
-established re-entry authority. Process evidence and operation ownership remain
-distinct. No source repair or Task completion is established by this readback.
+Branch prevention now keys process receipts by Exec ID and removes them only
+after a successful terminal write. Interrupt cleanup follows the same rule;
+pruning requires exact death plus a matching persisted terminal record. Failed
+writes, PID reuse and pruning must preserve unfinished identity without inventing
+an outcome. These loss paths are not proved causes of the original incident.
+Release's October 4 retained-landing evidence remains the counterexample: its
+receipt proved death while separate leases established re-entry authority.
+This source repair cannot recover the missing identity or complete LOO-326;
+focused journal/prune/Task-blocker checks and Clippy passed; installed behavior
+remains unproved.
 
 PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
 Exec receipt can precede closure of inherited checkout descriptors. A delayed

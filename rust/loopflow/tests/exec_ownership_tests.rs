@@ -961,46 +961,74 @@ fn serve_gate(
     })
 }
 
-#[test]
-fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
+#[tokio::test]
+async fn monitor_prune_preserves_unknown_outcomes_and_removes_only_settled_dead_receipts() {
     let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let conn = rusqlite::Connection::open(database).unwrap();
+    let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
     let directory = home.path().join("runtime/exec-processes");
     std::fs::create_dir_all(&directory).unwrap();
-    let receipt = directory.join("4294967295.json");
-    let bytes = serde_json::to_vec(&serde_json::json!({
-        "schema_version": 1,
-        "trace_id": "stale-trace",
-        "exec_id": "stale-exec",
-        "pid": u32::MAX,
-        "started_at": 1,
-    }))
-    .unwrap();
 
-    for json in [false, true] {
-        std::fs::write(&receipt, &bytes).unwrap();
-        for dry_run in [true, false] {
-            let mut args = vec!["monitor", "prune"];
-            if dry_run {
-                args.push("--dry-run");
+    for terminal in [false, true] {
+        let id = ExecId::new();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?1,1,?2,?3)",
+            rusqlite::params![id, terminal.then_some(2), terminal.then_some("failed")],
+        )
+        .unwrap();
+        // Existing PID-named receipts and new Exec-named receipts share retention rules.
+        for name in [pid.to_string(), id.to_string()] {
+            let receipt = directory.join(format!("{name}.json"));
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1, "trace_id": id, "exec_id": id,
+                "pid": pid, "started_at": 1,
+            }))
+            .unwrap();
+            for json in [false, true] {
+                std::fs::write(&receipt, &bytes).unwrap();
+                for dry_run in [true, false] {
+                    let mut args = vec!["monitor", "prune"];
+                    if dry_run {
+                        args.push("--dry-run");
+                    }
+                    if json {
+                        args.push("--json");
+                    }
+                    let output = command(home.path(), home.path(), &args).output().unwrap();
+                    assert!(output.status.success(), "{output:?}");
+                    assert_eq!(receipt.exists(), dry_run || !terminal, "{args:?}");
+                    if receipt.exists() {
+                        assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
+                    }
+                    if json {
+                        let report: serde_json::Value =
+                            serde_json::from_slice(&output.stdout).unwrap();
+                        assert_eq!(report["dry_run"], dry_run);
+                        assert_eq!(
+                            report["removed_exec_receipts"],
+                            u32::from(!dry_run && terminal)
+                        );
+                        assert_eq!(report["errors"], 0);
+                    }
+                }
             }
-            if json {
-                args.push("--json");
-            }
-            let output = command(home.path(), home.path(), &args).output().unwrap();
-            assert!(output.status.success(), "{output:?}");
-            assert_eq!(receipt.exists(), dry_run, "{args:?}");
-            if dry_run {
-                assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
-            }
-            if json {
-                let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-                assert_eq!(report["dry_run"], dry_run);
-                assert_eq!(report["removed_exec_receipts"], u32::from(!dry_run));
-            } else {
-                let action = if dry_run { "WOULD PRUNE" } else { "PRUNED" };
-                assert!(String::from_utf8_lossy(&output.stdout).contains(action));
+            if receipt.exists() {
+                std::fs::remove_file(receipt).unwrap();
             }
         }
+        let outcome: Option<String> = conn
+            .query_row("SELECT outcome FROM execs WHERE id=?1", [&id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(outcome.as_deref(), terminal.then_some("failed"));
     }
 }
 

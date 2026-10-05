@@ -26,34 +26,35 @@ without inventing an outcome. Neither proof exists in the recorded observation.
 Preserve unknown status. Rebooting is outside this pass; Task completion must
 run outside this Task's active contribution, whose own Exec gates completion.
 
-Prevention remains unimplemented. Source reconciliation on October 5 confirms
-the receipt lifetime crosses four removal/replacement paths:
+## Implemented prevention — October 5, 2026
 
-- Terminal emission in `journal/mod.rs` removes the receipt even when the ledger
-  write fails.
-- `write_exec_process_receipt` replaces receipts keyed by reusable PID.
-- `run_prune` in `lf/commands/top.rs` removes stale receipts.
-- `ensure_exec_context` registers receipt removal as interrupt cleanup.
+The existing receipt owner now uses Exec IDs rather than reusable PIDs. Normal
+completion and interruption remove identity only after the terminal ledger write
+succeeds. Prune requires both exact process death and a matching persisted
+terminal record; missing records and failed reads retain identity. Existing
+receipt filenames remain readable. No schema change or historical outcome repair
+is involved. These loss paths are not proved causes of the original incident.
 
-These paths are not a proven cause of this incident. The required regression
-starts with a recorded, unfinished Exec, fails its terminal write, then exercises
-interrupt cleanup, PID reuse and pruning without losing its exact identity.
-Existing write-lock tests cover a missing start and later ledger recovery; they
-do not prove preservation of an already-recorded Exec's process evidence.
-Live identities and failed process observations must still block completion;
-confirmed death must preserve the absent outcome and history. Prevention cannot
-recover the missing identity retroactively or by itself complete this Task.
+Delete — do not maintain: unconditional terminal/interrupt receipt removal and
+PID-keyed receipt replacement. Current process observations, terminal history
+and operation-specific lease checks remain authoritative.
 
-## Preservation boundary
+The regression begins with a recorded unfinished Exec, fails its terminal write,
+then exercises interruption, another Exec using the same PID, failed process
+observation and pruning. A mismatched birth identity establishes death without
+changing the stored record. The public prune regression covers both filename
+formats and retains unfinished history while removing settled dead receipts.
 
-The replacement for the loss-prone identity lifetime is still a design choice;
-no schema or storage mechanism has been selected. There is no read-only-command
-exemption. Release's October 4 retained-landing incident supplies a useful
-counterexample: an exact receipt proved death without a terminal outcome, while
-separate release leases established re-entry authority. Process evidence must
-survive cleanup; it does not replace operation-specific lease ownership.
+## Remaining verification and recovery
 
-Prior readback found no exact exit evidence; monitor prune dry-run reported zero
-errors. No new runtime observation or Task settlement is established here.
+Focused checks passed. Gate owns the broader affected suites. The source
+repair does not establish installed behavior or recover the existing missing
+identity. Release's October 4 retained-landing incident remains relevant: exact
+process evidence proved death, while separate leases established re-entry
+permission. Neither Session closure nor a known process exit supplies an outcome.
 
-Check: `git diff --check` — passed; source review confirmed four identity-loss paths; prose-only reconciliation, no behavioral tests rerun.
+Review finding: prune previews previously promised removal for all stale PIDs.
+They now identify candidates and explicitly retain unfinished receipts; actual
+removal counts remain separate.
+
+Check: `cargo test -p loopflow --lib journal::tests` (20), `cargo test -p loopflow --test exec_ownership_tests monitor_prune` (1), `cargo test -p loopflow --lib task_work_recovery_keeps_history_without_treating_it_as_execution_authority` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; broader affected verification deferred to gate/CI.

@@ -764,10 +764,11 @@ interrupted receipts remain partial. Three headless owned-provider reopens retai
 one Session and native history; post-exit inventory requires `--history`.
 The mounted scenario remains unrendered. Fixture preparation owns both receipt
 directories; real-CLI isolation confirms separate setup counts. Partial counts
-remain visible; older combined receipts remain unscoped. Reopen totals cannot measure planning
-refresh or the cat-PTY soak. Task-window reopening,
-native identity through the dense soak and realistic volume still require LOO-371
-integration. Release's retired publisher UI receipt does not waive this acceptance.
+remain visible; older combined receipts remain unscoped. Counters measure their
+exercised path: standalone reopening excludes fixture planning and the cat-PTY
+soak. Task-based native reopening during the soak and realistic CLI refresh remain
+implementation gaps awaiting LOO-371 integration. Release's retired publisher UI
+receipt does not waive this acceptance.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

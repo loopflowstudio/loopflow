@@ -1,5 +1,20 @@
 # infrastructure wave memory
 
+## Release follow-through (2026-10-04)
+
+Jack Heart directed Infrastructure to take responsibility for finishing every
+release. Release owns the release-specific execution and evidence; Infrastructure
+retains responsibility through verified publication and installed acceptance.
+A merged version bump, successful agent turn, or queued build is not completion.
+Resume interrupted releases through the supported release operation, preserve
+exact publication evidence, and surface any unresolved blocker and next action
+without requiring Jack to rediscover the gap. Keep progress updates in the
+ongoing conversation while recovery is active.
+
+The v0.13.1 version PR merged while v0.13.0 remained the latest published release.
+That gap left the Session filtering in PR #1421 absent from the installed Desktop.
+Release-specific recovery evidence belongs in [Release memory](release/MEMORY.md).
+
 ## Review replacement (2026-10-04)
 
 Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb

@@ -13,17 +13,23 @@ not evidence that a configured maintenance window has been performed or approved
 
 Current design: [Finish the Run cutover](finish-removing-the-retired-run.md).
 
-## Runtime recovery blocker — October 4
+## Earlier runtime recovery evidence
 
-The supported restart saved managed code Flow
-`b2476b7b-a8b2-4b61-9c04-d146871206d3`, replacing feature, but startup timed out.
-Fresh Task status shows idle implement with no claimed worker. A same-Flow start
-using an isolated tmux directory was rejected because the replaced review
-`task_5341076d02ed439798b9349bf7c5cdb6:69217c2a-11d9-4bd0-831f-ad95786d4e72:feature:review_kickoff:0`
-awaits completion and Execs `02c0220f-01f6-4d49-9c14-ca54b66fb3c6` and
-`9f7a4496-bddb-47f4-8f06-77e0c8393327` have live or unresolved execution.
-The supported session-complete command rejects that exact review as no longer
-waiting. Both Exec inspections lack terminal outcomes. No competing worker or
-raw database rewrite was used. Autonomous development/landing authorization
-remains valid; repair supported retirement/admission reconciliation before
-continuing the same saved code Flow. Implementation has not started.
+The October 4 restart/admission failure is preserved at
+`0faa2502a:scratch/questions.md`. This implementation used the supplied checkout;
+no competing worker, manual Session completion or database repair was performed.
+That earlier observation does not establish the current state of those Execs.
+
+## Earlier verification capacity — October 4
+
+The compression pass retried `uv run python scripts/resource_envelope.py --recover`:
+13.3 GiB free against the 32 GiB emergency reserve, no inactive eligible build roots,
+and uv cache pruning could not acquire its lock. No active build, installed Home,
+live conversation or other checkout was deleted. Build/focused-test/Clippy/Desktop
+verification defers to capable gate/CI; compression source edits can proceed.
+This does not waive conversion acceptance or establish readiness to land.
+
+October 5: capacity no longer blocks source verification. Rust compilation,
+focused Session/authority/history tests and all-target Clippy now pass. The
+conversion and populated released-Home matrix remain implementation work;
+no installed data or unrelated writer was changed.

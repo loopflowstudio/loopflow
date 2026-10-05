@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::durable::{Author, SteerComment, WorkRef};
-use crate::lf::commands::runs::SessionHistory;
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
+use crate::session_record::SessionHistory;
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::{GithubPr, TaskPr, TaskPrId};
 

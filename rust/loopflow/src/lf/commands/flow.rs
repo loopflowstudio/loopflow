@@ -100,7 +100,7 @@ fn execute(
         cwd: repo.to_path_buf(),
         message: message.map(str::to_owned),
         model: cli.model.clone(),
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,
@@ -297,7 +297,7 @@ async fn recover_native_flow(
         );
         wait_for_step(store, &flow).await?;
         if flow
-            .current_attempt
+            .selected_capture
             .as_ref()
             .is_some_and(|attempt| !attempt.published)
         {
@@ -760,9 +760,9 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         }
         loop {
             if !flow
-                .current_attempt
+                .selected_capture
                 .as_ref()
-                .is_some_and(crate::durable::FlowAttempt::completed)
+                .is_some_and(crate::durable::SelectedCapture::completed)
             {
                 execute_child(&self.store, &flow, self.launcher).await?;
                 flow = self
@@ -774,11 +774,11 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             }
             match self.store.sqlite.flow_output(&self.id)? {
                 Ok(outcome) => {
-                    if let Some(attempt) = &flow.current_attempt {
+                    if let Some(attempt) = &flow.selected_capture {
                         *self.progress.lock().expect("Flow progress mutex poisoned") = self
                             .store
                             .sqlite
-                            .input_final_answer(&attempt.run_id)?
+                            .input_final_answer(&attempt.artifact_key)?
                             .map(|answer| answer.text.trim().chars().take(2_000).collect());
                     }
                     return Ok(outcome);
@@ -938,8 +938,8 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
     }
     if !status.success() {
         let selected = store.flow(flow.id()).await?.context("Flow disappeared")?;
-        if let Some(attempt) = selected.current_attempt {
-            let events = store.sqlite.input_events(&attempt.run_id)?;
+        if let Some(attempt) = selected.selected_capture {
+            let events = store.sqlite.input_events(&attempt.artifact_key)?;
             for envelope in events.iter().rev() {
                 let event = &envelope["event"];
                 if event["type"] == "turn_completed" && event["status"] == "interrupted" {
@@ -1040,7 +1040,7 @@ mod tests {
                 cwd: directory.path().into(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,

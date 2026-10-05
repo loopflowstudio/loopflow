@@ -717,7 +717,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                     cwd: child.task.worktree.clone(),
                     message: None,
                     model: None,
-                    current_attempt: None,
+                    selected_capture: None,
                     finished: false,
                     invocation: QueuedInvocation::load(repo.path(), "identity-proof").unwrap(),
                     pending_session_id: None,
@@ -769,12 +769,17 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 None,
             ))
             .unwrap();
-        let reviewer = claimed.current_attempt.as_ref().unwrap().run_id.clone();
+        let reviewer = claimed
+            .selected_capture
+            .as_ref()
+            .unwrap()
+            .artifact_key
+            .clone();
         runtime
             .block_on(child.store.publish_attempt(
                 claimed.id(),
                 claimed.version,
-                claimed.current_attempt.as_ref().unwrap().captured,
+                claimed.selected_capture.as_ref().unwrap().captured,
                 Some(&claim),
                 "codex",
                 None,
@@ -856,7 +861,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             None,
         )
         .env("LF_AGENT_CALLER", caller)
-        .env("LF_RUN_ID", reviewer.as_str())
+        .env("LF_CAPTURE_KEY", reviewer.as_str())
         .env(
             "LF_FLOW_STEP",
             serde_json::json!({"invocation": claimed.id(), "version": claimed.version}).to_string(),
@@ -900,7 +905,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
         write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"schema_version\":1,\"provider_session_id\":\"ses-'\"$LF_RUN_ID\"'\",\"account_id\":null}}' > \"$LF_RUN_DIR/provider-session.json\"\necho \"$LF_RUN_ID\" > '{}'\n", launched.display(),
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
         ));
         let path = format!(
             "{}:{}",
@@ -1611,8 +1616,8 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         &bin.path().join("codex"),
         &format!(
             "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
-             printf '%s' '{{\"schema_version\":1,\"provider_session_id\":\"ses-'\"$LF_RUN_ID\"'\",\"account_id\":null}}' \
-             > \"$LF_RUN_DIR/provider-session.json\"\necho \"$LF_RUN_ID\" >> '{}'\n",
+             printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
+             | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
             launched.display()
         ),
     );
@@ -1757,7 +1762,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
                 cwd: repo.path().to_owned(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -1790,7 +1795,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .block_on(task.store.flow(flow.id()))
         .unwrap()
         .unwrap();
-    assert!(reserved.current_attempt.is_none());
+    assert!(reserved.selected_capture.is_none());
     assert!(!runtime
         .block_on(task.store.task_started(&task.task.id))
         .unwrap());
@@ -2003,7 +2008,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
                 cwd: task.task.worktree.clone(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -2525,7 +2530,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
                 cwd: task.task.worktree.clone(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -2748,7 +2753,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
             r#"if [ "$1" = --version ]; then exit 0; fi
 printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
 case "$*" in *app-server*) ;; *)
-  printf '%s' '{"schema_version":1,"provider_session_id":"review-fixture","account_id":null}' > "$LF_RUN_DIR/provider-session.json"
+  printf '%s' '{"session_id":"review-fixture"}' | "$LF_BIN" __provider-session || exit $?
   exit 0;; esac"#,
         ),
     );
@@ -2963,7 +2968,7 @@ fn flow_start_preserves_the_selected_review_from_another_checkout() {
                 cwd: repo.path().to_owned(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -2999,5 +3004,5 @@ fn flow_start_preserves_the_selected_review_from_another_checkout() {
     assert_eq!(after.invocation, saved.invocation);
     assert_eq!(after.cursor, saved.cursor);
     assert_eq!(after.pending_session_id, saved.pending_session_id);
-    assert_eq!(after.current_attempt, saved.current_attempt);
+    assert_eq!(after.selected_capture, saved.selected_capture);
 }

@@ -411,7 +411,7 @@ final class WorkspaceNavigation {
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose recent Runs are disclosed; the Runs are read only then.
-    var expandedRuns: Set<String> = []
+    var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
     var repositoryCollapsed = false

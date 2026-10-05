@@ -37,7 +37,7 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .output()
         .unwrap()
 }

@@ -34,8 +34,8 @@ enum GUIProcessEnvironment {
         copy["PATH"] = enrichedPath(from: env["PATH"])
         // The GUI is a new human control surface, not a continuation of the
         // Work process that opened it. Preserve Home and account authority.
-        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",
-                    "LF_AS", "LF_FLOW_STEP", "LF_HUMAN_SESSION", "LF_AGENT_CALLER",
+        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_HUMAN_SESSION_RUN", "LF_REVIEW_RUN_RESERVATION", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",
+                    "LF_AS", "LF_FLOW_STEP", "LF_HUMAN_SESSION", "LF_PREPARED_CAPTURE", "LF_REVIEW_CAPTURE", "LF_AGENT_CALLER",
                     "LF_GIT_OPERATION_ID", "LF_WORK_ADVANCE_CLAIM", "LOOPFLOW_DIRECTIVE_FILE",
                     "LF_TERMINAL_ID", "LF_TERMINAL_TTY"] {
             copy.removeValue(forKey: key)

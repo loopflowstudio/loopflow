@@ -555,7 +555,7 @@ fn execute_target(
                         None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
+                    if !shared && !loopflow::journal::has_caller() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf task commit: {name}")),
@@ -1621,7 +1621,9 @@ fn execute_command(
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
-        Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
+        Some(Commands::ProviderSession) => {
+            loopflow::lf::commands::session_history::observe_provider_session()
+        }
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
         Some(Commands::Account {
             cmd,

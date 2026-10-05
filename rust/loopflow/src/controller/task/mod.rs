@@ -183,7 +183,7 @@ fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
         cwd: task.worktree.clone(),
         message: None,
         model: None,
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,
@@ -291,9 +291,9 @@ mod planning_tests {
             .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
             .await
             .unwrap()
-            .current_attempt
+            .selected_capture
             .unwrap()
-            .run_id
+            .artifact_key
     }
 
     /// Start `flow` as the Task's Flow and park it when its first step is a review.
@@ -1016,7 +1016,7 @@ mod planning_tests {
                 let (store, task, flow) = human_task_fixture().await;
                 let position = parked(&store, &task, flow).await;
                 let id = human_session::flow_id(&position).unwrap();
-                let (position, first) = store.reserve_review_run(&position).await.unwrap();
+                let (position, first) = store.reserve_review_capture(&position).await.unwrap();
                 let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
                     crate::session_record::SessionCaptureSpec {
                         harness: "codex".into(),
@@ -1087,7 +1087,8 @@ mod planning_tests {
                 };
                 let replace = async {
                     pause.reached.notified().await;
-                    let (reserved, replacement) = store.reserve_review_run(&before).await.unwrap();
+                    let (reserved, replacement) =
+                        store.reserve_review_capture(&before).await.unwrap();
                     store
                         .sqlite
                         .publish_review_capture(
@@ -1250,7 +1251,7 @@ mod planning_tests {
         .unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let (_, replacement) = store.reserve_review_run(&position).await.unwrap();
+        let (_, replacement) = store.reserve_review_capture(&position).await.unwrap();
         let retained = human_session::rename(
             &store,
             replacement.artifact_key.as_str(),
@@ -1290,7 +1291,7 @@ mod planning_tests {
         .unwrap_err();
         assert!(historical
             .to_string()
-            .contains(&format!("historical attempt of Session {id}")));
+            .contains(&format!("historical input of Session {id}")));
         assert!(!first_dir.join("session-name.json").exists());
         let prefix = &first.artifact_key.as_str()[..16];
         assert!(
@@ -1298,7 +1299,7 @@ mod planning_tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("historical attempt of Session")
+                .contains("historical input of Session")
         );
         assert!(human_session::open(
             &store,
@@ -1314,7 +1315,7 @@ mod planning_tests {
 
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let (_, third) = store.reserve_review_run(&position).await.unwrap();
+        let (_, third) = store.reserve_review_capture(&position).await.unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(position.review_artifact_key(), Some(&third.artifact_key));
@@ -1322,12 +1323,12 @@ mod planning_tests {
             .ready_session(&id, first.captured, "stale answer")
             .await
             .is_err());
-        let previous_actor = std::env::var_os("LF_RUN_ID");
-        std::env::set_var("LF_RUN_ID", first.artifact_key.as_str());
+        let previous_actor = std::env::var_os("LF_CAPTURE_KEY");
+        std::env::set_var("LF_CAPTURE_KEY", first.artifact_key.as_str());
         let stale_actor = human_session::require_current_review_actor(&store, &position).await;
         match previous_actor {
-            Some(value) => std::env::set_var("LF_RUN_ID", value),
-            None => std::env::remove_var("LF_RUN_ID"),
+            Some(value) => std::env::set_var("LF_CAPTURE_KEY", value),
+            None => std::env::remove_var("LF_CAPTURE_KEY"),
         }
         assert!(stale_actor.is_err());
         store
@@ -1348,7 +1349,7 @@ mod planning_tests {
         .unwrap_err();
         assert!(error
             .to_string()
-            .contains(&format!("historical attempt of Session {id}")));
+            .contains(&format!("historical input of Session {id}")));
         assert!(!first_dir.join("session-name.json").exists());
         assert!(human_session::rename(
             &store,
@@ -1375,7 +1376,7 @@ mod planning_tests {
         let (store, task, flow) = human_task_fixture().await;
         let position = parked(&store, &task, flow).await;
         let session_id = human_session::flow_id(&position).unwrap();
-        let (reserved, run) = store.reserve_review_run(&position).await.unwrap();
+        let (reserved, run) = store.reserve_review_capture(&position).await.unwrap();
         let spec = crate::session_record::SessionCaptureSpec {
             harness: "codex".into(),
             model: None,
@@ -1408,7 +1409,7 @@ mod planning_tests {
                 .unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         assert!(!dir.join("terminal.json").exists());
-        let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();
+        let (retry, same_run) = store.reserve_review_capture(&reserved).await.unwrap();
         assert_eq!(same_run, run);
         assert_eq!(retry, reserved);
         let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
@@ -1512,7 +1513,7 @@ mod planning_tests {
                 human,
             );
             broken.version = 0;
-            broken.current_attempt = None;
+            broken.selected_capture = None;
             broken.pending_session_id = None;
             broken.ready_summary = None;
             let broken = store.start_task_flow(&broken_id, broken).await.unwrap();
@@ -1598,7 +1599,7 @@ mod planning_tests {
             .await
             .unwrap();
         replacement.version = 0;
-        replacement.current_attempt = None;
+        replacement.selected_capture = None;
         replacement.pending_session_id = None;
         replacement.ready_summary = None;
         let replacement = parked(&store, &task, replacement).await;
@@ -1719,7 +1720,7 @@ mod planning_tests {
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
         let id = crate::ops::human_session::flow_id(&position).unwrap();
-        let (position, run) = store.reserve_review_run(&position).await.unwrap();
+        let (position, run) = store.reserve_review_capture(&position).await.unwrap();
         store
             .sqlite
             .publish_review_capture(&id, run.captured.unwrap(), position.version, "codex", None)
@@ -1739,7 +1740,7 @@ mod planning_tests {
             .reserve_attempt(flow.id(), flow.version, None, None)
             .await
             .unwrap();
-        let input = &saved.current_attempt.as_ref().unwrap().run_id;
+        let input = &saved.selected_capture.as_ref().unwrap().artifact_key;
         store
             .sqlite
             .publish_attempt(

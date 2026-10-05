@@ -298,7 +298,7 @@ mod tests {
                 cwd: dir.path().join("absent"),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,

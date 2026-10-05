@@ -160,16 +160,12 @@ mod environment_tests {
     fn agent_receives_only_fresh_generic_run_identity() {
         let mut command = tokio::process::Command::new("vendor");
         command
-            .env(crate::durable::RUN_ID_ENV, "run_stale")
-            .env(crate::session_record::RUN_DIR_ENV, "/stale/run");
+            .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")
+            .env("LF_RUN_DIR", "/stale/run");
         let mut config = crate::engine::agent::AgentConfig::default();
         config.env.insert(
-            crate::durable::RUN_ID_ENV.to_string(),
+            crate::session_record::CAPTURE_KEY_ENV.to_string(),
             "run_fresh".to_string(),
-        );
-        config.env.insert(
-            crate::session_record::RUN_DIR_ENV.to_string(),
-            "/fresh/run".to_string(),
         );
 
         configure_agent_env(&mut command, &config);
@@ -180,13 +176,10 @@ mod environment_tests {
             .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
             .collect::<std::collections::HashMap<_, _>>();
         assert_eq!(
-            environment[crate::durable::RUN_ID_ENV],
+            environment[crate::session_record::CAPTURE_KEY_ENV],
             Some(OsString::from("run_fresh"))
         );
-        assert_eq!(
-            environment[crate::session_record::RUN_DIR_ENV],
-            Some(OsString::from("/fresh/run"))
-        );
+        assert_eq!(environment["LF_RUN_DIR"], None);
     }
 }
 

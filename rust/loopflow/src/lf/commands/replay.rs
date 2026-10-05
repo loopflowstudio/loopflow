@@ -10,8 +10,8 @@ use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec
 
 pub fn run(selector: &str) -> Result<()> {
     let home = crate::store::lf_home_dir();
-    let run_id = replay_at(&home, selector)?;
-    println!("replayed {selector} as {run_id}");
+    let artifact_key = replay_at(&home, selector)?;
+    println!("replayed {selector} as {artifact_key}");
     Ok(())
 }
 
@@ -98,7 +98,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
                 anyhow!("failed to publish replay capture before execution: {error}")
             })?;
     capture.record_input("replay", &replay_request.task_prompt);
-    let run_id = capture.artifact_key();
+    let artifact_key = capture.artifact_key();
     let mut context_file = if replay_request.system_prompt.trim().is_empty() {
         None
     } else {
@@ -137,7 +137,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             result.exit_code
         ));
     }
-    Ok(run_id)
+    Ok(artifact_key)
 }
 
 #[cfg(all(test, unix))]

@@ -351,7 +351,7 @@ async fn reconcile_task(
         state.exec_id = None;
     }
     let completed = flow
-        .current_attempt
+        .selected_capture
         .as_ref()
         .is_some_and(|attempt| attempt.completed())
         || store
@@ -359,7 +359,7 @@ async fn reconcile_task(
             .flow_operation_completed(flow.id())
             .map_err(error)?;
     let retry = !completed
-        && (state.exec_id.is_some() || flow.current_attempt.is_some() || flow.claim.is_some());
+        && (state.exec_id.is_some() || flow.selected_capture.is_some() || flow.claim.is_some());
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     if retry && state.retries >= config.automation.retries {
         return Ok(

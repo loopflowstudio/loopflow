@@ -13,7 +13,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
@@ -115,7 +115,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         for name in [
             "LF_BIN",
             "CARGO_BIN_EXE_lf",
-            "LF_RUN_ID",
+            "LF_CAPTURE_KEY",
             "LF_RUN_DIR",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
@@ -266,7 +266,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let provider = bin.join("opencode");
         std::fs::write(
         &provider,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF\"\nprintf '%s\\n' 'message=created id=ses_resume-proof' >&2\nread -r input\n",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$LF_RESUME_PROOF\"\nprintf '%s' \"$LF_AGENT_CALLER\" > \"$LF_RESUME_PROOF.caller\"\nprintf '%s\\n' 'message=created id=ses_resume-proof' >&2\nread -r input\n",
     )
     .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -324,12 +324,20 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             );
         }
         let selector = id;
+        // Drain metadata independently of process exit: a captured prompt can
+        // exceed the OS pipe buffer while the provider is deliberately waiting.
+        let metadata_stdout = home.path().join("metadata-stdout");
+        let metadata_stderr = home.path().join("metadata-stderr");
         let mut second = command(
             home.path(),
             &["session", "connect", selector, "--try", "--json"],
         )
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(
+            std::fs::File::create(&metadata_stdout).unwrap(),
+        ))
+        .stderr(Stdio::from(
+            std::fs::File::create(&metadata_stderr).unwrap(),
+        ))
         .spawn()
         .unwrap();
         // The provider waits on stdin indefinitely, so a slow machine cannot pass by accident.
@@ -341,7 +349,9 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         if blocked {
             second.kill().unwrap();
         }
-        let reopened = second.wait_with_output().unwrap();
+        let mut reopened = second.wait_with_output().unwrap();
+        reopened.stdout = std::fs::read(metadata_stdout).unwrap();
+        reopened.stderr = std::fs::read(metadata_stderr).unwrap();
         let active = run(home.path(), &["monitor", "active", "--json"]);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
@@ -349,7 +359,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         assert!(first.status.success(), "{:?}", first);
         assert!(
             !blocked,
-            "Session metadata open waited for the resumed provider to exit"
+            "Session metadata open waited for the provider (resume={resume}) to exit: {reopened:?}"
         );
         assert!(reopened.status.success(), "{:?}", reopened);
         let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
@@ -357,6 +367,26 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
             .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
         assert_eq!(std::fs::read_to_string(evidence).unwrap(), selected);
+        let caller: loopflow::exec::AgentCaller =
+            serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
+                .unwrap();
+        assert_eq!(caller.session_id, id);
+        let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT provider_generation,provider_exec_id FROM agent_sessions WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                caller.provider_generation,
+                caller.origin_exec_id.to_string()
+            ),
+            recorded
+        );
+
         assert_eq!(reopened["state"], "active");
         assert!(active.status.success(), "{:?}", active);
         let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
@@ -524,7 +554,7 @@ fn session_names_are_shared_and_human_names_win() {
     let reopened = run(home.path(), &["session", "connect", id, "--json"]);
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
-    // Naming touches only the Session row, never the Run or provider state.
+    // Naming touches only the Session row, never capture or provider state.
     assert!(!dir.join("session-name.json").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("events.jsonl").exists());
@@ -533,7 +563,7 @@ fn session_names_are_shared_and_human_names_win() {
 
 #[cfg(unix)]
 #[test]
-fn boundary_names_follow_run_ids_and_replacement_runs() {
+fn session_names_survive_capture_replacement() {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Stdio;
@@ -548,10 +578,19 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     );
     let id = id.as_str();
 
-    // The operating instruction passes the Session's own `$LF_RUN_ID`, which
-    // names the boundary's Run rather than the boundary. It must reach the
-    // boundary even before provider history exists.
-    let suggested = rename(home.path(), &[&first_run, "Release target", "--suggest"]);
+    // Capture keys and history prefixes cannot select a conversation mutation.
+    for selector in [first_run.as_str(), &first_run[..12]] {
+        for args in [
+            vec!["session", "rename", selector, "Wrong target"],
+            vec!["session", "complete", selector],
+        ] {
+            let rejected = run(home.path(), &args);
+            assert!(!rejected.status.success(), "{rejected:?}");
+            assert!(String::from_utf8_lossy(&rejected.stderr).contains("was not found"));
+        }
+    }
+    assert_eq!(listed(home.path(), id)["title"], "Which release target?");
+    let suggested = rename(home.path(), &[id, "Release target", "--suggest"]);
     assert_eq!(suggested["id"], id);
     assert_eq!(suggested["kind"], "conversation");
     assert_eq!(suggested["title"], "Release target");
@@ -559,14 +598,14 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     assert_eq!(named["title_source"], "human");
 
     // A consumed launch that never produced provider history is replaced by a
-    // new Run on the next open. The human name belongs to the Session.
+    // new capture on the next open. The human name belongs to the Session.
     std::fs::remove_file(first_dir.join("prepared")).unwrap();
     let bin = home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF.tmp\"\nmv \"$LF_RESUME_PROOF.tmp\" \"$LF_RESUME_PROOF\"\nprintf '%s\\n' \"$@\" > \"$LF_RESUME_PROOF.args\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$LF_RESUME_PROOF.tmp\"\nmv \"$LF_RESUME_PROOF.tmp\" \"$LF_RESUME_PROOF\"\nprintf '%s\\n' \"$@\" > \"$LF_RESUME_PROOF.args\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -602,13 +641,13 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         &[
             "session",
             "rename",
-            &replacement,
+            id,
             "Better guess",
             "--suggest",
             "--json",
         ],
     )
-    .env("LF_RUN_ID", &replacement)
+    .env("LF_CAPTURE_KEY", &replacement)
     .output()
     .unwrap();
     let _ = opened
@@ -635,7 +674,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     assert!(readback.get("run_id").is_none());
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
-    // The boundary's Run never appears as a second, interactive Session.
+    // A capture never appears as a second conversation.
     let all: Vec<serde_json::Value> = serde_json::from_slice(
         &run(
             home.path(),
@@ -649,7 +688,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
 
     let completed = run(home.path(), &["session", "complete", &replacement]);
     assert!(
-        String::from_utf8_lossy(&completed.stderr).contains("already complete"),
+        String::from_utf8_lossy(&completed.stderr).contains("was not found"),
         "{completed:?}"
     );
     let again = run(home.path(), &["session", "complete", id]);

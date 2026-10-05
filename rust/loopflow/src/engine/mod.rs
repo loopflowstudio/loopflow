@@ -5,7 +5,6 @@ pub mod command;
 pub mod config;
 pub mod context_budget;
 pub mod error;
-pub mod event;
 pub mod exec;
 pub mod execution;
 pub mod flow;

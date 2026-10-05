@@ -1395,7 +1395,7 @@ esac
                             Some("review"),
                             true,
                         ),
-                        current_attempt: None,
+                        selected_capture: None,
                         pending_session_id: None,
                         ready_summary: None,
                         cursor: Default::default(),

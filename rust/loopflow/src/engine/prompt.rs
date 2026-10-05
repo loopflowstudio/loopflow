@@ -1774,8 +1774,8 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{run_id}-{sources}.{skill}.md`, with the
-/// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
+/// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
+/// `{trace_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
@@ -1803,7 +1803,7 @@ pub fn write_prompt_log(
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
     let filename = match run_part {
-        Some(run_id) => format!("{}-{}-{}.md", timestamp, run_id, name_part),
+        Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
         None => format!("{}-{}.md", timestamp, name_part),
     };
     let path = prompts_dir.join(&filename);

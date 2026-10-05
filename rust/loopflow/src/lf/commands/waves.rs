@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
 use crate::durable::{Home, WorkRef, WorkStatus};
-use crate::lf::commands::runs::{format_tokens, SessionHistory};
+use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
+use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -528,13 +529,15 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
         let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
-                crate::lf::commands::WorkFilter {
-                    wave: Some(wave.slug()),
-                    project: None,
-                    task: None,
-                },
-            )),
+            runs: Evidence::from_result(
+                crate::lf::commands::session_history::collect_recent_history(
+                    crate::lf::commands::WorkFilter {
+                        wave: Some(wave.slug()),
+                        project: None,
+                        task: None,
+                    },
+                ),
+            ),
             wave: snapshot,
             projects: project_planning(&store, &wave).await,
             tasks: task_snapshots.tasks,

@@ -891,7 +891,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             .args(["roadmap", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
             .env("LF_WAVE_ID", "must-not-narrow-exact-lookup")
-            .env_remove("LF_RUN_ID")
+            .env_remove("LF_CAPTURE_KEY")
             .current_dir(home.path().join("repo"));
         prepend_test_bin(&mut command, home.path());
         let output = command.output().unwrap();
@@ -971,7 +971,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         }
         command
             .env("LF_HOME", home.path())
-            .env_remove("LF_RUN_ID")
+            .env_remove("LF_CAPTURE_KEY")
             .env("LF_WAVE_ID", original.id().to_string())
             .current_dir(&other_repo);
         prepend_test_bin(&mut command, home.path());

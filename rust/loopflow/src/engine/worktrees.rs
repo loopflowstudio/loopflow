@@ -233,20 +233,6 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     dir_for_component(repo, &component)
 }
 
-/// Short execution id: the leading 8 hex chars of a trace UUID.
-pub fn short_run_id(run_id: &str) -> String {
-    let hex: String = run_id
-        .chars()
-        .filter(|ch| ch.is_ascii_hexdigit())
-        .take(8)
-        .collect();
-    if hex.len() == 8 {
-        hex
-    } else {
-        short_hash(run_id, 8)
-    }
-}
-
 fn short_hash(value: &str, chars: usize) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut hash = hex::encode(digest);

@@ -129,7 +129,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
     ] {
         let output = command(home.path(), home.path(), &args)
             .env("LF_RUN_DIR", source.path().join("runs/parent"))
-            .env("LF_RUN_ID", "run_parent")
+            .env("LF_CAPTURE_KEY", "run_parent")
             .output()
             .unwrap();
         success(output);

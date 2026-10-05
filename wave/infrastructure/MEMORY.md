@@ -9,16 +9,23 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Capture-layout cleanup (LOO-370, design evidence 2026-10-02)
+## Capture-layout cleanup (LOO-370, source evidence 2026-10-04–05)
 
-Jack Heart requested the remaining Run cleanup with retained history and design
-review before implementation. Inspection at `a278d6bc1` found capture keys exported
-as LF_RUN_ID, while AgentCaller already carries Session/Exec provenance. A disposable
-rename/reopen probe reproduced split capture roots under an old writer. The promotion
-lock serializes installers only; unfinished switches still select the prior CLI.
-Neither proves writer quiescence. Offline conversion is proposed, not accepted or
-implemented; configured migration and release remain unauthorized. Preserve
-LOO-285 accounting and LOO-292 installation proof at their existing interfaces.
+Jack Heart authorized autonomous source development and landing on October 4,
+superseding the design-review hold. Installed conversion, interruption and release
+remain unauthorized. The runtime slice uses captured Session/Exec provenance and
+exports AgentCaller on native resume. Session mutations use durable IDs; capture
+selectors remain history inputs. SQLite mutation transactions fence replaced
+providers and stale captures, including standalone review completion. Source tests
+pass; this is not landed. Payloads still use `runs/`; recoverable conversion remains
+unimplemented. Preserve LOO-285 accounting and LOO-292 installation proof.
+
+SQLite Session identity survives missing capture payload. Validate a present
+manifest without making its absence erase native resumability. Rename/reopen can
+split capture roots under an old writer; promotion locks and unfinished switches
+do not establish writer quiescence. Exact SQLite compatibility cannot prove
+filesystem conversion: installer advancement and recovery both have exact-schema
+shortcuts that must be reconciled with the layout boundary.
 
 ## Optional chapters and Task workflows (2026-10-02)
 

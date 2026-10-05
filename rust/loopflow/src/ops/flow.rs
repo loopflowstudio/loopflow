@@ -112,7 +112,7 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
     // Earlier and unfinished Runs can contain the first attempt on a PR merged
     // inside the window. Python windows Run statistics and PR intervals separately.
-    let runs = crate::lf::commands::runs::collect_history(
+    let runs = crate::lf::commands::session_history::collect_history(
         crate::lf::commands::WorkFilter {
             wave: None,
             project: None,

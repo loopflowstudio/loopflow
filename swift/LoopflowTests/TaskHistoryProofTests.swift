@@ -16,11 +16,11 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task recent Runs and Session rows native proof", .requiresDisplay, .serialized)
+@Suite("Task history and Session rows native proof", .requiresDisplay, .serialized)
 @MainActor
-struct TaskRunsProofTests {
-    @Test("Recent Runs load on demand for their own Task; Session rows show recorded provider and summary")
-    func runsFollowTheirTask() async throws {
+struct TaskHistoryProofTests {
+    @Test("Session inputs load on demand for their own Task; Session rows show recorded provider and summary")
+    func historyFollowsItsTask() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
@@ -57,7 +57,7 @@ struct TaskRunsProofTests {
         )) as? [String: Any])
         notes["provider"] = NSNull()
         notes["open_argv"] = ["must-not-launch"]
-        let source = try RunSource(session: JSONSerialization.data(withJSONObject: [design, notes]))
+        let source = try HistorySource(session: JSONSerialization.data(withJSONObject: [design, notes]))
         let query = RegistryQuery { args, _ in try await source.respond(args) }
         let model = PodiumModel(query: query, repoPath: repo)
         await model.refresh()
@@ -68,7 +68,7 @@ struct TaskRunsProofTests {
         window.contentView = NSHostingView(rootView: view)
         defer { window.contentView = nil }
         try await settle(window)
-        let draft = "runs-proof-draft"
+        let draft = "history-proof-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         func find(_ id: String) throws -> InspectableView<ViewType.ClassifiedView> {
@@ -82,8 +82,8 @@ struct TaskRunsProofTests {
             }
         }
 
-        // Task A overview: Session rows carry only what their Runs recorded,
-        // and showing the Task reads no Run history.
+        // Task A overview: Session rows carry only their recorded facts,
+        // and showing the Task reads no input history.
         model.select(.task(id: "issue-review"))
         try await waitFor { (try? find("task-session-design")) != nil }
         try await settle(window)
@@ -92,50 +92,50 @@ struct TaskRunsProofTests {
         _ = try find("task-session-notes")
         #expect((try? find("task-session-provider-notes")) == nil)
         #expect((try? find("task-session-summary-notes")) == nil)
-        #expect(try label("task-runs-toggle") == "Recent runs, collapsed")
+        #expect(try label("task-history-toggle") == "Session history, collapsed")
         #expect(await source.reads.isEmpty)
 
         // Expanding reads that Task's exact identifier through the shared reader.
         await source.reply("W2-131", with: .runs(["run_a1", "run_a2"]))
-        try find("task-runs-toggle").button().tap()
-        try await waitFor { (try? find("task-run-run_a2:12")) != nil && !model.recentRuns.inFlight.contains("issue-review") }
+        try find("task-history-toggle").button().tap()
+        try await waitFor { (try? find("task-history-input-run_a2:12")) != nil && !model.sessionHistory.inFlight.contains("issue-review") }
         #expect(await source.reads == [["usage", "--days", "0", "--task", "W2-131", "--json"]])
-        #expect(try label("task-runs-toggle") == "Recent runs, expanded")
-        _ = try find("task-run-run_a1:12")
-        #expect((try? find("task-run-run_a2:12").find(text: "Unknown")) != nil)
-        try captureIfRequested(window, name: "task-runs-expanded")
+        #expect(try label("task-history-toggle") == "Session history, expanded")
+        _ = try find("task-history-input-run_a1:12")
+        #expect((try? find("task-history-input-run_a2:12").find(text: "Unknown")) != nil)
+        try captureIfRequested(window, name: "task-history-expanded")
 
-        // A failed refresh keeps the last Runs and says they may be out of date.
+        // A failed refresh keeps the last inputs and says they may be out of date.
         await source.reply("W2-131", with: .failure)
-        try find("task-runs-toggle").button().tap()
+        try find("task-history-toggle").button().tap()
         try await settle(window)
-        try find("task-runs-toggle").button().tap()
-        try await waitFor { model.recentRuns["issue-review"].errorMessage != nil }
+        try find("task-history-toggle").button().tap()
+        try await waitFor { model.sessionHistory["issue-review"].errorMessage != nil }
         try await settle(window)
-        #expect(try find("task-runs-stale").text().string() == "May be out of date")
-        _ = try find("task-run-run_a1:12")
-        #expect(try find("task-runs-status").text().string().contains("Session history unavailable"))
+        #expect(try find("task-history-stale").text().string() == "May be out of date")
+        _ = try find("task-history-input-run_a1:12")
+        #expect(try find("task-history-status").text().string().contains("Session history unavailable"))
 
         // A late read of A cannot publish into B; B reads only when expanded.
         await source.reply("W2-131", with: .held(["run_a3"]))
-        try find("task-runs-retry").button().tap()
+        try find("task-history-retry").button().tap()
         try await waitFor { await source.isHolding }
         let readsBeforeB = await source.reads.count
         model.select(.task(id: "issue-available"))
-        try await waitFor { (try? find("task-runs-toggle")) != nil }
+        try await waitFor { (try? find("task-history-toggle")) != nil }
         try await settle(window)
-        #expect(try label("task-runs-toggle") == "Recent runs, collapsed")
+        #expect(try label("task-history-toggle") == "Session history, collapsed")
         #expect(await source.reads.count == readsBeforeB)
         await source.reply("W2-156", with: .runs([]))
-        try find("task-runs-toggle").button().tap()
-        try await waitFor { (try? find("task-runs-empty")) != nil }
-        #expect(try find("task-runs-empty").text().string() == "No Session history recorded for this Task.")
+        try find("task-history-toggle").button().tap()
+        try await waitFor { (try? find("task-history-empty")) != nil }
+        #expect(try find("task-history-empty").text().string() == "No Session history recorded for this Task.")
         await source.release()
-        try await waitFor { !model.recentRuns.inFlight.contains("issue-review") }
+        try await waitFor { !model.sessionHistory.inFlight.contains("issue-review") }
         try await settle(window)
-        #expect(model.recentRuns["issue-review"].value?.map(\.id) == ["run_a3:12"])
-        #expect(model.recentRuns["issue-available"].value?.isEmpty == true)
-        #expect((try? find("task-run-run_a3:12")) == nil)
+        #expect(model.sessionHistory["issue-review"].value?.map(\.id) == ["run_a3:12"])
+        #expect(model.sessionHistory["issue-available"].value?.isEmpty == true)
+        #expect((try? find("task-history-input-run_a3:12")) == nil)
         #expect(await source.mutations.isEmpty)
 
         // The Session and its companion survived every interaction.
@@ -186,9 +186,9 @@ struct TaskRunsProofTests {
     }
 }
 
-/// Shared planning reads plus per-Task `lf runs` replies. Any other
+/// Shared planning reads plus per-Task `lf usage --days 0 --task ID --json` replies. Any other
 /// operation — including preparing or starting a Task — fails loudly.
-private actor RunSource {
+private actor HistorySource {
     enum Reply { case runs([String]), held([String]), failure }
 
     private let roadmap: String
@@ -242,7 +242,7 @@ private actor RunSource {
             return String(decoding: try JSONSerialization.data(withJSONObject: runs), as: UTF8.self)
         default:
             mutations.append(args)
-            throw RegistryQueryError("Unexpected recent-Runs proof operation: \(args)")
+            throw RegistryQueryError("Unexpected Task-history proof operation: \(args)")
         }
     }
 }

@@ -22,7 +22,7 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
-/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
+/// wave); the machine-wide reads (`lf wave list`, `lf usage --days 0 --task ID --json`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 public struct RegistryQuery: Sendable {
@@ -186,7 +186,7 @@ public struct RegistryQuery: Sendable {
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
-    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
+    public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {
         let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
         return try Self.decode([SessionHistory].self, from: stdout)
     }

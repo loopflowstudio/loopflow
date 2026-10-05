@@ -283,7 +283,7 @@ struct WorkSurfaceView: View {
                     TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
                 }
                 TaskWorkView(model: model, task: task, wave: found.wave.wave)
-                TaskRunsView(model: model, task: task, wave: found.wave.wave)
+                TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 if let sessions, !sessions.isEmpty {
                     section {

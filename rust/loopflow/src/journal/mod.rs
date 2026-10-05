@@ -575,11 +575,15 @@ fn create_exec_context(
     };
 
     let agent_caller = same_store
-        .then(|| std::env::var(AGENT_CALLER_ENV).ok())
+        .then(|| std::env::var_os(AGENT_CALLER_ENV))
         .flatten()
-        .map(|value| serde_json::from_str::<AgentCaller>(&value))
-        .transpose()
-        .map_err(std::io::Error::other)?;
+        .map(|value| {
+            let value = value
+                .into_string()
+                .map_err(|_| std::io::Error::other("agent caller is not valid UTF-8"))?;
+            serde_json::from_str::<AgentCaller>(&value).map_err(std::io::Error::other)
+        })
+        .transpose()?;
     // A direct child of this lf process must inherit this Exec, not the agent
     // edge that admitted it. Provider launches install their own fresh caller.
     std::env::remove_var(AGENT_CALLER_ENV);
@@ -870,6 +874,18 @@ pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwn
         exec_id: context.process_id,
         pid: std::process::id(),
         started_at: context.process_started_at?,
+    })
+}
+
+/// Caller provenance captured at process entry, before the environment is consumed.
+pub fn agent_caller() -> Option<AgentCaller> {
+    current_context().and_then(|context| context.agent_caller)
+}
+
+/// A nested command leaves checkpoint composition to its caller.
+pub fn has_caller() -> bool {
+    current_context().is_some_and(|context| {
+        context.agent_caller.is_some() || context.parent_process_id.is_some()
     })
 }
 
@@ -1410,11 +1426,13 @@ mod tests {
             fields.clone(),
         );
         let parent = super::current_context().expect("parent");
+        assert!(!super::has_caller());
         super::clear_context();
         let child = super::ensure_exec_context(repo.path(), &fields)
             .expect("child context")
             .expect("child");
 
+        assert!(super::has_caller());
         assert_ne!(parent.process_id, child.process_id);
         assert_eq!(
             child.trace_id, parent.trace_id,

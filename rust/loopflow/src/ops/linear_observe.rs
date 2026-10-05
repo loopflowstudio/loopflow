@@ -68,12 +68,13 @@ pub(crate) async fn publish_issue_comment(
     if steer {
         return publish_direction(client, issue, text).await;
     }
-    if let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) {
-        let run_id = run_id.to_string_lossy();
-        let run_id = crate::session_record::parse_artifact_key(&run_id)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+    let capture = crate::session_record::inherited_caller()
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let provenance =
+        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id));
+    if let Some(provenance) = provenance {
         let marker = format!(
-            "<!-- loopflow-progress:{run_id}:{} -->",
+            "<!-- loopflow-progress:{provenance}:{} -->",
             uuid::Uuid::new_v4()
         );
         return publish_comment(client, issue, text, &marker).await;

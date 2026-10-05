@@ -87,6 +87,10 @@ finds it or starts it, a Wave's with its goal and memory, and repeats return the
 same Session. `replace`
 stops that conversation, keeps it as history, and starts a fresh one.
 
+Session connect, rename, bind and complete take the durable Session ID shown by
+`lf session list`. Capture keys and history prefixes select retained inputs for
+inspection and replay; they do not select these Session actions.
+
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 Its overview explains each item's state and next action. A mechanical Exec has
 no provider conclusion. JSON reads emit one document; the active watch emits

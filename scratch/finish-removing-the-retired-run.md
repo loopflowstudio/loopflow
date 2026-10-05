@@ -3,7 +3,7 @@
 Draft for feature Flow design review, 2026-10-02. Jack Heart requested cleanup
 while preserving conversations, history and work. This plan is not approval of an
 installed-Home migration. Base: `a278d6bc1bd4373f78f27027b8ae249100ef14d3`.
-Design acceptance and production implementation remain pending.
+Source implementation is authorized by the October 4 direction below.
 
 ## Current direction — October 4
 
@@ -21,6 +21,94 @@ schedule mutation or production release is authorized by this source-delivery re
 Retain remaining configured acceptance honestly after landing. The prior feature
 Flow's human review gates are replaced by the autonomous implementation path at
 Jack's request; preserve Task, branch, checkout and history.
+
+## Source implementation status — October 5
+
+The runtime slice now builds with public history DTO exports retained under
+`session_history`. Removing these exports had broken external DTO/watch consumers;
+the private capture implementation remains private. Connect, rename, complete and
+bind select durable Session IDs, while history/replay retain capture selectors.
+The obsolete input-selector lookup and its duplicate target field are deleted.
+Git-operation evidence is named Trace/Exec in Rust; released receipt field names
+remain unchanged. Replay, capture admission and prompt-log variables name their
+actual capture or Trace owner.
+
+Review found standalone completion lacked the provider-generation fence already
+used by Task review. Session rename/readiness/completion and Task review settlement
+now validate the actor in their SQLite transaction. Completion also checks before
+provider-stop side effects. The public replacement proof rejects stale captures
+and replaced providers while preserving feedback, identity and a single completion.
+Binding still accepts closed Sessions without rewriting prior attribution.
+
+Source conversion is **not implemented**. Installer advancement and recovery still
+have exact-SQLite shortcuts; public entry-gate replacement still occurs after
+candidate advancement. No payload root has moved. The existing offline preservation
+strategy and full acceptance below remain required; this runtime checkpoint cannot
+be published as the finished cutover or landed independently.
+
+Check: isolated Session CLI/lifecycle (26 passed, one skip), PR authority (12 passed after clearing inherited Task authority), watch/DTO (19 passed), replacement/binding focused proofs, all-target Clippy, fmt/diff and architecture checks passed; 15 Session-owner library tests passed (`ops::human_session::tests` and `captured_reservation_survives_interruption_and_fences_replacement`; the earlier `sessions::tests` filter selected zero). Conversion, Desktop, full gate and configured installation proof remain outstanding.
+
+## Earlier runtime implementation — October 4
+
+The runtime slice is implemented in the working tree, not published. Old
+`LF_RUN_ID`/`LF_RUN_DIR` exports and policy readers are removed; one
+`LF_CAPTURE_KEY` resolves subordinate history through Home-local SQLite.
+Session/Exec caller context owns nested checkpoint behavior. Native resume now
+exports its claimed driver's AgentCaller; readiness checks provider identity inside
+its transaction. Definition-only Run events/errors/helpers are deleted, and the
+Flow input projection is `SelectedCapture`. Current history modules, Desktop Task
+history naming and environment instructions are updated. No migration draft or
+installed data was changed. This is not the complete cutover.
+
+Remaining source work retains the indivisible delivery boundary:
+
+- Implement and prove the offline conversion, including external launch exclusion,
+  frozen backup, operational reference inventory and candidate-owned recovery.
+  `advance_switch_store` currently skips the candidate when SQLite is already
+  exact; `recover_switch` has an exact-candidate fast path too. Neither may treat
+  exact schema as proof of completed filesystem conversion. The machine entry
+  gate is currently replaced during activation, after candidate advancement;
+  recovery selection must be effective before the first layout mutation.
+- Cut `record_dir`, watch classification, replay and ablation/tooling paths to one
+  capture layout together. They still use `runs/` in this internal slice.
+- Finish the current-reference audit beyond the completed Git Trace/Exec names
+  and durable Session mutation selectors. Preserve released Git receipt fields
+  and historical input selectors in read/replay paths.
+- Prove stale-provider review settlement and native callback/Flow paths after
+  all consumers move. Recheck the final history-module renames and missing-registry
+  caller predicate; they postdate the passing Rust checks. Desktop was not built.
+- Run the populated released-Home preservation/fault matrix and final gate, then
+  record the final retained-reference inventory and production delta. No configured
+  conversion, production release or installed acceptance follows from source tests.
+
+Inspection corrected two assumptions. A recorded native conversation remains
+resumable without its old manifest: validate a present manifest, but do not turn
+missing payload into missing Session identity. The metadata-open fixture's apparent
+provider wait was stdout backpressure: an owned process sample showed `session::open`
+blocked in `write`, because the test polled exit without draining JSON. File-backed
+capture preserves the bounded metadata-open assertion without pipe-capacity dependence.
+The native resume fixture now also checks the exported caller against SQLite's
+Session, provider generation and origin Exec.
+
+Check: isolated `cargo test` Session CLI/lifecycle/PR-authority + capture/process subsets passed 75 tests (one isolated-install skip); earlier journal/progress/resume subsets passed; Python materialization tests passed 3; all-target Clippy passed before final module/predicate edits; fmt/diff checks pass. Further build, Desktop and conversion checks deferred: resource recovery failed below the 32 GiB reserve. The controller filter selected zero tests and supplies no proof.
+
+## Compression review — October 4
+
+Removed the unused `fill_capture_provider` Store/SQLite pair and CLI-layer history
+type re-exports. Capture resolution now reads its owning Session once and shares
+that result with caller validation. The existing ownership test now distinguishes
+malformed payload from missing payload; it has not been rerun after this edit.
+Desktop query/navigation names consistently use history, and its documentation
+matches the complete `usage --days 0 --task ID --json` reader.
+
+Review found fixture-only capture-path duplication deriving the shard from `run_`
+and one unset path variable. Provider stubs now call the existing
+`__provider-session` callback and propagate failure; unrelated stubs no longer
+compute capture paths. `LF_PREPARED_CAPTURE` avoids the retired `LF_SESSION*`
+namespace. Swift scrubs both current reservation variables. Historical scrub names
+remain inert and unchanged. These repairs need the focused Flow/capture suites.
+
+Check: `cargo fmt --check`, `git diff --check`, `uv run python scripts/check_architecture.py`, and changed Swift `swiftc -frontend -parse` passed; `check_migrations.py` reports main's missing `0.13.1.001_release.sql` (sync owns reconciliation); resource recovery failed at 13.3/32 GiB, so build, focused Rust/Flow tests, Clippy and Desktop build defer to capable gate/CI. No runtime acceptance or landing follows.
 
 ## Earlier maintenance proposal
 
@@ -227,6 +315,18 @@ loses late recorder writes or downgrades into the old layout after partial conve
 The review must judge the offline boundary explicitly; cleanup authorization does
 not manufacture acceptance of that operational requirement.
 
+## Delete — do not maintain
+
+Delete `engine/event.rs::EngineEvent`, `engine/worktrees.rs::short_run_id`,
+`StoreError::{RunNotFound,StepRunNotFound}`, the `LF_RUN_ID`/`LF_RUN_DIR`
+execution inputs and presence-based policy, and the old capture layout reader.
+Keep historical artifact keys, immutable migration SQL and exact Session/Exec
+control fences. `FlowAttempt` becomes the transient selected-capture projection,
+without a new lifecycle or table. The definition-only symbols and unused
+`fill_capture_provider` wrappers are removed. The old layout reader and conversion remain. Current-input mutation aliases are
+removed and Git-operation owner fields name Trace/Exec, retaining released JSON
+field names for receipt preservation.
+
 ## Implementation sequence (one coherent end state)
 
 1. **This slice: remove runtime identity coupling.** Delete definition-only Run
@@ -286,7 +386,8 @@ identities; ordinary verbs (`cargo run`, process run, `RunAtLoad`). Old context 
 may be scrubbed at historical launch boundaries but never read to decide behavior.
 Current errors, live DTOs and current user instructions get no obsolete aliases.
 
-Kickoff production diff: **+0 / −0**; no implementation or runtime acceptance yet.
+Production changes now exist in the working tree. Final delta and inventory remain
+outstanding; file moves must not count as architectural deletion.
 The final count must report Rust/Swift/Python/scripts production separately, excluding
 builtin prose, tests/fixtures, historical SQL and generated outputs, and name its base.
 

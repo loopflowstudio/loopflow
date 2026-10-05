@@ -11,9 +11,13 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-The v0.13.1 version PR merged while v0.13.0 remained the latest published release.
-That gap left the Session filtering in PR #1421 absent from the installed Desktop.
-Release-specific recovery evidence belongs in [Release memory](release/MEMORY.md).
+Release's October 5 memory records v0.13.2 publication and CLI/app installation,
+delivering PR #1421's Session filtering after the unpublished v0.13.1 bump.
+Manual runner recovery supplies neither a verified public receipt nor LOO-285's
+two unattended settlements. Keep publication, installation and public verification
+separate; preserve the retained publisher checkout lease for supported recovery.
+Exact evidence and remaining validator/smoke repairs belong in
+[Release memory](release/MEMORY.md).
 
 ## Review replacement (2026-10-04)
 
@@ -233,14 +237,16 @@ Chapter creation requires planned KRs, with new Task admission afterward.
 Unreviewed backlog survives rotation until explicit disposition. These decisions
 supersede the earlier status-selection and automatic-expiration proposals.
 
-October 5 implementation inspection found a configuration ownership conflict:
-registry Wave identity is canonical across checkouts, but authored configuration
-reads remain checkout-local. A reset in one checkout leaves another selecting its
-completed predecessor; a settled creation leaves another unbound checkout able to
-create again. Locks do not propagate file changes. Recovery receipts must not
-become a second selection authority. Shared file ownership versus publication and
-checkout synchronization remains unresolved in the working design. No production
-implementation or configured proof occurred. The reviewed design is preserved at
+Jack Heart resolved the October 5 configuration conflict in Linear comment
+`f092d63a-a152-4920-af81-d676a576f694`: one shared local Wave configuration owns
+the Project binding across checkouts. Stale checkout files must never reverse it;
+Git publication is not an opening prerequisite. Locks alone cannot propagate a
+checkout-local binding, and settled recovery receipts must never become selectors.
+The design uses a Home-local file keyed by Wave ID; other authored policy retains
+its owner. Exact-ID ensure, KRs before optional chapter creation, separate Task
+admission and work preservation remain accepted. Implementation and configured
+proof remain outstanding; preserve the saved Flow's review boundary. The earlier
+reviewed design remains at
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
@@ -681,15 +687,11 @@ the manually transferred Tasks, without importing old turns or driver authority.
   Synthetic second-Home proofs exercise retries and missing evidence; they do
   not imply a second deployed client or a distributed transaction.
 
-**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
-are checkpointed locally; publication/merge is not established by this entry.
-The release-materialized full Rust run recorded 2,004 passes, seven failures and
-17 skips. Focused repair runs cover all seven failures; the original receipt
-remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
-291-case run had one obsolete import fixture; its eight-case observation repair,
-app/runner builds, boundary check and eight distinct fixture captures passed.
-Formatting, final all-target Clippy, architecture and immutable migration checks
-passed. Required hosted CI still owns the final landing candidate.
+**Integrated gate, 2026-09-30.** Exact suite counts and repairs remain in
+[gate evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
+and `e8ba23f0acb0b52cacfdcff4a5597cd1619a1f34:wave/infrastructure/MEMORY.md`.
+The full Rust receipt failed; focused repairs did not rewrite it. These local
+results establish neither publication nor installed conversion.
 
 The runtime finding was cursor order: stable-ID Session pages must retain ID
 order through projection, or renamed titles can repeat/skip records. Stacking

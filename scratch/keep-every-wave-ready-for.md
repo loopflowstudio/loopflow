@@ -4,7 +4,7 @@ Implementation design, drafted 2026-10-03; review concluded by Jack Heart before
 the October 5 implementation attempt. Jack Heart's accepted product direction
 comes from [LOO-366](https://linear.app/loopflow/issue/LOO-366): ordinary Projects
 need neither chapters nor a default Flow. The selected configuration/KR boundaries are approved for implementation;
-the unresolved configuration publication mechanism below is not settled. Base: `12016c6d6`.
+Jack Heart resolved shared configuration ownership on October 5. Base: `12016c6d6`.
 
 October 4 direction from Jack Heart: every Wave has exactly one active Project,
 independent of chapters; tools and skills coordinate optional repository-wide
@@ -20,6 +20,58 @@ Jack Heart further selected KRs as the chapter creation boundary: chapter review
 and planning generate KRs before creating chapter Projects. That planning may
 also generate Task candidates, but adding them is a separate step, optionally
 run globally immediately afterward. A complete future Task plan is not required.
+
+## Shared local configuration ownership — accepted October 5
+
+October 5 source inspection confirms an authority conflict, before production
+edits. The reviewed design is preserved at
+`e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
+`work/wave/context.rs` canonicalizes registry identity but explicitly gathers
+authored files from the executing checkout. `work/wave/config.rs` joins the
+supplied repository path; `ops/pm.rs::resolve_context` reads Initiative policy
+from that path. Desktop's `WaveDetailPane::refreshDetail` passes `repoPath` to
+`RegistryQuery.status`. `repository.rs::CanonicalRepo` collapses worktree
+identity to the main checkout, but does not publish configuration. The earlier
+claim that this branch already supplies a remote-main definition resolver was
+incorrect; it described remembered intent, not this branch's implementation.
+
+Counterexample: checkouts A and B both configure Project P. Reset in A creates Q,
+switches A to Q, completes P, and settles its receipt. B still configures P;
+exact-ID ensure must reject completed P, so ordinary work there is unavailable.
+If both began without a binding, after A creates P and settles its receipt, B
+still has no binding and can reserve another Project. A Wave lock serializes
+these calls but does not change B's file. Using the last settled receipt to pick
+P or Q would make receipts a second selection authority, expressly excluded.
+These are source-derived counterexamples, not executed provider tests.
+
+Jack Heart selected one shared local Wave configuration for the current Project
+binding in Linear comment `f092d63a-a152-4920-af81-d676a576f694` on October 5.
+This resolves the ownership decision above. All checkouts resolve the same file
+through durable Wave identity; stale checkout files never select or overwrite
+that binding. Git publication and checkout synchronization are not prerequisites
+for opening or rotating a Project. Recovery receipts remain mutation evidence.
+
+Implementation choice for this revision: `<Home>/waves/<WaveId>/config.yaml`,
+resolved through the existing Home path owner and registered Wave ID. The file
+holds `pm.linear_project`; it is independent of Wave slug and checkout location.
+This path is an implementation choice, not a path specified by Jack. Goals,
+Initiative binding, schedules and other authored policy retain their existing
+owners; this change does not relocate all Wave configuration. No binding is
+read from checkout `config.yaml` or `GOAL.md`, nor inferred from SQLite snapshots
+or settled transitions. Missing files mean unconfigured; unreadable or malformed
+files remain errors, never permission to provision another Project.
+
+The shared reader is observational, including when the file is absent. Explicit
+ensure, binding setup and rotation use the same Wave lock and atomic file writer.
+Re-read the expected binding before replacement, preserve unrelated authored
+bytes, and durably replace the file before settling its receipt. A crashed write
+must expose either the previous or next complete binding. The lock lives outside
+the replaced file, so atomic rename cannot create a second lock owner. Ordinary
+opening consumes the shared binding even when its checkout contains an older ID.
+
+All five implementation slices and configured acceptance remain outstanding.
+The existing saved Flow and its review boundary remain intact; this reconciliation
+records no implementation, provider mutation or Flow navigation.
 
 ## Outcome and demo
 
@@ -99,10 +151,10 @@ from synthetic tests or readiness alone.
 
 ## Chosen operation and authoritative state
 
-Proposed Wave configuration:
+Shared local Wave configuration (proposed field layout):
 
 ```yaml
-# wave/infrastructure/config.yaml
+# <Home>/waves/<WaveId>/config.yaml
 pm:
   linear_project: <stable Linear Project UUID>
 ```
@@ -318,11 +370,11 @@ CLI surface. Before including it in delivery, settle its representation and prov
 that renamed and completed Projects remain discoverable after later rotations.
 Wave-scoped chapter creation is part of the requested higher-level design.
 
-## Consumers and deletions
+## Implementation order
 
 This is one coherent delivery; internal slices are implementation order:
 
-1. Add the per-Wave Project configuration field and shared configured-ID reader;
+1. Add the Home-local per-Wave Project file and shared configured-ID reader;
    seed existing bindings from explicit IDs without provider mutations on reads. Move ordinary
    Project ownership out of `chapter`, remove
    nonempty-Flow create/adopt/update/reset gates and name-prefix rejection, and
@@ -351,14 +403,34 @@ This is one coherent delivery; internal slices are implementation order:
    activation, not observation. Reconcile the LOO-367 call site without importing
    its lifecycle changes into this Task.
 
-Delete `plan_rotation`'s cross-Wave `predecessor_names` heuristic, fallback
-`feature` during Project creation, name-derived successor IDs, candidate-selection
-logic, empty-Flow refusals, and
-`canonical_project_name`'s unknown-prefix refusal. Move reusable functions rather
-than copy them. Migration-marked old-content conversion remains only where
-released-data preservation requires it; remove its Flow refusal, not its evidence.
-Do not add Project “legacy/new” variants, chapter-required adapters, duplicate
-DTO defaults, broad recovery frameworks, or provider mutation in status reads.
+## Delete — do not maintain
+
+Apply these cuts with their replacement consumers under the selected shared local
+configuration owner; none is implemented yet.
+
+- `ops/chapter.rs::select_current`: replace status selection with the shared
+  configured-ID reader. Move `sync_projects`/`record_project` to `ops/project.rs`.
+- `plan_rotation`'s `predecessor_names` and target-name lookup, plus `successor_id`:
+  replace inferred predecessors and name-derived UUIDs with exact recorded IDs.
+- Empty-Flow refusals in `pm/linear.rs::{create_project,adopt_project}` and
+  `ops/chapter.rs::{update_plan,rotate,apply_rotation}`, including the `feature`
+  fallback: retain explicit launch validation at its Task owner.
+- `ops/pm.rs::canonical_project_name`'s unknown-prefix refusal and ordinary
+  adoption's name/content rewriting: provider IDs establish ownership.
+- Rotation's automatic backlog expiration: preserve unreviewed Tasks until
+  explicit disposition. Retain start fencing, unknown-work protection and
+  confirmation for explicitly requested cancellation.
+- Replace obsolete assertions in `ops/chapter_tests.rs`, including
+  `zero_current_without_shared_predecessor_evidence_stays_unresolved`,
+  `lost_creation_has_one_identity_on_every_home` and
+  `only_proven_untouched_backlog_expires`, with configured-ID recovery and backlog
+  preservation proofs. Keep shared provider fixtures and identity-preservation
+  cases; they also exercise surviving behavior.
+
+Move reusable functions rather than copy them. Retain migration-marked conversion
+only for released-data preservation, removing its Flow refusal. Add no candidate
+selection, Project variants, chapter-required adapters, DTO defaults or generic
+recovery framework.
 
 ## Acceptance at gate
 
@@ -398,6 +470,12 @@ native providers and configured accounts from being launched by synthetic tests.
   ID, retain predecessor Task visibility and leave reset effects untouched on
   opening. Cover crash before/after config switch and provider completion; stale
   checkout configuration must not reverse a later binding or resume an old reset.
+  Use two linked checkouts sharing one fixture Home: after creation in A and
+  receipt settlement, B reuses the exact ID; after reset in A, stale B reads the
+  successor without Git sync. Both absent and stale checkout files are ignored.
+  A malformed shared file causes no provider writes; read-only access creates no
+  file or directory. Preserve unrelated file bytes and test interrupted replacement
+  and a Wave rename against the same stable-ID file.
 - `scripts/test_desktop.sh -Xswiftc -gnone`: headless activation/reopening,
   selection race, retry/error, Project labels, independent primary conversation,
   reset preview/apply and JSON fixtures. `uv run python
@@ -419,50 +497,12 @@ reset recovers without sacrificing started work. Full Task admission/completion,
 new primary Session behavior, credential repair, release plumbing and a generic
 multi-product platform are excluded.
 
-## Review and remaining evidence
+## Review constraints
 
-October 5 source inspection confirms an authority conflict, before production
-edits. The reviewed design is preserved at
-`e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
-`work/wave/context.rs` canonicalizes registry identity but explicitly gathers
-authored files from the executing checkout. `work/wave/config.rs` joins the
-supplied repository path; `ops/pm.rs::resolve_context` reads Initiative policy
-from that path. Desktop's `WaveDetailPane::refreshDetail` passes `repoPath` to
-`RegistryQuery.status`. `repository.rs::CanonicalRepo` collapses worktree
-identity to the main checkout, but does not publish configuration. The earlier
-claim that this branch already supplies a remote-main definition resolver was
-incorrect; it described remembered intent, not this branch's implementation.
+Reserve identity before provider effects so a timeout cannot create another UUID.
+Use status-only writes and byte-preservation tests to protect authored content.
+Review rejected bootstrap chapters, creation during status reads and name-derived
+permanent Project IDs. Keep recovery receipts confined to mutation recovery;
+provider status/content and configured selection retain their respective owners.
 
-Counterexample: checkouts A and B both configure Project P. Reset in A creates Q,
-switches A to Q, completes P, and settles its receipt. B still configures P;
-exact-ID ensure must reject completed P, so ordinary work there is unavailable.
-If both began without a binding, after A creates P and settles its receipt, B
-still has no binding and can reserve another Project. A Wave lock serializes
-these calls but does not change B's file. Using the last settled receipt to pick
-P or Q would make receipts a second selection authority, expressly excluded.
-These are source-derived counterexamples, not executed provider tests.
-
-Remaining ownership decision: designate one shared file location for all
-Project-binding reads/writes (for example the canonical main checkout), or make
-publication and checkout synchronization part of switching the binding. The
-first changes checkout-local configuration semantics and writes outside the
-invoking Task checkout; the second introduces a Git delivery dependency into
-opening/rotation. Neither is selected by the reviewed design. A shared SQLite
-pointer, silent push, or stale-checkout refusal does not satisfy its constraints.
-Dependent implementation stops here under the implement skill's authority-model
-rule. All five implementation slices and configured acceptance remain outstanding.
-
-
-The main failure risk is a timeout followed by creation under a new UUID. Reserving
-identity before effects and reconciling exact provider state addresses that risk.
-Review also removed an unsupported assumption that a local-only Project writer
-already existed; configured Linear planning is the inspected implementation.
-A second risk is silently overwriting authored content during adoption; status-only
-writes and byte-preservation tests are mandatory. Review rejected a bootstrap
-chapter (keeps the dependency), creation during status (hidden writes), and
-name-derived permanent Project IDs (cannot support later completed generations).
-Wild success is routine opening with no planning ceremony. Wild failure is
-ordinary Projects becoming a second chapter framework; keep the receipt confined
-to unfinished mutations and leave status/content in the provider.
-
-Checks: October 5 `git diff --check` passed; `lf context` passed (memory 15,976/16,000 tokens; scratch under 12,000). No production code changed; behavioral verification remains outstanding.
+Checks: October 5 `git diff --check` and `lf context --skill realign` passed; prose-only reconciliation, behavioral verification remains with implementation/gate.

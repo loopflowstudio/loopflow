@@ -86,11 +86,17 @@ Agent's reading of Jack's feedback, not his wording:
    enters the Task worktree (`bin/lf.rs`, `prepare_work_binding` then
    `CwdGuard::enter`), and a launch from the worktree without `--task` binds
    its Flow to the Task (observed).
-   Proposed homes, not decided by Jack: placement, PR reconciliation and the
-   working-PR guarantee stay in `lf task checkout`; the caller names the Flow
-   (`task status` reports the recommended one); `-m` and `lf task comment
-   --steer` already cover agent and reason; detachment is the caller's.
-   Resulting recipe: `lf task checkout X`, then `lf --task X -b <flow>`.
+   **Jack decided (October 5):** "`lf task run` or whatever is allowed to do
+   #1 and #3 and then go into the lf run flow." So one thin Task entry may
+   place the Task (worktree, `--stack-on`) and fill defaults (the Project's
+   default Flow, the `-m` agent, `--reason` as a steer), then hand off to the
+   ordinary `lf run` path in that worktree: same driver, same `-b`/`-i`
+   behavior, no tmux launcher, no `LF_TASK_FLOW_OPTIONS`, no ten-second wait.
+   Jack did not include #2 (adopt/reconcile the Task PR, refuse a dirty
+   between-PR worktree, ensure a working PR) in what the entry may do.
+   Agent's reading: it leaves the launch. Where it lives instead is open.
+   Naming is open ("or whatever"); `lf task run` was itself removed by #1356
+   and is still asserted as rejected in `cli_discovery`.
 3. Reroute every caller onto the ordinary launch, with no alias: `task create
    --run/--flow`, Desktop Start (`MacLocalWaveAgentLauncher`, `RegistryQuery`),
    builtin skills (`task_operate`, `advance`, `launch-plan`, `repo_operate`,
@@ -125,6 +131,10 @@ unexpected argument. Clippy clean; `flow_tests` 23, `session_lifecycle_tests` 17
 2, 3 and 5 remain.
 
 Unresolved, for Jack:
+
+- Where PR preparation (#2 above) goes once it leaves the launch: `lf task
+  checkout`, the delivery commands that need a PR (`pr publish`, `land`), or
+  nowhere.
 
 - With `-b` blocking, who backgrounds? `task create --run/--flow`, Desktop
   Start (`RegistryQuery`, `MacLocalWaveAgentLauncher`) and the operator skills

@@ -66,7 +66,12 @@ wait "$descendant"
     fn command(&self, mode: &str) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
-            .args(["screenshot", self.source.to_str().unwrap(), "--output"])
+            .args([
+                "home",
+                "screenshot",
+                self.source.to_str().unwrap(),
+                "--output",
+            ])
             .arg(&self.output)
             .args(["--width", "390", "--height", "844"])
             .env(

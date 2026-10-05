@@ -23,7 +23,7 @@ lf schedule daily   # also accepts weekly, hourly, 5min
 
 Run `lf install` from any checkout, including a Task checkout. Promotion checks
 the candidate release against the installed database before changing it.
-Use `lf task sync` inside a repository to update its checkout.
+Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -65,18 +65,18 @@ lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
 lf run feature             # select a flow, otherwise a skill
 lf skill release-run       # explicitly select the skill
-lf land --help             # explain the uniquely owned pr land command
+lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
 ```
 
-Commands take precedence over definitions. Omit owners when the command is
-unique; ambiguous names show the canonical choices. Help and list stay local.
+Omit owners or abbreviate commands when the result is unique. Commands take precedence over definitions; help
+and list stay local.
 A same-named flow takes precedence in untyped execution; invalid flows report
 an error. Use `lf skill NAME` to select the skill explicitly.
 External skills honor the same frontmatter as local skills, on first fetch and
 when read from cache. Malformed definitions report their parse error.
 
-Flows invoke builtin commands with `cmd:`, for example `- cmd: task pr land`.
+Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
 ## Keep work moving
@@ -106,10 +106,10 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf --task INF-123 flow start                                   # start end-to-end Task automation
-lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
-lf task interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
+lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
+lf restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf arm -c                                          # request exact-head auto-merge and return
@@ -156,7 +156,7 @@ lf session connect SESSION
 lf session history SESSION --json
 lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
-lf session ready "Ready for review"  # inside an Ask or review
+lf ready "Ready for review"  # inside an Ask or review
 lf session complete SESSION        # return its saved feedback
 ```
 
@@ -217,8 +217,8 @@ each `.md` URL, use the curated
 
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
-lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf task sync                                      # refresh main and integrate it into this worktree
+lf schedule                          # update Loopflow at login and weekly (macOS)
+lf sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # run a disposable experiment
 ```

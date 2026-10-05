@@ -57,7 +57,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain
      future and historical content. Preserve existing Project identities.
-   - If a current Project exists, `lf wave update-plan --wave <child> --plan <plan.json>`
+   - If a current Project exists, `lf update-plan --wave <child> --plan <plan.json>`
      replaces its complete content: `{"metric_targets":[],"flow":"feature","krs":[]}`.
      Supply the intended nonempty `flow` string and all KRs and targets.
    - If no current Project exists, arrange its plan through the accepted

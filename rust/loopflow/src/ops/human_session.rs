@@ -21,6 +21,7 @@ use crate::work::task::{Task, TaskId};
 #[cfg(test)]
 pub(crate) mod action_test;
 pub(crate) mod primary;
+pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
@@ -1193,6 +1194,15 @@ pub(crate) async fn open(
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
         {
+            let admitted;
+            let session = if resume {
+                let id = session.id.clone();
+                let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+                admitted = primary::admit_workspace(store, session.as_ref().clone()).await?;
+                &admitted
+            } else {
+                session
+            };
             let native = NativeSession::of(session)?;
             let Some(provider_session) =
                 store.sqlite.input_provider_session(&session.artifact_key)?
@@ -1441,6 +1451,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if session.completed_at.is_some() {
         bail!("session {id:?} is already complete");
     }
+    let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let token = session_token(&session);
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
@@ -1987,7 +1998,7 @@ pub(crate) fn human_open_argv(
         context.lf_bin.display().to_string(),
     ];
     if let Some(home_id) = remote_home {
-        argv.push("ssh".to_string());
+        argv.extend(["home".to_string(), "ssh".to_string()]);
         if let Some(worktree) = worktree {
             let repo = crate::engine::wave_home::resolve_home_relative_repo(worktree)
                 .map_err(anyhow::Error::msg)?;

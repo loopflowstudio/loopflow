@@ -1,6 +1,6 @@
 // Repository rail, Wave list, and the selected Wave's work map + conversation.
 // Discovery is a periodic registry query (`lf wave list`); Work and Session
-// resident motion stream directly from that Wave's listener.
+// motion stream directly from that Wave's listener.
 
 import SwiftUI
 import Loopflow

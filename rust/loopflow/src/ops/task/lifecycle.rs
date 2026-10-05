@@ -663,7 +663,7 @@ fn execution_blockers(
         };
         if blocks {
             blockers.push(format!(
-                "Exec {} has live or unresolved execution; inspect `lf mon show {}`",
+                "Exec {} has live or unresolved execution; inspect `lf monitor show {}`",
                 exec.id, exec.id
             ));
         }

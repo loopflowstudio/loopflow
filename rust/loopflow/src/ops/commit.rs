@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
-    commit, current_branch, is_clean, push, push_with_upstream, rev_parse, stage_all,
+    commit, current_branch, git_stdout, is_clean, push, push_with_upstream, rev_parse, stage_all,
 };
 use crate::engine::load_skill;
 
@@ -104,6 +104,101 @@ fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
     Ok(())
 }
 
+/// `scratch/.gitkeep` stays tracked so the directory exists on every branch.
+const UNTRACK_SCRATCH: &[&str] = &[
+    "rm",
+    "-r",
+    "--cached",
+    "--ignore-unmatch",
+    "-f",
+    "--",
+    ":(top)scratch",
+    ":(top,exclude)scratch/.gitkeep",
+];
+
+/// Commit an explicit document selection using an independent index. The real
+/// index retains unrelated staged work, and scratch remains on disk.
+pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
+    let message =
+        message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    restart_landed_persistent(repo)?;
+    let persistent = crate::engine::worktrees::is_persistent_worktree(repo)?;
+    let directory = tempfile::tempdir()?;
+    let index = directory.path().join("index");
+    let run = |args: &[&str]| -> OpsResult<()> {
+        let output = std::process::Command::new("git")
+            .current_dir(repo)
+            .env("GIT_INDEX_FILE", &index)
+            .args(args)
+            .output()?;
+        if !output.status.success() {
+            return Err(OpsError::Message(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
+        }
+        Ok(())
+    };
+    run(&["read-tree", "HEAD"])?;
+    let selected = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect::<Vec<_>>();
+    if !paths.is_empty() {
+        let mut args = vec!["add", "-A", "--"];
+        args.extend(selected.iter().map(String::as_str));
+        args.push(":(top,exclude)scratch");
+        run(&args)?;
+    }
+    if persistent {
+        run(UNTRACK_SCRATCH)?;
+    }
+    run(&["commit", "-m", message])?;
+    let mut reset = vec!["reset", "-q", "HEAD", "--"];
+    reset.extend(selected.iter().map(String::as_str));
+    if persistent {
+        reset.push(":(top)scratch");
+    }
+    git_stdout(repo, &reset).map_err(|error| {
+        OpsError::Message(format!("commit saved; index refresh failed: {error}"))
+    })?;
+    Ok(())
+}
+
+/// Whenever a persistent checkout is about to commit or publish, drop history
+/// its merged PRs already delivered. Nothing has to observe the merge itself.
+fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
+    if crate::engine::worktrees::is_persistent_worktree(repo)?
+        && crate::ops::sync::restart_landed_persistent(repo)?
+    {
+        eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_persistent_publication(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(());
+    }
+    restart_landed_persistent(repo)?;
+    let tracked = git_stdout(
+        repo,
+        &["ls-tree", "-r", "--name-only", "HEAD", "--", "scratch"],
+    )?;
+    if tracked.lines().any(|path| path != "scratch/.gitkeep") {
+        commit_selected(repo, &[], Some("Keep persistent scratch local"))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn untrack_persistent_scratch(repo: &Path) -> OpsResult<()> {
+    if !crate::engine::worktrees::is_persistent_worktree(repo)? {
+        return Ok(());
+    }
+    git_stdout(repo, UNTRACK_SCRATCH)?;
+    Ok(())
+}
+
 /// Run the ordinary commit path, carrying caller-owned capabilities into Git mutations.
 /// Agent generation, draft PR creation and Task merge revocation have separate launch owners.
 pub fn commit_workflow(
@@ -112,6 +207,8 @@ pub fn commit_workflow(
     progress: &impl Progress,
     inherit_git: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
+    restart_landed_persistent(repo)?;
+    untrack_persistent_scratch(repo)?;
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
@@ -125,7 +222,11 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        stage_all(repo, inherit_git)?;
+        if crate::engine::worktrees::is_persistent_worktree(repo)? {
+            git_stdout(repo, &["add", "-A", "--", ".", ":(top,exclude)scratch"])?;
+        } else {
+            stage_all(repo, inherit_git)?;
+        }
     }
 
     if !has_staged_changes(repo)? {

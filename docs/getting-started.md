@@ -223,7 +223,7 @@ lf ssh <home-id> --wave shipper wave/operate
 The target Home proves its identity before running the command and keeps the
 resulting execution locally.
 
-Reads follow the same rule: `lf monitor list`, `lf usage`, `lf wave list`, and `lf wave status`
+Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate execution records.
 

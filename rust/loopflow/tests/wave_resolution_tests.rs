@@ -1,10 +1,10 @@
 //! W2-151: every `lf` command must resolve the ambient Wave the same way. The
-//! bug was never that a resident exports `LF_WAVE_ID=<uuid>` — that is correct.
+//! bug was never that a Wave agent exports `LF_WAVE_ID=<uuid>` — that is correct.
 //! It was that consumers disagreed about how to read it: `status` handled a
 //! UUID, `pm show` ignored the env entirely, others silently dropped a hand-set
 //! name. This drives the ONE resolver directly across the seven environments,
 //! then proves the shared Wave status projection honors the original reproduction
-//! end to end from a resident wave's environment.
+//! end to end from a Wave agent's environment.
 
 use std::path::Path;
 use std::process::Command;

@@ -135,7 +135,7 @@ pub enum Surface {
     Mac,
     Iphone,
     /// A live chat channel (e.g. Discord) where a person is reading. The reply
-    /// is the message they see, so the resident speaks plainly and deliberately.
+    /// is the message they see, so the agent speaks plainly and deliberately.
     Chat,
     #[default]
     #[serde(other)]

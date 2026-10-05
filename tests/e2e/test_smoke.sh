@@ -44,7 +44,7 @@
     --diff false \
     | grep -q "Test"
 
-  "$ROOT_DIR/target/debug/lf" task wt create smoke-test >/dev/null
+  "$ROOT_DIR/target/debug/lf" wt create smoke-test >/dev/null
 
   repo_name=$(basename "$repo_dir")
   wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"

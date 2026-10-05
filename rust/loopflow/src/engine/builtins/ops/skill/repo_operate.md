@@ -204,7 +204,7 @@ Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
-Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
+Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
 The complete content object has `metric_targets`, a nonempty `flow` string and
 `krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
@@ -281,12 +281,12 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
+Use `lf id`, then `lf --wave <wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf task checkout <issue> --json`.
+Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's

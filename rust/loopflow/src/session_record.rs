@@ -1971,14 +1971,7 @@ impl CaptureHandle {
     ) -> StoreResult<Self> {
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
-        Self::begin_with_key_and_caller(
-            spec,
-            new_artifact_key(),
-            None,
-            true,
-            Some(exec),
-            Some(&context),
-        )
+        Self::begin_with_context(spec, &context, Some(exec))
     }
 
     pub(crate) fn begin_with_context(
@@ -1986,7 +1979,22 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         exec: Option<AgentExecRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_key_and_caller(spec, new_artifact_key(), None, true, exec, Some(context))
+        #[cfg(test)]
+        let home = std::env::var_os("LF_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
+            });
+        #[cfg(not(test))]
+        let home = crate::store::lf_home_dir();
+        Self::begin_at_with_id(
+            &home,
+            spec,
+            new_artifact_key(),
+            inherited_caller()?,
+            exec,
+            Some(context),
+        )
     }
 
     pub(crate) fn begin_reserved_with_context(
@@ -2038,37 +2046,6 @@ impl CaptureHandle {
             caller_artifact_key,
             Some(exec),
             Some(&context),
-        )
-    }
-
-    fn begin_with_key_and_caller(
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        caller_artifact_key: Option<String>,
-        inherit_caller: bool,
-        exec: Option<AgentExecRequest>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Self> {
-        #[cfg(test)]
-        let home = std::env::var_os("LF_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
-            });
-        #[cfg(not(test))]
-        let home = crate::store::lf_home_dir();
-        let caller_artifact_key = if inherit_caller {
-            inherited_caller()?
-        } else {
-            caller_artifact_key.and_then(|candidate| verified_caller(&home, candidate))
-        };
-        Self::begin_at_with_id(
-            &home,
-            spec,
-            artifact_key,
-            caller_artifact_key,
-            exec,
-            context,
         )
     }
 

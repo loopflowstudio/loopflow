@@ -1819,6 +1819,8 @@ mod tests {
             .put_pm_project(wave.id(), "linear", &snapshot.initiative, old, 20)
             .await
             .is_err());
+        assert!(store.put_pm_snapshot(snapshot).await.is_err());
+        assert!(store.pm_snapshot(wave.id()).await.unwrap().is_none());
         assert!(store
             .list_projects(Some(wave.id()))
             .await

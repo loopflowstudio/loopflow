@@ -876,17 +876,18 @@ Release's October 5 publication/install evidence belongs in its memory and prove
 no Project readiness. Keep the materialized name-cutover fixture's same-batch
 boundary with #1451's pending-version behavior; no release-tree gate ran here.
 
-Atomic ingestion and restart preservation are checkpointed at `ec5501f25`.
-Review also found that a stale partial Project response could attach its newer
-accepted body to the wrong Wave. Partial association now checks the accepted
-Initiative set transactionally; its focused regression preserves the newer body
-and leaves the Wave without an invented Project.
+Atomic ingestion and restart preservation are checkpointed at `ec5501f25`;
+`49ab053e7` checkpoints the accepted-Task SQL projection compression and prior
+notes. The October 5 regression extension exposed a remaining full-ingestion gap:
+after accepting newer Project facts owned elsewhere, a stale full snapshot still
+committed Wave membership and freshness. Readers filtered the foreign Project out,
+leaving a misleading fresh empty snapshot. The partial writer already rejected it.
+Both writers now check the accepted Initiative inside their transaction before
+associating the Project. The shared regression preserves the newer body, rejects
+both stale associations and leaves no Wave refresh receipt. This is a store proof;
+operation acquisition serialization and reteam's full readbacks remain unfinished.
 
-The uncommitted compression copies accepted Task fields in one SQL update,
-retaining ownership/removal filters and entity ages. Its focused proof preserves
-an unobserved Task and PR; shared fixture setup replaces duplication. Realign
-reviewed the diff without changing production code. Release is the sole immediate
-child; its complete goal/memory retain entry-point recovery lessons already
-reflected here, with no new Project-readiness evidence.
+Release is the sole immediate child. Its complete goal/memory retain entry-point
+recovery lessons already reflected here, with no new Project-readiness evidence.
 
-Checks: `git diff --check` passes (realign); retained compression `cargo fmt --all -- --check` and network-isolated nextest build/10 selected cases passed. No behavioral rerun for prose edits; gate owns broader/materialized/configured checks, isolated CI the prohibited installation proofs.
+Checks: network-isolated `cargo nextest run -p loopflow --lib` (four focused ingestion cases), formatting, all-target Clippy and `git diff --check` pass; gate owns broader/materialized/configured checks and isolated CI owns the prohibited installation proofs.

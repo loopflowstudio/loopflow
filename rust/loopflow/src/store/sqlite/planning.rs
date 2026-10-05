@@ -33,18 +33,7 @@ impl SqliteStore {
         validate_project_membership(&conn, &repo, provider, project)?;
         let tx = conn.transaction()?;
         put_project(&tx, &repo, provider, observed_at, project)?;
-        let accepted: String = tx.query_row(
-            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id],
-            |row| row.get(0),
-        )?;
-        let accepted: PmProject = serde_json::from_str(&accepted)?;
-        if accepted.initiative_ids.as_slice() != [initiative] {
-            return Err(StoreError::InvalidData(format!(
-                "accepted Project {} does not belong to Initiative {initiative}",
-                project.id
-            )));
-        }
+        require_accepted_initiative(&tx, &repo, provider, &project.id, initiative)?;
         tx.execute(
             "INSERT INTO pm_wave_projects(wave_id,project_id,position)
              VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
@@ -278,6 +267,13 @@ impl SqliteStore {
         }
         for project in &snapshot.snapshot.projects {
             put_project(&tx, &repo, &snapshot.provider, snapshot.synced_at, project)?;
+            require_accepted_initiative(
+                &tx,
+                &repo,
+                &snapshot.provider,
+                &project.id,
+                &snapshot.initiative,
+            )?;
         }
         for item in &snapshot.snapshot.items {
             put_item(&tx, &repo, &snapshot.provider, snapshot.synced_at, item)?;
@@ -480,6 +476,27 @@ fn project_accepted_planning(
 
 fn same_ids(left: &[String], right: &[String]) -> bool {
     left.iter().all(|id| right.contains(id)) && right.iter().all(|id| left.contains(id))
+}
+
+fn require_accepted_initiative(
+    conn: &Connection,
+    repo: &str,
+    provider: &str,
+    project_id: &str,
+    initiative: &str,
+) -> StoreResult<()> {
+    let body: String = conn.query_row(
+        "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+        params![repo, provider, project_id],
+        |row| row.get(0),
+    )?;
+    let accepted: PmProject = serde_json::from_str(&body)?;
+    if accepted.initiative_ids.as_slice() != [initiative] {
+        return Err(StoreError::InvalidData(format!(
+            "accepted Project {project_id} does not belong to Initiative {initiative}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_project_membership(

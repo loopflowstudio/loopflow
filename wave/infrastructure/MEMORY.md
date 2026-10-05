@@ -231,11 +231,9 @@ the two distinct automatic settlements remain, including retained telemetry
 failures; this operator-triggered release supplies none of that automatic proof.
 LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
 
-LOO-295's installed reconciliation attached existing merged
-[PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283) to the original
-PR row, recording merge 5bcc40fdff810c39885a31b3fbfd6557f49fde93. The Task stayed
-open and all eight unrelated scratch/loc-explorer files were byte-identical.
-Its current-runtime review/repeat/final-demo acceptance remains unresolved.
+LOO-295's installed association and eight-file preservation evidence remain at
+`49ab053e7:wave/infrastructure/MEMORY.md` under this heading. October 4's
+operator acceptance above supersedes its then-unresolved continuation proof.
 
 A separate retained-data defect remains: `invalid stored landing placement: home`
 from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
@@ -280,7 +278,11 @@ October 5 source permits empty Flow and preserves names. Jack Heart's comment
 retaining original evidence and strict subsequent conflicts. At `ec5501f25`,
 ingestion commits accepted facts, conversion markers and durable projection together
 with each entity's acquisition time; projection failure rolls back acceptance.
-Disputed membership remains recorded before that transaction. Replay and generic planning writers are deleted. Restart retains accepted planning.
+Full and partial association must validate the accepted Initiative transactionally:
+a stale full response otherwise records a fresh empty Wave after readers exclude
+the foreign Project. The extended store regression reproduced and repairs this gap.
+Disputed membership remains recorded before acceptance. Replay and generic planning
+writers are deleted; restart retains accepted planning.
 Rotation readbacks replace durable-only writes at `661622ee2`; partial reads retain refresh age. Reteam lacks full issue readbacks,
 planning locks and authorized Team-relationship acceptance. Lock all participating Waves from acquisition through acceptance, reusing held
 locks; final-refresh locking leaves earlier reads exposed. Focused proofs are synthetic; installed acceptance remains open.

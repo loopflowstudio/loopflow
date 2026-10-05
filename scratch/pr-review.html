@@ -31,28 +31,14 @@ details{margin:14px 0}summary{cursor:pointer;color:var(--mute);font-size:14px}
  td::before{content:attr(data-l);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}}
 @media print{body{background:#fff}pre{white-space:pre-wrap}details>*{display:block}}
 </style></head><body><main>
-<h1>Task Flows as ordinary commands</h1>
-<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> “Run Task Flows through ordinary commands and keep reviews in conversation” · LOO-353 · base <code>8ea0bec9c</code> → published head <code>45ca0d2ac</code> · 233 files, +6,046 −22,705. The local branch is one commit ahead (<code>92134ed3f</code>, scratch notes only).</p>
-<p>Jack Heart asked that the Task worker be deleted, that a Task launch be the ordinary command, and that a Flow leave nothing beyond what <code>lf</code> logs for any command. This revision replaces <code>flow start</code> with a thin <code>lf task run</code> and removes the FlowSession record. Waiting, Task primary selection, workflow files and Desktop's all-Flow views are not in it.</p>
-<nav><a href="#run">Run</a><a href="#record">What is recorded</a><a href="#read">Reading it back</a><a href="#migrate">Migration</a><a href="#proof">Proof</a></nav>
-<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-l="When you…"><a href="#run">Run a Flow for a Task</a></td><td data-l="What happens">The command prints the Flow's output and returns when it ends. It makes no difference whether you name the Task with <code>lf task run ISSUE</code>, with <code>--task ISSUE</code>, or by standing in its worktree: the same checks refuse a canceled or moved Task, and the same records are left.</td><td data-l="Where the code controls this"><code>lf task run</code> places the Task's worktree and picks its default Flow, then rewrites itself into <code>lf --task ISSUE run FLOW</code> before anything runs.</td></tr><tr><td data-l="When you…"><a href="#record">Look at what a Flow left behind</a></td><td data-l="What happens">There is no Flow record. You see one process row for the Flow and one for each step it started, each step row carrying its position in the Flow.</td><td data-l="Where the code controls this">The driver keeps the graph and its position in memory and tells each step what it is through one argument, <code>FlowStep</code>, which lands on that step's recorded command line.</td></tr><tr><td data-l="When you…"><a href="#read">Ask which Flows ran and how they ended</a></td><td data-l="What happens"><code>task status</code> and <code>flow list --sessions</code> list each Flow as Current, Completed or Stopped. A Flow whose step failed or whose process died reads Stopped; nothing restarts it.</td><td data-l="Where the code controls this"><code>flows_in</code> finds step rows by searching recorded command lines and groups them under their parent; the Flow's state is the driver row's own outcome.</td></tr><tr><td data-l="When you…"><a href="#migrate">Upgrade a Home that has saved Flows</a></td><td data-l="What happens">Saved Flows stop being Flows. Each one's name, state and last position is kept as a note on the conversations it opened; the tables are dropped.</td><td data-l="Where the code controls this">One draft migration, <code>task_flow_observations</code>.</td></tr></tbody></table>
+<h1>Flows as plain commands with a driver's record</h1>
+<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> “Run Task Flows through ordinary commands and retain their execution history” · LOO-353 · base <code>8ea0bec9c</code> → published head <code>32f42bffe</code> · 238 files, +6,530 −23,511 · the local branch matches the published head.</p>
+<p>Jack Heart's model from October 5: one <code>lf</code> flow run is a process whose driver keeps an append-only record, <b>FlowExec</b>; its steps are plain commands that do not know they are part of a Flow. The outer path from start to end, <b>TaskWorkflow</b>, is designed in <code>scratch/task-workflow.md</code> and is not in this revision.</p>
+<nav><a href="#run">Run</a><a href="#step">A step</a><a href="#record">The record</a><a href="#stop">Stopping</a><a href="#choices">Choices to review</a><a href="#proof">Proof</a></nav>
+<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-l="When you…"><a href="#run">Run a Flow for a Task</a></td><td data-l="What happens">The command prints the Flow's output and returns when it ends, whether you name the Task with <code>lf task run ISSUE</code>, with <code>--task ISSUE</code>, or by standing in its worktree.</td><td data-l="Where the code controls this"><code>lf task run</code> places the Task and picks its default Flow, then becomes <code>lf --task ISSUE run FLOW</code>. Unchanged since the last review.</td></tr><tr><td data-l="When you…"><a href="#step">Watch a Flow while it runs</a></td><td data-l="What happens">Each step shows up as the command you would type yourself, such as <code>lf sync --plan</code>. <code>flow show</code> lists the steps so far and marks the one still running.</td><td data-l="Where the code controls this">The driver starts each step as an ordinary child process. The step is told nothing about the Flow; the driver alone knows which step it is.</td></tr><tr><td data-l="When you…"><a href="#record">Ask what a Flow did</a></td><td data-l="What happens">Every Flow run, started by hand or by <code>lf task run</code>, has the same record: its name, its graph as it was at launch, and one line per step started.</td><td data-l="Where the code controls this">Two tables, <code>flow_execs</code> and <code>flow_exec_steps</code>, written only by the driver and never updated. Whether anything is running or finished is read from the process rows.</td></tr><tr><td data-l="When you…"><a href="#stop">Kill a Flow's process</a></td><td data-l="What happens">The Flow reads Stopped. Nothing restarts it. The step it had started keeps running to its own end.</td><td data-l="Where the code controls this">A Flow's state is its driver process's state. There is no command that changes a running Flow.</td></tr></tbody></table>
 
 <h2 id="run">1 · Run a Flow for a Task</h2>
-<figure class="term"><figcaption>Captured October 5 · branch build 0.13.3+45ca0d2ac · private Home, fixture Task, <code>proof</code> is a one-step Flow · agent run</figcaption><pre><code>$ lf -b task run INF-123 proof
-
-── flow proof
-  cmd: task sync --plan
-
-op: task sync --plan
-branch: launch-proof
-base: main
-class: protected
-strategy: merge_target
-unique_commits: 0
-changed_files: 1
-protected: true
-$                                   # returned when the Flow ended</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/bin/lf.rs#L1451-L1486"><code>rust/loopflow/src/bin/lf.rs</code></a> · <code>task run dispatch</code> · 45ca0d2ac · lines 1451–1486</figcaption><pre><code>    // `lf task run` places the Task and fills its defaults; from here it is
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/bin/lf.rs#L1451-L1486"><code>rust/loopflow/src/bin/lf.rs</code></a> · <code>task run dispatch</code> · 32f42bffe · lines 1451–1486</figcaption><pre><code>    // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE run FLOW`.
     if let Some(Commands::Task {
         cmd:
@@ -88,287 +74,215 @@ $                                   # returned when the Flow ended</code></pre><
         });
     }
     if let Some(task) = cli.task.as_ref() {</code></pre></figure>
-<p>After line 1486 the command is indistinguishable from <code>lf --task INF-123 run proof</code>. The <code>--task</code> branch that follows enters the Task's worktree, which is where a launch from the worktree already stands.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/tests/task_flow_launch_tests.rs#L26-L36"><code>rust/loopflow/tests/task_flow_launch_tests.rs</code></a> · <code>the three launch forms under test</code> · 45ca0d2ac · lines 26–36</figcaption><pre><code>/// The three ways to name a Task for a Flow: the Task entry, `--task`, and its
-/// worktree. All block in the foreground and reach the same checks.
-const LAUNCHES: [&amp;[&amp;str]; 3] = [
-    &amp;[&quot;-b&quot;, &quot;task&quot;, &quot;run&quot;, &quot;INF-123&quot;, &quot;proof&quot;],
-    &amp;[&quot;-b&quot;, &quot;--task&quot;, &quot;INF-123&quot;, &quot;run&quot;, &quot;proof&quot;],
-    &amp;[&quot;-b&quot;, &quot;run&quot;, &quot;proof&quot;],
-];
+<p>Unchanged from the last review. <code>task_flow_launch_tests</code> still runs the three launch forms and asserts identical refusals and records; it passes at this head.</p>
 
-#[test]
-fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
-    for condition in [&quot;valid&quot;, &quot;invalid&quot;, &quot;removed&quot;, &quot;terminal&quot;, &quot;moved&quot;] {</code></pre></figure>
-<div class="note"><b>Fits the decision.</b> Jack: “running somethign from a task's worktree and passing --task should be equivalent … we shouldnt get different codepaths or validations for either.” The test runs all three through valid, invalid, removed, terminal and moved planning and asserts identical refusals and identical recorded steps.</div>
-<div class="note"><b>Changed without Jack's review.</b> Launch-time PR preparation and the agent preflight before placement are gone; publication now refuses a settled PR and names the next step. Listed in <code>scratch/questions.md</code>.</div>
-
-<h2 id="record">2 · What a Flow leaves behind</h2>
-<figure class="term"><figcaption>Captured October 5 in the same private Home · agent run · rows trimmed, second JSON shortened</figcaption><pre><code>$ lf -b run stages &amp;                 # three operation steps; the second is not an allowed operation
-$ lf task status INF-123
-  latest Flow: task wait INF-123 --timeout 45: cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, sync, commit, release, doctor, … Inspect its history and effects, then launch fresh work
-  Flow: eef8c206-…  proof   Completed
-  Flow: f18905f1-…  stages  Stopped
-  Exec: e28cb983-…  [&quot;…/lf&quot;,&quot;__flow-step&quot;,&quot;{\&quot;flow\&quot;:\&quot;stages\&quot;,\&quot;seq\&quot;:2,\&quot;label\&quot;:\&quot;task wait INF-123 --timeout 45\&quot;,\&quot;cursor\&quot;:{\&quot;index\&quot;:1,\&quot;progress\&quot;:{\&quot;repeats\&quot;:{},\&quot;direction\&quot;:null,\&quot;verdict\&quot;:null},\&quot;iteration\&quot;:0},\&quot;key\&quot;:1,\&quot;iterations\&quot;:[[]]}&quot;,&quot;task&quot;,&quot;wait&quot;,&quot;INF-123&quot;,&quot;--timeout&quot;,&quot;45&quot;]  failed
-  Exec: e5be536d-…  [&quot;…/lf&quot;,&quot;__flow-step&quot;,&quot;{\&quot;flow\&quot;:\&quot;stages\&quot;,\&quot;seq\&quot;:1,\&quot;label\&quot;:\&quot;task sync --plan\&quot;, … }&quot;,&quot;task&quot;,&quot;sync&quot;,&quot;--plan&quot;]  succeeded
-  Exec: f18905f1-…  [&quot;…/lf&quot;,&quot;-b&quot;,&quot;run&quot;,&quot;stages&quot;]  failed
-  … other Exec rows omitted …
-
+<h2 id="step">2 · A step is the command you would type</h2>
+<figure class="term"><figcaption>Captured October 5 · branch build 0.13.3+32f42bffe · private Home, fixture Task · agent run, read while the second step was waiting · rows trimmed</figcaption><pre><code>$ lf -b run stages &amp;                 # sync --plan, then a 40-second wait, then sync --plan
 $ lf flow list --sessions --for-task INF-123
-eef8c206-b785-4fe1-8b63-f6eebf858370  Completed  proof
-f18905f1-2114-4bbf-9e45-46db250da289  Stopped  stages</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/ops/flow_run.rs#L22-L76"><code>rust/loopflow/src/ops/flow_run.rs</code></a> · <code>FlowStep</code> · 45ca0d2ac · lines 22–76</figcaption><pre><code>
-/// What a driver tells one step&#x27;s process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowStep {
-    pub flow: String,
-    /// This driver&#x27;s nth step launch, from 1. A repeated or corrected step
-    /// takes a new number.
-    pub seq: u32,
-    /// Skill name, operation or XOR router, as the graph labels it.
-    pub label: String,
-    /// The driver&#x27;s position: index, selected XOR paths and per-edge returns.
-    pub cursor: ExecutionCursor,
-    /// The step&#x27;s node in the driver&#x27;s graph, counted in preorder.
-    pub key: u32,
-    /// Returns taken on each loop edge, per nesting level, outermost first.
-    pub iterations: Vec&lt;Vec&lt;u32&gt;&gt;,
-    /// The driver&#x27;s compiled skill, when looking `label` up by name would not
-    /// yield it: a step-level override, a built-in router, or a file edited
-    /// since the Flow started.
-    #[serde(default, skip_serializing_if = &quot;Option::is_none&quot;)]
-    pub skill: Option&lt;crate::engine::Skill&gt;,
-    /// The structured answer a deciding or routing step must return.
-    #[serde(default, skip_serializing_if = &quot;Option::is_none&quot;)]
-    pub output: Option&lt;FlowOutput&gt;,
-    /// Continue this conversation instead of opening one: a correction of the
-    /// answer it just gave.
-    #[serde(default, skip_serializing_if = &quot;Option::is_none&quot;)]
-    pub session: Option&lt;String&gt;,
-}
+0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Current  stages
+2927673f-bb44-4069-a6d2-6a41f785b9f2  Completed  proof
 
-impl FlowStep {
-    pub(crate) fn arg(&amp;self) -&gt; Result&lt;String&gt; {
-        Ok(serde_json::to_string(self)?)
-    }
+$ lf flow show --sessions 0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5
+0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Current  stages
+  d495b06c-…  task sync --plan                iteration [[]]  succeeded
+  c435c0e8-…  task wait INF-123 --timeout 40  iteration [[]]  no recorded exit
 
-    pub(crate) fn parse(value: &amp;str) -&gt; Result&lt;Self&gt; {
-        serde_json::from_str(value).context(&quot;invalid Flow step&quot;)
-    }
-
-    /// The step an Exec was started as, read from its recorded argv.
-    pub(crate) fn of_exec(exec: &amp;Exec) -&gt; Option&lt;Self&gt; {
-        Self::of_command(exec.command.as_deref()?)
-    }
-
-    /// The step a recorded argv names.
-    pub(crate) fn of_command(command: &amp;str) -&gt; Option&lt;Self&gt; {
-        let argv: Vec&lt;String&gt; = serde_json::from_str(command).ok()?;
-        let marker = argv
-            .iter()
-            .position(|arg| arg == FLOW_STEP_ARG || arg == FLOW_STEP_COMMAND)?;
-        Self::parse(argv.get(marker + 1)?).ok()
-    }
-}
-
-/// One Flow as its Execs record it.</code></pre></figure>
-<h3>How the driver starts a step</h3>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/lf/commands/flow.rs#L527-L549"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>skill step</code> · 45ca0d2ac · lines 527–549</figcaption><pre><code>        // An invalid answer is corrected in the same conversation, twice at most.
-        for turn in 1.. {
-            let mut step = self.step(skill.skill.name.clone(), output.clone());
-            step.skill = compiled.clone();
-            step.session = session.take();
-            let mut args = step_cli.step_args();
-            args.extend([
-                &quot;--__cwd&quot;.to_owned(),
-                self.cwd.to_string_lossy().into_owned(),
-            ]);
-            args.extend([
-                flow_run::FLOW_STEP_ARG.to_owned(),
-                step.arg()?,
-                &quot;skill&quot;.to_owned(),
-                skill.skill.name.clone(),
-            ]);
-            if !message.trim().is_empty() {
-                args.push(message.clone());
+$ lf task status INF-123
+  latest Flow: Step Exec c435c0e8-… is running task wait INF-123 --timeout 40
+  Exec: c435c0e8-…  [&quot;…/lf&quot;,&quot;task&quot;,&quot;wait&quot;,&quot;INF-123&quot;,&quot;--timeout&quot;,&quot;40&quot;]  unknown
+  Exec: 0e0f46b7-…  [&quot;…/lf&quot;,&quot;-b&quot;,&quot;run&quot;,&quot;stages&quot;]                       unknown
+  Exec: d495b06c-…  [&quot;…/lf&quot;,&quot;sync&quot;,&quot;--plan&quot;]                           succeeded
+  … other rows omitted …</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/lf/commands/flow.rs#L531-L575"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>Driver::run_skill — building and running a skill step</code> · 32f42bffe · lines 531–575</figcaption><pre><code>        let mut step_cli = self.launcher.exec_options();
+        step_cli.account.clear();
+        step_cli.only_account.clear();
+        step_cli.isolate = false;
+        step_cli.shared = false;
+        // The step looks its skill up by name. An agent the Flow names for
+        // this occurrence is the one option that travels, as `--model`.
+        if step_cli.model.is_none() {
+            let authored = crate::engine::flow::load_skill(name, self.cwd).ok();
+            if authored.and_then(|authored| authored.agent) != skill.skill.agent {
+                step_cli.model = skill.skill.agent.clone();
             }
-            if let StepExit::Stopped = self.spawn(&amp;step, &amp;args, false).await? {
+        }
+        // The step is the command a person would type: `lf -b skill &lt;name&gt; [message]`.
+        let mut args = step_cli.step_args();
+        args.extend([&quot;skill&quot;.to_owned(), name.clone()]);
+        if !message.trim().is_empty() {
+            args.push(message);
+        }
+        // An invalid answer is corrected in the same conversation, twice at most.
+        for turn in 1.. {
+            let (exit, step) = self.spawn(name, &amp;args).await?;
+            if let StepExit::Stopped = exit {
                 return Ok(SkillOutcome::Waiting);
             }
-            let Some(output) = &amp;output else {</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/lf/commands/flow.rs#L572-L587"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>operation step</code> · 45ca0d2ac · lines 572–587</figcaption><pre><code>
-    /// The child owns the effect; the driver reads only how it ended.
-    async fn run_command(
+            let Some(output) = &amp;output else {
+                return Ok(SkillOutcome::Completed);
+            };
+            let (conversation, answer) = self.answer(name, step.as_ref())?;
+            let error = match answer {
+                None =&gt; &quot;final output is absent&quot;.to_owned(),
+                Some(text) =&gt; match answer_value(&amp;text).and_then(|value| output.decode(&amp;value)) {
+                    Ok(outcome) =&gt; return Ok(outcome),
+                    Err(error) =&gt; error,
+                },
+            };
+            anyhow::ensure!(
+                turn &lt; 3,
+                &quot;structured output validation exhausted after {turn} successful turns: {error}&quot;
+            );
+            args = vec![
+                &quot;--batch&quot;.to_owned(),
+                &quot;session&quot;.to_owned(),
+                &quot;resume&quot;.to_owned(),
+                conversation,</code></pre></figure>
+<p>A deciding step's answer format is appended to its message (lines 529–531). If the answer does not parse, the driver runs <code>lf --batch session resume &lt;conversation&gt; &lt;correction&gt;</code>, twice at most.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/lf/commands/flow.rs#L366-L412"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>Driver::spawn — start the child, then record which Exec it became</code> · 32f42bffe · lines 366–412</figcaption><pre><code>    /// Run `lf &lt;args&gt;` as a child and record its Exec as this Flow&#x27;s next step.
+    async fn spawn(
         &amp;self,
-        ops: &amp;crate::engine::ConcreteCommand,
-        _ctx: ExecutionContext,
-    ) -&gt; Result&lt;SkillOutcome&gt; {
-        eprintln!(&quot;op: {}&quot;, ops.item.display_name());
-        let step = self.step(ops.item.display_name(), None);
-        let mut args = vec![flow_run::FLOW_STEP_COMMAND.to_owned(), step.arg()?];
-        args.extend(ops.item.argv().into_iter().skip(1));
-        Ok(match self.spawn(&amp;step, &amp;args, true).await? {
-            StepExit::Finished =&gt; SkillOutcome::Completed,
-            StepExit::Stopped =&gt; SkillOutcome::Waiting,
-        })
-    }</code></pre></figure>
-<div class="note"><b>Open.</b> Jack: “Can we do this environemnt variables? I hate __ and hidden arguments.” The argument does two jobs: it instructs the step (compiled skill, required answer, conversation to continue) and it is the only record of position. Process rows record the command line and not the environment, so moving it means the row needs a field for position. Not decided.</div>
-<div class="note"><b>Consequence of the current shape.</b> A step with a compiled skill override puts the whole skill on its command line, and every reader finds Flows by searching command text for <code>__flow-step</code> (next stop).</div>
-
-<h2 id="read">3 · Which Flows ran and how they ended</h2>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/store/sqlite/flow_inventory.rs#L21-L69"><code>rust/loopflow/src/store/sqlite/flow_inventory.rs</code></a> · <code>flows_in, entry_in</code> · 45ca0d2ac · lines 21–69</figcaption><pre><code>/// Step Execs matching `scope` (a condition on `e`), grouped under their
-/// drivers in launch order. A step whose driver left no Exec is not a Flow.
-pub(super) fn flows_in(
-    conn: &amp;Connection,
-    scope: &amp;str,
-    values: &amp;[&amp;dyn rusqlite::ToSql],
-) -&gt; StoreResult&lt;Vec&lt;FlowExecs&gt;&gt; {
-    let steps = conn
-        .prepare(&amp;format!(
-            &quot;{EXEC_SELECT} WHERE e.parent_exec_id IS NOT NULL
-             AND instr(e.command,&#x27;{FLOW_STEP_COMMAND}&#x27;)&gt;0 AND ({scope}) ORDER BY e.rowid&quot;
-        ))?
-        .query_map(values, read_exec)?
-        .collect::&lt;rusqlite::Result&lt;Vec&lt;_&gt;&gt;&gt;()?;
-    let mut flows: Vec&lt;FlowExecs&gt; = Vec::new();
-    for exec in steps {
-        let Some(step) = FlowStep::of_exec(&amp;exec) else {
-            continue;
-        };
-        let parent = exec.parent_exec_id.clone().expect(&quot;selected with a parent&quot;);
-        if let Some(flow) = flows.iter_mut().find(|flow| flow.driver.id == parent) {
-            flow.steps.push((step, exec));
-            continue;
-        }
-        let driver = conn
-            .query_row(
-                &amp;format!(&quot;{EXEC_SELECT} WHERE e.id=?1&quot;),
-                [&amp;parent],
-                read_exec,
-            )
-            .optional()?;
-        if let Some(driver) = driver {
-            flows.push(FlowExecs {
-                driver,
-                steps: vec![(step, exec)],
-            });
-        }
-    }
-    for flow in &amp;mut flows {
-        flow.steps.sort_by_key(|(step, _)| step.seq);
-    }
-    Ok(flows)
-}
-
-/// What the driver&#x27;s Exec says of the Flow, and the Work its checkout names.
-pub(super) fn entry_in(conn: &amp;Connection, flow: &amp;FlowExecs) -&gt; StoreResult&lt;FlowInventoryEntry&gt; {
-    let driver = &amp;flow.driver;
-    let state = FlowSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
-    let task: Option&lt;String&gt; = match &amp;driver.cwd {</code></pre></figure>
-<p>The Flow's id is its driver's process id. Its state is the driver's outcome: running is Current, a clean exit is Completed, anything else is Stopped. Its Task is whichever Task's worktree contains the driver's directory.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/ops/flow_run.rs#L97-L160"><code>rust/loopflow/src/ops/flow_run.rs</code></a> · <code>FlowExecs::detail</code> · 45ca0d2ac · lines 97–160</figcaption><pre><code>    /// How far the Flow got, drawn on the authored graph while every recorded
-    /// step still fits it, else on the sequence its steps recorded.
-    pub(crate) fn detail(
-        &amp;self,
-        entry: crate::durable::FlowInventoryEntry,
-    ) -&gt; crate::durable::FlowDetail {
-        use crate::engine::flow_graph::{location, project_cursor, FlowGraph};
-        use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
-
-        let cwd = self.driver.cwd.as_ref().map(std::path::PathBuf::from);
-        let finished = entry.summary.state == crate::session::FlowSummaryState::Completed;
-        let (latest, _) = self.latest();
-        let authored = cwd.as_deref().and_then(|cwd| {
-            let flow = crate::engine::load_flow(self.name(), cwd).ok()?;
-            let steps = crate::engine::compile_flow(&amp;flow, cwd).ok()?;
-            let graph = FlowGraph::new(self.name(), &amp;steps);
-            self.steps
-                .iter()
-                .all(|(step, _)| {
-                    location(&amp;steps, &amp;step.cursor).is_ok_and(|(key, _)| {
-                        key == step.key
-                            &amp;&amp; graph
-                                .node_at(key)
-                                .is_some_and(|node| node.label == step.label)
-                    })
-                })
-                .then_some((steps, graph))
-        });
-        let (graph, cursor) = match authored {
-            Some((steps, graph)) =&gt; {
-                let mut cursor = latest.cursor.clone();
-                if finished {
-                    cursor.index = steps.len();
-                    cursor.child = None;
-                }
-                (graph, cursor)
-            }
-            None =&gt; {
-                let mut occurrences: Vec&lt;(String, &amp;str)&gt; = Vec::new();
-                for (step, _) in &amp;self.steps {
-                    let path = step.cursor.node_key();
-                    if !occurrences.iter().any(|(seen, _)| *seen == path) {
-                        occurrences.push((path, &amp;step.label));
+        label: &amp;str,
+        args: &amp;[String],
+    ) -&gt; Result&lt;(StepExit, Option&lt;crate::id::ExecId&gt;)&gt; {
+        // The absolute selected path becomes argv[0] in the child&#x27;s Exec record.
+        let mut command =
+            tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
+        command.current_dir(self.cwd);
+        command.env(flow_run::FLOW_ID_ENV, self.exec.as_str());
+        if let Some((id, fd)) = self
+            .launcher
+            .cron_receipt
+            .as_ref()
+            .zip(self.launcher.cron_lock_fd)
+        {
+            command.args([&quot;--__cron-receipt&quot;, id, &quot;--__cron-lock-fd&quot;, &amp;fd.to_string()]);
+            // SAFETY: the cron launcher owns the descriptor throughout spawn;
+            // fcntl preserves that exact capability in the step child.
+            unsafe {
+                command.pre_exec(move || {
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
                     }
+                    Ok(())
+                });
+            }
+        }
+        command.args(args);
+        let mark = self.store.sqlite.exec_mark()?;
+        let mut child = command.spawn().context(&quot;could not execute Flow step&quot;)?;
+        let mut step = None;
+        let status = loop {
+            tokio::select! {
+                status = child.wait() =&gt; break status,
+                // A read can fail while a newer child migrates; the exit retries it.
+                () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() =&gt; {
+                    step = self.record_step(mark).unwrap_or(None);
                 }
-                let position = occurrences
-                    .iter()
-                    .position(|(path, _)| *path == latest.cursor.node_key())
-                    .expect(&quot;the latest step is recorded&quot;);
-                let steps: Vec&lt;_&gt; = occurrences
-                    .iter()
-                    .map(|(_, label)| {
-                        ConcreteStep::Skill(ConcreteSkill {
-                            skill: Skill::named(label),
-                            id: None,
-                            human: false,
-                            repeat: None,
-                            sources: Vec::new(),
-                        })
-                    })
-                    .collect();
-                let cursor = ExecutionCursor {
-                    index: if finished { steps.len() } else { position },
-                    ..Default::default()</code></pre></figure>
-<div class="note"><b>What was given up.</b> No graph is pinned at launch. A Flow is drawn on today's authored graph only while every recorded step still fits it; otherwise it is drawn as the flat sequence its steps recorded. Recorded as accepted by default, not confirmed by Jack.</div>
-<div class="note"><b>Fixed since the first review.</b> A failed Flow read <code>Current</code> beside a line saying its process exited. It now reads <code>Stopped</code>.</div>
+            }
+        };
+        // The step ran whatever comes next, so its row is attempted first.
+        if step.is_none() {
+            step = self.record_step(mark).unwrap_or(None);
+        }
+        // A new installation can select a newer child. Never read its result</code></pre></figure>
+<div class="note"><b>Fits the decision.</b> Jack: “why does the skill lf exec even need to know what step position it is? just runt the right skill.” No payload, hidden argument or position variable remains. <code>LF_FLOW_ID</code> is still set in the step's environment so skills can share a note; <code>lf</code> reads it nowhere.</div>
+<div class="note"><b>How the driver learns its child's Exec.</b> It notes where the Exec table ends, starts the child, and polls every 10 ms for the first new Exec whose parent is itself. A driver killed in that gap leaves a step with no record line.</div>
 
-<h2 id="migrate">4 · Upgrading a Home with saved Flows</h2>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/45ca0d2ac23b196147c3b110b41086f4f8d04ca1/rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql#L26-L53"><code>rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql</code></a> · <code>Flow archive and drop</code> · 45ca0d2ac · lines 26–53</figcaption><pre><code>-- A Flow is its driver Exec and the step Execs it starts; nothing stores a
--- cursor. Each saved Flow&#x27;s name, state and last position stay as an observation
--- on every conversation it opened. None of it is resumable state.
-DROP TRIGGER validate_task_invocation;
-ALTER TABLE tasks DROP COLUMN current_invocation_id;
-INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-SELECT s.id,&#x27;observed&#x27;,&#x27;legacy_flow:&#x27;||f.id,s.task_id,s.wave_id,unixepoch(),
-    json_object(&#x27;type&#x27;,&#x27;legacy_flow&#x27;,&#x27;flow_id&#x27;,f.id,
-        &#x27;flow&#x27;,CASE WHEN json_valid(f.invocation_json) THEN json_extract(f.invocation_json,&#x27;$.flow&#x27;) END,
-        &#x27;state&#x27;,f.state,&#x27;ended_at&#x27;,f.ended_at,&#x27;step_index&#x27;,f.step_index,&#x27;iteration&#x27;,f.iteration,
-        &#x27;cursor&#x27;,CASE WHEN json_valid(f.review_json) THEN json(f.review_json) END,
-        &#x27;failure&#x27;,CASE WHEN json_valid(f.failure_json) THEN json(f.failure_json) END,
-        &#x27;node&#x27;,s.node,&#x27;iterations&#x27;,CASE WHEN json_valid(s.iterations) THEN json(s.iterations) END),
-    s.current_capture
-FROM agent_sessions s JOIN flow_sessions f ON f.id=s.flow_session_id;
--- A Task whose only start evidence was its Flow row keeps that evidence.
-DROP TRIGGER validate_task_started_update;
-UPDATE tasks SET started_at=(SELECT MIN(updated_at) FROM flow_sessions WHERE task_id=tasks.id)
-WHERE started_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=tasks.id);
+<h2 id="record">3 · The record every Flow gets</h2>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql#L76-L106"><code>rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql</code></a> · <code>flow_execs, flow_exec_steps</code> · 32f42bffe · lines 76–106</figcaption><pre><code>-- One row per Flow run, written once by its driver: the Flow&#x27;s name and its
+-- graph as compiled at launch. Running, finished and failed are the driver
+-- Exec&#x27;s; nothing here is updated.
+CREATE TABLE flow_execs (
+    exec_id TEXT PRIMARY KEY REFERENCES execs(id),
+    flow TEXT NOT NULL,
+    graph TEXT NOT NULL CHECK (json_valid(graph))
+) STRICT;
 
-DROP TRIGGER validate_conversation_ancestry_insert;
-DROP TRIGGER validate_conversation_ancestry_update;
-DROP TRIGGER validate_flow_conversation_parents;
-DROP TRIGGER validate_flow_capture;
-ALTER TABLE agent_sessions DROP COLUMN flow_session_id;
-UPDATE flow_sessions SET operation_start=NULL;
-DROP TABLE flow_events;
-DROP TABLE flow_sessions;</code></pre></figure>
-<div class="note"><b>Evidence limit.</b> Not run against real data. A saved Flow that opened no conversation leaves only its Task's start time. A Flow parked at a review today cannot be continued after this migration.</div>
+-- One row per step the driver started, in launch order. The step&#x27;s result is
+-- its own Exec&#x27;s exit.
+CREATE TABLE flow_exec_steps (
+    seq INTEGER PRIMARY KEY,
+    flow_exec_id TEXT NOT NULL REFERENCES flow_execs(exec_id),
+    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id),
+    node INTEGER NOT NULL,
+    iterations TEXT NOT NULL CHECK (json_valid(iterations))
+) STRICT;
+CREATE INDEX flow_exec_steps_flow ON flow_exec_steps(flow_exec_id, seq);
+
+CREATE TRIGGER flow_execs_are_append_only BEFORE UPDATE ON flow_execs BEGIN
+    SELECT RAISE(ABORT,&#x27;A Flow record is append-only&#x27;);
+END;
+CREATE TRIGGER flow_exec_steps_are_append_only BEFORE UPDATE ON flow_exec_steps BEGIN
+    SELECT RAISE(ABORT,&#x27;A Flow record is append-only&#x27;);
+END;
+CREATE TRIGGER validate_flow_exec_step BEFORE INSERT ON flow_exec_steps BEGIN
+    SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM execs step
+        WHERE step.id=NEW.exec_id AND step.parent_exec_id=NEW.flow_exec_id
+    ) THEN RAISE(ABORT,&#x27;A Flow step is an Exec its driver started&#x27;) END;
+END;</code></pre></figure>
+<figure class="term"><figcaption>The same private Home, after the runs above</figcaption><pre><code>sqlite&gt; select substr(exec_id,1,8), flow, length(graph) from flow_execs;
+2927673f|proof|334
+0e0f46b7|stages|682
+sqlite&gt; select substr(flow_exec_id,1,8), seq, substr(exec_id,1,8), node, iterations from flow_exec_steps;
+2927673f|1|131c89ce|0|[[]]
+0e0f46b7|2|d495b06c|0|[[]]
+0e0f46b7|3|c435c0e8|1|[[]]</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/sqlite/flow_inventory.rs#L212-L239"><code>rust/loopflow/src/store/sqlite/flow_inventory.rs</code></a> · <code>the driver's two writes</code> · 32f42bffe · lines 212–239</figcaption><pre><code>
+    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
+    pub(crate) fn record_flow_exec(
+        &amp;self,
+        driver: &amp;ExecId,
+        flow: &amp;str,
+        graph: &amp;FlowGraph,
+    ) -&gt; StoreResult&lt;()&gt; {
+        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        conn.execute(
+            &quot;INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,?2,?3)&quot;,
+            params![driver, flow, serde_json::to_string(graph)?],
+        )?;
+        Ok(())
+    }
+
+    /// A driver&#x27;s record of one step it started, as that step&#x27;s Exec.
+    pub(crate) fn record_flow_step(
+        &amp;self,
+        driver: &amp;ExecId,
+        step: &amp;ExecId,
+        key: u32,
+        iterations: &amp;[Vec&lt;u32&gt;],
+    ) -&gt; StoreResult&lt;()&gt; {
+        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        conn.execute(
+            &quot;INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,?3,?4)&quot;,
+            params![driver, step, key, serde_json::to_string(iterations)?],</code></pre></figure>
+<div class="note"><b>Fits the decision.</b> “the flow driver should be responsible for maintaining the state”; “FlowExec works fine”. The record is keyed by the driver's Exec, holds no state of its own, and triggers refuse any update. No column on a Task points at a Flow.</div>
+<div class="note"><b>Regained since the last review.</b> A past Flow is drawn on the graph it launched with, not on today's YAML.</div>
+
+<h2 id="stop">4 · Killing a Flow's process</h2>
+<figure class="term"><figcaption>Captured October 5 in the same private Home · agent run</figcaption><pre><code>$ kill -TERM &lt;driver of a running `stages` Flow&gt;
+$ lf flow list --sessions --for-task INF-123
+0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Stopped  stages
+…
+$ ps | grep &quot;task wait&quot;              # the step it had started is still running
+…/lf task wait INF-123 --timeout 40</code></pre></figure>
+<div class="note"><b>Evidence limit.</b> This was an operation step. A driver killed during an agent step is untested; by design the running turn is left to its conversation.</div>
+
+<h2 id="choices">Choices the pass made that Jack has not reviewed</h2>
+<p>From <code>scratch/questions.md</code>, “Choices the FlowExec pass made without Jack”. The ones that change behavior beyond this model:</p>
+<ul>
+<li><b>Structured output is gone for every provider.</b> A deciding step's answer contract is message text only; the driver accepts a JSON value alone, in prose or in a code fence. How reliably real providers comply is unproven.</li>
+<li><b>Any <code>lf</code> command can be a <code>cmd:</code> step.</b> The in-process operation interpreter and its allowlist are deleted. <code>cmd: pr open</code> now opens the browser page; <code>commit</code> in a Flow no longer applies the guard the interpreter added.</li>
+<li><b>Watched landings.</b> Exit status 75 is gone; after an operation the driver stops the Flow if a landing of its checkout still awaits its merge.</li>
+<li><b>Steers.</b> Every step receives all of its Task's steers; per-node acknowledgement, which spared a repeated node steers it had already seen, is gone.</li>
+<li><b>Step overrides.</b> A step looks its skill up by name, so a mid-Flow edit applies to later steps. Only <code>agent</code> travels, as <code>--model</code>; <code>action_style</code> on a step is dropped. The default XOR router is now a builtin skill, <code>xor-route</code>.</li>
+<li><b><code>lf session resume ID MESSAGE</code></b> is a new optional argument, refused without <code>-b</code>.</li>
+</ul>
 
 <h2 id="proof">Proof and limits</h2>
 <details open><summary>Checks</summary>
-<p><b>Run for this page, at <code>45ca0d2ac</code>, inherited <code>LF_*</code> cleared:</b> <code>task_flow_launch_tests</code> (1) and <code>pr_tests</code> (31) passed; Clippy on all targets and <code>cargo fmt --check</code> clean.</p>
-<p><b>Recorded by the implementing pass, not rerun here:</b> <code>session_lifecycle_tests</code>, <code>flow_tests</code>, <code>flow_discovery_tests</code>, <code>dto_fixtures</code>, <code>cli_discovery</code>; <code>swift build --build-tests</code>.</p>
-<p><b>PR CI:</b> only <code>scratch-clear</code> ran and passed; the other 14 jobs, including <code>rust-test</code>, <code>swift-test</code> and <code>migration-check</code>, were skipped. The full suites have not run anywhere.</p>
-<p><b>Unverified:</b> a real provider step; a loop's iterations read back in a live run; a driver killed mid-step (operation steps accept only a fixed list, so no slow provider-free step exists); the migration on a populated store; Desktop Start against a real <code>lf</code>.</p></details>
-<details><summary>Not shown here</summary><p>The restored <code>-b</code>, <code>-i</code>, <code>--tui</code>, <code>--ide</code> flags and <code>commit -p</code> (<code>8847ba5ab</code>); builtin Flows without human steps; the removed worker, scheduling and Ready/Complete code from the first reviewed revision. Decisions and open choices: <code>scratch/focus-on-your-own-work.md</code>, <code>scratch/questions.md</code>.</p></details>
+<p><b>Run for this page, at <code>32f42bffe</code>, inherited <code>LF_*</code> cleared:</b> <code>task_flow_launch_tests</code> (1), <code>flow_tests</code> (24), <code>pr_tests</code> (31), <code>session_lifecycle_tests</code> (17), <code>dto_fixtures</code> (18) passed; Clippy on all targets and <code>cargo fmt --check</code> clean. The private-Home transcripts above.</p>
+<p><b>Reported by the pass, not rerun:</b> two gate failures it says predate it (Session resume selection; previous-release status migration). The real-Codex end-to-end script was ported but not executed.</p>
+<p><b>PR CI:</b> not rechecked for this head; on earlier heads only <code>scratch-clear</code> ran.</p>
+<p><b>Unverified:</b> a real provider step, including whether a provider returns a decision without structured output; a loop's iterations in a live run; a driver killed during an agent step; the migration on a populated store; Swift tests and Desktop.</p></details>
 </main></body></html>

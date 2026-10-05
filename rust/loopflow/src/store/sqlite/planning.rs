@@ -6,6 +6,7 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::{
     PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord, StoreError, StoreResult,
 };
+use crate::work::project::ProjectId;
 
 impl SqliteStore {
     pub fn put_pm_task(
@@ -376,8 +377,11 @@ fn project_accepted_planning(
             )));
         }
         let id = existing
-            .map(|(id, _)| id)
-            .unwrap_or_else(|| crate::work::project::ProjectId::new().to_string());
+            .map(|(id, _)| {
+                ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?
+            .unwrap_or_else(ProjectId::new);
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
              project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,flow,status)
@@ -385,15 +389,10 @@ fn project_accepted_planning(
              ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
              project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
              pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,flow=excluded.flow,status=excluded.status",
-            params![id,wave_id,project.id,project.slug,project.name,
+            params![id.as_str(),wave_id,project.id,project.slug,project.name,
                 project.prompt_context(),observed_at,super::super::rows::now_unix(),project.flow,project.status.as_str()],
         )?;
-        let durable = tx.query_row(
-            super::children::PROJECT_SELECT,
-            [&id],
-            super::children::map_project_row,
-        )?;
-        super::durable::create_project_work(tx, &durable)?;
+        super::durable::inherit_project_placement(tx, &id)?;
     }
     let items = {
         let mut query = tx.prepare(

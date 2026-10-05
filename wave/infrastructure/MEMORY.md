@@ -277,20 +277,21 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 
 October 5 source permits empty Flow and preserves names. Jack Heart's comment
 `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only correction,
-retaining original evidence and strict subsequent conflicts. Full/detail ingestion
-now commits accepted facts, conversion markers and durable projection together,
-using each entity's retained acquisition time. Projection failure rolls back
-acceptance. Independent replay and `update_task_plan` are deleted; rotation and
-reteam still bypass that owner. Restart no longer writes captured
-Project/Task plans; the unused generic Task updater is deleted. Rotation and
-reteam identifier regressions plus cached reteam's rejected Team change remain.
-Age, delayed-response and restart proofs narrow six failures to three;
-installed acceptance remains unproved.
-Full mutation readbacks and explicitly ordered relationship acceptance remain.
-Selection, ensure, rotation and Desktop are unfinished. #1447's cached view and
-independent Session reads must survive activation outside restoration/polling.
-#1446's ongoing operating procedures retain started-Task follow-through;
-observational reads must remain free of provisioning.
+retaining original evidence and strict subsequent conflicts. At `ec5501f25`,
+full/detail ingestion commits accepted facts, conversion markers and durable
+projection together, retaining each entity's acquisition time. Projection failure
+rolls back acceptance; disputed membership remains recorded before that transaction.
+Independent replay and generic Task planning updates are deleted. Restart changes
+execution without restoring captured planning; delayed public restart coverage
+retains accepted content and age. Rotation and reteam still bypass this owner:
+transfer, identifier and cached Team-relationship regressions remain failing.
+
+Uncommitted placement compression has focused proofs, not operation recovery.
+Full mutation readbacks and serialized, authorized relationship acceptance remain
+before membership fencing, shared selection, ensure and rotation. Desktop activation
+must preserve #1447's cached plans and independent Session reads, outside polling.
+#1446's ongoing procedures retain started-Task follow-through; reads never provision.
+Installed and configured acceptance remain unproved.
 
 Collection preserves issue-reported ownership; listing Project IDs cannot override
 it. October 5 removes that overwrite for moved/detached issues after a failing

@@ -1737,6 +1737,17 @@ mod tests {
         store.put_pm_snapshot(old).await.unwrap();
         // The first refresh has accepted and loaded its response, then pauses.
         let delayed = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let predecessor_work = WorkRef::Project(predecessor.id.clone());
+        let retained_placement = store.placement(&predecessor_work).await.unwrap();
+        let next_home = crate::durable::HomeId::new();
+        store
+            .observe_home(&next_home, "ssh://fixture")
+            .await
+            .unwrap();
+        store
+            .place_work(&WorkRef::Wave(wave.id().clone()), &next_home)
+            .await
+            .unwrap();
         let mut newer = delayed.clone();
         newer.synced_at = 2;
         let mut successor = newer.snapshot.projects[0].clone();
@@ -1751,6 +1762,18 @@ mod tests {
         let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, predecessor.id);
+        assert_eq!(
+            store.placement(&predecessor_work).await.unwrap(),
+            retained_placement
+        );
+        assert_eq!(
+            store
+                .placement(&WorkRef::Project(transferred.project_id.clone()))
+                .await
+                .unwrap()
+                .home_id,
+            next_home
+        );
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
         assert!(store.put_pm_snapshot(delayed).await.is_err());

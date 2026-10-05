@@ -9,7 +9,7 @@ use crate::durable::{
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::{Project, ProjectEventKind};
+use crate::work::project::ProjectEventKind;
 use crate::work::task::{Task, TaskEventKind};
 
 use super::SqliteStore;
@@ -652,35 +652,21 @@ pub(crate) fn create_wave_work(
     inherit_placement(tx, &work, None, created_at)
 }
 
-pub(crate) fn create_project_work(tx: &Transaction<'_>, project: &Project) -> StoreResult<()> {
-    let project_id = tx
-        .query_row(
-            "SELECT id FROM projects WHERE external_project_id=?1",
-            [project.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| ProjectId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO projects (
-            id, wave_id, external_project_id, created_at
-         ) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            project_id,
-            project.wave_id.as_str(),
-            project.plan.id.as_str(),
-            project.created_at.unix_timestamp(),
-        ],
+pub(super) fn inherit_project_placement(
+    tx: &Transaction<'_>,
+    project_id: &ProjectId,
+) -> StoreResult<()> {
+    let (wave_id, created_at) = tx.query_row(
+        "SELECT wave_id,created_at FROM projects WHERE id=?1",
+        [project_id.as_str()],
+        |row| Ok((row.get::<_, WaveId>(0)?, row.get::<_, i64>(1)?)),
     )?;
-    let work = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Wave(project.wave_id.clone());
     inherit_placement(
         tx,
-        &work,
-        Some(&parent),
-        project.created_at.unix_timestamp(),
-    )?;
-    Ok(())
+        &WorkRef::Project(project_id.clone()),
+        Some(&WorkRef::Wave(wave_id)),
+        created_at,
+    )
 }
 
 pub(crate) fn create_task_work(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {

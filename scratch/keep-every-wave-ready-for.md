@@ -867,27 +867,24 @@ preparation retains its pending version and appends any new migration batch with
 rewriting earlier bytes. The materialized name-cutover fixture must retain that
 same-batch boundary behavior; its earlier focused pass is not a release-tree gate.
 
-October 5 implementation removes independent `sync_projects` and Task-update
-reconciliation writes. SQLite projects accepted Project/Task facts before committing
-full or detail ingestion, preserving per-entity times and Project placement. The
-projection is limited to supplied entity IDs. Shared Project prompt rendering now
-belongs to `PmProject`. No configured provider mutation or installed-Home access occurred.
+October 5 atomic-ingestion and restart changes are checkpointed at `ec5501f25`.
+Atomic ingestion replaces independent sync/Task-update projection; restart preserves
+accepted planning and returns its persisted age. Public restart coverage delays
+its Git checkpoint while a provider-detail update arrives, then reaches review
+with the newer plan. Store coverage retains Completed status and PR identity.
+Shared prompt rendering belongs to `PmProject`; projection selects supplied IDs
+and rejects conflicting Wave ownership transactionally.
 
-October 5 implementation removes restart's captured Project/Task writes and the
-unused generic Task updater. The restart store regression preserves Completed
-Project status, accepted Task content/age and PR identity. Public restart coverage
-adds a provider-detail update while the real checkpoint waits in a fixture Git
-hook; the resumed workflow retains the newer accepted plan and reaches review. Restart
-returns the persisted Task so its JSON does not report the pre-checkpoint age. These are local
-proofs, not installed acceptance. Rotation's transfer, reteam's identifier and
-cached Team-relationship failures remain. No shared selection, ensure, membership
-fence, rotation redesign or Desktop activation is established.
+The subsequent, uncommitted compression removes `create_project_work`'s redundant
+identity lookup and insert.
+Both callers already inserted the Project in the same transaction; the surviving
+helper only inherits placement from that stored row. Projection no longer decodes
+a complete durable Project merely to place it. Existing placement survives a Wave
+placement change; newly projected Projects inherit the current Wave placement.
+Restart clears its invocation and updates its timestamp in one statement.
+Realign source inspection confirms three remaining regressions: rotation transfer,
+reteam identifier and cached Team relationships. Earlier feedback naming four
+predates restart repair. Selection, admission and configured acceptance remain
+unfinished. No installed Home or configured provider was changed.
 
-Compression removes the unused `update_task_plan` writer and its wrapper. Tests
-retain planning/PR/execution preservation through accepted ingestion; the reteam
-counterexample no longer replays the deleted writer. Projection inputs now share
-ID extraction, and a single SQL CTE applies eligibility to both known ownership
-paths. Conflicting Wave ownership still rolls back the transaction. These cuts
-do not repair the remaining runtime writers or establish configured acceptance.
-
-Checks: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, and compiled tests through `scripts/test_network.py` pass: six planning/restart cases, public restart (delayed acceptance and JSON age), two checkout cases; gate owns broader/materialized/configured proofs, isolated CI owns prohibited installation proofs.
+Checks: realign `git diff --check` passes; retained compression evidence (not rerun): `cargo fmt --all`, `cargo test -p loopflow --lib --no-run` and seven compiled planning/placement/restart tests via `scripts/test_network.py`, plus `cargo clippy --all-targets -- -D warnings`, pass. Earlier public restart/checkout passes remain at `ec5501f25`; gate owns broader/materialized/configured proofs, isolated CI owns prohibited installation proofs.

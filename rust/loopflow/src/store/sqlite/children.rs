@@ -25,7 +25,7 @@ use crate::work::task::{
     TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{create_project_work, create_task_work};
+use super::durable::{create_task_work, inherit_project_placement};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -155,11 +155,7 @@ impl SqliteStore {
             params![task.id.as_str(), now_unix()],
         )?;
         transaction.execute(
-            "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
-            [task.id.as_str()],
-        )?;
-        transaction.execute(
-            "UPDATE tasks SET updated_at=?2 WHERE id=?1",
+            "UPDATE tasks SET current_invocation_id=NULL,updated_at=?2 WHERE id=?1",
             params![task.id.as_str(), task.updated_at.unix_timestamp()],
         )?;
         insert_task_event_in(
@@ -749,7 +745,7 @@ impl SqliteStore {
             PROJECT_INSERT,
             rusqlite::params_from_iter(project_params(project).iter().map(|value| value.as_ref())),
         )?;
-        create_project_work(&transaction, project)?;
+        inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())
     }

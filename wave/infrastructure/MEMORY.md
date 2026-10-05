@@ -252,59 +252,12 @@ stores; October 4's authorized retirement below resolves that remaining gap.
 
 ### Release and acceptance recovery (2026-10-02)
 
-Jack Heart authorized publishing the patch, installation, and the remaining
-one-Home acceptance. [PR #1406](https://github.com/loopflowstudio/loopflow/pull/1406)
-repaired the publisher's installed-CLI command mismatch: staging and finalization
-use `lf release publish`. Six publisher tests and hosted checks passed, and
-v0.12.30 publication completed through `lf release run patch`.
-
-Installed upgrade refused v0.12.30. Its Task-checkout guard opened the old shared
-schema before migration; an isolated preflight also proved the published binary
-still embedded the uncut `remove_ask` draft. Main's #1402 removes the unrelated
-Task guard. The v0.12.31 release batch includes `remove_ask` and its candidate tree
-has no SQL drafts. Publication is not installation acceptance; v0.12.29 remained
-selected after both refused install attempts. Do not manually advance the Home
-or promote a source build to work around these failures.
-
-The v0.12.31 queued run
-[37072469684](https://github.com/loopflowstudio/loopflow/actions/runs/37072469684)
-also exposed missing terminal outcome history after capture completion. The
-recorder queued terminal observations with best-effort telemetry and drained for
-only 250 ms. [PR #1409](https://github.com/loopflowstudio/loopflow/pull/1409), now
-merged, persists terminal outcomes synchronously through the existing Session
-owner, preserves the original receipt on retry, and leaves stream telemetry
-asynchronous. Prepared captures without an admitted Session remain valid. The
-regression disables the recorder, completes twice, removes artifacts, then reads
-the outcome from SQLite; 28 Session-record tests, the scorecard regression and
-all-target Clippy passed, with the regression passing again after sync.
-
-The first v0.12.31 candidate built successfully, but artifact download timed out.
-Re-entry selected newer merged fixes under the same version through release
-[PR #1411](https://github.com/loopflowstudio/loopflow/pull/1411). An exact candidate
-ref creation race also recovered through re-entry, without manually deleting a
-ref or generated worktree. [v0.12.31](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.31)
-then published from `a278d6bc1bd4373f78f27027b8ae249100ef14d3` after
-[workflow 37077794913](https://github.com/loopflowstudio/loopflow/actions/runs/37077794913)
-and signed preparation passed. `lf install` successfully migrated the main Home
-from 0.12.29 through 0.12.31; all 33 executable references resolved in preflight.
-The CLI reports 0.12.31 and promotion installed the matching macOS app.
-
-Configured checks passed on the installed release:
-
-- Installed and current validation-only source CLIs return the same main Home
-  identity, including with a stale `LF_BIN` value.
-- A fresh explicit `LF_HOME` remains empty on initial and repeated reads, and
-  the source CLI reads that same experiment without importing main's data.
-- Installed and source CLIs each complete `sync --plan` as a nested Flow
-  operation on both main and experimental Homes. Both experimental child
-  success receipts are in the experimental database.
-- After an intentional schema change confined to the experiment, the valid
-  `lf monitor list --json` command refuses it, explains disposal, and leaves
-  the schema unchanged without a backup or repair. An earlier probe used the
-  retired `exec` command and was superseded by this valid-command check.
-- An agent-issued `lf home id` uses the published executable, succeeds on main,
-  and retains this Session's attribution (`via_agent: true`). LOO-342's Task,
-  issue, checkout, PR ids and saved Flow invocation match the pre-install read.
+The v0.12.30/v0.12.31 publisher repair, refused upgrades, terminal-outcome fix
+(#1409) and the passing installed one-Home checks are retained in
+[the 2115a8ad4 memory](https://github.com/loopflowstudio/loopflow/blob/2115a8ad42aaa3a952d485175a7018e6dd49773a/wave/infrastructure/MEMORY.md#release-and-acceptance-recovery-2026-10-02).
+Lasting rules: never hand-advance the Home or promote a source build around a
+refused published install; re-entry recovers a timed-out or raced candidate
+under the same version.
 
 ### Legacy retirement completed (2026-10-04)
 
@@ -864,11 +817,10 @@ checks do not complete that Task or establish its KR.
 
 ## Installation and command scope (curated 2026-10-02)
 
-[LOO-292](https://linear.app/loopflow/issue/LOO-292) owns installation acceptance;
-LOO-287 retains command-scope reduction. [Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#installation-and-command-scope-branch-evidence-2026-09-24)
+LOO-292's installation acceptance closed below; LOO-287 retains command-scope
+reduction. [Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#installation-and-command-scope-branch-evidence-2026-09-24)
 retains September 24 fixtures, failed public v0.12.20 clean-home promotion and
-exact branch evidence. Later installed acceptance above supersedes only the
-boundaries actually exercised, not natural login/wake or first-install recovery.
+exact branch evidence.
 
 Installation verifies a pinned published installer; the promotion transaction
 alone activates artifacts/store. Checkout integration is separate. No Git,
@@ -879,10 +831,8 @@ are insufficient without exact-store preflight and a complete matching macOS app
 Bound inspection of broken binaries. Do not restore the old Python refresh alias:
 delegation through PATH recursed into the old source updater.
 
-Jack Heart selected login plus weekly installation, Monday 09:00 by default,
-with explicit daily/hourly/five-minute cadence. Preserve launchd label/logs and
-custom install directory, without source WorkingDirectory. Simulated launchctl
-and Linux fixtures do not prove natural macOS timing. Promotion resolves the OS
+Preserve launchd label/logs and custom install directory, without source
+WorkingDirectory. Simulated launchctl proves no real timing. Promotion resolves the OS
 account home: HOME/LF_HOME and PATH mocks cannot isolate it. Use disposable OS
 accounts/containers without the real installation; verify failed first activation
 and retained-candidate recovery. Artifact-copy completion and member hashes matter;
@@ -897,26 +847,41 @@ setup remains unselected. No receipt redesign was selected: switch phase alone
 cannot substitute for durable advancement evidence. Current mechanics and proof
 commands belong in docs/lf.md and TESTING.md.
 
-## Installation and checkout evidence (LOO-292, 2026-10-02)
+## Installation and checkout closure (LOO-292, 2026-10-04)
 
-The accepted September 24 Task brief separates published machine installation
-from preserving checkout updates: install performs no main, Homebrew or uv
-refresh; rebase fetches current upstream and integrates the caller. Scheduling
-is opt-in login plus weekly (Monday 09:00 local), with positional daily/hourly/5min
-alternatives. These decisions supersede the older combined-refresh descriptions.
+Jack Heart requested closing LOO-292 on actual machine evidence. Install updates
+published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
+#1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
+09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Preservation is compositional: rebase followed by sibling creation must retain
-unpublished main commits and staged/working/untracked bytes. Equality with origin
-is not the invariant. Version equality alone likewise cannot prove installation
-completeness: inspect the selected receipt, CLI/app/helper hashes and signature.
-The separate daemon was retired; do not restore it from obsolete acceptance notes.
+Observed October 4 with published 0.13.0:
 
-The October 2 operator evidence establishes weekly activation, idempotence and
-initial launchd success. Current 0.12.31 preflight and artifact integrity checks
-pass. Jack Heart reports successful published upgrade and main-Home migration;
-this Task's readback does not establish a before/after preservation audit.
-A single RunAtLoad success proves neither a later login/calendar/wake execution
-nor interactive app acceptance. Preserve those distinctions at the demo review.
+- **Natural login catch-up.** v0.13.0 published at 00:20 PDT while the laptop
+  was asleep, then off after a 1% battery shutdown. `com.loopflow.refresh` ran
+  at the 12:04 login and promoted 0.12.32 → 0.13.0 with exact-store preflight
+  and no migration (refresh.log, switch-49b58550 receipt).
+- **Real calendar firing.** The 5min cadence fired at 20:10 and 20:15 through
+  launchd itself (runs 1 → 3); weekly was then restored byte-identical and
+  idempotent. No Monday 09:00 firing or sleep-coalesced wake run has been
+  observed; neither is Loopflow code. Read refresh.log after October 5 09:00.
+- **Complete artifacts.** Receipt CLI/app/helper hashes, the entry gate, the
+  notarized signature and /Applications 0.13.0 all match. Repeat `lf install`
+  changes no receipt, Task, PR, Flow or Wave identity.
+- **Fresh published path.** Ubuntu 24.04 container without Git: public installer,
+  repeat without download, and missing-entry repair retain the Home identity.
+- **Checkout updates.** Sandbox with the installed binary: stale main with an
+  unpublished commit plus staged/modified/untracked bytes catches up, repeats
+  as a no-op, picks up advanced upstream, bases a sibling on it, and a sibling
+  sync refreshes canonical main first. Clean main fast-forwards. The real main
+  checkout was already current; its incident path was not replayed there.
+
+Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
+returned not-current once at load ~14, starting a redundant download; preflight
+measured 6–13 s then, so timeout is a hypothesis. Reloading the schedule killed
+that run mid-install and the installation stayed intact. A hand-truncated entry
+gate is not healed by reinstall (gate writes are atomic, so only tampering
+produces it). Interactive app acceptance was not exercised beyond the running
+0.13.0 app.
 
 ## Shipped history
 

@@ -1988,20 +1988,26 @@ esac
         r#"{"status":"published","summary":"Reran the failed Swift job; the exact release head is green and merged."}"#,
         &format!("touch '{}'", repaired.display()),
     );
-    let repair_log = state.path().join("repair.log");
-    let finish_repair = if stale_after_repair { "wait $!" } else { "" };
-    let tmux = format!(
+    // Completion can be recorded before the repair's inherited descriptors close.
+    // Keep its launcher alive briefly after the real Exec exits to expose that gap.
+    let lf = format!(
         r#"#!/bin/sh
-if [ "$1" = new-session ]; then
-  cd "$6" || exit 1
-  for arg do command=$arg; done
-  /bin/sh -c "$command" </dev/null >'{}' 2>&1 &
-  {finish_repair}
+if [ "$1 $2" = 'task __repair' ]; then
+  '{}' "$@"
+  status=$?
+  sleep 2
+  exit "$status"
 fi
+exec '{}' "$@"
 "#,
-        repair_log.display()
+        env!("CARGO_BIN_EXE_lf"),
+        env!("CARGO_BIN_EXE_lf"),
     );
-    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("tmux", &tmux)]);
+    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("lf", &lf)]);
+    let repair_bin = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .next()
+        .unwrap()
+        .join("lf");
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);
     git(&repo, &["push", "origin", "v0.9.1"]);
@@ -2034,16 +2040,15 @@ fi
 
     let outcome = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["repo", "release", "run", "patch"])
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", &repair_bin)
         .current_dir(repo.path())
         .output()
         .unwrap();
     assert!(
         outcome.status.success(),
-        "release did not settle: {}\n{}\n{}",
+        "release did not settle: {}\n{}",
         String::from_utf8_lossy(&outcome.stdout),
-        String::from_utf8_lossy(&outcome.stderr),
-        fs::read_to_string(&repair_log).unwrap_or_default()
+        String::from_utf8_lossy(&outcome.stderr)
     );
     assert!(
         repaired.exists(),
@@ -2059,7 +2064,10 @@ fi
             .lines()
             .filter(|line| line.starts_with("worktree "))
             .count(),
-        1
+        1,
+        "{}\n{}",
+        String::from_utf8_lossy(&outcome.stdout),
+        String::from_utf8_lossy(&outcome.stderr)
     );
 }
 

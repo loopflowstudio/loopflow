@@ -1,50 +1,49 @@
 # Release memory
 
-## Release completion responsibility (2026-10-04)
+## Release completion responsibility (2026-10-05)
 
-Jack Heart directed Infrastructure to ensure releases finish through verified
-publication and installed acceptance. Release retains its execution and evidence;
-Infrastructure follows interruptions through recovery and reports actual stages
-in the ongoing conversation. A merged release PR is unfinished until the public
-artifacts and configured completion checks pass.
+Jack Heart directed Infrastructure on October 4 to ensure releases finish through
+verified publication and installed acceptance. Release retains its execution and
+evidence; Infrastructure follows interruptions through recovery and reports actual
+stages in the ongoing conversation. A merged release PR is unfinished until the
+public artifacts and configured completion checks pass.
 
-The v0.13.1 version PR #1426 merged without a candidate workflow or published
-release. Supported re-entry with installed v0.13.0 found an unprepared migration
-in that source and selected v0.13.2. PR #1434 merged as
-`2a35f54a43df54ea1ea4aa219dd04bea4c05fa50`; candidate workflow
-[37266713001](https://github.com/loopflowstudio/loopflow/actions/runs/37266713001)
-passed every package build. Publisher preparation then rejected the old CLI's
-missing `LF_RELEASE_LOCK_FD` handoff. No publication resulted from that attempt.
+The v0.13.1 version PR #1426 merged without publication. Supported recovery cut
+v0.13.2, ultimately published at 2026-10-05 07:31:48 UTC from
+`f4cbe142b9a320ac6c2488273345c28153b45e91` after
+[candidate 37276274755](https://github.com/loopflowstudio/loopflow/actions/runs/37276274755)
+passed. Published CLI and `/Applications/Loopflow.app` both installed as 0.13.2.
+The default Session inventory contained 43 interactive Sessions, zero headless
+and zero closed; native CLI discovery also passed. This delivers PR #1421's
+filtering. It does not prove LOO-353's unfinished Waiting-first experience.
 
-Release bootstrap compatibility is part of acceptance: changes to publisher
-authority must work from the installed previous release, or provide a supported
-recovery path. Never remove the lock requirement to make publication pass.
-The current recovery builds the CLI in the supplied checkout and uses a disposable
-Home to resume the exact candidate without migrating the live Home. Publication
-and installed acceptance remain pending until fresh receipts establish them.
+Recovery exposed three release boundaries. Installed 0.13.0 predates the
+publisher's inherited-lock handoff, so recovery used a current source CLI with a
+disposable Home, preserving the live Home. The publisher launcher retained an
+isolated test lock. The five-minute deadline for the entire 76 MB artifact set
+repeatedly killed healthy transfers near 200 KiB/s; fifteen minutes remains
+bounded and completed the transfer. Finally, publisher preparation and public
+verification still required XCUITest despite Jack's September 30 retirement of
+that prerequisite (LOO-357, `release/UI_HOST_GATE.md`). macOS authentication
+prevented UI runner initialization after Desktop had already built and signed.
+[PR #1438](https://github.com/loopflowstudio/loopflow/pull/1438) landed the download
+and publisher fixes while preserving required headless CI and artifact proof.
 
-Recovery exposed a second boundary: the five-minute download deadline covers
-all four platforms together. The 76 MB candidate progressed at about 200 KiB/s,
-so healthy transfers exceeded the deadline and retries discarded their progress.
-The local repair allows fifteen minutes for the complete set while preserving
-bounded retries and exact candidate identity. Focused retry tests, formatting,
-and all-target Clippy passed; delivery of this repair remains pending.
+A follow-up found the same retired UI receipt in Rust's scheduled-settlement
+validator, and public smoke still invoked the removed `lf catalog` command.
+Remove the obsolete receipt requirement and use `lf list --json`; keep all actual
+public verification stages required. The scheduled regression exercises published,
+no-change, telemetry failure/recovery, missing proof and smoke failure without a
+UI receipt. Publisher fixtures now reject unknown CLI commands instead of returning
+a version for every invocation. The follow-up is not yet shipped at this curation.
 
-The replacement release PR #1437 merged as `be09439a9fca912a7671386ed2cd543a0da6f606`.
-Candidate [37270978984](https://github.com/loopflowstudio/loopflow/actions/runs/37270978984)
-passed. The repaired downloader completed, and the publisher built and signed
-Desktop before failing on XCUITest initialization: macOS reported that system
-authentication was running. `release/UI_HOST_GATE.md` records Jack Heart's
-September 30 retirement of that release prerequisite (LOO-357); publisher
-preparation and public verification had wrongly retained it. The repair removes
-both calls and the required receipt stage while keeping headless CI, artifact,
-installer, notarization, website and public smoke proof. All 33 publisher tests
-pass, including publication with no UI host and rejection of missing required
-preparation. Publication and installation are still pending.
-
-The replacement PR's Docker startup failure recovered through one failed-job
-rerun on a fresh GitHub runner. This manual recovery does not satisfy LOO-285's
-two unattended scheduled-settlement acceptance window.
+A Docker startup failure recovered through one failed-job rerun on a fresh GitHub
+runner. This manual recovery does not satisfy LOO-285's two unattended scheduled
+settlements. Public read-back/smoke verification remains distinct from publication
+and local installation; no verified public receipt was produced by the manual run.
+Publisher checkout cleanup reported a retained lease at
+`/Users/jack/src/loopflow.publish-default-v0-13-2`; preserve it for supported
+reconciliation rather than removing it manually.
 
 ## Retained landing incident and minor recovery (2026-10-04)
 

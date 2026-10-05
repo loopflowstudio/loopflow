@@ -1952,7 +1952,6 @@ fn verify_release_outcome(
         || proof.source_commit != commit
         || proof.workflow_run_id != workflow_id.to_string()
         || ![
-            "ui_host_verified",
             "public_artifacts_verified",
             "versioned_dmg_verified",
             "latest_dmg_verified",

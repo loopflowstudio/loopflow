@@ -704,9 +704,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             if reported != f"{name} {version}":
                 raise RuntimeError(f"public {name} reported {reported!r}, expected {version}")
             _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
-        _run(
-            [str(install_dir / "lf"), "catalog", "--json"], cwd=scratch, env=smoke_env, capture=True
-        )
+        _run([str(install_dir / "lf"), "list", "--json"], cwd=scratch, env=smoke_env, capture=True)
     verified = PublicReleaseReceipt(
         verified_at=int(time.time()),
         asset_urls={asset["name"]: asset["url"] for asset in release["assets"]},

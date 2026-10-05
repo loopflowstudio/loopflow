@@ -20,20 +20,21 @@ in [Release memory](release/MEMORY.md).
 ## Capture cutover (LOO-370, source evidence 2026-10-05)
 
 Jack Heart authorized autonomous source delivery, not installed conversion or live
-interruption. Capture keys name subordinate history; durable Session IDs select
-conversation mutations, and current Session/Exec provenance supplies authority.
+interruption. Capture keys select history, Session IDs select mutations, and Session/Exec
+provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove layout completion. Released v0.13.3
-journals before installation checks. An isolated macOS probe changed payload and
-SQLite bytes through newly opened hard links after Home traversal was denied;
-no descriptor survived. Directory ownership cannot revoke child-inode aliases.
-The unexecuted Linux probe seals inodes and kills a reader after sealing finishes;
-it cannot prove interrupted sealing or durable recovery.
-Candidate recovery and durable restoration evidence must precede even exclusion
-mutations. Quiescence must follow sealing and repeat on recovery. ACLs, shared
-namespaces and external storage remain design gaps; account targeting depends on
-that boundary. `runs/` remains; conversion and installed preservation are unproved.
+SQLite compatibility cannot prove layout completion; v0.13.3 journals before checks. macOS probes demonstrate:
+newly opened hard links modify payload/SQLite despite Home traversal denial;
+after worker death during partial sealing, a writable shared parent permits
+namespace replacement. Fresh recovery preserves both histories but requires fixture
+namespace repair before restoration; identity checks cannot fence swaps. Linux
+probes remain unexecuted. Reader death after full sealing proves neither interrupted
+sealing nor recovery; portable probes establish no conversion or power-loss proof.
+
+Durable restoration and candidate recovery must precede exclusion mutations.
+Quiescence follows sealing and repeats on recovery. Preserve unrelated access;
+ACLs, mounts and aliases remain obligations. `runs/` and conversion gaps remain.
 
 ## Review replacement (2026-10-04)
 

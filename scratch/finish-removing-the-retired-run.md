@@ -204,6 +204,10 @@ mechanism.
 Review finding: the fixture waits for its known renamer to exit before recovery.
 Identity prechecks do not fence a concurrent path swap or discover unknown writers;
 production recovery still needs exclusion and a repeated quiescence observation.
+The interruption is one fixed point after file ownership/mode changes and fsync,
+before directory sealing; it does not cover death between chown and chmod or
+during restoration. Fresh-process retry proves metadata restoration only after
+the fixture repairs the namespace, not automatic recovery of that namespace.
 
 ## Problem and observable outcome
 
@@ -528,4 +532,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5, compress): `uv run ruff check tests/e2e/capture_exclusion.py`, both portable probes (`--probe-recovery`, `--probe-aliases`) and `git diff --check` passed; privileged Linux sealing/recovery remains CI-owned (Docker unavailable in the preceding implementation check).
+Check (October 5, realign): `git diff --check` passed; reused compress’s Ruff and portable-probe passes without rerunning unchanged code; privileged Linux sealing/recovery remains CI-owned (Docker previously unavailable).

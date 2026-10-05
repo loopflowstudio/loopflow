@@ -90,8 +90,8 @@ lf : "add type hints to utils.py"
 | `--docs PATH,PATH` | Add specific files, globs, or directories to context |
 | `--diff files` | Full content of files changed on the branch |
 | `--diff patch` | Raw `git diff` output |
-| `--mode interactive` | Interactive mode |
-| `--mode batch` | Batch/headless mode |
+| `-i` | Interactive mode |
+| `-b` | Batch/headless mode |
 
 ---
 

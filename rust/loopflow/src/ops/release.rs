@@ -2921,7 +2921,7 @@ fn generate_notes_file(
     )?;
 
     let mut cmd = Command::new("lf");
-    cmd.args(["--mode", "batch"])
+    cmd.args(["--batch"])
         .arg("release-notes")
         .arg(format!(
             "Write notes only to {} (LF_RELEASE_NOTES_OUTPUT). Do not modify any other file, \

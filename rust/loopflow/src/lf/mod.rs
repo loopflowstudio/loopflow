@@ -28,14 +28,6 @@ pub enum DiffContext {
     None,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum LaunchMode {
-    Interactive,
-    Batch,
-    Tui,
-    Ide,
-}
-
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
@@ -95,9 +87,21 @@ pub struct Cli {
     #[arg(long)]
     pub yolo: bool,
 
-    /// Choose the provider surface; omission inherits configuration and terminal context
-    #[arg(long, value_enum)]
-    pub mode: Option<LaunchMode>,
+    /// Run interactively
+    #[arg(short = 'i', long = "interactive", conflicts_with = "batch")]
+    pub interactive: bool,
+
+    /// Run headless: print the output and return when the work ends
+    #[arg(short = 'b', long = "batch")]
+    pub batch: bool,
+
+    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
+    #[arg(long, conflicts_with_all = ["ide", "batch"])]
+    pub tui: bool,
+
+    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
+    #[arg(long, conflicts_with = "batch")]
+    pub ide: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -171,7 +175,7 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--mode".to_string(), "batch".to_string()];
+        let mut args = vec!["--batch".to_string()];
         for (flag, enabled) in [
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
@@ -229,7 +233,10 @@ impl Cli {
             shared: self.shared,
             account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
-            mode: self.mode,
+            interactive: self.interactive,
+            batch: self.batch,
+            tui: self.tui,
+            ide: self.ide,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -301,10 +308,13 @@ pub enum Commands {
     Commit {
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
+        /// Push the branch after committing
+        #[arg(short = 'p', long = "push")]
+        push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
         /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with = "no_add")]
+        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
         paths: Vec<String>,
     },
 
@@ -1829,8 +1839,7 @@ mod tests {
     fn direct_work_selector_accepts_an_inline_question() {
         let cli = Cli::try_parse_from([
             "lf",
-            "--mode",
-            "batch",
+            "--batch",
             "--wave",
             "product",
             ":",

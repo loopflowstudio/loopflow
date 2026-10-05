@@ -91,7 +91,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         "command does not name the selected Flow skill"
     );
     let mut launch = cli.exec_options();
-    launch.mode = Some(crate::lf::LaunchMode::Batch);
+    launch.batch = true;
     launch.task = task.as_ref().map(ToString::to_string);
     launch.wave = flow
         .wave_id
@@ -591,11 +591,10 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    match cli.mode {
-        Some(crate::lf::LaunchMode::Batch) => false,
-        Some(_) => true,
-        None => attached_tty || (skill.is_none() && message.is_none()),
+    if cli.batch {
+        return false;
     }
+    cli.interactive || cli.tui || cli.ide || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn should_exec_via_skill(skill_name: &str) -> bool {
@@ -676,10 +675,12 @@ fn forced_launch_target(cli: &Cli, skill: Option<&str>) -> Option<ExecTarget> {
     if skill == Some("default") {
         return Some(ExecTarget::Tui);
     }
-    match cli.mode {
-        Some(crate::lf::LaunchMode::Ide) => Some(ExecTarget::Ide),
-        Some(crate::lf::LaunchMode::Tui) => Some(ExecTarget::Tui),
-        _ => None,
+    if cli.ide {
+        Some(ExecTarget::Ide)
+    } else if cli.tui {
+        Some(ExecTarget::Tui)
+    } else {
+        None
     }
 }
 
@@ -1278,13 +1279,10 @@ mod tests {
 
     #[test]
     fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
-        for mode in [
-            None,
-            Some(crate::lf::LaunchMode::Ide),
-            Some(crate::lf::LaunchMode::Tui),
-        ] {
+        for (ide, tui) in [(false, false), (true, false), (false, true)] {
             let cli = Cli {
-                mode,
+                ide,
+                tui,
                 ..Default::default()
             };
             assert_eq!(
@@ -1293,7 +1291,7 @@ mod tests {
             );
         }
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Ide),
+            ide: true,
             ..Default::default()
         };
         assert_eq!(
@@ -1331,7 +1329,7 @@ mod tests {
                 (Some("both"), true, true),
                 (Some("none"), false, false),
             ] {
-                let mut args = vec!["lf", "--mode", "batch"];
+                let mut args = vec!["lf", "--batch"];
                 if let Some(choice) = choice {
                     args.extend(["--diff", choice]);
                 }
@@ -1389,7 +1387,7 @@ mod tests {
             ".lf/config.yaml",
             "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+        let cli = Cli::parse_from(["lf", "--batch"]);
 
         for name in ["Jack", "Jacqueline", "  "] {
             std::fs::write(
@@ -1444,7 +1442,7 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+        let cli = Cli::parse_from(["lf", "--batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
@@ -1797,7 +1795,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
 
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Batch),
+            batch: true,
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
@@ -1832,7 +1830,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.stage_all();
         repo.commit("bound basis");
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Interactive),
+            interactive: true,
             ..Cli::default()
         };
 
@@ -1869,14 +1867,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--mode", "ide", "gate"]);
+        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
 
         assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
     fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--mode", "batch", "design"]);
+        let cli = Cli::parse_from(["lf", "--batch", "design"]);
         assert!(!is_interactive_run(&cli, Some("design"), None));
     }
 
@@ -1904,7 +1902,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1941,7 +1939,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "--ide", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),

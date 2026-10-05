@@ -77,13 +77,9 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
     let decoy = tempfile::tempdir().unwrap();
     fs::write(decoy.path().join("loopflow.db"), b"never open this store").unwrap();
     repo.create_file(".lf/flows/home-proof.yaml", "- cmd: sync --plan\n");
-    let output = command(
-        home.path(),
-        repo.path(),
-        &["flow", "home-proof", "--mode", "batch"],
-    )
-    .output()
-    .unwrap();
+    let output = command(home.path(), repo.path(), &["flow", "home-proof", "--batch"])
+        .output()
+        .unwrap();
     success(output);
     let connection = Connection::open(home.path().join("loopflow.db")).unwrap();
     let child_commands: i64 = connection.query_row(

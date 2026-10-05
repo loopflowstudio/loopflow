@@ -1679,11 +1679,13 @@ fn execute_command(
         }
         Some(Commands::Commit {
             message,
+            push,
             no_add,
             paths,
         }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),
+                *push,
                 *no_add,
                 paths,
                 cli.model.as_deref(),
@@ -2159,8 +2161,7 @@ mod tests {
     fn reorder_args_mixed_flags() {
         let args = vec![
             "lf".to_string(),
-            "--mode".to_string(),
-            "interactive".to_string(),
+            "--interactive".to_string(),
             "implement".to_string(),
             "-c".to_string(),
             "-m".to_string(),
@@ -2169,15 +2170,7 @@ mod tests {
         let result = reorder_args(args);
         assert_eq!(
             result,
-            vec![
-                "lf",
-                "--mode",
-                "interactive",
-                "-c",
-                "-m",
-                "claude",
-                "implement"
-            ]
+            vec!["lf", "--interactive", "-c", "-m", "claude", "implement"]
         );
     }
 

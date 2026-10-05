@@ -3,7 +3,7 @@
 ```bash
 mkdir first-project && cd first-project
 git init
-lf --mode batch : "Write a README explaining this project"
+lf -b : "Write a README explaining this project"
 lf monitor                         # waiting, blocked, active, finished
 lf account                         # live access and capacity by account
 ```

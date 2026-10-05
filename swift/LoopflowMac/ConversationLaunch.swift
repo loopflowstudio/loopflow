@@ -35,7 +35,7 @@ struct ConversationLaunch: Equatable {
         case .wave(_, let id): ["--wave", "\(id)"]
         case .task(_, let id): ["--task", "\(id)"]
         }
-        return [lf, "--mode", "interactive"] + binding + [":", prompt]
+        return [lf, "--interactive"] + binding + [":", prompt]
     }
 }
 
@@ -72,7 +72,7 @@ struct SessionSkillLaunch: Equatable {
     let skill: String
 
     func arguments(lf: String) -> [String] {
-        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
+        [lf, "--interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
     }
 }
 

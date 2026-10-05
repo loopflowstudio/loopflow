@@ -750,6 +750,7 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
 
 pub fn run_commit(
     message: Option<&str>,
+    push: bool,
     no_add: bool,
     paths: &[String],
     agent_override: Option<&str>,
@@ -762,6 +763,7 @@ pub fn run_commit(
         &repo_root,
         &CommitOptions {
             add: !no_add,
+            push,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")

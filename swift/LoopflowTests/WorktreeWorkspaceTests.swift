@@ -204,7 +204,7 @@ struct WorktreeWorkspaceTests {
         let store = MultiplexerStore()
         store.newShell()
         let shell = store.focusedPaneId
-        store.newShell(command: ["lf", "--mode", "interactive", ":", "hello"])
+        store.newShell(command: ["lf", "--interactive", ":", "hello"])
         #expect(store.layout.allPanes.count == 2)
         #expect(store.layout.pane(for: shell)?.content == .shell)
         #expect(store.shellCommands[shell] == [])

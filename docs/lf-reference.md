@@ -54,7 +54,10 @@ Open Loopflow or run its CLI
 | `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
 | `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
-| `--mode` | Choose the provider surface; omission inherits configuration and terminal context |
+| `--interactive / -i` | Run interactively |
+| `--batch / -b` | Run headless: print the output and return when the work ends |
+| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch) |
+| `--ide` | Hand off Claude or Codex to the vendor app (overrides session.launch) |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
 | `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
 | `--__cron-lock-fd` | cron lock fd Internal. |

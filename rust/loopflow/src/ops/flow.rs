@@ -64,6 +64,7 @@ pub(crate) fn execute_flow_command_with_cron(
 
         Some(Commands::Commit {
             message,
+            push,
             no_add,
             paths,
         }) => {
@@ -76,6 +77,7 @@ pub(crate) fn execute_flow_command_with_cron(
                 repo,
                 &CommitOptions {
                     add: !no_add,
+                    push,
                     message,
                     ..CommitOptions::for_task("commit")
                 },

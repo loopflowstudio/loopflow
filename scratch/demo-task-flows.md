@@ -83,6 +83,30 @@ Agent's reading of Jack's feedback, not his wording:
 4. Status presentation (items 1-3, 6 below) is out of scope for this Task by
    Jack's statement. Leave it.
 
+5. **Jack decided (October 5):** "running somethign from a task's worktree and
+   passing --task should be equivalent ... we shouldnt get different codepaths
+   or validations for either." So the planning check does not move to
+   `--task`; one launch path resolves the Task from the flag or the checkout
+   and applies the same checks. Observed at this commit: `lf -b run proof`
+   from the Task worktree, with no `--task`, already binds its FlowSession to
+   the Task. Only `flow start` runs the planning check (terminal, moved,
+   removed), so today the two differ in validation.
+6. Jack on `lf commit`: "should always push i guess ... or else should accept
+   -p if we want to allow local only commiting." `-p/--push` is restored;
+   always-push is not adopted.
+
+## Done in this review (October 5, uncommitted behavior change)
+
+Jack: "Definitely take this back" on `--mode`. `-i/--interactive`,
+`-b/--batch`, `--tui`, `--ide` are flags again and `--mode` and `LaunchMode`
+are deleted, across Rust, Swift launch argv, tests and docs. `lf commit -p`
+pushes; it conflicts with explicit paths because that path has no push.
+Checks: `cargo build -p loopflow --bin lf`; `cargo test -p loopflow --test
+cli_discovery` 18 passed; `--lib lf::commands::run` 33 passed; in the private
+Home `lf -b run proof` printed the op output and blocked, `--mode` is an
+unexpected argument. Clippy clean; `flow_tests` 23, `session_lifecycle_tests` 17, `task_flow_launch_tests` 1 passed; `swift build --build-tests` built. Direction 1 is done;
+2, 3 and 5 remain.
+
 Unresolved: whether `task create --run`, `task automate`/`automation`, `task
 interrupt` and `task wait` count as worker APIs to delete or are ordinary Task
 commands to keep.

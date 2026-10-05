@@ -747,8 +747,10 @@ installed steady-state or soak acceptance.
 Jack Heart's current LOO-304 brief removes interactive kickoff/demo gates, not
 rendered acceptance. The native harness now compiles with a timed unattended soak using the refresh
 owner and live recorder; headless fixture/history/draft proofs pass. No rendered
-run exists. Flow/history/file component mounting still needs full workspace-route
-coverage, and mixed-phase traces need idle-only analysis. LOO-371's October 5
+run exists. Task details, Flow/history disclosure and file-sidebar controls now
+have native harness paths; idle trace analysis uses the trace's clock and keeps
+missing/partial coverage explicit. Fixture Task/Session workspace Home identities
+must agree or native routes never open. LOO-371's October 5
 branch and checkout contain no isolated snapshot runner; its handoff remains
 required for comparable CLI receipts. A copied database alone is insufficient. Same-window
 Session coalescing does not prove cross-window deduplication or change-driven

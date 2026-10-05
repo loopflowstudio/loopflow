@@ -51,6 +51,7 @@ def _sources() -> str:
             "swift",
             "tests/fixtures/dto",
             "scripts/desktop_performance.py",
+            "scripts/benchmarks/desktop-performance/record_live.py",
         ],
         cwd=REPO,
     ).split(b"\0")
@@ -313,7 +314,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
             f"RSS growth after four rounds: {soak['memory_after_four_rounds_mib']} MiB.",
             "CPU, RSS, signposts and trace availability: soak-resources/report.json. "
             "Missing recording is unmeasured. "
-            "Mixed-phase trace totals do not score the idle budget.",
+            "Idle-only trace coverage is reported separately; partial coverage is not acceptance.",
         ]
     if not complete:
         lines += [
@@ -358,6 +359,7 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
                     "tests/fixtures/dto/task_work.json",
                     "tests/fixtures/dto/task_comments.json",
                     "tests/fixtures/dto/context_report.json",
+                    "tests/fixtures/dto/flow_catalog.json",
                     "scripts/desktop_performance.py",
                     "scripts/benchmarks/desktop-performance/record_live.py",
                 ]
@@ -421,6 +423,8 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
                                             str(soak_seconds),
                                             "--output",
                                             str(output / "soak-resources"),
+                                            "--phases",
+                                            str(output / "attempts.jsonl"),
                                         ],
                                         stdout=log,
                                         stderr=subprocess.STDOUT,

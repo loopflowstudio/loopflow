@@ -66,19 +66,23 @@ struct DesktopPerformanceTests {
 
 #if canImport(GhosttyKit)
     private func measure(population: String, taskCount: Int, samples: Int, soakSeconds: Double, journal: PerformanceJournal) async throws {
-        let (query, planning) = try populationQuery(taskCount: taskCount)
-        let files = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
-        files.autosave = false
+        let checkout = FileManager.default.temporaryDirectory.appendingPathComponent("desktop-perf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        try Data("Original notes".utf8).write(to: checkout.appendingPathComponent("notes.txt"))
+        defer { try? FileManager.default.removeItem(at: checkout) }
+        let (query, planning) = try populationQuery(taskCount: taskCount, checkout: checkout.path)
         let detailWindow = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 800),
                                             styleMask: [.titled], backing: .buffered, defer: false)
         detailWindow.isReleasedWhenClosed = false
         defer { detailWindow.contentView = nil; detailWindow.close() }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = PodiumModel(query: query, repoPath: checkout.path)
         await model.refresh()
         try #require(model.workspace.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
+        let workspace = registry.workspace(for: fixtureWorkspace(checkout.path))
+        let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
+        files.autosave = false
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0")
         let sessionPane = multiplexer.focusedPaneId
@@ -99,7 +103,7 @@ struct DesktopPerformanceTests {
         multiplexer.setFocusedPane(sessionPane)
         model.select(.task(id: "perf-task-0"))
         model.navigation.content = .terminals
-        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+        let view = SessionsView(model: model, repoPath: checkout.path, workspaces: registry, query: query)
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 800),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -255,39 +259,43 @@ struct DesktopPerformanceTests {
             })
             try await sample("task_details", population, attempt, journal, window, action: {
                 model.select(.task(id: "perf-task-0"))
-                workspace.showsDetails = true
+                try pressElement("breadcrumb-task", in: window)
             }, ready: { window.attachedSheet != nil && window.allText.contains { $0.contains("Task 000") } })
+            try await sample("task_flow", population, attempt, journal, window, action: {
+                try pressElement("flow-node-2", in: window)
+            }, ready: {
+                model.navigation.flowDrafts[selected.task.id]?.selectedNode?.node == 2
+                    && window.allText.contains { $0.contains("realign") }
+            })
+            model.navigation.expandedRuns.remove(selected.task.id)
+            try await sample("task_history", population, attempt, journal, window, action: {
+                try pressElement("task-runs-toggle", in: window)
+                try await wait(window) { model.recentRuns[selected.task.id].value?.count == taskCount }
+                try revealElement("task-runs-list", in: window)
+            }, ready: {
+                model.navigation.expandedRuns.contains(selected.task.id)
+                    && model.recentRuns[selected.task.id].value?.count == taskCount
+                    && window.allText.contains { $0.contains("implement") }
+            })
             workspace.showsDetails = false
             try await wait(window) { window.attachedSheet == nil }
-            detailWindow.orderFront(nil)
-            try await sample("task_flow", population, attempt, journal, detailWindow, action: {
-                detailWindow.contentView = NSHostingView(rootView:
-                    TaskFlowView(model: model, task: selected.task, wave: selected.wave.wave))
-            }, ready: { detailWindow.allText.contains { $0.lowercased().contains("feature") } })
-            try await sample("task_history", population, attempt, journal, detailWindow, action: {
-                model.navigation.expandedRuns.insert(selected.task.id)
-                await model.loadRecentRuns(task: selected.task, wave: selected.wave.wave)
-                detailWindow.contentView = NSHostingView(rootView:
-                    TaskRunsView(model: model, task: selected.task, wave: selected.wave.wave))
-            }, ready: {
-                model.recentRuns[selected.task.id].value?.count == taskCount
-                    && detailWindow.allText.contains { $0.contains("implement") }
-            })
-            try await sample("file_edit_refresh", population, attempt, journal, detailWindow, action: {
-                files.selection = "notes.txt"
-                await files.refresh()
-                await files.loadFile()
+            try await sample("file_edit_refresh", population, attempt, journal, window, action: {
+                try pressElement("workspace-toggle-files", in: window)
+                try await wait(window) { files.directories[""]?.entries.first?.path == "notes.txt" }
+                try pressElement("notes.txt", in: window, property: "Label")
+                try await wait(window) { files.selectedDocument?.snapshot != nil }
                 let document = try #require(files.selectedDocument)
                 document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
                 document.editor.setSelectedRange(NSRange(location: 2, length: 3))
                 await files.refresh()
                 await files.loadFile()
-                detailWindow.contentView = NSHostingView(rootView: TaskFilesView(store: files, prURL: nil))
             }, ready: {
                 files.selectedDocument?.text == "Preserved draft"
                     && files.selectedDocument?.editor.selectedRange() == NSRange(location: 2, length: 3)
-                    && detailWindow.allText.contains { $0.contains("Preserved draft") }
+                    && window.allText.contains { $0.contains("Preserved draft") }
             })
+            try pressElement("workspace-toggle-files", in: window)
+            detailWindow.orderFront(nil)
             let freshIdentity = TerminalIdentity.shell("benchmark-\(UUID().uuidString)")
             let fresh = registry.surfaces.view(for: freshIdentity)
             defer { registry.surfaces.release(freshIdentity) }
@@ -355,7 +363,7 @@ struct DesktopPerformanceTests {
             refresh.cancel()
             await refresh.value
             try journal.write(["event": "soak_end", "elapsed_seconds": Double(start.duration(to: .now).components.seconds),
-                               "rounds": round, "preserved": true, "reads": planning.reads])
+                               "rounds": round, "preserved": true, "reads": planning.reads, "time": Date().timeIntervalSince1970])
             // Let the recorder finish its fixed-duration attachment before this
             // test process exits. The tail is outside the measured soak.
             let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
@@ -471,12 +479,44 @@ struct DesktopPerformanceTests {
         }
     }
 
+    private func accessibility(_ element: NSObject, _ property: String) -> Any? {
+        let key = "accessibility" + property
+        guard element.responds(to: NSSelectorFromString(key)) else { return nil }
+        return element.value(forKey: key)
+    }
+
+    private func accessible(_ root: Any) -> [NSObject] {
+        guard let element = root as? NSObject else { return [] }
+        return [element] + ((accessibility(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
+    }
+
+    @discardableResult
+    private func revealElement(_ value: String, in window: NSWindow, property: String = "Identifier") throws -> NSObject {
+        let target = window.attachedSheet ?? window
+        let content = try #require(target.contentView)
+        let element = try #require(accessible(content).first { accessibility($0, property) as? String == value })
+        if let frame = accessibility(element, "Frame") as? NSValue,
+           let scroll = scrollView(in: content), let document = scroll.documentView {
+            let rect = document.convert(target.convertFromScreen(frame.rectValue), from: nil)
+            document.scrollToVisible(CGRect(x: rect.minX, y: rect.minY, width: 10, height: 40))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        return element
+    }
+
+    private func pressElement(_ value: String, in window: NSWindow, property: String = "Identifier") throws {
+        let element = try revealElement(value, in: window, property: property)
+        let action = NSSelectorFromString("accessibilityPerformPress")
+        try #require(element.responds(to: action))
+        element.perform(action)
+    }
+
     private func scrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
     }
 
-    fileprivate func populationQuery(taskCount: Int) throws -> (RegistryQuery, PerformancePlanning) {
+    fileprivate func populationQuery(taskCount: Int, checkout: String = "/src/loopflow") throws -> (RegistryQuery, PerformancePlanning) {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
@@ -494,11 +534,11 @@ struct DesktopPerformanceTests {
             planning["completed"] = false
             task["task"] = planning
             var reference: [String: Any] = ["issue_url": NSNull(), "workspace": [
-                "slug": "benchmark", "branch": "benchmark",
-                "worktree": "/src/loopflow", "local_exists": true,
+                "slug": "benchmark", "branch": "benchmark", "home_id": fixtureHomeId,
+                "worktree": checkout, "local_exists": true,
             ]]
             if index == 1 {
-                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty",
+                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "home_id": fixtureHomeId,
                                           "worktree": NSTemporaryDirectory(), "local_exists": true]
             }
             task["reference"] = reference
@@ -510,16 +550,19 @@ struct DesktopPerformanceTests {
         }
         wave["tasks"] = tasks
         wave["unavailable_tasks"] = []
+        var waveInfo = try #require(wave["wave"] as? [String: Any])
+        waveInfo["repo"] = checkout
+        wave["wave"] = waveInfo
         snapshot["waves"] = [wave]
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "interactive": true, "kind": "conversation",
              "work": ["kind": "task", "id": "perf-work-\(index)"],
-             "workspace": ["home_id": fixtureHomeId, "worktree": "/src/loopflow",
+             "workspace": ["home_id": fixtureHomeId, "worktree": checkout,
                            "task_id": "perf-work-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
-             "cwd": "/src/loopflow", "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
+             "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(kind: "conversation", state: "active"),
              "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
@@ -535,6 +578,7 @@ struct DesktopPerformanceTests {
         let workJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_work.json"), encoding: .utf8)
         let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
         let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
+        let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
         let active = try JSONSerialization.data(withJSONObject: [
             "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
             "sessions": [0, 2].map { index in
@@ -548,7 +592,9 @@ struct DesktopPerformanceTests {
         let query = RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
             await planning.count(args)
             switch args.first {
+            case "home" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureHomeId)\"}"
             case "roadmap": return await planning.read()
+            case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
@@ -576,6 +622,14 @@ struct DesktopPerformanceFixtureTests {
         #expect(model.workspace.waves.first?.tasks.count == 256)
         #expect(model.sessions.value?.count == 128)
         let task = try #require(model.task(id: "perf-task-0"))
+        #expect(task.task.reference.workspace?.identity == fixtureWorkspace("/src/loopflow"))
+        #expect(model.sessions.value?.first?.workspace?.identity == task.task.reference.workspace?.identity)
+        await model.loadFlowCatalog()
+        await model.loadTaskWork(task: task.task, wave: task.wave.wave)
+        await model.loadTaskContext(task: task.task, wave: task.wave.wave)
+        #expect(model.flowCatalog.errorMessage == nil)
+        #expect(model.taskWork[task.task.id].errorMessage == nil)
+        #expect(model.taskContext[task.task.id].errorMessage == nil)
         await model.loadRecentRuns(task: task.task, wave: task.wave.wave)
         #expect(model.recentRuns[task.task.id].value?.count == 256)
         #expect(model.recentRuns[task.task.id].errorMessage == nil)

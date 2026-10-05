@@ -119,10 +119,10 @@ uv run python scripts/desktop_performance.py run --samples 21 --soak-seconds 360
 The native runner retains three owned `cat` PTYs while navigating and refreshing
 8- and 256-Task fixtures. It exercises filtering, scrolling during refresh,
 Session return with an unsubmitted terminal draft, Monitor, split/zoom restore,
-and the Task details sheet. Mounted Flow, complete history (one record per Task),
-and file editor views add component-level capture endpoints; they do not measure
-the workspace's file-sidebar or Flow/history disclosure routing. A fresh `cat`
-PTY is created and verified each round. Its startup is not provider startup;
+the Task details breadcrumb/sheet, Flow nodes, complete history disclosure
+(one record per Task), and browsing/editing in the file sidebar. These use mounted
+workspace controls and an owned temporary checkout. A fresh `cat` PTY is created
+and verified each round. Its startup is not provider startup;
 retained surface equality is not native provider identity proof.
 
 After the large-population journeys, the soak alternates thirty seconds idle
@@ -132,9 +132,10 @@ Every round checks retained surfaces, layout, Session records and the file draft
 The native journal records phase times, fixture-read counts, window counts and
 focus endpoints. The existing live recorder attaches to that test PID for CPU,
 RSS, signposts and optional xctrace evidence. The report includes RSS change at
-the fourth soak round. Mixed-phase trace totals do not establish idle-only hitch
-budgets; raw phase timestamps remain available for trace analysis. A missing
-trace or resource report stays unmeasured. Interrupted or shortened soaks and
+the fourth soak round. Idle hitch/hang analysis aligns phase timestamps to the
+trace's exported start/end dates and reports actual coverage, clipping intervals
+at idle boundaries. Missing clock metadata, trace tables or resource reports
+stay unmeasured; partial idle coverage does not establish the budget. Interrupted or shortened soaks and
 failed preservation checks cannot produce a complete journey report.
 
 These fixtures never open a configured Home, provider or real Task checkout.

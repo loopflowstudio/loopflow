@@ -140,6 +140,13 @@ def record(args: argparse.Namespace) -> Path:
     _log_show(pid, start, end, output / "signposts.ndjson")
     trace = output / "hitches.trace"
     if trace.exists():
+        toc = subprocess.run(
+            ["xcrun", "xctrace", "export", "--input", str(trace), "--toc"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        (output / "trace-toc.xml").write_text(toc.stdout, encoding="utf-8")
         for table in HITCH_TABLES:
             (output / f"{table}.xml").write_text(_export(trace, table), encoding="utf-8")
     (output / "run.json").write_text(
@@ -159,6 +166,8 @@ def record(args: argparse.Namespace) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    if args.phases and args.phases.exists():
+        shutil.copyfile(args.phases, output / "phases.jsonl")
     return output
 
 
@@ -265,6 +274,70 @@ def _trace_rows(output: Path, table: str, recorded: bool) -> list[dict] | None:
     return rows
 
 
+def _idle(output: Path, frames: list[dict] | None, hangs: list[dict] | None) -> dict:
+    phases = output / "phases.jsonl"
+    result = {
+        "requested_seconds": None,
+        "covered_seconds": None,
+        "hitch_ms_per_second": None,
+        "hangs": None,
+    }
+    if not phases.exists():
+        return result
+    events = []
+    for line in phases.read_text().splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("event") in {"soak_phase", "soak_end"} and "time" in event:
+            events.append(event)
+    intervals = [
+        (a["time"], b["time"])
+        for a, b in zip(events, events[1:])
+        if a.get("phase") == "idle" and b["time"] >= a["time"]
+    ]
+    if not intervals:
+        return result
+    result["requested_seconds"] = sum(end - start for start, end in intervals)
+    toc = output / "trace-toc.xml"
+    if not toc.exists():
+        return result
+    try:
+        root = ElementTree.fromstring(toc.read_text())
+        info = root.find(".//run[@number='1']/info/run-info")
+        if info is None:
+            return result
+        start_date, end_date = info.findtext("start-date"), info.findtext("end-date")
+        if not start_date or not end_date:
+            return result
+        start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        if start.tzinfo is None or end.tzinfo is None:
+            return result
+        origin, finish = start.timestamp(), end.timestamp()
+    except (ElementTree.ParseError, ValueError):
+        return result
+    covered = [
+        (max(a, origin), min(b, finish)) for a, b in intervals if min(b, finish) > max(a, origin)
+    ]
+    seconds = sum(b - a for a, b in covered)
+    if seconds <= 0:
+        return result
+    result["covered_seconds"] = seconds
+
+    def overlap(row: dict) -> float:
+        begin = origin + row["start_ms"] / 1000
+        end = begin + row["duration_ms"] / 1000
+        return sum(max(0, min(b, end) - max(a, begin)) for a, b in covered)
+
+    if frames is not None:
+        result["hitch_ms_per_second"] = sum(overlap(row) * 1000 for row in frames) / seconds
+    if hangs is not None:
+        result["hangs"] = sum(overlap(row) > 0 for row in hangs)
+    return result
+
+
 def summarize(output: Path) -> dict:
     run = json.loads((output / "run.json").read_text(encoding="utf-8"))
     closed, legacy = intervals(
@@ -338,7 +411,14 @@ def summarize(output: Path) -> dict:
         if hangs is not None
         else None,
     }
-    report = {"run": run, "intervals": rows, "memory": memory, "cpu": cpu, "hitches": hitch_summary}
+    report = {
+        "run": run,
+        "intervals": rows,
+        "memory": memory,
+        "cpu": cpu,
+        "hitches": hitch_summary,
+        "idle": _idle(output, frames, hangs),
+    }
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (output / "report.md").write_text(_markdown(report), encoding="utf-8")
     return report
@@ -390,6 +470,13 @@ def _markdown(report: dict) -> str:
         else "CPU: not recorded.",
         "",
     ]
+    idle = report["idle"]
+    if idle["requested_seconds"] is not None:
+        lines += [
+            f"Idle trace coverage: {idle['covered_seconds']} / {idle['requested_seconds']} s; "
+            f"hitches {idle['hitch_ms_per_second']} ms/s; potential hangs {idle['hangs']}. "
+            "Missing trace clock or tables is unmeasured; partial coverage is not acceptance."
+        ]
     return "\n".join(lines)
 
 
@@ -410,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     rec.add_argument("--pid", type=int)
     rec.add_argument("--output")
+    rec.add_argument("--phases", type=Path, help="Native soak journal for idle-only trace analysis")
     rec.add_argument(
         "--no-xctrace", dest="xctrace", action="store_false", help="signposts and RSS only"
     )

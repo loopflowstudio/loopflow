@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -205,3 +206,49 @@ def test_empty_recorded_hitch_table_measures_zero(tmp_path: Path) -> None:
     assert report["hitches"]["recorded"] is True
     assert report["hitches"]["count"] == 0
     assert report["hitches"]["hitch_ms_per_second"] == 0.0
+
+
+def test_idle_hitches_use_trace_clock_and_clip_phase_boundaries(tmp_path: Path) -> None:
+    origin = 1791223200.0
+    (tmp_path / "phases.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"event": "soak_phase", "phase": "idle", "time": origin},
+                {"event": "soak_phase", "phase": "navigation_typing", "time": origin + 2},
+                {"event": "soak_end", "time": origin + 4},
+            ]
+        )
+    )
+    start = datetime.fromtimestamp(origin, timezone.utc)
+    end = datetime.fromtimestamp(origin + 4, timezone.utc)
+    (tmp_path / "trace-toc.xml").write_text(
+        f'<trace-toc><run number="1"><info><run-info><start-date>{start.isoformat()}</start-date>'
+        f"<end-date>{end.isoformat()}</end-date></run-info></info></run></trace-toc>"
+    )
+    rows = [
+        {"start_ms": 1000, "duration_ms": 100},
+        {"start_ms": 1900, "duration_ms": 200},
+        {"start_ms": 2500, "duration_ms": 500},
+    ]
+    result = record_live._idle(tmp_path, rows, rows)
+    assert result["requested_seconds"] == result["covered_seconds"] == 2
+    assert result["hitch_ms_per_second"] == pytest.approx(100, abs=0.001)
+    assert result["hangs"] == 2
+
+
+def test_idle_clock_or_table_absence_never_means_zero_hitches(tmp_path: Path) -> None:
+    (tmp_path / "phases.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"event": "soak_phase", "phase": "idle", "time": 10},
+                {"event": "soak_end", "time": 20},
+            ]
+        )
+    )
+    result = record_live._idle(tmp_path, [], [])
+    assert result["requested_seconds"] == 10
+    assert result["covered_seconds"] is None
+    assert result["hitch_ms_per_second"] is None
+    assert result["hangs"] is None

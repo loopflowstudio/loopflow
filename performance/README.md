@@ -7,19 +7,10 @@ uv run python scripts/desktop_performance.py run --cli target/debug/lf --output 
   --baseline /tmp/desktop-baseline
 ```
 
-Run the two desktop journeys on a macOS host after changing the outline or Task
-workspace. `--samples 1` runs the short behavioral check; the default records one
-first interaction and twenty warm attempts per scenario and population. The
-runner opens an owned native window and three retained `/bin/cat` PTYs, with
-fixed populations of 8 Tasks/4 Sessions and 256 Tasks/128 Sessions. Planning and
-active Sessions come from synthetic shared DTOs. `--cli` names the source binary
-used only with a fresh owned Home, native transcript and Codex stub; no configured
-Home, credential or provider is used. The separate `native_session_reopen` scenario
-selects that Session through `SessionsStore` and `session connect`, mounts its
-returned launch command, waits for native identity and input replies, lets the
-client exit, then reopens the same conversation. Every pass preserves one Session
-ID and the exact native history bytes. This proves the public resume boundary
-with a synthetic provider, not real Codex readiness or a realistic data snapshot.
+Run the desktop journeys on a macOS display host. `--samples 1` runs the short
+behavioral check; the default records one first interaction and twenty warm
+attempts per scenario and population. The [benchmark guide](../scripts/benchmarks/desktop-performance/README.md#unattended-workspace-journeys-and-soak)
+owns fixture isolation, native reopening, CLI counters and unattended soak setup.
 
 `hierarchy_interaction_ms` covers full/compact/Session presentations, folding,
 expansion, filtering and scrolling during planning refresh. The scroll case uses
@@ -29,8 +20,10 @@ text verifies that destination before releasing the response; refreshed text mus
 then appear without changing the settled viewport, selection or Session identities.
 The normal 800-point viewport is restored before the workspace scenarios.
 
-`task_workspace_ready_ms` covers active/empty Monitor,
-retained Session return and combined-pane zoom/restore. The endpoint is native
+`task_workspace_ready_ms` covers active/empty Monitor, retained Session return,
+combined-pane zoom/restore, Task details/Flow/history, file editing and native
+Session reopening. `new_pty_capture_and_echo_ms` covers fresh `cat` PTYs.
+The endpoint is native
 bitmap capture with text verification; Session return additionally requires
 actual first responder, retained surfaces, draft submission and PTY replies.
 Forced capture and OCR add observer overhead. Each attempt separates the last
@@ -39,9 +32,9 @@ verification and any input proof. Scrolling includes an intermediate capture/OCR
 before refresh release; its verification cost is also recorded in the attempt's
 observation, alongside before/after labels and offsets. These are **not compositor
 paint measurements**. Scrolling uses the native scroll API, excluding wheel-event
-delivery and continuous gesture smoothness. Frame hitches, production phase
-attribution and configured registry/provider costs remain
-unmeasured. No rendering budget is scored from this endpoint.
+delivery and continuous gesture smoothness. No rendering budget is scored from
+this endpoint; the soak's separate recorder reports available hitch evidence.
+Configured registry/provider costs remain unmeasured.
 
 Each output directory retains `attempts.jsonl`, `native.log`, `run.json` and
 JSON/Markdown reports. Begin records preserve interrupted attempts. Failure rates

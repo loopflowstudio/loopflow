@@ -116,14 +116,12 @@ uv run python scripts/desktop_performance.py run --cli target/debug/lf --samples
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --samples 21 --soak-seconds 3600 --output /tmp/workspace-candidate --baseline /tmp/workspace-baseline
 ```
 
-The native runner retains three owned `cat` PTYs while navigating and refreshing
-8- and 256-Task fixtures. It exercises filtering, scrolling during refresh,
-Session return with an unsubmitted terminal draft, Monitor, split/zoom restore,
-the Task details breadcrumb/sheet, Flow nodes, complete history disclosure
-(one record per Task), and browsing/editing in the file sidebar. These use mounted
-workspace controls and an owned temporary checkout. A fresh `cat` PTY is created
-and verified each round. Its startup is not provider startup;
-retained surface equality is not native provider identity proof.
+The [workspace journeys](../../../performance/README.md) use mounted controls,
+an owned temporary checkout and three retained `cat` PTYs. Synthetic planning
+and active-Session DTOs supply 8 Tasks/4 Sessions or 256 Tasks/128 Sessions, with
+one explicit history record per Task. A fresh `cat` PTY is created each round;
+its startup is not provider startup. Native reopening uses the separate fixture
+below.
 
 After the large-population journeys, the soak alternates thirty seconds idle
 with Session switching, typing/echo and split focus/restore for the requested
@@ -140,11 +138,10 @@ failed preservation checks cannot produce a complete journey report.
 
 These fixtures never open a configured Home, provider or real Task checkout.
 The runner removes inherited `LF_*` context, uses a private Home, and fixture
-transport rejects mutations. Reports distinguish completed harness execution
-from acceptance: bitmap/OCR and PTY echo do not measure compositor paint or
-key-to-glyph latency. Baseline comparison requires the same host, measurement
-sources, fixture contract and soak duration. The September 24 receipt is kept
-but is incompatible with the expanded harness.
+transport rejects mutations. The journey report's comparison contract also
+requires matching soak duration. Bitmap/OCR and PTY echo do not establish
+key-to-glyph latency. The September 24 receipt remains on disk but is incompatible
+with the expanded harness.
 
 LOO-371 owns the representative snapshot runner for real CLI comparisons. Its
 October 5 committed tree and checkout contained no such runner, so this harness

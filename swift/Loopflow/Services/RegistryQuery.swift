@@ -3,11 +3,8 @@
 // Planning and history are one-shot queries. Active Sessions use one foreground
 // observation per window so native receipt discovery survives between samples.
 //
-// This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
-// readers with `--json` as subprocesses and decodes the wire
-// snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
-// `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
-// runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
+// Reads run `lf` subprocesses and decode shared wire types into app models.
+// The injected runner on macOS execs the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation
@@ -22,7 +19,7 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
-/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
+/// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 /// Entry emitted by `lf list --json`.

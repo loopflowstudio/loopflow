@@ -5,6 +5,18 @@ Heart requested the Task; the mechanism below is proposed, not accepted. Product
 decisions in the Task brief are binding. Open choices are in
 [questions.md](questions.md).
 
+## Decisions (Jack Heart, 2026-10-05 design review)
+
+- **One landing.** Slices 1–4 are built in order and delivered together.
+- **Desktop is reactive to the store and nothing else.** Linear reaches the UI
+  only through a sync committing to the store; the two are independent. How
+  syncs are scheduled or triggered (a schedule, Desktop asking for one,
+  webhooks — Jack's stated preference among these) is not this Task.
+- **The latency budgets are targets, not a landing gate.** "Reasonable enough
+  for now, but dont block landing on an unachieveable number": pursue them for
+  about an hour of focused work; if they are not met, ship the measured result
+  with its numbers stated and file a follow-up Task for the gap.
+
 ## Problem
 
 Jack Heart creates a Task and the open Desktop sidebar does not show it. The
@@ -232,7 +244,8 @@ files, diffs, usage).
 | Liveness not verified | Stays unknown; a frame never upgrades it. |
 | Home or installed `lf` replaced | Watch exits on configuration change as the active reader does; the window reopens it and drops other-Home content. |
 
-**Operational budget.**
+**Operational budget.** Targets to pursue, time-boxed per Jack's decision; the
+spawn, Exec-row and no-polling rows are structural and are not negotiable.
 
 | Measure | Now | Target |
 | --- | --- | --- |
@@ -243,8 +256,9 @@ files, diffs, usage).
 | Idle watch CPU | n/a | < 1% of a core |
 | Planning projection in the watch | 18–23 s as a command | ≤ 300 ms p95 |
 
-**Exclusions.** No Linear poller: a change made in Linear appears when a sync
-commits it. Git-only changes (commits, dirty files) keep their existing slower
+**Exclusions.** No Linear observation in Desktop (Jack's decision above): a
+change made in Linear appears when a sync commits it, and then by the same
+path as any other commit. Git-only changes (commits, dirty files) keep their existing slower
 paths. Remote-Home streaming over SSH is not proven here. LOO-380 owns
 reconciling stale live records. No change to process admission cost for
 one-shot commands. iOS is unchanged.
@@ -284,8 +298,8 @@ liveness was not observed.
    second watch process.
 5. Rendered benchmark scenario and the installed-app demo.
 
-Slices 1–4 land together or the forbidden polling fallback exists in between;
-they are ordered for building, not for separate delivery.
+Slices 1–4 land together (Jack's decision); they are ordered for building,
+not for separate delivery.
 
 ## Done when
 
@@ -311,8 +325,9 @@ they are ordered for building, not for separate delivery.
 - `cargo test -p loopflow --test dto_fixtures` and `swift test --filter
   DTOFixtureTests` cover the frame envelope.
 - `uv run python scripts/desktop_performance.py run` gains a write-to-visible
-  scenario; 20 comparable samples meet the budget table, with failed attempts
-  retained.
+  scenario; 20 comparable samples are recorded against the budget table, with
+  failed attempts retained. A miss after the time-boxed pursuit is reported
+  with its numbers and a filed follow-up Task, not held back from landing.
 - Demo/review (people, not gate): the create → rename → bind → complete
   sequence on the installed app on Jack's Home, with evidence limits stated.
 
@@ -331,8 +346,9 @@ costs seconds. This plan earns no KR by itself.
   against a second-process writer, is the guard for the first; the heartbeat
   projection counts for the second.
 - **`execs` invalidates planning.** Cheap once Desktop's polls are gone (2,067
-  a day); until the last poll loop is deleted, every remaining poll bumps it.
-  This bears on how the slices are delivered (questions.md, 8).
+  a day). One landing means no interval in which a surviving poll loop bumps
+  it; during development, expect the planning projection to re-run on every
+  remaining poll until slice 4.
 - **FSEvents latency on `-wal`** is unmeasured; the probe used kqueue. The
   integration test decides; kqueue on the file plus a directory watch is the
   alternative.

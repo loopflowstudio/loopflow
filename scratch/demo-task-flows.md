@@ -69,11 +69,28 @@ Agent's reading of Jack's feedback, not his wording:
    tmux launch and ten-second wait are deleted without a replacement. Restore
    `-i` the same way; global `-w` and `session open` are outside this Task.
 2. Delete `lf flow start` and its launcher (`ops/task.rs::launch_task_flow`,
-   `ops/run.rs::exec_task_flow`), with the
+   `launch_existing_task`, `ops/run.rs::exec_task_flow`), with the
    `LF_TASK_FLOW_OPTIONS` environment hop. `lf flow` keeps `list` and `show`.
-   Today it only validates planning and re-execs
-   `lf --mode batch --task <id> run <flow>` in tmux. The planning check
-   (terminal, moved or removed Task) moves to `--task` launch admission.
+   **Correction (source read, October 5):** the agent earlier told Jack that
+   `flow start` only checks planning and re-execs in tmux. It does more.
+   `bin/lf.rs` routes it to `ops::task::task_run`, which:
+   - places an unplaced Task (creates the worktree), applies `--stack-on`,
+     restores the checkout. `lf task checkout` is the same function with
+     `launch: false`;
+   - resolves planning, picks the Project's default Flow when none is named,
+     records a `-m` agent choice on the Task, publishes `--reason` as a steer;
+   - adopts/reconciles the Task PR, refuses a dirty between-PR worktree and
+     ensures a working PR;
+   - then launches detached and waits up to ten seconds for the Flow row.
+   The ordinary launch already covers the rest: `--task X` on any command
+   enters the Task worktree (`bin/lf.rs`, `prepare_work_binding` then
+   `CwdGuard::enter`), and a launch from the worktree without `--task` binds
+   its Flow to the Task (observed).
+   Proposed homes, not decided by Jack: placement, PR reconciliation and the
+   working-PR guarantee stay in `lf task checkout`; the caller names the Flow
+   (`task status` reports the recommended one); `-m` and `lf task comment
+   --steer` already cover agent and reason; detachment is the caller's.
+   Resulting recipe: `lf task checkout X`, then `lf --task X -b <flow>`.
 3. Reroute every caller onto the ordinary launch, with no alias: `task create
    --run/--flow`, Desktop Start (`MacLocalWaveAgentLauncher`, `RegistryQuery`),
    builtin skills (`task_operate`, `advance`, `launch-plan`, `repo_operate`,
@@ -107,9 +124,19 @@ Home `lf -b run proof` printed the op output and blocked, `--mode` is an
 unexpected argument. Clippy clean; `flow_tests` 23, `session_lifecycle_tests` 17, `task_flow_launch_tests` 1 passed; `swift build --build-tests` built. Direction 1 is done;
 2, 3 and 5 remain.
 
-Unresolved: whether `task create --run`, `task automate`/`automation`, `task
-interrupt` and `task wait` count as worker APIs to delete or are ordinary Task
-commands to keep.
+Unresolved, for Jack:
+
+- With `-b` blocking, who backgrounds? `task create --run/--flow`, Desktop
+  Start (`RegistryQuery`, `MacLocalWaveAgentLauncher`) and the operator skills
+  (`wave_operate`, `task_operate`, `repo_operate`, `advance`) all rely on
+  `flow start` returning at once. Proposal: delete `task create --run/--flow`;
+  skills tell the agent to background the command with its own tool; Desktop
+  owns the child process as it owns terminals.
+- Whether the planning refusal (canceled, moved, removed Task) applies to
+  every launch that resolves to a Task, or is deleted. Proposal: apply once at
+  Task resolution.
+- Whether `task automate`/`automation`, `task interrupt` and `task wait` are
+  worker APIs to delete or ordinary Task commands to keep.
 
 ## Defects and stale surface found
 

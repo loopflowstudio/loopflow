@@ -99,7 +99,8 @@ it started. `--built` reuses the bundle already in `--work`; `--home <other
 work>/home` copies another run's Home, so a baseline and a candidate read the
 same data. It needs a logged-in desktop; OS file caches stay warm, and
 main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
-a baseline and a candidate.
+a baseline and a candidate; `20261005-first-render/` alternates the two in
+rounds so both see the same host load.
 
 `desktop_performance.py write-visible` opens one window on a private Home
 through the real `lf monitor workspace --watch` reader, then commits from

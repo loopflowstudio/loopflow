@@ -10,12 +10,20 @@ enum RepoFilter: Hashable {
     case repo(String)
 }
 
+@MainActor
+private final class WindowModel {
+    private(set) lazy var model = PodiumModel.window(query: RegistryQueryLocal.shared)
+}
+
 struct WavesView: View {
     let portfolioService: PortfolioService
     @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
     /// The window's one workspace model: the Work list and the Task sheet both
     /// read it, and it opens from the saved workspace like every other window.
-    @State private var model = PodiumModel.window(query: RegistryQueryLocal.shared)
+    /// Built when a window first renders: the app describes this view at every
+    /// launch, and a model decodes the saved workspace.
+    @State private var window = WindowModel()
+    private var model: PodiumModel { window.model }
     @State private var showsTaskWorkspace = false
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo

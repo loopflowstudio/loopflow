@@ -841,15 +841,16 @@ no owning Task (LOO-375 owns `wt list` only).
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
 - The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
-  CPU and the 400/1000 ms targets are unmeasured.
+  lower-level timing, not a rendered launch.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Rendered receipt (`launch.py`, [20261004-launch-rendered](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)):
-  saved launch usable at 506 ms median / 540 p95, under load, never waiting on
-  a read. Still open on LOO-376: first frame misses 400 ms (~420 ms of first
-  render after an 89 ms restore); an unsaved launch waits 10–12 s; every `lf`
-  read costs 3.7 s or more; `session list` runs twice. Stalls unmeasured.
+- Rendered receipts (`launch.py`): [20261004](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)
+  saved launch usable at 506 ms median; [20261005](../../scripts/benchmarks/desktop-performance/20261005-first-render/README.md)
+  first frame 850 → 617 ms in alternating rounds under heavy load, never
+  waiting on a read. Profile before guessing: the cost was model getters
+  re-normalizing paths per render, not drawing. Still open on LOO-376: 400 ms
+  unproven on a quiet host; unsaved launch waits on `lf`; `session list` runs
+  2–3 times (refresh owner: LOO-382/LOO-304).
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

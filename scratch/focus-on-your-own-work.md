@@ -60,7 +60,8 @@ October 5 (delivery review):
 
 ## Branch state after the October 5 pass
 
-Built on `67cd68157`; Jack Heart has not reviewed it.
+Built on `67cd68157`, merged with main at v0.13.3 (`8ea0bec9c`, release files
+only, no conflicts); Jack Heart has not reviewed it.
 
 - **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
   `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
@@ -113,6 +114,8 @@ Built on `67cd68157`; Jack Heart has not reviewed it.
 - **Leftovers.** `SessionKind::FlowReview` and `SessionAttention::Review` are
   unreachable for new work and go with the Waiting slice. Task status still
   lists every Exec (defect 2 in [the demo notes](demo-task-flows.md)).
+  `--needs-me` remains in the CLI, docs and `repo/operate` until `--waiting`
+  replaces it.
 
 ## Later slices (approved October 4, unbuilt)
 
@@ -168,7 +171,10 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --test pr_tests publishing_after` | Publish after an observed merge names the PR and `lf pr next`. |
 | `cargo test -p loopflow --lib store::migrations` | Released frontier converts through the one draft. |
 | `cargo test -p loopflow --test dto_fixtures`, `swift build --build-tests` | Wire shapes agree across Rust and Swift. |
-| `git grep -E "FlowSession\|flow_sessions\|flow_events\|flow start\|LF_TASK_FLOW_OPTIONS"` | Matches only migrations, their tests and removed-command assertions. |
+| `git grep -E "FlowSession\|flow_sessions\|flow_events\|flow start\|LF_TASK_FLOW_OPTIONS"` | Outside scratch and Wave memory: migrations and their tests, two dated reviews under `docs/reviews/`, and old release notes. No executable path. |
+
+Last run, October 5 after the merge: `cargo test -p loopflow --lib
+store::migrations`, 83 passed; the rest wait for gate.
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

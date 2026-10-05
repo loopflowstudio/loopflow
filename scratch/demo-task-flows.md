@@ -100,5 +100,5 @@ driver killed mid-step, and the migration against a populated store.
 
 The pass Jack requested is built; its state and what stays unproven are in
 [the design](focus-on-your-own-work.md). Of the defects above, 1 is fixed (a
-Flow whose driver failed reads `stopped`), 5 and 7 are unchanged, and the rest
-were not rechecked.
+Flow whose driver failed reads `stopped`), the `lf feature` half of 4 is fixed,
+5 and 7 are unchanged, and the rest were not rechecked.

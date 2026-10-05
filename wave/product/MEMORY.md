@@ -1078,7 +1078,7 @@ They explain the topology change; they are not current setup instructions.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`, `LF_AS` and `LF_FLOW_ID`; Rust tests that launch or assert journal ids
-  must clear both or `cargo test -p loopflow` fails only under agent runs.
+  must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and

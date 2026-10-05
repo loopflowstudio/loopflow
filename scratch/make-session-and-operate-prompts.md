@@ -363,15 +363,19 @@ cargo test -p loopflow --test discovery_tests --test documented_commands --test 
 Expected: all pass; goldens regenerated in the same change. Demo/review holds
 the post-install conversation behavior; it is not a gate.
 
-Check result (kickoff, 2026-10-05): no build or test run — plan only.
+Check result (implement, 2026-10-05): `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- engine::prompt engine::builtins engine::skills ops::task_automation` and `--test discovery_tests --test documented_commands --test golden_prompt` pass. `default_conversation_tests` passes only with the launching agent's `LF_*` variables cleared; gate owns the full run.
 
-## Internal slices
+## Remaining
 
-One coherent change; order for the implementer:
+Implemented in one change: the action contract in all three operate skills,
+continuity-only sessions composed with their operate body in `build.rs`
+(under a generated `# Operating procedure` heading), `task/session`, the
+LOOPFLOW.md refresh at 114 lines, regenerated goldens, user docs and
+[the scenario walk-through](../docs/reviews/session-operate-prompts.md).
 
-1. **This slice — contract and deletion.** Rewrite the three operate skills to
-   the action contract and defined-Flow rule; cut the session files to
-   continuity only and compose operate into them; add `task/session`; fix the two broken commands. Focused test:
-   `cargo test -p loopflow --lib assembled_prompts_deliver_procedures_to_the_owning_skill`.
-2. LOOPFLOW.md rewrite and goldens.
-3. User docs and the scenario review document.
+- Gate: the command plan above, once.
+- Demo/review: the post-install conversation behavior in "Demo". Not shown yet.
+- `wave/operate` keeps its Task-brief section: `capture-tasks` does not cover
+  its description-versus-comment rules.
+- The sessions' workspace section is unchanged, including its sync-conflict
+  detail.

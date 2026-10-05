@@ -8,8 +8,8 @@ Jack Heart resolved 1, 2, 3, 4, 8 and 9 in design review on 2026-10-05; see
 2. Resolved: inline. The session's builtin content is composed from its session file and its operate body; no run-time read.
 3. Resolved: the rule covers started Tasks only.
 4. Resolved: no. A defined Flow with steps left proceeds; a Task whose Flow ended before landing waits on Jack. Letting a Task change its Flow is wanted and undesigned.
-5. **Does `wave/operate`'s Task-brief section move to `capture-tasks`?** Only if
-   `capture-tasks` already covers each rule; otherwise it stays in place.
+5. Assumed at implementation: `wave/operate`'s Task-brief section stays.
+   `capture-tasks` does not cover its description-versus-comment rules.
 8. Resolved: started Tasks only; unstarted work is not started "for now at least."
 9. Resolved with 2.
 6. **Default New Session skill.** Unchanged (`capture-tasks`, Jack's 2026-10-02
@@ -21,3 +21,14 @@ Jack Heart resolved 1, 2, 3, 4, 8 and 9 in design review on 2026-10-05; see
 Still open after review:
 
 - How a Task changes its Flow. Jack wants it; no design exists. Out of this Task.
+
+Assumptions made at implementation, 2026-10-05:
+
+- `task/operate` still selects a Flow for a Task that has never had one, since
+  invoking it on that Task is the person's selection. It no longer selects a
+  further Flow after one finished unlanded.
+- The composed session text places the operate procedure after the session's
+  workspace section, under a generated heading; the session opens by pointing
+  to it.
+- LOOPFLOW.md dropped "selected Wave context belongs to that Work" to stay at
+  114 lines; the `<lf:wave>` block already scopes that context.

@@ -4,6 +4,30 @@ For [the design](focus-on-your-own-work.md). The pass followed each default
 below; defaults and interpretations are the agent's, not Jack Heart's. Earlier
 interpretations are at `6f246fda4:scratch/questions.md`.
 
+## Answered by Jack Heart (October 5)
+
+- **Who backgrounds, now that `-b` blocks?** "cant you just background with
+  &" and "like llms know how to background things". The caller does; there is
+  no detached launch mode. Explicit `nohup`/`&` examples in skills are fine.
+  The six builtin skills that say "background it with your own tool" stay.
+- **Task helpers.** On deleting `task create --run`: "Im fine with this. i am
+  fine with task helpers that sit on top of the lf system, but i dont want to
+  introduce parallel paths or drivers." A Task command may prepare, then it
+  enters the ordinary path; it never owns a second launcher, driver or record.
+
+## Asked by Jack, open
+
+- **How a step learns and records its position.** At `45ca0d2ac` the driver
+  passes a JSON `FlowStep` as the hidden `--__flow-step` argument (the hidden
+  `__flow-step` command for operations), and the Exec's recorded argv is the
+  record. Jack: "Can we do this environemnt variables? I hate __ and hidden
+  arguments." Proposed, not decided: the driver sets one environment variable;
+  the step's `lf` consumes and removes it at startup, as it already replaces
+  `LF_PROCESS_ID`, so nested commands never inherit it; the Exec row gains one
+  nullable field for flow, sequence, label, graph key and iterations, because
+  Execs record argv and not environment. Step Execs then read as plain
+  commands (`lf -b implement`, `lf task sync --plan`).
+
 ## Asked of Jack, unanswered; the pass took the default
 
 - **Who backgrounds, now that `-b` blocks?** `task create --run/--flow` is

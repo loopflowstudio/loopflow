@@ -17,6 +17,10 @@ below. Mechanisms not listed there remain proposals.
    basically end at landing." If a Task's selected Flow does not end at
    landing, the Task either changes its Flow (wanted, not yet designed) or
    waits on Jack. "If there is a defined flow, we need to proceed."
+4. **`task/session` is a plain skill**, launched with
+   `lf --task <issue> skill task/session`. "This is the right entry point."
+   A primary Task session is "just a smaller wrapper around this that saves
+   that id in a field"; the wrapper is not built here.
 
 ## Problem
 
@@ -208,8 +212,10 @@ the Desktop skill picker and exports. It is an ordinary Task Session: any number
 may exist, it never becomes the Flow's driver, and it holds no primary scope.
 It keeps applying `task/operate`, answers questions about the Task, takes
 direction, and gives review feedback a home without completing a review the
-person has not decided. A primary Task conversation (`session ensure` for a
-Task, Ctrl-C semantics) stays with LOO-364/LOO-353.
+person has not decided. A primary Task conversation launches this same skill
+and records its Session id; that wrapper (`session ensure` for a Task, Ctrl-C
+semantics) stays with LOO-364/LOO-353, so this skill must not assume it is
+the only or the primary Task Session.
 
 ### Review completion, unified
 

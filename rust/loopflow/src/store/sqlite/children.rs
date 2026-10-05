@@ -81,26 +81,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn update_task_plan(&self, task_id: &TaskId, plan: &TaskPlan) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE tasks SET issue_identifier=?2, issue_title=?3, issue_description=?4,
-                 pm_snapshot_synced_at=?5 WHERE id=?1 AND external_issue_id=?6",
-            params![
-                task_id.as_str(),
-                plan.identifier,
-                plan.title,
-                plan.description,
-                plan.pm_snapshot_synced_at,
-                plan.id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
     pub fn update_task_pm_writeback(
         &self,
         task_id: &TaskId,
@@ -109,23 +89,6 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         update_task_pm_writeback_in(&conn, task_id, state, updated_at)
-    }
-
-    pub fn update_task(&self, task: &Task) -> StoreResult<()> {
-        validate_task(task)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        let parameters = task_params(task);
-        let changed = transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
-        Ok(())
     }
 
     pub fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
@@ -195,10 +158,9 @@ impl SqliteStore {
             "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1",
             [task.id.as_str()],
         )?;
-        let parameters = task_params(task);
         transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+            "UPDATE tasks SET updated_at=?2 WHERE id=?1",
+            params![task.id.as_str(), task.updated_at.unix_timestamp()],
         )?;
         insert_task_event_in(
             &transaction,
@@ -1147,12 +1109,6 @@ const TASK_COLUMNS: &str = "SELECT
     t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent
     FROM tasks t JOIN projects p ON p.id=t.project_id";
-const TASK_UPDATE: &str = "UPDATE tasks SET
-    external_issue_id=?3, issue_identifier=?4,
-    issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
-    pm_writeback_json=?8, worktree=?9, workspace_slug=?10,
-    abandon_requested_at=?11, abandon_reason=?12, created_at=?13, updated_at=?14
-    WHERE id=?1";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,

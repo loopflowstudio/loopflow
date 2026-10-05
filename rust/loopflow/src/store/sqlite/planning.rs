@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::id::WaveId;
 use crate::pm::{PmItem, PmProject, PmSnapshot};
@@ -37,6 +37,13 @@ impl SqliteStore {
                 params![repo, provider, record.item.id],
             )?;
         }
+        project_accepted_planning(
+            &tx,
+            repo,
+            provider,
+            record.project.as_slice(),
+            std::slice::from_ref(&record.item),
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -237,6 +244,13 @@ impl SqliteStore {
                 params![snapshot.wave_id, project.id, position as i64],
             )?;
         }
+        project_accepted_planning(
+            &tx,
+            &repo,
+            &snapshot.provider,
+            &snapshot.snapshot.projects,
+            &snapshot.snapshot.items,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -303,6 +317,126 @@ impl SqliteStore {
             snapshot: PmSnapshot { projects, items },
         }))
     }
+}
+
+/// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
+fn project_accepted_planning(
+    tx: &Transaction<'_>,
+    repo: &str,
+    provider: &str,
+    projects: &[PmProject],
+    items: &[PmItem],
+) -> StoreResult<()> {
+    let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
+    let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
+    let projects = {
+        let mut query = tx.prepare(
+            "WITH accepted AS (
+                SELECT * FROM pm_projects WHERE repo=?1 AND provider=?2
+                AND id IN (SELECT value FROM json_each(?3))
+                AND archived=0 AND membership_unresolved=0
+             )
+             SELECT p.body,p.observed_at,m.wave_id FROM accepted p
+             JOIN pm_wave_projects m ON m.project_id=p.id
+             JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+             JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
+             WHERE EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=sync.initiative)
+             UNION
+             SELECT p.body,p.observed_at,existing.wave_id FROM accepted p
+             JOIN projects existing ON existing.external_project_id=p.id
+             JOIN waves w ON w.id=existing.wave_id AND w.repo=p.repo"
+        )?;
+        let rows = query
+            .query_map(params![repo, provider, project_ids], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, WaveId>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    for (body, observed_at, wave_id) in projects {
+        let project: PmProject = serde_json::from_str(&body)?;
+        let existing: Option<(String, WaveId)> = tx
+            .query_row(
+                "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
+                [&project.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if existing
+            .as_ref()
+            .is_some_and(|(_, owner)| owner != &wave_id)
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} changed Wave ownership",
+                project.id
+            )));
+        }
+        let id = existing
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| crate::work::project::ProjectId::new().to_string());
+        tx.execute(
+            "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,flow,status)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)
+             ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
+             project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,flow=excluded.flow,status=excluded.status",
+            params![id,wave_id,project.id,project.slug,project.name,
+                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.flow,project.status.as_str()],
+        )?;
+        let durable = tx.query_row(
+            super::children::PROJECT_SELECT,
+            [&id],
+            super::children::map_project_row,
+        )?;
+        super::durable::create_project_work(tx, &durable)?;
+    }
+    let items = {
+        let mut query = tx.prepare(
+            "SELECT i.body,i.observed_at,t.id,p.id FROM pm_items i
+             JOIN tasks t ON t.external_issue_id=i.id
+             JOIN projects current ON current.id=t.project_id
+             JOIN waves w ON w.id=current.wave_id
+             JOIN projects p ON p.external_project_id=i.project_id AND p.wave_id=current.wave_id
+             JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider AND observed.id=i.project_id
+             WHERE i.repo=?1 AND i.provider=?2 AND w.repo=i.repo AND i.needs_refresh=0
+             AND i.id IN (SELECT value FROM json_each(?3))
+             AND observed.archived=0 AND observed.membership_unresolved=0
+             AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
+             AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"
+        )?;
+        let rows = query
+            .query_map(params![repo, provider, item_ids], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    for (body, observed_at, task_id, project_id) in items {
+        let item: PmItem = serde_json::from_str(&body)?;
+        tx.execute(
+            "UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
+             pm_snapshot_synced_at=?5,project_id=?6 WHERE id=?1",
+            params![
+                task_id,
+                item.identifier,
+                item.name,
+                item.description,
+                observed_at,
+                project_id
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn same_ids(left: &[String], right: &[String]) -> bool {
@@ -516,7 +650,7 @@ mod tests {
         // An already exact prefixed name also consumes the exception once.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let mut conn = Connection::open_in_memory().unwrap();
-            crate::store::migrations::apply_before_project_name_cutover_fixture(&conn);
+            crate::store::migrations::apply_before_current_draft(&conn, "project_readiness");
             let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/task_history_planning.json"
             ))
@@ -532,7 +666,7 @@ mod tests {
                 params![project.id, original],
             )
             .unwrap();
-            conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
+            conn.execute_batch(&crate::store::migrations::current_draft_sql(
                 "project_readiness",
             ))
             .unwrap();

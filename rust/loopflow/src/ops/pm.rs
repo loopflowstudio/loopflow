@@ -849,19 +849,13 @@ async fn fetch_pm_snapshot_for_projects(
     ctx: &PmContext,
     projects: Vec<PmProject>,
 ) -> OpsResult<PmSnapshot> {
-    let project_items = try_join_all(projects.iter().map(|project| async move {
-        let mut items = ctx
-            .client
-            .list_items(&project.id)
-            .await
-            .map_err(pm_to_ops)?;
-        for item in &mut items {
-            item.project_id = Some(project.id.clone());
-            item.project = Some(project.slug.clone());
-        }
-        Ok::<_, OpsError>(items)
-    }))
-    .await?;
+    let project_items = try_join_all(
+        projects
+            .iter()
+            .map(|project| ctx.client.list_items(&project.id)),
+    )
+    .await
+    .map_err(pm_to_ops)?;
     Ok(PmSnapshot {
         projects,
         items: project_items.into_iter().flatten().collect(),
@@ -889,12 +883,7 @@ async fn store_pm_snapshot(
         })
         .await
         .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
-    let accepted = store
-        .pm_snapshot(registered.id())
-        .await
-        .map_err(|err| OpsError::Message(err.to_string()))?
-        .ok_or_else(|| OpsError::Message("stored PM snapshot is unavailable".into()))?;
-    super::project::sync_projects(store, &registered, &accepted.snapshot).await
+    Ok(())
 }
 
 pub(crate) async fn refresh_pm_snapshot(
@@ -1295,33 +1284,6 @@ pub(crate) async fn pm_update_async(
                 "Linear has not confirmed completion of {}",
                 item.identifier
             )));
-        }
-        let store = pm_store().await?;
-        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        super::project::sync_projects(&store, &registered, &PmSnapshot {
-            projects: vec![record.project.clone()],
-            items: vec![item.clone()],
-        }).await?;
-        if let Some(task) = store
-            .get_task_by_issue(&item.id)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            store
-                .update_task_plan(
-                    &task.id,
-                    &crate::planning::TaskPlan {
-                        id: task.plan.id,
-                        identifier: item.identifier.clone(),
-                        title: item.name.clone(),
-                        description: item.description.clone(),
-                        pm_snapshot_synced_at: record.observed_at,
-                    },
-                )
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
         }
         Ok::<(), OpsError>(())
     }
@@ -3428,6 +3390,15 @@ mod tests {
 
     #[tokio::test]
     async fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
+        interrupted_reteam(false).await;
+    }
+
+    #[tokio::test]
+    async fn repository_team_reteam_resumes_with_cached_project_membership() {
+        interrupted_reteam(true).await;
+    }
+
+    async fn interrupted_reteam(cache_planning: bool) {
         let repo = tempfile::tempdir().unwrap();
         write_repo_config(
             repo.path(),
@@ -3445,14 +3416,12 @@ mod tests {
         ))
         .await
         .unwrap();
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                "survival".to_string(),
-                repo.path().display().to_string(),
-            ))
-            .await
-            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "survival".to_string(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
 
         let old_project = migration_project_node(
             "project-survival",
@@ -3489,7 +3458,12 @@ mod tests {
             false,
         );
         let marker = reteam_comment_body("OLD-1", "LOO");
-        let responses = vec![
+        let mut responses = Vec::new();
+        if cache_planning {
+            responses.push(projects_response(json!([old_project.clone()])));
+            responses.push(issues_response(json!([old_issue.clone()])));
+        }
+        responses.extend([
             projects_response(json!([old_project])),
             issues_response(json!([old_issue.clone()])),
             project_update_response("project-survival"),
@@ -3512,7 +3486,7 @@ mod tests {
             project_update_response("project-survival"),
             projects_response(json!([migrated_project])),
             issues_response(json!([migrated_issue])),
-        ];
+        ]);
         let (base_url, requests) = test_server::spawn(responses).await;
         let resolved = ResolvedReteamContext {
             repository: RepositoryPmContext {
@@ -3528,6 +3502,32 @@ mod tests {
             team_key: "LOO".to_string(),
             store,
         };
+
+        if cache_planning {
+            let projects = resolved
+                .repository
+                .client
+                .list_projects("initiative-survival")
+                .await
+                .unwrap();
+            let items = resolved
+                .repository
+                .client
+                .list_items("project-survival")
+                .await
+                .unwrap();
+            resolved
+                .store
+                .put_pm_snapshot(PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative-survival".into(),
+                    synced_at: 1,
+                    snapshot: PmSnapshot { projects, items },
+                })
+                .await
+                .unwrap();
+        }
 
         let first = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
             .await
@@ -3592,7 +3592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_pm_snapshot_reads_projects_and_tags_their_items() {
+    async fn fetch_pm_snapshot_reads_projects_and_their_items() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
@@ -3619,6 +3619,48 @@ mod tests {
         assert_eq!(
             requests.lock().await[1].authorization.as_deref(),
             Some("Bearer linear-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_pm_snapshot_preserves_moved_and_detached_issue_ownership() {
+        let (base_url, _) = test_server::spawn(vec![
+            projects_response(json!([project_node("project-123", "Scan")])),
+            issues_response(json!([
+                { "id": "moved", "identifier": "LOO-1", "url": null,
+                  "title": "Moved", "description": "Preserve the observed destination",
+                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                  "updatedAt": "2026-10-05T12:00:00Z",
+                  "assignee": null, "state": { "type": "started" },
+                  "project": { "id": "successor", "name": "Next work" },
+                  "team": { "id": "team-123" } },
+                { "id": "detached", "identifier": "LOO-2", "url": null,
+                  "title": "Detached", "description": "Do not invent membership",
+                  "completedAt": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
+                  "updatedAt": "2026-10-05T12:00:01Z",
+                  "assignee": null, "state": { "type": "started" },
+                  "project": null, "team": { "id": "team-123" } }
+            ])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
+        let store = isolated_pm_store(repo.path()).await;
+
+        let snapshot = fetch_pm_snapshot_with_store(repo.path(), "scan", &ctx, &store)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));
+        assert_eq!(snapshot.items[0].project.as_deref(), Some("next-work"));
+        assert_eq!(
+            snapshot.items[0].revision.as_deref(),
+            Some("2026-10-05T12:00:00Z")
+        );
+        assert_eq!(snapshot.items[1].project_id, None);
+        assert_eq!(snapshot.items[1].project, None);
+        assert_eq!(
+            snapshot.items[1].revision.as_deref(),
+            Some("2026-10-05T12:00:01Z")
         );
     }
 

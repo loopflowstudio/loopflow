@@ -1549,27 +1549,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let accepted = store
-            .pm_task_observation("/repo", "linear", task.plan.id.as_str())
-            .await
-            .unwrap()
-            .record
-            .unwrap();
-        // Task-update reconciliation projects the accepted detail, not a stale
-        // captured Task. No concurrent writer or delayed local read is needed.
-        store
-            .update_task_plan(
-                &task.id,
-                &TaskPlan {
-                    id: task.plan.id.clone(),
-                    identifier: accepted.item.identifier,
-                    title: accepted.item.name,
-                    description: accepted.item.description,
-                    pm_snapshot_synced_at: accepted.observed_at,
-                },
-            )
-            .await
-            .unwrap();
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), rebound);
     }
@@ -1592,34 +1571,28 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
-        crate::ops::project::sync_projects(&store, &wave, &snapshot.snapshot)
-            .await
-            .unwrap();
-        // Restart resolves cached planning before checkpointing or stopping work.
-        let resolved = store
-            .pm_task_observation("/repo", "linear", task.plan.id.as_str())
-            .await
-            .unwrap()
-            .record
-            .unwrap();
         snapshot.synced_at = 2;
         snapshot.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
         snapshot.snapshot.projects[0].revision = Some("2026-10-05T12:00:01Z".into());
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
-        crate::ops::project::sync_projects(&store, &wave, &snapshot.snapshot)
-            .await
-            .unwrap();
+        // Restart retains its captured Task,
+        // while provider planning advances independently.
+        snapshot.snapshot.items[0].name = "Accepted title".into();
+        snapshot.snapshot.items[0].description = "Accepted description".into();
+        snapshot.snapshot.items[0].revision = Some("2026-10-05T12:00:02Z".into());
+        snapshot.synced_at = 3;
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        let accepted = store.get_task(&task.id).await.unwrap().unwrap();
         let completed = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(completed.plan.status, crate::pm::ProjectStatus::Completed);
-        // restart_task_async reloads the durable Project, then replaces its plan
-        // with the earlier resolved value through the generic Project writer.
-        let mut delayed = completed.clone();
-        delayed.plan = crate::ops::project::project_plan(
-            resolved.project.as_ref().unwrap(),
-            resolved.observed_at,
-        )
-        .unwrap();
-        store.update_project(&delayed).await.unwrap();
+        store
+            .restart_task_flow(&task, None, "deadbeef")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get_task(&task.id).await.unwrap().unwrap().plan,
+            accepted.plan
+        );
         assert_eq!(
             store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
             snapshot
@@ -1629,6 +1602,91 @@ mod tests {
             store.get_project(&project.id).await.unwrap().unwrap(),
             completed
         );
+    }
+
+    #[tokio::test]
+    async fn planning_projection_retains_independent_detail_entity_ages() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.synced_at = 10;
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        let mut item = snapshot.snapshot.items[0].clone();
+        item.name = "New issue title".into();
+        item.revision = Some("2026-10-05T12:00:01Z".into());
+        let mut older_project = snapshot.snapshot.projects[0].clone();
+        older_project.name = "Old Project title".into();
+        older_project.revision = Some("2026-10-05T11:59:59Z".into());
+        store
+            .put_pm_task(
+                "/repo",
+                "linear",
+                crate::store::PmTaskRecord {
+                    item,
+                    project: Some(older_project),
+                    observed_at: 20,
+                },
+            )
+            .await
+            .unwrap();
+        let retained = store.get_project(&project.id).await.unwrap().unwrap();
+        let refreshed = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(retained.plan.name, snapshot.snapshot.projects[0].name);
+        assert_eq!(retained.plan.pm_snapshot_synced_at, 10);
+        assert_eq!(refreshed.plan.title, "New issue title");
+        assert_eq!(refreshed.plan.pm_snapshot_synced_at, 20);
+        assert_eq!(refreshed.worktree, task.worktree);
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+    }
+
+    #[tokio::test]
+    async fn planning_projection_failure_rolls_back_accepted_observations() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let snapshot = task_planning_snapshot(&wave, &project, &task);
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        let retained = store.get_task(&task.id).await.unwrap().unwrap();
+        let other = Wave::new(crate::id::WaveId::new(), "other".into(), "/repo".into());
+        store.create_wave(&other).await.unwrap();
+        let mut foreign = make_project(&other);
+        foreign.plan.id = crate::planning::LinearProjectId::new("foreign-project").unwrap();
+        store.create_project(&foreign).await.unwrap();
+        let mut response = snapshot.clone();
+        response.synced_at = 2;
+        response.snapshot.items[0].name = "Rejected issue title".into();
+        response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
+        let mut conflict = response.snapshot.projects[0].clone();
+        conflict.id = foreign.plan.id.as_str().to_string();
+        response.snapshot.projects.push(conflict);
+        assert!(store.put_pm_snapshot(response).await.is_err());
+        assert_eq!(
+            store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
+            snapshot
+        );
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), retained);
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
     }
 
     #[tokio::test]
@@ -1655,9 +1713,6 @@ mod tests {
         let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         assert_eq!(accepted.synced_at, 20);
         assert_eq!(accepted.snapshot.projects[0], original);
-        crate::ops::project::sync_projects(&store, &wave, &accepted.snapshot)
-            .await
-            .unwrap();
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(projected.plan.name, original.name);
         assert_eq!(projected.plan.pm_snapshot_synced_at, 10);
@@ -1680,11 +1735,8 @@ mod tests {
         store.create_task(&task, &pr).await.unwrap();
         let old = task_planning_snapshot(&wave, &predecessor, &task);
         store.put_pm_snapshot(old).await.unwrap();
-        // The first refresh has accepted and loaded its projection, then pauses.
+        // The first refresh has accepted and loaded its response, then pauses.
         let delayed = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        crate::ops::project::sync_projects(&store, &wave, &delayed.snapshot)
-            .await
-            .unwrap();
         let mut newer = delayed.clone();
         newer.synced_at = 2;
         let mut successor = newer.snapshot.projects[0].clone();
@@ -1697,15 +1749,11 @@ mod tests {
         newer.snapshot.projects.push(successor);
         store.put_pm_snapshot(newer).await.unwrap();
         let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        crate::ops::project::sync_projects(&store, &wave, &accepted.snapshot)
-            .await
-            .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, predecessor.id);
-        // Resume the already accepted older refresh after the transfer settled.
-        crate::ops::project::sync_projects(&store, &wave, &delayed.snapshot)
-            .await
-            .unwrap();
+        // A delayed response omits the now-known successor. Rejection must
+        // preserve both normalized facts and the durable Task transfer.
+        assert!(store.put_pm_snapshot(delayed).await.is_err());
         assert_eq!(
             store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
             accepted
@@ -1750,10 +1798,6 @@ mod tests {
         // A response acquired before the move arrives after rotation releases its
         // lock. Reading accepted planning afresh still selects the predecessor.
         store.put_pm_snapshot(response).await.unwrap();
-        let accepted = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        crate::ops::project::sync_projects(&store, &wave, &accepted.snapshot)
-            .await
-            .unwrap();
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(
             store.get_task(&task.id).await.unwrap().unwrap(),
@@ -1822,7 +1866,6 @@ mod tests {
             .move_chapter_task(&task.id, &successor.id)
             .await
             .unwrap();
-        store.update_task(&task).await.unwrap(); // stale worker snapshot
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(moved.project_id, successor.id);
         assert_eq!(moved.worktree, task.worktree);
@@ -2495,7 +2538,9 @@ mod tests {
         next.iteration = 5;
         let mut refreshed = task.clone();
         refreshed.plan.title = "Updated while the worker ran".to_string();
-        store.update_task(&refreshed).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.snapshot.items[0].name = refreshed.plan.title.clone();
+        store.put_pm_snapshot(snapshot).await.unwrap();
         let saved_task = store.get_task(&task.id).await.unwrap().unwrap();
         let saved_position = store.task_flow(&task.id).await.unwrap().unwrap();
         let mut stale = claim.clone();
@@ -2701,21 +2746,22 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut task = make_task(&wave, &project);
+        let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        task.plan.title = "Refreshed Task".to_string();
-        store.update_task(&task).await.unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.plan.title, "Refreshed Task");
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
         let mut plan = persisted.plan.clone();
         plan.title = "Edited planning title".into();
         plan.description = "Edited planning notes".into();
         plan.pm_snapshot_synced_at += 1;
-        store.update_task_plan(&task.id, &plan).await.unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.synced_at = plan.pm_snapshot_synced_at;
+        snapshot.snapshot.items[0].name = plan.title.clone();
+        snapshot.snapshot.items[0].description = plan.description.clone();
+        store.put_pm_snapshot(snapshot).await.unwrap();
         let by_stable_id = store
             .get_task_by_issue(task.id.as_str())
             .await
@@ -3282,10 +3328,11 @@ mod tests {
 
         let mut refreshed_plan = task.plan.clone();
         refreshed_plan.title = "Latest provider title".into();
-        store
-            .update_task_plan(&task.id, &refreshed_plan)
-            .await
-            .unwrap();
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.synced_at = refreshed_plan.pm_snapshot_synced_at;
+        snapshot.snapshot.items[0].name = refreshed_plan.title.clone();
+        snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
+        store.put_pm_snapshot(snapshot).await.unwrap();
         store.complete_task(&task, Some(&pr)).await.unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.plan, refreshed_plan);

@@ -52,41 +52,11 @@ pub(crate) fn project_plan(
         id: LinearProjectId::new(project.id.clone()).map_err(project_error)?,
         slug: project.slug.clone(),
         name: project.name.clone(),
-        prompt_context: crate::ops::task::project_context(project),
+        prompt_context: project.prompt_context(),
         pm_snapshot_synced_at,
         flow: project.flow.clone(),
         status: project.status,
     })
-}
-
-/// Adopt provider Project facts and same-Wave issue moves without creating Task execution.
-pub(crate) async fn sync_projects(
-    store: &Store,
-    wave: &Wave,
-    snapshot: &crate::pm::PmSnapshot,
-) -> OpsResult<()> {
-    for plan in &snapshot.projects {
-        let project = record_project(store, wave, plan).await?;
-        for item in snapshot
-            .items
-            .iter()
-            .filter(|item| item.project_id.as_deref() == Some(plan.id.as_str()))
-        {
-            if let Some(task) = store
-                .get_task_by_issue(&item.id)
-                .await
-                .map_err(project_error)?
-            {
-                if task.project_id != project.id {
-                    store
-                        .move_chapter_task(&task.id, &project.id)
-                        .await
-                        .map_err(project_error)?;
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(crate) async fn record_project(

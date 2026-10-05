@@ -5,12 +5,11 @@ Jack Heart concluded review before the October 5 implementation attempt. The
 status and evidence; earlier review notes remain at
 `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
-- Preservation mechanics: the design's **Accepted planning must own durable
-  projection** section owns the five failing regressions, writer inventory and
-  operation-entry proof requirements. Atomic ingestion, mutation readbacks and
-  removal of independent planning writers precede population/admission exclusion.
-  No new product decision is needed; preserve local execution choices and
-  historical binding.
+- Preservation mechanics: follow the design's **Accepted planning must own durable
+  projection**, **Reteam relationship acceptance** and **Preservation boundary**
+  sections in that order. They own the three remaining failures, replacement writers and
+  operation proofs; no new product decision is needed. Collection now preserves
+  issue-reported ownership; its former listing-based rewrite is removed.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.
 - Skill/Flow composition and the retained Task-candidate format between KR planning,

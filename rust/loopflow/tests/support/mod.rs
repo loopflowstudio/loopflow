@@ -367,6 +367,10 @@ fn register_task_fixture(
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
+        store
+            .create_project(&project)
+            .await
+            .expect("create test project");
         let pm_payload = serde_json::json!({
             "projects": [{
                 "id": project.plan.id.as_str(),
@@ -404,10 +408,6 @@ fn register_task_fixture(
             })
             .await
             .expect("cache Task PR context");
-        store
-            .create_project(&project)
-            .await
-            .expect("create test project");
         store
             .create_task(&task, &pr)
             .await

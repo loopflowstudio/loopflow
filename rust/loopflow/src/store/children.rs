@@ -29,24 +29,6 @@ impl Store {
         .await
     }
 
-    pub async fn update_task_plan(
-        &self,
-        task_id: &TaskId,
-        plan: &crate::planning::TaskPlan,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let plan = plan.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_plan(&task_id, &plan)
-        })
-        .await
-    }
-
-    pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
-    }
-
     pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
         let task_id = task_id.clone();
         let agent = agent.to_string();

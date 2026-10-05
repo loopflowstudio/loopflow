@@ -87,6 +87,15 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
+Snapshot and detail ingestion project accepted entities into durable Project and
+Task rows in the same SQLite transaction. Projection uses each stored entity's
+acquisition time, never the Wave's aggregate sync time. A projection failure rolls
+back observation acceptance. It preserves execution fields and retained identity;
+an unknown destination does not authorize a Task transfer. Restart changes
+execution without rewriting accepted planning. Rotation and reteam still have independent durable planning writes; atomic ingestion does not
+yet prevent those paths from restoring captured facts. Confirmed mutation
+readbacks and ordered relationship reconciliation remain unfinished.
+
 The `project_readiness` migration preserves original Linear Project bodies and
 acquisition evidence before a one-time name/slug correction from fresh provider
 facts. Only pre-cutover rows receive this exception; all non-name conflict checks

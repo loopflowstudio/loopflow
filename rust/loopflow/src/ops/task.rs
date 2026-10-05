@@ -1050,22 +1050,6 @@ fn create_prepared_task(
     })
 }
 
-pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
-    let mut context = format!(
-        "Chapter metric targets:\n{}",
-        serde_json::to_string(&project.metric_targets).expect("metric targets serialize")
-    );
-    context.push_str(&format!("\n\nChapter Task flow: {}", project.flow));
-    if !project.krs.is_empty() {
-        context.push_str("\n\nKRs:");
-        for kr in &project.krs {
-            let mark = if kr.holds { "x" } else { " " };
-            context.push_str(&format!("\n- [{mark}] {}", kr.text));
-        }
-    }
-    context
-}
-
 pub fn task_create(
     repo: &Path,
     wave: Option<&str>,
@@ -5159,23 +5143,6 @@ async fn restart_task_async(
     let resolved = resolve_managed_task_planning(&store, &task).await?;
     let selected_flow =
         select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
-    let mut project = store
-        .get_project(&task.project_id)
-        .await
-        .map_err(|error| task_error(format!("failed to resolve refreshed Project: {error}")))?
-        .ok_or_else(|| {
-            task_error(format!(
-                "refreshed Task {} has no synced Project record ({}); sync its Wave planning data before restarting",
-                resolved.item.identifier, resolved.project.slug
-            ))
-        })?;
-    project.plan = crate::ops::project::project_plan(&resolved.project, resolved.observed_at)?;
-    project.updated_at = time::OffsetDateTime::now_utc();
-    store
-        .update_project(&project)
-        .await
-        .map_err(|error| task_error(format!("failed to adopt refreshed Project: {error}")))?;
-
     let checkpoint_worktree = task.worktree.clone();
     let checkpoint_identifier = task.plan.identifier.clone();
     let head = tokio::task::spawn_blocking(move || {
@@ -5184,16 +5151,7 @@ async fn restart_task_async(
     .await
     .map_err(|error| task_error(format!("Task restart checkpoint panicked: {error}")))??;
 
-    let now = time::OffsetDateTime::now_utc();
-    task.plan = TaskPlan {
-        id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
-        identifier: resolved.item.identifier.clone(),
-        title: resolved.item.name.clone(),
-        description: resolved.item.description.clone(),
-        pm_snapshot_synced_at: resolved.observed_at,
-    };
-    task.pm_writeback = PmWritebackState::Current;
-    task.updated_at = now;
+    task.updated_at = time::OffsetDateTime::now_utc();
 
     if let Some(advice) = advice.as_deref() {
         super::linear_observe::publish_task_steer(&store, &task, advice)
@@ -5215,7 +5173,11 @@ async fn restart_task_async(
         .await
         .map_err(|error| task_error(format!("failed to restart Task flow: {error}")))?;
     exec_task_process(&store, &mut task, Some(&selected_flow)).await?;
-    Ok(task)
+    store
+        .get_task(&task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task disappeared after restart"))
 }
 
 /// Continue the saved invocation, including review and failed-boundary recovery.
@@ -6797,7 +6759,13 @@ time.sleep(30)
         let head = git(&checkout, &["rev-parse", "HEAD"]);
         git(&checkout, &["push", "origin", &pr.branch]);
         fixture.task.worktree = checkout.clone();
-        fixture.store.update_task(&fixture.task).await.unwrap();
+        rusqlite::Connection::open(&fixture.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree=?2 WHERE id=?1",
+                rusqlite::params![fixture.task.id.as_str(), checkout.display().to_string()],
+            )
+            .unwrap();
         pr.base_commit = head.clone();
         fixture.store.heal_task_pr_base(&pr).await.unwrap();
         pr.publication = Some(PrPublication {

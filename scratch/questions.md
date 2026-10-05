@@ -1,56 +1,38 @@
-# Reconciliation assumptions — October 4, 2026
+# Open choices — October 5, 2026
 
-No unresolved product judgment blocks implementation. Jack Heart approved the
-workflow design; its [implementation defaults](focus-on-your-own-work.md) remain
-reversible: 120-second Waiting fallback, most-recent interactive Task primary,
-optional occurrence names, backward-target loops and source-only workflow YAML.
-These are implementation choices, not Jack's exact spelling/timing preferences.
+For [the design](focus-on-your-own-work.md). None blocks the next pass; each
+has a default the pass follows. Defaults are the agent's, not Jack Heart's.
+Earlier interpretations are at `6f246fda4:scratch/questions.md`.
 
-The saved-capture bridge preserves the existing invocation; live migration and
-configured acceptance remain separate from implementation.
+## Asked of Jack, unanswered
 
-Superseded questions and proposals: `5090f672e:scratch/questions.md`.
+- **Who backgrounds, now that `-b` blocks?** `task create --run/--flow`,
+  Desktop Start and the operator skills relied on `flow start` returning at
+  once. Default: delete `task create --run/--flow`; skills tell the agent to
+  background the command with its own tool; Desktop owns the child process as
+  it owns terminals.
+- **Planning refusal** (terminal, moved or removed Task). Default: apply once
+  at Task resolution, for every launch that resolves to a Task.
+- **`task automate`/`automation`, `task interrupt`, `task wait`:** worker APIs
+  or ordinary Task commands? Default: keep; `automate` holds CI repair only.
+- **Name of the Task entry.** Default: `lf task run ISSUE [FLOW]`.
+- **A past Flow after its YAML changed** is drawn from its Exec sequence, not
+  a pinned graph. Default: accepted, as it follows from Jack's requirement.
+- **`lf commit`:** Jack offered always-push or `-p`. `-p` is restored; plain
+  commit stays local.
 
-Implementation interpretation: the existing per-Task automation on/off field also
-holds CI repair. Preserve that setting and its delivery UI while deleting Flow
-scheduling and its counters. This preserves unrelated CI policy; it provides no
-Flow restart authority.
+## Interpretations still awaiting Jack's review
 
-## Worker removal — implementation interpretations (October 4)
-
-Reversible choices made while deleting Task-worker authority. None is attributed
-to Jack Heart; each is the simplest reading of his complete-removal direction.
-
-- **`flow start` always launches fresh.** A second start while a Flow is live
-  launches a second Flow in the same checkout. The caller checks `task status`
-  first. Open: whether Desktop's Start should say a Flow is already running.
-- **Task status describes the most recently launched Flow.** One Flow's graph is
-  shown until every associated Flow gets the shared detail view. It selects
-  nothing and grants no control.
-- **Builtin `feature` ends at a published PR.** It is `task-design` then `pursue`
-  with no design-review pause; `ship` lands after the demo in the conversation.
-  A design review first means launching `task-design`, then `pursue`. `code` now
-  equals `pursue`; `ship-demo` is deleted. Open: whether `feature` should stop
-  after kickoff, and whether `code` should remain.
-- **Only live or unresolved execution holds completion.** A Flow whose driver
-  died can no longer be resumed or ended, so it no longer blocks Task completion,
-  checkout cleanup, abandon or landing cleanup. This adapts an evidence reader;
-  admission/completion policy stays LOO-367.
-- **A legacy review position neither waits nor blocks.** It reads as stopped
-  history in status and no longer holds CI repair.
-- **Any FlowSession counts as started work at a chapter boundary.** It replaces
-  the worker-claim evidence. The terminal-plan/live-claim conflict is no longer
-  reported as unresolved.
-- **Remote Session placement was only the managed review.** That branch is gone
-  with it; owning-Home remote association remains retained LOO-353 work.
-- **Stacking no longer checks for a claim.** A ready Task can select a parent PR
-  while a Flow runs.
-- **A Flow that stops at a watched landing stays unfinished.** `pr land` inside
-  a Flow returns while GitHub is still checking; the Flow exits "waiting on
-  delivery" and its row stays `current` after the merge, because nothing
-  resumes it. Landing cleanup proceeds as for a standalone landing. Open:
-  whether reconciliation should mark such a Flow finished.
-- **Main's `lf flow end` is dropped.** #1435 (LOO-326) added it to retire a
-  stopped Flow that blocked a Task. Here a stopped Flow blocks nothing, so the
-  merge kept boot-time exit evidence and omitted the command. Open: whether
-  Infrastructure still wants an explicit "replaced" mark on stopped history.
+- Builtin `feature` ends at a published PR with no design-review pause; `ship`
+  lands after the demo; `code` equals `pursue`. Open: whether `feature` should
+  stop after kickoff, and whether `code` should remain.
+- A Flow that stops at a watched landing ends when its driver exits; nothing
+  resumes it. Landing cleanup proceeds as for a standalone landing.
+- Main's `lf flow end` (#1435, LOO-326) is dropped: a stopped Flow blocks
+  nothing. Open: whether Infrastructure wants a mark on stopped history.
+- The per-Task automation on/off field is kept for CI repair only.
+- Implementation defaults: 120-second Waiting fallback, most-recent
+  interactive Task primary, optional occurrence names, backward-target loops,
+  source-only workflow YAML.
+- Global `-w` and `lf session open`, also removed by #1356, are left alone as
+  outside this Task.

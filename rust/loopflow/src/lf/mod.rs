@@ -509,6 +509,8 @@ pub enum FlowCommand {
         #[arg(long)]
         retry: bool,
     },
+    /// End a stopped Flow without running its remaining steps; its history stays
+    End { invocation: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }

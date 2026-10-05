@@ -191,6 +191,17 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                 report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
             })
         }
+        FlowCommand::End { invocation } => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let store = runtime.block_on(open_flow_store())?;
+            // A driver holds this lock for its whole pass.
+            let _driver = flow_run::driver_lock(invocation)?;
+            runtime.block_on(crate::ops::task::end_stopped_flow(&store, invocation))?;
+            println!("Flow {invocation} ended");
+            Ok(())
+        }
         _ => anyhow::bail!("not a Flow control: {command:?}"),
     }
 }

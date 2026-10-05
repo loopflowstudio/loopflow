@@ -289,8 +289,11 @@ headless and closed history. Completion waits for independent unfinished Flows;
 recovery preserves idle Flows and waits for unresolved execution, including a
 worker claim before its first step. Pending reviews and live or unresolved
 Execs preserve the checkout. The completing managed worker may settle itself;
-it cannot settle an independent Flow by completing its Task. Passive membership
-grants no control.
+it cannot settle an independent Flow by completing its Task. `lf flow end` ends
+one stopped Flow by request: no step result is invented, and its failure,
+Sessions and Execs remain. A review whose Flow ended awaits no one. An Exec or
+provider turn that began before the machine's last boot has exited; live or
+unknown execution since then still blocks. Passive membership grants no control.
 Template composition compiles into the graph.
 One started Flow is one FlowSession; loop passes are node/iteration positions and
 lenses over its history. They have no separate claim or lifecycle. Captured

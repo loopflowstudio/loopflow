@@ -11,6 +11,16 @@ architecture it removed is at `6f246fda4:scratch/focus-on-your-own-work.md`.
 
 ## Flow model — decided October 5, governs the rest of this document
 
+**Not settled; do not implement from this section yet.** After it was written
+Jack said of the outer workflow (start node, land node, human sessions
+between, edges are `lf` flows): "I think maybe the flowsession is *that*". On
+that reading FlowSession is the mutable, takeover-able outer run, and one
+`lf` flow run is a process with a driver-kept, append-only record (Jack
+earlier: "something more similar to an Exec but specifically for Flows"). The
+text below assumed FlowSession was the record of one `lf` flow run. Awaiting
+Jack's confirmation; the rules on uniform tracking, driver-maintained state
+and oblivious steps hold under both readings.
+
 Jack Heart's statements are quoted in [questions.md](questions.md) under
 "Step invocation". Where any section below still describes a Flow as only its
 driver Exec and step Execs, or steps carrying a `FlowStep` payload, this

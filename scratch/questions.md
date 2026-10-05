@@ -89,6 +89,13 @@ step reads or writes it.
    lf skill, the flow session api would let you replace / take over any
    running flow".
 
+10. "i have also previously talked about the idea of there being two different
+    notions of flow. One where there there is a start and a land node and
+    then in between are human sessions, and the edges are lf flows". Then: "I
+    think maybe the flowsession is *that*".
+
+Open, and blocking the next pass: which thing FlowSession names.
+
 The consolidated model is in [the design](focus-on-your-own-work.md#flow-model--decided-october-5-governs-the-rest-of-this-document).
 Open: whether takeover is built in this PR or only designed for.
 

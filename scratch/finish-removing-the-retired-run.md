@@ -49,7 +49,7 @@ at `d537a095cfe3fbb8e6e48cc04ae1b1cb1f51cd58`; they are not a complete final gat
 The semantic audit now covers current Rust/Swift/Python/CLI/DTO/scripts/skills/docs
 and configuration. Wave detail exposes required `history` in Rust, Swift and JSON
 fixtures. Telemetry labels/metric IDs name Sessions; ablation/check-cost interfaces
-name captures. Current Session help names durable/native conversation selectors;
+name captures. CLI help names durable/native conversation selectors;
 monitor `--input` and replay keep capture selectors. The abandoned probes and their
 exclusive workflow/runner/docs are removed. No schema or physical layout changed.
 

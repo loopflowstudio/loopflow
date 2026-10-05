@@ -1,67 +1,68 @@
 # Direct Task opening — LOO-371
 
 Jack Heart authorized autonomous local implementation and measurement on October 3,
-2026. Jack's October 4 steer authorizes direct lf execution and landing when ready,
-without restarting the Task worker or historical Flows. LOO-368 is the reproduction
-case; LOO-372 owns the default interactive unfinished Session population. LOO-376
-owns cold startup, persistent caching and unified refresh; integrate its work
-instead of adding another cache. This Task retains routing, window churn and the runner.
+2026. Jack's October 4 steer authorizes direct lf execution, publication and landing
+when ready, without restarting the Task worker or historical Flows and without
+interactive reviews. LOO-368 is the reproduction case. This Task retains routing,
+window churn and the snapshot runner.
 
-## Intended cut
+## Neighbors (reconciled October 5 against main `8ea0bec9c`)
 
-Keep one workspace window and its retained panes. Resolve unknown Task identities
-without presenting a successful-path sheet; show actual missing/ambiguous errors.
-Reuse exact loaded Task/Session evidence for warm navigation. Prefer an existing
-window holding the destination over an unrelated key window. Preserve historical
-records and retained drafts. No copied Session may launch a provider or control a
-live process.
+- LOO-372 landed (#1421): ordinary navigation shows unfinished interactive Sessions.
+  This branch sits on it; no filtering belongs here.
+- LOO-376 landed real launch measurement (#1432, #1436): `launch.py` launches the
+  release bundle against a private Home copy and reads the app's own launch journal.
+  It owns cold startup, the saved workspace and unified refresh. No cache is added here.
+- LOO-304 owns steady-state polling and projection; nothing of it is on main yet.
 
-Delete — do not maintain: successful-path TaskLinkView loading presentation and
-unconditional full-inventory rereads for already retained destinations; the separate
-SwiftPM test-launch path for fixture measurements. These cuts are implemented. Preserve
-missing/ambiguous selection and retry, generation fencing and exact membership.
+## Implemented (accepted cut)
 
-## Measurement
+One workspace window and its retained panes. Unknown Task identities resolve without
+a successful-path sheet; `TaskLinkView` remains only for missing/ambiguous links and
+retry. Exact loaded Task/Session evidence is reused for warm navigation, and a window
+already holding the destination wins over an unrelated key window. Planning and
+runtime IDs both preserve a selected Task's Session. Unknown Session links keep full
+enumeration: publishing a partial inventory could remove retained panes on later
+pages. Checkout-root resolution canonicalizes before launching Git (333 → 29 probes
+in one profiled Session read). No lifecycle or history migration; no copied Session
+launches a provider or controls a live process.
 
-Extend scripts/desktop_performance.py and the native experience instruments. Use
-SQLite online backup of the current Home, retain all rows, and permit only read
-commands against the copy. Record snapshot hash/counts, process reads, windows,
-focus and intermediate states. Baseline precedes production edits. Native bitmap
-capture is not compositor presentation; owned local PTYs are not provider startup.
-The first native baseline observed cold workspace captures at 12.1–15.2 seconds
-and warm Task captures at 4.5–4.9 seconds, with a transient sheet window. Reopening
-also exposed a 45-second unresolved-reading timeout. Before production UI edits,
-the October 4 targets are cold workspace ≤5,000 ms and warm/reopen ≤250 ms, with
-zero successful-path sheets or extra windows. These are optimization targets from
-the observed baseline, not claimed product acceptance or compositor budgets.
-Session readiness has no scored budget until a credible baseline exists.
+The runner (`scripts/desktop_performance.py`) takes an SQLite online backup, permits
+only reads against the copy, and records snapshot hash/counts, reads, windows and
+intermediate states. Fixture and snapshot modes share one owned native-process path;
+SIGTERM and timeout stop the whole process group during build and measurement, and
+reads drain between samples.
+
+## Evidence and its limits
+
+The [dated evidence](../scripts/benchmarks/desktop-performance/20261004-task-open/README.md)
+keeps every journal, the snapshot identity, medians, timeouts and window observations.
+Baseline: cold 12.1–15.2 s, warm 4.5–4.9 s, a 45 s reopen timeout, and the Task-link
+sheet in 9/9 attempts. First implementation: one window and no sheet in 9/9 sampled
+attempts. Its latency run overlapped a benchmark child that survived its launcher,
+under host load, with a different `lf` build mode: no speedup can be inferred.
+Targets chosen from the baseline before UI edits (October 4): cold workspace
+≤5,000 ms, warm/reopen ≤250 ms, zero successful-path sheets or extra windows.
+None is met or scored. Session readiness has no budget until a credible baseline
+exists. Bitmap capture is not compositor presentation; owned PTYs are not provider
+startup; key-window observations were always `-1`, so focus is unproven.
+
+The coordinating Wave interrupted the earlier run at load 292 on 16 CPUs; no product
+failure caused it. On October 5 free disk is 135 GiB (the 32 GiB reserve is no longer
+a blocker) and one-minute load is 120, which still contaminates timing.
 
 ## Remaining
 
-Routing and cached reopen changes are implemented. Compression removed the early
-Session-page exit: publishing a partial inventory could remove retained panes on
-later pages. Unknown Session links retain full enumeration. Planning/runtime IDs
-both preserve a selected Task's Session. LOO-372 owns filtering; LOO-304 owns
-polling/projection. No lifecycle or history migration is part of this change.
+- Latest Swift build, focused destination tests and Clippy: the retention and runner
+  revisions have syntax checking only. Owner: gate/CI.
+- Comparable baseline and after samples with the revised runner, same snapshot and
+  `lf` build mode, on a quiet host. Archived launcher runs cannot be reused.
+- OS cold launch with a Task deep link, and absence of an unrelated landing screen:
+  extend LOO-376's `launch.py` (real bundle, private Home, launch journal) with a
+  link scenario instead of a third launch path. Its Home copy and this runner's
+  `_snapshot` duplicate one SQLite backup; share one when that scenario is added.
+- Session deep-link and retained-input usability, and reliable focus observation.
 
-The [dated evidence](../scripts/benchmarks/desktop-performance/20261004-task-open/README.md)
-preserves all final journals, snapshot identity, before/after medians, timeouts,
-window observations and limits. Interrupted SwiftPM children continued writing;
-overlap invalidates latency comparison. The runner now owns the native helper
-directly and drains reads between samples. SIGTERM and timeout now stop its owned
-process group during both build and measurement, including children remaining
-after the leader exits. Focused subprocess tests cover interruption and timeout;
-the revised native measurement still needs execution. Compression routes both
-fixture and snapshot measurements through that same owned native-process path,
-with an exact test filter. Archived launcher runs require fresh baselines.
+No target, acceptance bullet beyond sheet removal, or KR passes.
 
-Capacity still blocks fresh native builds/measurement; the dated evidence records
-the latest observation. A capable host still needs the latest Swift
-build/focused tests and Clippy, then comparable baseline/after samples. OS cold
-launch/URL dispatch, Session deep-link/input usability, reliable focus, and absence
-of an unrelated cold landing screen remain acceptance work, with startup changes
-owned by LOO-376. No target or KR passes.
-
-Checks: `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed; Ruff passed; earlier cargo fmt and Swift syntax
-passed; earlier resolver tests 2 and destination tests 16 passed; latest Swift
-behavior/build and Clippy deferred to a host with capacity, broader suites to gate.
+Checks: `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed (reused, content unchanged); Swift build/tests and Clippy deferred to gate/CI.

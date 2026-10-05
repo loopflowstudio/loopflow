@@ -57,6 +57,9 @@ At the October 4 11:00 continuation, free disk was 12 GiB and one-minute load
 25.44. The 32 GiB reserve still prevents fresh native builds and measurements.
 No comparable rerun was attempted, and no live Home or provider was changed.
 
+On October 5, free disk was 135 GiB and one-minute load 120 on 16 CPUs. Disk no
+longer blocks; load still contaminates timing, so no rerun was attempted.
+
 ## Targets and changes
 
 Before production UI changes, the exploratory baseline (cold 12.1–15.2 seconds,

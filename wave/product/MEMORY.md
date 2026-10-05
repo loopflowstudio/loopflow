@@ -47,8 +47,10 @@ they establish no sustained-use KR or configured provider acceptance.
 Jack Heart's LOO-371 direct-open work preserves realistic history in isolated
 SQLite backups. October 4 measurements exposed benchmark children surviving
 launcher interruption; overlapping runs prove no speedup. Own process groups
-and drain reads between samples. LOO-376 owns startup/caching; LOO-371 keeps
-routing, window churn and the runner. See [failed observations and remaining
+and drain reads between samples. The Task-link sheet is gone in nine sampled
+attempts; no latency target is scored. LOO-376 owns startup/caching and landed
+`launch.py` (real launches over a private Home copy): extend it for Task links
+instead of adding another launch path. See [failed observations and remaining
 proof](../../scripts/benchmarks/desktop-performance/20261004-task-open/README.md).
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
@@ -1078,11 +1080,6 @@ they are not current setup instructions.
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
   the only surface that presents its worktree.
-- **Interactive provider clients resume natively.** Reuse `SessionRecord` and
-  `lf session open`; do not restore lfd terminal attachment, a tmux presentation
-  path, or Ask-specific Swift plumbing.
-- The high-value review move was catching invented fields duplicating existing
-  ones (e.g. `RunStatus`).
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest

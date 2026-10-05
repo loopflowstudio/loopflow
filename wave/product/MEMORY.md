@@ -5,6 +5,33 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Session and operate pairs (2026-10-05)
+
+Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
+the Wave conversation is operations, and “reliably finishing stuff ive started
+and isnt blocked on me” is the goal.
+
+- Operators keep every started Task moving and leave unstarted backlog alone
+  “for now at least.” A defined Flow with steps left proceeds without asking.
+  A Task whose Flow ended before landing waits on Jack; how a Task changes its
+  Flow is wanted and undesigned.
+- Each session carries its operate procedure inline (“just make it work
+  reliably”). The branch composes session file plus operate body at build time.
+- `task/session` is a plain skill; a primary Task Session is “just a smaller
+  wrapper around this that saves that id in a field” (LOO-364).
+
+Lessons: the observed failure copied `next_move.owner: wave` into the reply, so
+the operator reported its own queue as a handoff. A status label naming the
+reader's own scope must say so in the prompt. Nothing re-invokes a
+conversation; `lf task reconcile` resumes only enrolled Tasks with an unfinished
+captured Flow. On Jack's Home that day the minute check was disabled and
+Product's declared `wave/operate` cron was not installed.
+
+Limits: the [nine scenario walk-throughs](../../docs/reviews/session-operate-prompts.md)
+are simulations read from assembled prompts; no model ran. Installed
+conversation behavior is unshown, and an open conversation keeps its old text
+until `lf session replace`.
+
 ## Capture and configurable New Session (2026-10-03 UTC)
 
 Jack Heart accepted capture on October 1, then selected New Session and the
@@ -252,7 +279,8 @@ investigate and act independently; one shared pass note carries evidence forward
 Repository scope remains the default despite ambient Wave attribution, unless
 the request narrows it. Whether `wave/operate` uses that sequence remains open;
 its separate operation is retained. Jack's “soften, dont harden” correction
-rejects turning “one or two useful moves” into a numeric cap. No action is valid.
+rejects a numeric cap on moves. The October 5 pairs decision below replaces
+“one or two useful moves”: no action is valid only once started work is covered.
 Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
 authority or making operation a prerequisite for independent Tasks.
@@ -715,31 +743,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
+Retired 2026-10-05: resident-era retry, containment-liveness and Home-server
+notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
+Still applicable: a missing Flow settles as one blocker instead of retrying,
+and a live containment is not proof of an advancing provider turn.
 
 ## Model (design invariants)
 
@@ -1056,11 +1063,9 @@ to close during this reconciliation.
 
 ## Historical remote client
 
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
+June's HTTP-to-lfd, bearer-token and Concerto build recipes are superseded by
+shared `lf` projections and explicit Home transport; see the
+[pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).
 
 ## Learnings
 

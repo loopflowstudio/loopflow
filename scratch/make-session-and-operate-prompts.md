@@ -1,8 +1,10 @@
 # Session and operate prompts keep work moving together (LOO-383)
 
-Status: design reviewed with Jack Heart, 2026-10-05. Jack accepted the two-part
-contract in the Task brief and made the three decisions under "Decisions"
-below. Mechanisms not listed there remain proposals.
+Status: design reviewed with Jack Heart, 2026-10-05, and implemented on the
+branch the same day. Jack accepted the two-part contract in the Task brief and
+made the five decisions under "Decisions" below. Other mechanisms are the
+branch's choices, not Jack's. Gate and the post-install demo remain; see
+"Remaining".
 
 ## Decisions (Jack Heart, 2026-10-05)
 
@@ -272,7 +274,8 @@ Source of truth: builtin skill files and `LOOPFLOW.md` embedded in the `lf`
 binary. Derived: `lf help`/`lf list`, vendor exports written by install and by
 launch-time skill sync, assembled launch prompts, goldens.
 
-Edit together:
+Edited together on the branch (`docs/architecture/execution.md` needed no
+change; `task/skill/launch-plan.md` also lost the `run --directive` remark):
 
 - `engine/builtins/LOOPFLOW.md`
 - `wave/skill/wave_operate.md`, `wave/skill/wave_session.md`
@@ -367,16 +370,23 @@ Check result (implement, 2026-10-05): `cargo clippy -p loopflow --all-targets --
 
 Check result (compress, 2026-10-05): clippy clean; `cargo test -p loopflow --lib -- engine::prompt engine::builtins` and `--test discovery_tests --test golden_prompt` pass after the reduction. Gate still owns the full plan.
 
+Check result (realign, 2026-10-05): every command the six skills name resolves in the built `lf` (`--help` exit 0, flags present); `lf list --json` lists all six; `lf help wave/session` shows the composed heading once. No rerun of tests; gate owns the plan above.
+
 ## Remaining
 
-Implemented in one change: the action contract in all three operate skills,
+Exists on the branch: the action contract in all three operate skills,
 continuity-only sessions composed with their operate body in `build.rs`
-(under a generated `# Operating procedure` heading), `task/session`, the
-LOOPFLOW.md refresh at 114 lines, regenerated goldens, user docs and
-[the scenario walk-through](../docs/reviews/session-operate-prompts.md).
+(under a generated `# Operating procedure: <scope>/operate` heading),
+`task/session`, the LOOPFLOW.md refresh at 114 lines, regenerated goldens,
+user docs, [the scenario walk-through](../docs/reviews/session-operate-prompts.md)
+and the Product memory entry. `main` has not moved since the base commit.
 
-- Gate: the command plan above, once.
+- Gate: the command plan above, once. The temporary-Home export check in
+  "Demo" has not been run.
 - Demo/review: the post-install conversation behavior in "Demo". Not shown yet.
+- The composed sessions inherit their operate skill's one-pass wording
+  ("operate once… and exit"); the session text governs when to repeat it.
+  Left as is: rewording operate for the session would fork the single source.
 - `wave/operate` keeps its Task-brief section: `capture-tasks` does not cover
   its description-versus-comment rules.
 - The sessions' workspace section is unchanged, including its sync-conflict

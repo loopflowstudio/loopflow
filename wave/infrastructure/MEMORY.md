@@ -10,6 +10,13 @@ authored content, ongoing work, optional chapter creation with KRs and separate
 Task admission. The decision was delivered to LOO-366 as new direction; source
 implementation and configured acceptance remain unfinished.
 
+Jack also approved the one-time cached-name cutover: fresh Linear names replace
+historical cached display names, with original values and acquisition/revision
+evidence retained. This accepts that the old projected-name and genuine
+same-revision name histories cannot be distinguished. Keep the exception confined
+to that conversion; ordinary equal-revision conflict rejection remains strict.
+The decision was delivered to LOO-366 and its saved Flow resumed.
+
 The current Infrastructure Project now recommends `code` (pursue, then PR review),
 following Jack's accepted review direction and installation of v0.13.3. Its KRs
 and targets are unchanged. Existing captured Flows retain their review boundaries.

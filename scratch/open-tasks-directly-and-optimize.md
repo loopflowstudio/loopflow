@@ -35,34 +35,39 @@ reads drain between samples.
 
 ## Evidence and its limits
 
-The [dated evidence](../scripts/benchmarks/desktop-performance/20261004-task-open/README.md)
-keeps every journal, the snapshot identity, medians, timeouts and window observations.
-Baseline: cold 12.1–15.2 s, warm 4.5–4.9 s, a 45 s reopen timeout, and the Task-link
-sheet in 9/9 attempts. First implementation: one window and no sheet in 9/9 sampled
-attempts. Its latency run overlapped a benchmark child that survived its launcher,
-under host load, with a different `lf` build mode: no speedup can be inferred.
-Targets chosen from the baseline before UI edits (October 4): cold workspace
-≤5,000 ms, warm/reopen ≤250 ms, zero successful-path sheets or extra windows.
-None is met or scored. Session readiness has no budget until a credible baseline
-exists. Bitmap capture is not compositor presentation; owned PTYs are not provider
-startup; key-window observations were always `-1`, so focus is unproven.
+[October 5 evidence](../scripts/benchmarks/desktop-performance/20261005-task-open/README.md):
+same frozen snapshot, `lf` binary and runner, five samples each, load 32–65.
 
-The coordinating Wave interrupted the earlier run at load 292 on 16 CPUs; no product
-failure caused it. On October 5 free disk is 135 GiB (the 32 GiB reserve is no longer
-a blocker) and one-minute load is 120, which still contaminates timing.
+| Scenario | Base `8ea0bec9c` median ms | Branch median / max ms | Budget | Sheet |
+|---|---:|---:|---:|---:|
+| Cold workspace | 12,256 | 8,360 / 10,978 | 5,000 — missed | 5/5 → 0/5 |
+| Warm Task | 9,059 | 152 / 163 | 250 — met 5/5 | 5/5 → 0/5 |
+| Reopen Task | 9,688 | 38 / 44 | 250 — met 5/5 | 5/5 → 0/5 |
+
+One window on the branch, two on the base. No timeouts. p95 is unavailable (needs
+twenty samples) and load contaminates absolute timings; the warm/reopen difference
+is the removed `roadmap --task` read, not load. Cold still waits on that read
+(8.2 s median) and cannot meet 5,000 ms while one `lf` read costs more than the
+budget; real cold launches go through LOO-376's saved workspace, unmeasured here.
+
+The earlier 9/9 timeout sweep was the observer: fast OCR read the breadcrumb as
+`LOO- 368` and the runner compared verbatim. It now ignores whitespace and names
+the unmet condition on timeout. October 4 timeouts may share that cause; see the
+[October 4 record](../scripts/benchmarks/desktop-performance/20261004-task-open/README.md)
+for the budgets' origin and the interrupted runs. Bitmap capture is not compositor
+presentation; owned PTYs are not provider startup; key-window observations were
+always `-1`, so focus is unproven.
 
 ## Remaining
 
-- Latest Swift build, focused destination tests and Clippy: the retention and runner
-  revisions have syntax checking only. Owner: gate/CI.
-- Comparable baseline and after samples with the revised runner, same snapshot and
-  `lf` build mode, on a quiet host. Archived launcher runs cannot be reused.
-- OS cold launch with a Task deep link, and absence of an unrelated landing screen:
-  extend LOO-376's `launch.py` (real bundle, private Home, launch journal) with a
-  link scenario instead of a third launch path. Its Home copy and this runner's
-  `_snapshot` duplicate one SQLite backup; share one when that scenario is added.
+- Cold budget: needs a Task deep-link scenario in LOO-376's `launch.py` (real
+  bundle, private Home, saved workspace) and faster `lf` reads, which no Task owns.
+  Its Home copy and this runner's `_snapshot` duplicate one SQLite backup; share one
+  when that scenario is added.
+- Twenty samples per scenario on a quiet host for p95.
 - Session deep-link and retained-input usability, and reliable focus observation.
 
-No target, acceptance bullet beyond sheet removal, or KR passes.
+Sheet removal, single window and the warm/reopen budgets hold in sampled attempts.
+The cold budget, Session readiness and every KR remain unmet or unscored.
 
-Checks: `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed (reused, content unchanged); Swift build/tests and Clippy deferred to gate/CI.
+Checks: `swift test --filter WorkspaceDestinationTests` 16 passed; `cargo fmt --check` clean; `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed (reused, content unchanged); `cargo clippy --all-targets -- -D warnings` clean.

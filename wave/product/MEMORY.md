@@ -44,14 +44,13 @@ they establish no sustained-use KR or configured provider acceptance.
 
 ## Current Tasks and completion history (2026-10-02)
 
-Jack Heart's LOO-371 direct-open work preserves realistic history in isolated
-SQLite backups. October 4 measurements exposed benchmark children surviving
-launcher interruption; overlapping runs prove no speedup. Own process groups
-and drain reads between samples. The Task-link sheet is gone in nine sampled
-attempts; no latency target is scored. LOO-376 owns startup/caching and landed
-`launch.py` (real launches over a private Home copy): extend it for Task links
-instead of adding another launch path. See [failed observations and remaining
-proof](../../scripts/benchmarks/desktop-performance/20261004-task-open/README.md).
+Jack Heart's LOO-371 direct-open work measures against isolated SQLite backups.
+Own benchmark process groups; overlapping runs prove nothing. October 5, same
+snapshot/`lf`, five samples, load 32–65: warm 152 ms and reopen 38 ms versus
+9–10 s; one window, no Task-link sheet. Cold stays 8.4 s behind one `lf` read.
+Fast OCR split `LOO- 368` and timed out a 9/9 sweep: verify the observer
+before blaming the product. LOO-376 owns startup and `launch.py`;
+extend it for Task links. See [the evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time

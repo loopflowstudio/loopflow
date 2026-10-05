@@ -7,10 +7,11 @@ at `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
 ## Implementation details still open
 
-- Preservation fence: Session creation/binding and mechanical Flow starts bypass
-  the two chapter admission checks. The design records the interleaving and a
-  proposed shared lock order; prove all first-start entry points before cutting
-  over selection. Historical binding must remain usable.
+- Preservation fence: explicit Started/worker claims omit unbound conversations
+  associated by checkout. The revised design proposes existing checkout admission
+  plus the shared Task-work reader, including missing-checkout/subdirectory and
+  out-of-checkout binding paths. Prove both orderings and failed-reset re-entry
+  before cutting over selection; historical binding must remain usable.
 - Chapter metadata representation and projection; historical cross-Wave inspection
   remains a proposed extension, while Wave-scoped chapter creation is requested.
 - Existing skill/Flow composition and retained Task-candidate format between

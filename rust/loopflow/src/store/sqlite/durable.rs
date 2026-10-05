@@ -1313,6 +1313,34 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn checkout_session_membership_survives_project_transfer_without_binding() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src");
+        conversation.work_source = None;
+        let session = store.create_session(conversation, None, None).unwrap();
+        let before = store.task_work(&task_id).unwrap();
+        assert_eq!(before.sessions.len(), 1);
+        assert_eq!(before.sessions[0].id, session.id);
+        assert_eq!(session.task_id, None);
+
+        let successor = ProjectId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
+            rusqlite::params![successor.as_str(), task.wave_id.as_str()],
+        ).unwrap();
+        store.move_chapter_task(&task_id, &successor).unwrap();
+
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, successor);
+        assert_eq!(retained.worktree, task.worktree);
+        let after = store.task_work(&task_id).unwrap();
+        assert_eq!(after.sessions, before.sessions);
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    }
+
+    #[test]
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();

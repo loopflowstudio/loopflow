@@ -2009,7 +2009,7 @@ async fn apply_or_plan_repository_reteam(
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut identifier_updates = Vec::new();
-    let mut states = Vec::new();
+    let mut projects = Vec::new();
     let mut seen_initiatives = BTreeMap::new();
     let mut seen_projects = BTreeSet::new();
     let mut already = 0usize;
@@ -2035,13 +2035,13 @@ async fn apply_or_plan_repository_reteam(
             )));
         }
         progress.status(&format!("preflighting wave/{wave} Initiative {initiative}"));
-        let projects = resolved
+        let wave_projects = resolved
             .repository
             .client
             .list_projects(&initiative)
             .await
             .map_err(pm_to_ops)?;
-        for project in projects {
+        for project in wave_projects {
             if !seen_projects.insert(project.id.clone()) {
                 return Err(OpsError::Message(format!(
                     "Linear Project `{}` ({}) appears under multiple Wave Initiatives",
@@ -2117,14 +2117,14 @@ async fn apply_or_plan_repository_reteam(
                     }),
                 }
             }
-            states.push(project);
+            projects.push(project);
         }
     }
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
-        for project in &states {
+        for project in &projects {
             if !project.team_ids.iter().any(|team| team == team_id) {
                 let mut teams = project.team_ids.clone();
                 teams.push(team_id.clone());
@@ -2203,7 +2203,7 @@ async fn apply_or_plan_repository_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        for project in &states {
+        for project in &projects {
             if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",

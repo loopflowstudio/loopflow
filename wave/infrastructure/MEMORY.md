@@ -212,20 +212,13 @@ LOO-367 progression and LOO-295 association/file-preservation readback passed.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
-The current briefs for [LOO-366](https://linear.app/loopflow/issue/LOO-366/keep-every-wave-ready-for-work-without-requiring-a-chapter)
-and [LOO-367](https://linear.app/loopflow/issue/LOO-367/start-and-finish-tasks-without-unrelated-workflow-prerequisites),
-read through `lf wave status infrastructure --json` on October 2, record Jack
-Heart's accepted direction: ordinary Projects do not require chapters or a
-default Flow; Tasks do not require a managed Flow or delivery workflow merely
-to exist and record an outcome. Chapters remain optional coordinated resets.
-This supersedes older mandatory-chapter/default-Flow assumptions in this memory;
-it does not establish implementation or authorize a repository reset.
-
-LOO-366 owns explicit Project ensure/adoption and optional resets. LOO-367 owns
-Task admission/completion and preserves unresolved delivery and unfinished work.
-Keep that interface distinct: observational reads must not create Projects, and
-Task operations must not acquire unrelated coordination prerequisites. Neither
-Project KR has outcome proof; LOO-367's delivery state is unproved here.
+Jack Heart's October 2 direction separates ordinary work from optional chapters:
+LOO-366 owns Project ensure and coordinated resets; LOO-367 owns Task admission
+and completion. Projects need no chapter or default Flow; Tasks need no managed
+Flow or delivery workflow merely to exist and record an outcome. Preserve
+unfinished work and unresolved delivery. Reads never provision Projects. This
+supersedes mandatory-chapter assumptions, without proving either KR or authorizing
+a repository reset.
 
 Jack Heart's October 4 reviewed direction selects an explicit Wave Project
 configuration field and exact-ID ensure; no name matching or candidate selection.
@@ -246,8 +239,21 @@ retaining original bodies and acquisition/revision evidence. All non-name checks
 and subsequent equal-revision rejection remain strict. Planning and conversion
 markers settle atomically; durable Project synchronization follows acceptance
 separately. Rejected planning cannot update durable facts first. Shared selection,
-SQL admission, ensure, rotation and Desktop remain unfinished. Release's lesson:
-prove operation entry points. Installed/configured acceptance remains unproved.
+SQL admission, ensure, rotation and Desktop remain unfinished. Installed/configured
+acceptance remains unproved.
+
+The October 5 preservation findings change implementation order. Session creation,
+binding and mechanical Flow starts bypass chapter admission. More fundamentally,
+checkout membership includes unbound conversations without explicit Started;
+rotation's start/claim reader omits them even without concurrency. The public-store
+transfer regression preserves that membership, Session bytes and checkout without
+inventing a binding. It does not prove rotation. The plan now proposes using
+existing checkout admission and the shared Task-work reader, including taskless
+creation, binding from elsewhere and missing checkout paths. Wave planning locks
+alone do not establish execution exclusion. Prove lock order, both rotation
+orderings and failed-reset re-entry before claiming preservation. Historical
+binding remains allowed; pending recovery alone cannot become permanent start
+denial. Release's lesson still applies: prove each operation's entry point.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
@@ -1022,20 +1028,13 @@ the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (2026-09-25)
 
-Work selectors give direct skills/flows attribution, context and placement;
-`lf task run` owns the managed Task Flow. Direct bound contributions receive
-fresh scratch and leave checkpointing to their caller. Bare names prefer skills;
-explicit verbs resolve their own kind. Reuse the skill-to-invocation loader,
-without one-skill wrappers or name-specific dispatch. Started is written at
-explicit interactive/headless CLI dispatch, after capture and before provider
-launch. Generic capture stays registry-independent: putting Started there broke
-the unavailable-registry regression. Read-only Work resolution and unopened review
-preparation never record execution. LOO-298's derivation from Run rows replaces
-this write only when that model is implemented.
+The historical dispatch/Run implementation is retained at
+`9e283244352fd0dd030803f0edef5be5d4ef76fa:wave/infrastructure/MEMORY.md` under this
+heading; the current Session ownership contract supersedes its Started writer.
+Direct bound contributions retain caller-owned checkpointing and use the common
+invocation loader; reads and unopened reviews never establish execution.
 
-Recursive scratch exceeded both argv capacity and a provider input limit.
-Claude batch input uses text stdin backed by an anonymous file, with system
-instructions in the existing context file; captured and streamed output use the
-same launch path. Curate scratch instead of silently truncating instructions.
-The observed Codex rejected `turn/start` remained waiting; that driver failure
-is still unresolved, and Claude's working input path does not establish a fix.
+Recursive scratch exceeded argv and provider limits. Claude batch input uses
+file-backed stdin with system instructions in its context file. Curate scratch
+rather than truncate it. Codex's rejected `turn/start` remaining waiting is still
+unresolved; Claude's successful input path proves no repair there.

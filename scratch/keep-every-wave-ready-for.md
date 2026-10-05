@@ -116,7 +116,7 @@ Wave acceptance.
 Shared Wave-ID binding and exact-ID ensure are still unimplemented. The old
 status/name selector and rotation remain in place; this branch is not a completed
 or releasable Project-readiness cut. In particular, chapter rotation's comparison
-of stripped names must be replaced alongside shared configured selection before
+of provider names must be replaced alongside shared configured selection before
 its provider-name inputs can work across differently named Waves.
 
 Both callers of `store/sqlite/durable.rs::require_current_task_chapter` still
@@ -160,14 +160,60 @@ not only worker claim and managed Flow admission. Historical binding remains
 allowed, and an unfinished transition receipt must not become a permanent
 start denial while ordinary use waits for a failed reset to recover.
 
-Proposed mechanics: all participating first-start operations and the active
-rotation share the Wave lock, acquired before SQLite writes; a start after a
-failed rotation is reclassified by the resumed rotation. A bind after a completed
-rotation retains historical attribution. Prove both orderings, failure/re-entry,
-and the no-deadlock lock order through operation entry points before claiming the
-fence. This proposal changes synchronization, not Jack Heart's selected Project
-owner or historical-binding policy. Selection/rotation implementation paused at
-this counterexample; the name-cutover checkpoint is `eb8315a31`.
+The initial proposal put every first-start operation under the Wave lock before
+SQLite writes. The membership finding below supersedes that mechanism; explicit
+Task ancestry does not identify every conversation to preserve. Selection and
+rotation remain unimplemented; the name-cutover checkpoint is `eb8315a31`.
+
+### Checkout membership changes the exclusion boundary — October 5
+
+`store/sqlite/task_work.rs` includes an unbound, non-primary Session by its
+checkout path, including subdirectories. `reserve_session_in` preserves that
+Session's nullable Task attribution. The first-conversation triggers observe
+explicit `task_id`, while `chapter_task_evidence` reads Started and the managed
+worker claim, not checkout membership. Therefore a clean, unpublished Task can
+have a retained conversation without either start flag. The existing classifier
+can treat it as untouched; replacing expiration with preserved backlog would
+still leave that conversation's Task in the predecessor. This counterexample
+does not require a concurrent write. Locking explicit Task/Wave ancestry alone
+cannot fix it.
+
+The public-store regression
+`checkout_session_membership_survives_project_transfer_without_binding` creates
+an unbound conversation in a Task subdirectory and transfers the Task. It checks
+that membership, Session bytes and checkout identity survive without synthesizing
+a binding. It proves the preservation contract, not automatic rotation or the
+proposed exclusion. The classifier mismatch above is source-derived.
+
+Revised implementation proposal: reuse checkout admission for execution exclusion
+instead of adding a Wave lock to every start. Rotation owns Wave planning locks,
+then the affected checkout admission locks in stable canonical-path order, then
+SQLite writes. Start operations acquire their affected checkout locks before
+SQLite and never wait for Wave planning locks. Include both the execution checkout
+and an explicitly bound Task's checkout, deduplicated in the same order. Binding
+from elsewhere must acquire its target Task's checkout; taskless Session/Flow
+creation must participate through cwd. Resolve omitted ancestry before choosing
+locks and revalidate it after acquisition. The current helper's missing-path
+fallback uses the literal cwd, so subdirectories of removed checkouts need the
+same retained Task checkout identity used by membership; Git-root discovery alone
+is insufficient. No lock may be acquired while holding the store mutex or writer
+transaction.
+
+Final classification must consume the existing Task-work membership reader as
+well as explicit Started, authored and publication evidence. Ordinary inspection
+Execs still do not establish Started; membership grants neither process authority
+nor permission to rewrite attribution. Existing independent Sessions/Flows must
+remain associated and preserve their history. Do not copy a second path-matching
+implementation into chapter classification.
+
+After failed reset, released checkout locks permit ordinary starts; recovery
+reclassifies while the predecessor remains configured. The durable configuration
+switch is the proposed boundary after which new historical bindings stay with
+the predecessor. Retry after that switch reconciles already selected transfers
+and predecessor completion without sweeping newly bound historical work into the
+successor. Prove response loss on each side of that boundary. Pending receipts
+alone never deny starts. This is a synchronization/recovery revision, not a new
+product decision or implemented fence; dependent selection work stopped here.
 
 October 5 reconciliation read Release's GOAL.md and full MEMORY.md, the only
 immediate child scope in this checkout. Its recovery finding applies here:
@@ -476,11 +522,19 @@ Wave-scoped chapter creation is part of the requested higher-level design.
 
 This is one coherent delivery; internal slices are implementation order:
 
-1. The approved name transition is implemented in this Task's one migration draft. Add the Home-local per-Wave Project file and shared configured-ID reader;
+1. Establish preservation using shared Task-work membership and checkout admission
+   before switching selection or rotation. Explicit first-start fields alone
+   omit checkout-associated Sessions/Flows. Session creation/binding, review
+   reservation and mechanical Flow starts must share the revised lock order above,
+   including taskless and out-of-checkout entry points. Historical binding stays
+   allowed. Prove starts on both sides of rotation and failed-reset re-entry
+   through operation entry points; a pending receipt alone cannot deny starts.
+   The approved name transition is implemented in this Task's one migration draft. Add the Home-local per-Wave Project file and shared configured-ID reader;
    seed existing bindings from explicit IDs without provider mutations on reads. Ordinary Project recording and name-prefix deletion across readers, sync and
    reteam are implemented; shared selection remains. Preserve provider bytes on ordinary adoption; the
    optional-Flow removal is already implemented. Cut CLI/status/DTO consumers
-   over with it. Focused test: `cargo test -p loopflow --lib project_ensure` with
+   over with it, including `ops/pm.rs` current-Project callers and
+   `ops/project.rs::resolve_project_for_task`. Focused test: `cargo test -p loopflow --lib project_ensure` with
    new regression cases proving an existing no-Flow Project survives adoption.
 2. Add transition persistence and explicit ensure, with concurrent/crash/uncertain
    response tests through real operation entry points and a stateful fake provider.
@@ -611,6 +665,9 @@ SQL loader directly after seeding pre-cutover data, removing a boolean phase hel
 Project error conversion uses one mapping function. Sync retains its diagnostic
 collection while checked reads reject the first slug conflict; combining these
 would change their reporting contracts.
+The follow-up compression removes the provider fixture's unwritable rename state
+and asserts the retained snapshot name instead. Reteam's collected Projects are
+named directly, removing the last naming residue of its deleted state wrapper.
 Cached-name conversion and shared selection must land together. The approved
 historical name-only exception is implemented; the old selector remains to replace.
 
@@ -620,4 +677,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `cargo test -p loopflow --lib session_binding_retains_a_task_in_completed_project_history` passes (one case; initial fixture supplied a stale capture token and was corrected); `cargo fmt` and `git diff --check` pass; `cargo clippy --all-targets -- -D warnings` passes; `lf context --skill implement` fits all budgets. Earlier six cutover passes are retained in `eb8315a31`; selection, rotation, Desktop and configured acceptance remain unimplemented/unproved.
+Checks: `cargo test -p loopflow --lib checkout_session_membership_survives_project_transfer_without_binding` passes (1 test); `cargo fmt --all -- --check` passes; selection, rotation, Desktop and configured acceptance remain with implement/gate.

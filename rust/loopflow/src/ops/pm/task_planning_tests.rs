@@ -53,7 +53,6 @@ impl PlanningEnvironment {
 struct PlanningState {
     issues: Vec<serde_json::Value>,
     extra_projects: Vec<serde_json::Value>,
-    project_name: Option<String>,
     fail_confirmation: bool,
     fail_snapshot: bool,
     fail_issue_read_after: Option<usize>,
@@ -108,10 +107,7 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let mut project = planning_project(&project_id, &project_id);
-    if let Some(name) = &state.project_name {
-        project["name"] = json!(name);
-    }
+    let project = planning_project(&project_id, &project_id);
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
@@ -1664,11 +1660,11 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
-            assert_eq!(provider.project_name, None);
             let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
             let snapshot = row.snapshot;
             assert_eq!(snapshot.projects.len(), 1);
             assert_eq!(snapshot.projects[0].id, "project-1");
+            assert_eq!(snapshot.projects[0].name, "Chapter");
         });
         runtime.block_on(async {
             let mut provider = state.lock().await;
@@ -1676,7 +1672,6 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             provider.issues[0]["project"]["id"] = json!("prior-project");
             mark_issue_updated(&mut provider.issues[0]);
             // Duplicate foreign membership still yields one preview entry.
-            provider.project_name = None;
             provider.extra_projects.push(foreign.clone());
         });
         let preview = crate::ops::task::task_sweep(&repo, false).unwrap();

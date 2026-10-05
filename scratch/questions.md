@@ -9,6 +9,10 @@ Still open:
 - Whether an operator should arm a merge that status recommends. The branch
   leaves unarmed merges to the person.
 
+- If PR #1439 lands, no command continues a stopped Flow. Does "a defined Flow
+  proceeds without asking" then mean the operator launches fresh work for the
+  remaining steps on its own judgment, or does a stopped Flow wait on Jack?
+
 Assumptions the branch proceeds on:
 
 - The default New Session skill stays `capture-tasks` (Jack's 2026-10-02

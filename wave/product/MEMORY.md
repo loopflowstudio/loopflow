@@ -25,12 +25,22 @@ the operator reported its own queue as a handoff. A status label naming the
 reader's own scope must say so in the prompt. Nothing re-invokes a
 conversation; `lf task reconcile` resumes only enrolled Tasks with an unfinished
 captured Flow. On Jack's Home that day the minute check was disabled and
-Product's declared `wave/operate` cron was not installed.
+Product's declared `wave/operate` cron was not installed. `lf wave status`
+describes only the managed Flow: before continuing, check every Flow and
+unfinished Exec against `lf ps --json`, or a second driver starts.
 
-Limits: the [nine scenario walk-throughs](../../docs/reviews/session-operate-prompts.md)
-are simulations read from assembled prompts; no model ran. Installed
-conversation behavior is unshown, and an open conversation keeps its old text
-until `lf session replace`.
+Jack approved the branch in demo review and asked for the operator report
+grouped as waiting on him, moving and stuck, with PR links. Leaving an unarmed
+merge to the person is the branch's choice; Jack did not answer.
+
+Open PR #1439 (LOO-353, `32f42bffe`) changes the contract: `lf task run`
+always starts a fresh Flow, nothing continues a stopped one, reconcile never
+resumes, and review moves into the Task conversation. “A defined Flow proceeds”
+then needs a new mechanism; whichever lands second rewrites the other's prompts.
+
+Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
+simulated walk-throughs and two read-only model runs. Installed behavior is
+unshown; an open conversation keeps its old text until `lf session replace`.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -279,7 +289,7 @@ investigate and act independently; one shared pass note carries evidence forward
 Repository scope remains the default despite ambient Wave attribution, unless
 the request narrows it. Whether `wave/operate` uses that sequence remains open;
 its separate operation is retained. Jack's “soften, dont harden” correction
-rejects a numeric cap on moves. The October 5 pairs decision below replaces
+rejects a numeric cap on moves. The October 5 pairs decision above replaces
 “one or two useful moves”: no action is valid only once started work is covered.
 Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
@@ -340,11 +350,8 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   Recorded scope retained Session code and background tmux process wrappers.
   Fixture renders do not prove tab/window interaction or native recovery.
 
-The prior name-attribution gate passed 799 affected Rust tests, 229 Python tests,
-78 website checks (three skips), 112 focused Swift tests, static checks and the
-Mac build. A full Swift package run stopped completing and was terminated;
-focused stream checks passed later, but full-package and native-rendering proof
-remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
+The prior name-attribution gate passed its affected suites; full Swift package
+and native-rendering proof remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
 not a live Task write or the review-bearing design Flow. Native review resume
 still needs anonymous → named → corrected → unknown participant acceptance on
 a differently named Home, preserving historical authors and review authority.
@@ -981,10 +988,7 @@ no owning Task (LOO-375 owns `wt list` only).
 - The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
   the automated real-PTY correction passes but its final reviewer confirmation is
-  still pending. Latest identity pass recorded 45 tests in four suites, then 24
-  affected tests after review. These are prior-run receipts, not fresh update-wave
-  validation or an all-provider matrix. Hosted UI initialization was canceled by
-  LocalAuthentication; it supplied no behavioral result. JSON prepare-without-kill
+  still pending. No all-provider matrix exists. JSON prepare-without-kill
   has source/Swift contract coverage but no focused Rust behavioral proof yet.
 
 ### Shell command blocks and build fidelity (2026-09-22)
@@ -1061,12 +1065,6 @@ comparison. This branch does not establish any Project's week/month evidence
 window; definitions and KRs remain unchanged. No open Task had enough evidence
 to close during this reconciliation.
 
-## Historical remote client
-
-June's HTTP-to-lfd, bearer-token and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport; see the
-[pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).
-
 ## Learnings
 
 - **Reshape proven code; don't rebuild beside it** (code only — a rewrite loses
@@ -1091,6 +1089,6 @@ shared `lf` projections and explicit Home transport; see the
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The specific 057/061 incident and
-  proposed remedies are retained in the prior memory linked above; they are not
-  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.
+  test upgrades from the released frontier. The incident detail and June's
+  superseded remote-client recipes are in the
+  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.

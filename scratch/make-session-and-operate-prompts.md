@@ -1,8 +1,10 @@
 # Session and operate prompts keep work moving together (LOO-383)
 
 Status: implemented on the branch and approved by Jack Heart in demo review on
-2026-10-05 ("once youre done, this is approved"). Gate, the installed demo and
-reconciliation with PR #1439 remain. The full design, audit and both dry-run
+2026-10-05 ("once youre done, this is approved"); the demo fixes he asked for
+are committed. Gate, the installed demo and reconciliation with PR #1439
+remain. The demo notes are folded into this file and the review; there is no
+separate demo file. The full design, audit and both dry-run
 records are at
 [commit 831b979ec](https://github.com/loopflowstudio/loopflow/tree/831b979ec/scratch);
 the durable account is [the review](../docs/reviews/session-operate-prompts.md).
@@ -96,14 +98,35 @@ sync-skills --yes`.
 - **Installed demo** (post-merge, not a gate): install, `lf session replace`
   the Product Wave conversation, say nothing, and watch its first turn give
   every started Task a disposition; then ask "what's running?" and file an idea.
-- **PR #1439 (LOO-353)** reportedly replaces `lf --task <issue> flow start` and
-  Session Ready/Complete with `lf task run`; unverified here. Whichever lands
-  second reconciles the prompts and `ops/task_automation.rs`'s hint.
+- **PR #1439 (LOO-353)**, read at head `32f42bffe` on 2026-10-05: open,
+  mergeable, not armed, and it contains current main. This branch is rooted on
+  main, where `flow start` is the shipped command, so its prompts are correct
+  for what exists today. #1439 changes the contract underneath decision 3, not
+  only a command name:
+  - `lf task run <issue> [flow]` always starts a fresh Flow in the foreground
+    and returns when it ends. Nothing continues a stopped Flow; a stopped Flow
+    is history to read before choosing what to launch.
+  - `lf task reconcile` checks recorded deliveries and never resumes a Flow.
+  - Flows run autonomous work only; review happens in the Task conversation,
+    so "waiting on a person, open this review Session" changes shape.
+  - No Flow is privileged, so the `managed: false` wording in the live-driver
+    check goes away while the check itself stays.
+
+  The two branches overlap in 23 files, including all three operate skills,
+  both existing sessions, LOOPFLOW.md, `prompt.rs`, `task_automation.rs`, the
+  goldens and Product memory. Whichever lands second owns the rewrite. Under
+  #1439, "a defined Flow with steps left proceeds without asking" has no
+  resume to call: the operator would have to judge what remains and launch
+  fresh work. Whether that still counts as proceeding without asking is Jack's
+  to decide and is recorded in `questions.md`.
 - `lf` defects the prompt works around, owned by no Task: status recommends
   `lf flow start` while a direct Flow is live and says "resume" with no pinned
   Flow; `lf wave status` returns 437 KB; LOO-278's planning read fails with
   "refresh planning" and names no command; `flow start` on a Task whose PR
   already merged (LOO-368) is unsettled.
+
+Check result (realign, 2026-10-05): no code changed; `git log HEAD..origin/main`
+is empty and #1439 was read with `git grep` at `32f42bffe`. Gate owns the tests.
 
 Check result (compress, 2026-10-05): prose reduction after the demo commit;
 `cargo test -p loopflow --lib -- engine::prompt engine::builtins` (90 passed)

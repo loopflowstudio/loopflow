@@ -23,14 +23,20 @@ the exact boundary result without closing the conversation or a renamed handshak
 These decisions supersede conflicting older constraints below, not retained
 membership, native surface ownership, historical attribution or proof obligations.
 
-Jack requested loop-decide alternatives, then clarified that removal needs a
-replacement and must not block accepted work; retaining it is acceptable. No
-replacement is approved. LOO-353 kickoff remains draft pending review-design;
-sleeping runner, observation storage, feedback delivery and timeout are proposals.
-Main at `c5dc238b0` still creates separate review Sessions; harness input capability
-does not prove native conversation delivery. No production or configured proof was
-performed by kickoff. Remaining workspace/remote/performance/defaults/website work
-stays with LOO-353; LOO-366/367 retain their separate policy scope.
+Jack subsequently approved conversation-stage workflow nodes with operational-Flow
+edges. The native Task conversation owns navigation, without a shared playhead or
+review-settlement API. Operational Flows contain autonomous loops/XORs only and
+cannot nest human workflows. Autonomous deciders use `loop-or-next`; duplicate
+authored id/name fields are unnecessary. This supersedes the sleeping-runner and
+single-capture human-segment proposals preserved at
+`5090f672e:scratch/focus-on-your-own-work.md`.
+
+Design review is finished and approved; Jack requested further kickoff reconciliation
+and continuation of LOO-353's saved pursue capture without replacement. Local main
+`a1d2f8a59` has zero-human pursue, while the saved capture still has demo and its
+post-review decider. Source templates cannot establish a saved invocation's shape.
+No configured proof follows from this reconciliation. Workspace/remote/performance/
+defaults/website scope stays LOO-353; LOO-366/367 retain separate policy scope.
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
@@ -979,55 +985,14 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Historical Wave controls & truthful failures (`wave-controls`)
+## Historical Wave controls and failures
 
-The resident/listener Stop lifecycle and chat rendering below are historical:
-upstream `3dc89bc9a` removed those runtime and UI surfaces. Do not restore them
-as dependencies of primary Sessions. The failure-evidence, native UI proof and
-dictation lessons remain useful independently.
-
-The 2026-07-10 dogfood exposed four independent surface failures; all repaired
-here on top of PR #849's signed-test/release hardening.
-
-- **Stop is a wave lifecycle verb: `lf stop <name>`.** Top-level command (not
-  `lf loop stop`), closing the old "no single-wave stop" gap. It discovers the
-  live loopback listener via the same `.wave-endpoint` `lf serve` writes, posts
-  `POST /stop`, and waits briefly for graceful shutdown. Missing/stale endpoint
-  = idempotent success ("already stopped"). **The listener is the sole cleanup
-  owner** (`run_listener`): stop supervisor → terminate resident → deregister
-  runtime registration → remove only this boot's endpoint + resident-token
-  files. Detached
-  worker loops stay independent; the listener never owned their tmux. The Mac
-  Stop button shells through the same CLI verb via `LocalWaveAgentLauncher`
-  (launcher tests pin the exact `lf stop <wave>` argv) — one implementation, CLI
-  and GUI. **The agent exec door denies `stop`** (`ExecVerdict::Deny`) so a
-  worker can't tear down its steward wave.
-- **Empty `Thought` records never become cards.** Whitespace-only thoughts are
-  dropped at the listener's shared turn-item boundary (clean new journals) AND
-  filtered in the shared Swift model (existing journals replay clean). Non-empty
-  thoughts and every other item type survive.
-- **Transcript follows only while the reader is at the bottom.** A near-bottom
-  flag derived from scroll geometry gates auto-follow; scrolling back disables
-  it, returning to the bottom re-enables. Initial replay starts in follow mode.
-  No timer, no buffered-copy model — it tracks reader intent only.
-- **Failed bodies are attempts, not failed waves** (`AttemptFailurePresentation`).
-  A surface-only projection over existing provenance; runtime/journal/wire
-  unchanged. Key: `StepKey = (invocation_id, step_index, iteration)`. A
-  body-backed failed turn retains its exact `termination_reason`; a later
-  different body with the same key ⇒ `retrying` (running) / `recovered on retry`
-  (complete); same step still selected, no active body, loop not failed ⇒
-  `retry pending`; else `Attempt failed`. Bodyless failed turns keep the neutral
-  `Turn failed` fallback. **Never infer terminal step or wave failure from an
-  attempt** — the capacity-error receipt now reads `Attempt failed · recovered
-  on retry` with the reason visible, and the successful retry is its own turn.
-- **Dictation is Wispr Flow (Mac + iOS), not a built-in.** The product owner
-  chose Wispr Flow, so the unused `VoiceInputService` (~1276 lines), WhisperKit
-  package, its tests (~554 lines), and microphone permission declarations left
-  the product rather than being carried into the signed build.
-- **Signed UI-test gate reconciled with CI:** PR #849's signed macOS
-  `xcodebuild build-for-testing` compiles the visible controls without requiring
-  hosted Automation permission; executing UI tests stays an explicit
-  host-permissioned action (macOS Automation can stop the runner pre-bootstrap).
+The retired resident/listener controls, attempt-card fixes, dictation decision and
+signed UI-test limits remain at `5090f672e:wave/product/MEMORY.md` under
+“Historical Wave controls & truthful failures”. Upstream removed those runtime/UI
+surfaces; they are not dependencies of primary Sessions. Attempt failure is not
+Wave failure, empty thought records are not cards, and native UI proof remains
+separate from a signed build. Wispr Flow remains the selected dictation tool.
 
 ## Learnings
 

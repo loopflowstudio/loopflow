@@ -228,6 +228,44 @@ The CLI/ Desktop activation and rotation proofs below must exercise their own
 entry points and retain the actual failure outcome. Release publication and
 installation evidence supplies no Project-readiness acceptance.
 
+### Task registration also changes membership — October 5
+
+The checkout-lock proposal above is insufficient even if every listed Session
+and Flow writer participates. `ops/task.rs::create_prepared_task` resolves the
+Project before registering an existing issue through
+`Store::create_task_with_worktree`. This path holds a worktree lease, but no Wave
+planning lock. New-issue creation's `pm_create_task_idempotent` does hold the Wave
+lock; that protection does not cover existing-issue registration.
+
+Interleaving: admission resolves predecessor P for a provider-started issue
+without a local Task row, then pauses. Rotation collects registered checkouts,
+locks them, and moves that issue remotely (provider Started already classifies
+it as Move). Its local transfer finds no Task. After rotation's final Task read,
+admission registers the Task against the previously resolved P, associating an
+earlier taskless conversation immediately; rotation switches to Q and completes
+P. The new Task checkout was outside its lock set. Unregistered backlog with
+unknown evidence would block current rotation; this counterexample uses the
+provider-started case. Another inventory read only moves the race. Generic
+`update_task` also writes `worktree`, so population stability cannot be assumed
+from Session admission. This is a source-derived interleaving, not a provider test.
+
+`task_registration_retains_earlier_checkout_conversations_without_binding`
+exercises public SQLite registration: an earlier unbound conversation becomes
+Task work, retains its exact Session bytes, and does not acquire Started. It
+preserves required behavior; it does not assert that registration must bypass a
+future fence or prove the rotation interleaving.
+
+The revised exclusion must stabilize the Task/checkout population before
+collecting checkout locks, through final classification and the configuration
+switch. Registration of existing issues and membership-changing relocation must
+participate, as well as the previously identified Session/Flow entry points.
+Resolve and revalidate the selected Project inside that boundary. Existing
+new-issue callers already holding the Wave lock must not recursively acquire it.
+Do not acquire planning or checkout locks inside SQLite transactions. The exact
+population-fence implementation and operation-entry-point proofs remain open;
+dependent selection and rotation implementation stopped on this counterexample.
+Jack Heart's explicit-binding decision and historical binding policy are unchanged.
+
 ## Outcome and demo
 
 Every Wave has one explicitly configured current Project, normally In Progress.
@@ -528,7 +566,8 @@ Wave-scoped chapter creation is part of the requested higher-level design.
 
 This is one coherent delivery; internal slices are implementation order:
 
-1. Establish preservation using shared Task-work membership and checkout admission
+1. Establish a stable Task/checkout population across registration and relocation,
+   then preservation using shared Task-work membership and checkout admission
    before switching selection or rotation. Explicit first-start fields alone
    omit checkout-associated Sessions/Flows. Session creation/binding, review
    reservation and mechanical Flow starts must share the revised lock order above,
@@ -689,4 +728,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `cargo nextest run -p loopflow --lib -E 'test(ops::pm::planning_lookup_tests::) | test(repository_team_reteam) | test(foreign_projects_do_not_block_sweep_refresh_or_sync)' --no-fail-fast` passes 15 tests (projectless-Task case reported leaky; gate owns output-handle investigation); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; selection, rotation, Desktop and configured acceptance remain with implement/gate.
+Checks: `cargo test -p loopflow --lib task_registration_retains_earlier_checkout_conversations_without_binding` passes (1 test); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; earlier focused PM evidence is retained at `5d1b5a3b1`; population/admission fencing, selection, rotation, Desktop and configured acceptance remain unfinished.

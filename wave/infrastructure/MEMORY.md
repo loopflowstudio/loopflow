@@ -242,18 +242,24 @@ separately. Rejected planning cannot update durable facts first. Shared selectio
 SQL admission, ensure, rotation and Desktop remain unfinished. Installed/configured
 acceptance remains unproved.
 
-October 5 preservation findings change implementation order. Session creation,
-binding and mechanical Flow starts bypass chapter admission. Checkout membership
-includes unbound conversations without Started; rotation's start/claim reader
-omits them even without concurrency. The public-store transfer regression preserves
-membership, Session bytes and checkout without inventing a binding; it does not
-prove rotation. Reuse the complete Task-work rule, including Flow associations and
-primary-scope exclusion, rather than counting conversations by path. The proposed
-checkout admission fence must cover taskless creation, binding from elsewhere and
-missing paths. Wave locks alone do not exclude execution. Lock order, both rotation
-orderings and failed-reset re-entry remain unproved. Historical binding stays
-allowed; pending recovery cannot permanently deny starts. Release's child memory
-reinforces entry-point proofs. Later PM compression changes none of these boundaries.
+October 5 preservation findings change implementation order. Session binding and
+mechanical Flow starts bypass chapter admission. Unbound checkout-associated
+conversations lack Started; rotation's start/claim reader omits them. Reuse the
+complete Task-work rule, including Flow associations and primary-scope exclusion.
+The transfer regression preserves membership and Session bytes without binding;
+it does not prove rotation.
+
+Checkout locks also require a stable Task population. Existing-issue registration
+in `create_prepared_task` holds no Wave planning lock and can introduce a checkout
+after rotation collects locks. Registration immediately associates earlier
+conversations without another Session write. The public-store regression preserves
+that history without setting Started. Generic Task updates can change checkout
+membership too. Stabilize registration/relocation as well as taskless starts,
+binding from elsewhere and missing-path admission before claiming exclusion.
+Lock order, both rotation orderings and failed-reset re-entry remain unproved.
+Historical binding stays allowed; pending recovery cannot permanently deny starts.
+Release's child memory reinforces operation-entry-point proofs. PM compression
+changes none of these boundaries; selection and Desktop remain unfinished.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

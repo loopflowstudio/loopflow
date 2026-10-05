@@ -12,6 +12,11 @@ at `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
   plus the shared Task-work reader, including missing-checkout/subdirectory and
   out-of-checkout binding paths. Prove both orderings and failed-reset re-entry
   before cutting over selection; historical binding must remain usable.
+  Existing-issue registration can add a checkout after rotation collects its
+  locks and associate earlier Sessions without a Session write. Stabilize the
+  Task/checkout population too; generic Task updates can relocate it. The design
+  records the entry points and reentrant-lock constraint. This is unresolved
+  implementation mechanics, not a request to change Jack Heart's product policy.
 - Chapter metadata representation and projection; historical cross-Wave inspection
   remains a proposed extension, while Wave-scoped chapter creation is requested.
 - Existing skill/Flow composition and retained Task-candidate format between

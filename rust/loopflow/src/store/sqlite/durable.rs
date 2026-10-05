@@ -1313,6 +1313,40 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn task_registration_retains_earlier_checkout_conversations_without_binding() {
+        let (dir, store, existing) = store_with_task();
+        let mut task = store.task(&existing).unwrap().unwrap();
+        let mut pr = store.task_prs(&existing).unwrap().remove(0);
+        task.id = TaskId::new();
+        task.plan.id = LinearIssueId::new("later-issue").unwrap();
+        task.plan.identifier = "PROBE-2".into();
+        task.worktree = dir.path().join("later-checkout");
+        task.workspace_slug = "later-checkout".into();
+        pr.id = TaskPrId::new();
+        pr.task_id = task.id.clone();
+        pr.slug = task.workspace_slug.clone();
+        pr.branch = task.workspace_slug.clone();
+
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src");
+        conversation.work_source = None;
+        let session = store.create_session(conversation, None, None).unwrap();
+        assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+
+        store.insert_task_with_worktree(&task, &pr).unwrap();
+
+        assert_eq!(
+            store.session_task_ids(&session.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        let work = store.task_work(&task.id).unwrap();
+        assert_eq!(work.sessions.len(), 1);
+        assert_eq!(work.sessions[0].id, session.id);
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task.id).unwrap());
+    }
+
+    #[test]
     fn checkout_session_membership_survives_project_transfer_without_binding() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();

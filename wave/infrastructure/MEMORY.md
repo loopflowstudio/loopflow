@@ -734,6 +734,12 @@ worktree roots from the filesystem, reads only unfinished Execs through a
 partial index, and verifies the CLI once per process. On one store snapshot the
 per-Task Exec read fell from p50 54.9 ms to 0.69 ms with identical unfinished
 sets. No end-to-end candidate timing, rendered journey or soak exists yet.
+October 5 integration retains LOO-376's single refresh owner and persistent
+cache while removing process polling. Cache/Session integration regressions
+pass, including unchanged-cache writes and overlapping enumeration. The live
+recorder now includes sampled app CPU and requires twenty samples for p95;
+old RSS-only receipts remain CPU-unmeasured. These are source proofs, not
+installed steady-state or soak acceptance.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

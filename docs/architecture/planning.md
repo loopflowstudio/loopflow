@@ -11,10 +11,12 @@ lf repo new-chapter 2026-10 --dry-run
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress Linear
-Project owns Tasks, KRs, targets and the default Flow. A Chapter is the shared
-name of those current Projects across the repository. This page specifies the
-accepted model; [cutover status](../architecture-reference.md#cutover-status)
-records the remaining implementation and proof gaps.
+Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the shared
+name of those current Projects across the repository. The rotation below describes
+the current implementation. LOO-366 replaces status/name selection with an explicit
+shared Project binding and preserves unreviewed backlog; that cutover remains
+unimplemented. [Cutover status](../architecture-reference.md#cutover-status) records
+other implementation and proof gaps.
 
 ## Rotate the plan, preserve the work
 
@@ -24,7 +26,7 @@ lf refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
-successor or creates one with the predecessor's Flow. Started unfinished Tasks
+successor or creates one with the predecessor's Flow when present. Started unfinished Tasks
 move with identity, checkout, PR and captured execution intact. Proven untouched
 backlog is canceled; completed Tasks stay historical. Missing local or provider
 evidence cannot establish that work should be retired. Linear keeps the Projects

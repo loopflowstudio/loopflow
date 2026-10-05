@@ -493,6 +493,32 @@ mod tests {
     use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[test]
+    fn project_name_representation_change_requires_a_cutover() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE pm_projects(repo TEXT,provider TEXT,id TEXT,observed_at INTEGER,body TEXT,archived INTEGER DEFAULT 0,PRIMARY KEY(repo,provider,id));").unwrap();
+        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut project = snapshot.projects[0].clone();
+        project.revision = Some("2026-10-05T12:00:00Z".into());
+        project.name = "Customer requests".into();
+        project.slug = "customer-requests".into();
+        super::put_project(&conn, "/repo", "linear", 1, &project).unwrap();
+        let stored = serde_json::to_string(&project).unwrap();
+        project.name = "Product — Customer requests".into();
+        project.slug = "product-customer-requests".into();
+        let error = super::put_project(&conn, "/repo", "linear", 2, &project).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unordered or conflicting Project facts"));
+        let retained: String = conn
+            .query_row("SELECT body FROM pm_projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(retained, stored);
+    }
+
+    #[test]
     fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();

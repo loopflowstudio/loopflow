@@ -67,9 +67,6 @@ pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterR
 
 pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
     content.validate().map_err(error)?;
-    if content.flow.trim().is_empty() {
-        return Err(error("Project content requires a nonempty flow: line"));
-    }
     let wave =
         crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
     tokio::runtime::Runtime::new()
@@ -281,18 +278,6 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
         return Ok(plan);
     }
     for entry in &plan.waves {
-        let flow = entry
-            .successor
-            .as_ref()
-            .or(entry.predecessor.as_ref())
-            .map(|project| project.flow.as_str())
-            .unwrap_or("feature");
-        if flow.trim().is_empty() {
-            return Err(error(format!(
-                "Wave {}: set the Project's flow: line before rotating; no Project status changed",
-                entry.wave
-            )));
-        }
         if let Some(task) = entry
             .tasks
             .iter()
@@ -570,12 +555,7 @@ async fn apply_rotation(
                 .predecessor
                 .as_ref()
                 .map(|project| project.flow.as_str())
-                .unwrap_or("feature");
-            if flow.trim().is_empty() {
-                return Err(error(
-                    "predecessor has no flow: line; set its default Flow before rotating",
-                ));
-            }
+                .unwrap_or("");
             let content = ProjectContent {
                 flow: flow.to_string(),
                 metric_targets: Vec::new(),

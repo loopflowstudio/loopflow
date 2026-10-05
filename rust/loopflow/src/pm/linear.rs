@@ -854,11 +854,6 @@ impl LinearClient {
         id: Option<&str>,
     ) -> PmResult<String> {
         content.validate()?;
-        if content.flow.trim().is_empty() {
-            return Err(PmError::Message(
-                "new Projects require a nonempty flow: line".into(),
-            ));
-        }
         let team_id = self.require_team_id()?;
         let status_id = self
             .project_status_id(crate::pm::ProjectStatus::Planned)
@@ -1275,9 +1270,6 @@ impl LinearClient {
         }
         let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
-        if project.flow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started {
-            return Err(PmError::Message(format!("Project {project_id} has no recorded default Flow; set flow: in Linear before adoption")));
-        }
         if apply && (converted != original || promote) {
             let mut input = json!({"content":converted});
             if promote {
@@ -2462,6 +2454,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn migration_adoption_accepts_a_started_project_without_flow() {
+        let original = "Original prose.\n\n## KRs\n- [ ] Preserve this proof\n";
+        let response = json!({"data":{"project": {
+            "id":"project-1", "name":"Summer work — customer requests",
+            "description":"Original description", "content":original,
+            "status":{"type":"started"}, "archivedAt":null,
+            "initiatives":{"nodes":[{"id":"initiative-1"}]},
+            "teams":{"nodes":[{"id":"team-1"}]}
+        }}});
+        let (base_url, _) = test_server::spawn(vec![
+            json_response(StatusCode::OK, response.clone()),
+            json_response(StatusCode::OK, response),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), base_url);
+        let adopted = client
+            .adopt_project("project-1", "initiative-1", "team-1", false, true)
+            .await
+            .unwrap();
+        assert_eq!(adopted.id, "project-1");
+        assert_eq!(adopted.name, "Summer work — customer requests");
+        assert!(adopted.flow.is_empty());
+        assert_eq!(adopted.krs[0].text, "Preserve this proof");
+        assert_eq!(adopted.status, crate::pm::ProjectStatus::Started);
+    }
+
     #[test]
     fn issue_mutations_use_linear_string_ids() {
         for query in [
@@ -2803,7 +2822,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_writes_content_then_attaches_to_initiative() {
+    async fn create_project_without_flow_retains_krs_and_attaches_to_initiative() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(StatusCode::OK, json!({"data":{"projectStatuses":{
                 "nodes":[{"id":"planned","type":"planned","position":0.0,"teamId":null}],
@@ -2831,7 +2850,7 @@ mod tests {
                 "Wave Chat",
                 &ProjectContent {
                     metric_targets: Vec::new(),
-                    flow: "feature".into(),
+                    flow: String::new(),
                     krs: vec![PmKr {
                         text: "Replies stream".to_string(),
                         holds: false,
@@ -2846,10 +2865,9 @@ mod tests {
         let requests = requests.lock().await;
         let create: Value = serde_json::from_str(&requests[1].body).expect("create json");
         assert_eq!(create["variables"]["name"], "Wave Chat");
-        assert!(create["variables"]["content"]
-            .as_str()
-            .expect("content")
-            .contains("- [ ] Replies stream"));
+        let content = create["variables"]["content"].as_str().unwrap();
+        assert!(content.contains("- [ ] Replies stream"));
+        assert!(!content.contains("flow:"));
         let attach: Value = serde_json::from_str(&requests[2].body).expect("attach json");
         assert_eq!(attach["variables"]["initiativeId"], "initiative-1");
         assert_eq!(attach["variables"]["projectId"], "project-1");

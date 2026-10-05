@@ -69,9 +69,96 @@ must expose either the previous or next complete binding. The lock lives outside
 the replaced file, so atomic rename cannot create a second lock owner. Ordinary
 opening consumes the shared binding even when its checkout contains an older ID.
 
-All five implementation slices and configured acceptance remain outstanding.
-The existing saved Flow and its review boundary remain intact; this reconciliation
-records no implementation, provider mutation or Flow navigation.
+The optional-Flow cut is implemented locally: create/adopt/update/reset no longer
+refuse empty Flow, rendering omits an empty line, and rotation supplies no invented
+default. Shared binding, exact-ID ensure, rotation recovery and Desktop remain
+unimplemented. No provider mutation or configured acceptance has occurred.
+
+## Cached-name cutover counterexample — October 5
+
+Source inspection and `project_name_representation_change_requires_a_cutover`
+expose a preservation gap in slice 1. `ops/pm.rs::checked_projects_with_store`
+strips the Wave prefix and derives a new slug before `put_pm_snapshot` stores
+Project facts. `store/sqlite/planning.rs::put_project` rejects a differing body
+at the same provider revision. An existing cached “Customer requests” therefore
+conflicts with the fresh provider name “Product — Customer requests” at unchanged
+`updatedAt`. Repeated refresh cannot repair it. Removing only the prefix refusal
+would still alter ordinary names; weakening equal-revision rejection would discard
+the existing conflict protection.
+
+The receipt-only migration specified below is insufficient for this deletion.
+The name/selection cut needs an explicit released-data transition before it is
+implemented. Original evidence and acquisition time must survive. As the mixed
+representation finding below establishes, existing records cannot distinguish
+projected names from provider facts. Automatic replacement at the same revision
+therefore requires a policy exception; an exact-ID read alone cannot authorize it.
+The durable `projects` row separately mirrors name/slug and must converge through
+its existing writer. `put_item` already excludes the Project display reference
+from equal-issue-revision comparison; no new exception is needed there. The stored
+stripped name alone cannot reconstruct its original provider bytes.
+
+The consumer audit must also cover
+`store/sqlite/durable.rs::require_current_task_chapter`: it rejects an unstarted
+Task unless its Project is Started and the Wave has exactly one Started Project.
+Changing only `ops/project` and display would leave admission blocked by an
+unrelated second Started Project. Removing or replacing this status authority
+must preserve the Task-start/rotation fence and the LOO-367 ownership boundary.
+Both worker eligibility and `start_task_flow` call this SQL guard; changing only
+one admission path leaves the competing selector in place.
+
+### Mixed representation blocks automatic classification — October 5
+
+`inspect_task_planning_async` canonicalizes names only when Initiative-to-Wave
+resolution succeeds; otherwise `put_pm_task` stores exact provider names.
+Snapshots store projected names. Both use `put_project`, without representation
+provenance. The released `normalize_pm_planning` migration retains none either.
+
+Two histories yield identical UUID, body, revision, acquisition time and ownership:
+“Product — Customer requests” projected to “Customer requests”, or that latter
+name stored verbatim. A fresh prefixed name at the same revision repairs the
+first history but contradicts the second. Neither current membership nor a new
+migration marker distinguishes them. This is source-derived evidence; the existing
+regression proves rejection and body retention, not a conversion.
+
+Concrete proposal for review: classify all pre-cut Linear name/slug evidence as
+representation-unknown. Preserve original bodies, acquisition times and archive/
+membership evidence. Allow one exact-ID read to replace name/slug, atomically
+settling its marker. Keep other field comparisons, ownership, archival and revision
+ordering strict; new rows and subsequent reads receive no exception. Populated
+released-frontier tests must cover both histories and expose the second history's
+one-time acceptance.
+
+Jack Heart has not selected that relaxation of historical conflict protection.
+The alternative retains strict rejection until a newer provider revision or
+explicit record-specific repair; ensure cannot manufacture revisions. This policy
+decision blocks the dependent name/selection cut. No schema or runtime exception
+was added; optional-Flow changes remain intact.
+
+The subsequent iteration direction requests conversion while retaining
+equal-revision conflict protection and original evidence. Retaining the original
+body makes a replacement auditable; it does not preserve rejection of a genuine
+conflict. No automatic conversion satisfying all three conditions has been
+established. The next implementation needs either an explicit historical
+name-only exception or a record-specific repair path that leaves ordinary
+equal-revision ingestion strict. Repeating the existing regression cannot choose
+that policy. This reconciliation does not select the exception.
+
+## Reader and writer cutover audit — October 5 realign
+
+`pm_resolve_task_async` also strips provider names. `pm_sync_async` both plans
+prefix-based renames and applies them through `rename_project`; reteam derives
+`target_name` from the same prefix rule. Removing only snapshot normalization
+would let later sync rewrite an ordinary Project or reject its em-dash name.
+The cutover therefore includes exact-name preservation through Task resolution,
+sync preview/apply and reteam, with ownership still validated by provider IDs.
+These are inspected source paths, not configured-provider results. Keep explicit
+Project naming at creation separate from automatic renaming of existing Projects.
+
+The optional-Flow removal is the completed part of slice 1, not completion of that
+slice or the five-slice delivery. Existing documentation still describes the
+implemented status/name-based rotation, including automatic backlog cancellation;
+that behavior conflicts with the accepted replacement and remains to be changed
+with its callers and preservation tests. No ordinary ensure operation exists yet.
 
 ## Outcome and demo
 
@@ -116,10 +203,10 @@ from synthetic tests or readiness alone.
   including Task routing; changing ensure alone leaves competing selection rules.
 - `pm/linear.rs::{create_project,adopt_project}` and
   `ops/chapter.rs::{update_plan,rotate,apply_rotation}` independently reject empty
-  Flow strings. `ProjectContent` parsing already permits an absent Flow as an
-  empty string. Keep that representation in this cut; remove the prerequisites
-  and omit an empty `flow:` line when rendering. Do not invent a default `feature`
-  merely to create a Project. Explicit Flow launch validation remains with LOO-367.
+  Flow strings in the base implementation. This branch removes those refusals
+  and the invented rotation default, and omits an empty `flow:` line on render.
+  `ProjectContent` retains its existing empty-string representation. Explicit
+  Flow launch validation remains with LOO-367.
 - `ops/pm.rs::checked_projects_with_store` retrieves retained IDs missing from
   membership, validates ownership, projects migration adoption, then canonicalizes
   names. `canonical_project_name` rejects unknown em-dash prefixes. Ordinary
@@ -374,11 +461,12 @@ Wave-scoped chapter creation is part of the requested higher-level design.
 
 This is one coherent delivery; internal slices are implementation order:
 
-1. Add the Home-local per-Wave Project file and shared configured-ID reader;
+1. Resolve the mixed-representation policy above, then prove its transition within this
+   Task's one migration draft. Add the Home-local per-Wave Project file and shared configured-ID reader;
    seed existing bindings from explicit IDs without provider mutations on reads. Move ordinary
-   Project ownership out of `chapter`, remove
-   nonempty-Flow create/adopt/update/reset gates and name-prefix rejection, and
-   preserve provider bytes on ordinary adoption. Cut CLI/status/DTO consumers
+   Project ownership out of `chapter` and remove name-prefix rejection across
+   readers, sync and reteam. Preserve provider bytes on ordinary adoption; the
+   optional-Flow removal is already implemented. Cut CLI/status/DTO consumers
    over with it. Focused test: `cargo test -p loopflow --lib project_ensure` with
    new regression cases proving an existing no-Flow Project survives adoption.
 2. Add transition persistence and explicit ensure, with concurrent/crash/uncertain
@@ -405,18 +493,17 @@ This is one coherent delivery; internal slices are implementation order:
 
 ## Delete — do not maintain
 
-Apply these cuts with their replacement consumers under the selected shared local
-configuration owner; none is implemented yet.
+Apply the remaining cuts with their replacement consumers under the selected
+shared local configuration owner. The empty-Flow cut below is implemented locally;
+the name/selection deletion is subject to the cutover counterexample above.
 
 - `ops/chapter.rs::select_current`: replace status selection with the shared
   configured-ID reader. Move `sync_projects`/`record_project` to `ops/project.rs`.
 - `plan_rotation`'s `predecessor_names` and target-name lookup, plus `successor_id`:
   replace inferred predecessors and name-derived UUIDs with exact recorded IDs.
-- Empty-Flow refusals in `pm/linear.rs::{create_project,adopt_project}` and
-  `ops/chapter.rs::{update_plan,rotate,apply_rotation}`, including the `feature`
-  fallback: retain explicit launch validation at its Task owner.
-- `ops/pm.rs::canonical_project_name`'s unknown-prefix refusal and ordinary
-  adoption's name/content rewriting: provider IDs establish ownership.
+- `ops/pm.rs::canonical_project_name`'s unknown-prefix refusal, Task-resolution
+  projection, sync/reteam prefix rewrites and ordinary adoption's name/content
+  rewriting: provider IDs establish ownership.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
   explicit disposition. Retain start fencing, unknown-work protection and
   confirmation for explicitly requested cancellation.
@@ -441,6 +528,7 @@ native providers and configured accounts from being launched by synthetic tests.
 - `cargo test -p loopflow --lib project_ensure`: no Project → one Started record;
   repeat/two processes → identical UUID and one provider Project; ordinary
   configured Backlog and current no-Flow Projects preserve all bytes/IDs;
+  Task resolution, sync preview/apply and reteam retain ordinary provider names;
   configured identity is independent of other Project names/statuses; absent
   configuration creates and records one ID without candidate discovery; failed
   access produces no provider writes; interrupted create/attach/activation
@@ -499,10 +587,18 @@ multi-product platform are excluded.
 
 ## Review constraints
 
+Compression review, October 5: `LinearClient::adopt_project` is reached only for
+migration-marked Projects. Its no-Flow test proves that boundary, not ordinary
+ensure or end-to-end name preservation; the renamed test makes this limit explicit.
+The surviving renderer trims the optional Flow once; tests retain no-Flow KR
+round-trip and provider payload checks without repeated extraction or unused clones.
+Cached-name conversion and shared selection must land together before deleting the
+old selector; no migration exception or new recovery authority was added here.
+
 Reserve identity before provider effects so a timeout cannot create another UUID.
 Use status-only writes and byte-preservation tests to protect authored content.
 Review rejected bootstrap chapters, creation during status reads and name-derived
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: October 5 `git diff --check` and `lf context --skill realign` passed; prose-only reconciliation, behavioral verification remains with implementation/gate.
+Checks: October 5 realign: `git diff --check` passed; Rust bytes unchanged from supplied hashes, so prior build/five focused passes reused; `lf context --skill realign`: memory/scratch fit; assembled goal exceeds its budget (stored steers not edited here); full gate/configured proof remain outstanding.

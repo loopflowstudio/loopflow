@@ -224,12 +224,8 @@ it does not establish implementation or authorize a repository reset.
 LOO-366 owns explicit Project ensure/adoption and optional resets. LOO-367 owns
 Task admission/completion and preserves unresolved delivery and unfinished work.
 Keep that interface distinct: observational reads must not create Projects, and
-Task operations must not acquire unrelated coordination prerequisites. The
-October 2 allocation observation is historical. LOO-366 now has
-its assigned checkout and Task (`task_7c24c806bfaa464a877352b568384fff`) in the
-October 3 kickoff seed; this does not establish LOO-367's current delivery state.
-Neither unchecked current Project KR has outcome proof;
-the metric portfolio and Project metric targets were empty in this observation.
+Task operations must not acquire unrelated coordination prerequisites. Neither
+Project KR has outcome proof; LOO-367's delivery state is unproved here.
 
 Jack Heart's October 4 reviewed direction selects an explicit Wave Project
 configuration field and exact-ID ensure; no name matching or candidate selection.
@@ -237,17 +233,22 @@ Chapter creation requires planned KRs, with new Task admission afterward.
 Unreviewed backlog survives rotation until explicit disposition. These decisions
 supersede the earlier status-selection and automatic-expiration proposals.
 
-Jack Heart resolved the October 5 configuration conflict in Linear comment
-`f092d63a-a152-4920-af81-d676a576f694`: one shared local Wave configuration owns
-the Project binding across checkouts. Stale checkout files must never reverse it;
-Git publication is not an opening prerequisite. Locks alone cannot propagate a
-checkout-local binding, and settled recovery receipts must never become selectors.
-The design uses a Home-local file keyed by Wave ID; other authored policy retains
-its owner. Exact-ID ensure, KRs before optional chapter creation, separate Task
-admission and work preservation remain accepted. Implementation and configured
-proof remain outstanding; preserve the saved Flow's review boundary. The earlier
-reviewed design remains at
+Jack Heart's October 5 comment `f092d63a-a152-4920-af81-d676a576f694` selects one
+shared local Project binding across checkouts. Stale checkout files and settled
+receipts cannot select it; Git publication is no opening prerequisite. The design
+uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
+
+October 5 branch code removes empty-Flow refusals and the invented default.
+The name cutover remains unresolved: bound reads strip names, while unbound
+Task inspection can store exact names in the same row without provenance.
+Migration marking cannot distinguish a repair from a genuine same-revision
+name conflict. The design records the unselected tradeoff: preserve original
+evidence and permit one historical name-only replacement, or require explicit
+repair. Archived bytes do not preserve conflict rejection. Iteration direction
+retains that protection without selecting an exception.
+Sync/reteam and both SQL admission callers must join the cut. Binding, ensure,
+recovery, Desktop and configured proof remain unfinished.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

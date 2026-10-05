@@ -100,16 +100,17 @@ lf repo new-chapter 2026-10
 ```
 
 A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
-targets and default Flow. Projects created together share a chapter name, such
-as `2026-10`. The chapter is that group of Projects; there is no chapter table,
+targets and optional default Flow. Projects created together share a chapter name,
+such as `2026-10`. The chapter is that group of Projects; there is no chapter table,
 plan packet or local switch. Current navigation stays Wave → Task. Completed
 Projects retain previous plans and Tasks in Linear.
 
 Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
 Planned Project with the requested name in each Wave, or creates an empty one
-with the predecessor's `flow:`. It never copies checked KRs or metric targets.
+with the predecessor's `flow:` when present. It never copies checked KRs or metric
+targets.
 Every Wave participates, including Waves with no Tasks. A new Wave with no
-Projects starts with `flow: feature`, or uses its explicitly Planned successor.
+Projects has no default Flow, unless its explicitly Planned successor supplies one.
 
 The preview lists every successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Proven untouched
@@ -150,7 +151,9 @@ predecessors stay historical even if their old status says In Progress.
 
 If no receipt identifies the old current Project, adoption requires a single
 unambiguous candidate. Resolve competing plans in Linear; names and dates never
-break the tie. A missing default stays missing: set `flow:` before rotation.
+break the tie. A missing default stays missing. Creation, adoption, plan edits and
+rotation do not require a Flow; launching a Flow still requires an explicit or
+configured selection.
 Unobserved backlog on another Home is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 

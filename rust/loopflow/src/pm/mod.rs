@@ -545,7 +545,10 @@ pub fn render_project_content(project: &ProjectContent) -> String {
         serde_json::to_string_pretty(&project.metric_targets)
             .expect("validated metric targets serialize")
     );
-    content.push_str(&format!("\n\nflow: {}", project.flow.trim()));
+    let flow = project.flow.trim();
+    if !flow.is_empty() {
+        content.push_str(&format!("\n\nflow: {flow}"));
+    }
     content.push_str("\n\n## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
@@ -752,32 +755,33 @@ mod tests {
     }
 
     #[test]
-    fn missing_flow_is_visible_without_changing_existing_project_content() {
+    fn project_content_without_flow_preserves_krs() {
         let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
         assert!(content.flow.is_empty());
         assert_eq!(content.krs[0].text, "Keep this proof");
+        let rendered = render_project_content(&content);
+        assert!(!rendered.contains("flow:"));
+        assert_eq!(parse_project_content(&rendered).unwrap(), content);
     }
 
     #[test]
     fn project_content_round_trips_linear_markdown() {
-        let krs = vec![
-            PmKr {
-                text: "One proof holds".to_string(),
-                holds: true,
-            },
-            PmKr {
-                text: "Another remains".to_string(),
-                holds: false,
-            },
-        ];
         let project = ProjectContent {
             metric_targets: vec![ChapterMetricTarget {
                 metric_id: "throughput".into(),
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
             }],
-
             flow: "feature".to_string(),
-            krs: krs.clone(),
+            krs: vec![
+                PmKr {
+                    text: "One proof holds".to_string(),
+                    holds: true,
+                },
+                PmKr {
+                    text: "Another remains".to_string(),
+                    holds: false,
+                },
+            ],
         };
         let rendered = render_project_content(&project);
         assert_eq!(parse_project_content(&rendered).unwrap(), project);

@@ -22,6 +22,115 @@ Retain remaining configured acceptance honestly after landing. The prior feature
 Flow's human review gates are replaced by the autonomous implementation path at
 Jack's request; preserve Task, branch, checkout and history.
 
+## Offline recovery decision — October 5 steer
+
+Jack Heart explicitly replaced same-account sealing with investigation of an
+offline recovery environment in comments `4b7f18fe-16dd-4646-8cd0-25365a2ea725`
+and `1afa3329-2d1c-4f58-a1fe-104d2d1b5e80`. No interactive review is required.
+The implementation choice is **exclusive custody of the storage from outside the
+original OS**, conditional on a concrete deployment mechanism and isolated proof.
+Logging out, a second administrator, disabling login, stopping known processes,
+and booting Recovery once do not establish that custody through reboot.
+No further same-account permission-helper work is selected.
+
+### Owner, backup and restart contract
+
+The external recovery owner must control both original-OS startup and attachment
+of every affected storage volume. The original OS is stopped, with no suspended
+image that can resume with old handles. Recovery runs its own kernel/account and
+never launches target-volume executables other than the verified candidate.
+The target account is filesystem data, not the recovery process's effective UID.
+A mount table must map original absolute paths to offline volume identities;
+`HOME`/`LF_HOME` cannot redirect the existing account-owned installer.
+
+Before any Home, namespace or installation mutation, that owner durably withholds
+the affected volumes from ordinary startup. Its default after an unreadable or
+missing maintenance record must remain withheld, not auto-attach. A record in the
+Home or a Loopflow entry gate cannot enforce this: retained released binaries
+bypass both. Network/shared storage needs exclusion at its actual server; a local
+recovery boot supplies none. Other OS users and hosts cannot retain write access
+to the target objects through aliases. This design cannot quietly narrow supported
+placements to local files or take unrelated shared-directory permissions.
+
+Under exclusive custody, inventory resolved volumes, links, ACLs, metadata,
+SQLite/WAL, payloads, installation selection, matching executable and native
+operational references. Preserve an independently restorable frozen copy before
+mutation, with hashes and volume/path mapping outside the mutable target. Freeze
+all participating volumes together; one APFS snapshot or copying `.lf` alone
+cannot establish that set. Validate the backup and candidate from recovery before
+recording conversion-prepared in the existing switch recovery domain. Missing
+historical payload stays missing; it never deletes resumable SQLite identity.
+
+Crash/reboot behavior is a storage-owner obligation, not a converter retry flag:
+
+| Boundary | Required behavior after converter or recovery-OS death |
+| --- | --- |
+| Before frozen backup is verified | Original bytes remain unchanged; storage stays withheld pending inspection or explicit cancellation. |
+| After preparation, before rename | Same pinned candidate verifies frozen identity and resumes; cancellation can reopen the unchanged source only after validation. |
+| After rename/reference mutation | Ordinary startup remains unable to access the volumes; candidate recovers forward using the receipt and verifies history/references. No prior-binary fallback. |
+| After validation, before release | Repeat validates completion; a missing release receipt keeps storage withheld. |
+| Storage release interrupted | External owner reconciles its durable attachment state against completed candidate evidence; it cannot infer completion from a successful process exit. |
+
+The external owner must be exercised through a real reboot, not merely a killed
+converter. Kill recovery as well, try original-OS startup and direct released
+install-preflight/doctor/screenshot, then recover without the original controller.
+Repeat with aliases, external storage and namespace replacement attempts. Only
+after those boundaries pass does the populated Session conversion matrix apply.
+
+### Concrete feasibility result
+
+A dedicated VM host can, in principle, own this boundary: persist removal of target
+disks from the stopped original guest's definition, disable automatic restoration,
+and attach them only to a separate recovery guest. Host restart must retain those
+facts before either guest boots. That is a proposed isolated proof apparatus,
+not proof or a deployment implementation for Jack Heart's Mac. Merely stopping a
+container or keeping a Python launcher alive is insufficient.
+
+For the Mac, Apple's [Recovery documentation](https://support.apple.com/guide/mac-help/macos-recovery-a-mac-apple-silicon-mchl82829c17/mac)
+provides Terminal and startup-disk selection and explicitly permits restarting
+into macOS. [Paired recoveryOS restrictions](https://support.apple.com/guide/security/paired-recoveryos-restrictions-sec4cf9d63a6/web)
+relate recoveryOS to the selected installation. Neither cited document establishes
+a candidate-owned, persistent prohibition on ordinary startup until a Loopflow
+receipt settles. This is an evidence gap, not a claim that macOS cannot implement
+such a mechanism. FileVault unlock or a remembered startup selection alone is not
+proof of it. No boot-policy, encryption-key or target-volume modification is
+selected without a recoverable mechanism covering its own first mutation.
+
+Repository inspection finds no such external owner. `account_home()` resolves the
+running effective UID; `startup_selection_during_switch()` returns the prior
+selection before activation; both exact-schema advancement and recovery can skip
+candidate layout work. Adding an offline path argument would address targeting
+only. It cannot implement boot/storage exclusion. The fresh local Docker query
+failed because its configured socket did not exist; no VM runner was found on PATH.
+No offline reboot experiment ran, and the existing permission-probe workflow is
+not an offline proof. Capable VM/OS testing can establish a proposed mechanism,
+but a Linux VM result must not be presented as the missing Mac deployment owner.
+
+**Disposition:** no proved replacement boundary yet. Dependent conversion remains
+unimplemented because the required exclusion mechanism is unresolved, not because
+an ordinary test needs a display. The next necessary technical result is a concrete
+Mac-compatible storage/boot owner with isolated crash/reboot evidence. No existing
+permission helper, new advisory lock or receipt-only gate meets that obligation.
+
+### Opaque-path alternative and exact contract change
+
+The smallest alternative keeps `runs/<shard>/<artifact-key>` as an opaque physical
+encoding for **all** captures, while current APIs, instructions and identities call
+them captures. One `record_dir` owner remains; no per-event location column,
+old/new fallback, parallel root or symlink is introduced. Existing paths and active
+writers need no relocation. This avoids conversion-specific races; it does not
+by itself prove every Session/runtime cleanup or installed rollout obligation.
+
+This requires changing acceptance from “replace the current `~/.lf/runs` capture
+layout” to “retain its opaque physical encoding; remove Run as a runtime/product
+concept.” It also changes the requirement that current tooling contain no old
+layout references: only the storage owner and preservation fixtures retain that
+literal. That change is **not accepted** by the steer asking for comparison.
+Creating new captures under `captures/` while retaining historical `runs/` would
+instead violate the single-layout requirement and add permanent routing; reject
+that variant. If no deployable offline owner can be proved, the opaque single-root
+alternative is the concrete contract decision, not permission to drop history.
+
 ## Source implementation status — October 5
 
 The runtime slice uses `LF_CAPTURE_KEY` for subordinate history and the resolved
@@ -54,10 +163,9 @@ former pipe backpressure looked like a provider hang. File-backed output preserv
 the bounded assertion.
 
 October 5 reconciliation inspected the compression diff and the sole child Wave,
-Release (both top-level Markdown files). No new product decision changes the
-scope. The unresolved choice is technical: an external admission owner that
-survives converter/recovery death and protects shared namespaces without denying
-unrelated access. Autonomous source authorization covers selecting and proving
+Release (both top-level Markdown files). The subsequent October 5 steer selects an offline recovery investigation.
+The unresolved choice is a concrete external storage/boot owner that survives
+recovery death and excludes the original OS through restart. Autonomous source authorization covers selecting and proving
 that design in isolation; it supplies no configured maintenance authority.
 
 Remaining indivisible source work:
@@ -93,23 +201,13 @@ conversion, interruption, installation or production release is authorized.
 
 ## Deployment boundary
 
-The selected source design uses an offline transition: conversations finish writing,
-launch sources close, the frozen Home and executable are preserved, conversion
-completes, then the same conversations reopen. Jack Heart's October 4 direction
-permits designing and testing this boundary autonomously in isolation. It does not
-authorize a configured interruption or installation. Duration remains unmeasured.
-
-October 5 source inspection confirms that
-`machine_install.rs::startup_selection_during_switch` still selects the prior binary
-before activation, while `promotion_lock.rs` serializes installers only.
-`advance_switch_store` skips the candidate at an exact SQLite frontier;
-`recover_switch` can also finalize advancement without candidate migration work.
-A layout receipt must participate in both paths. Candidate recovery and startup
-exclusion must be effective before the first filesystem mutation; direct retained
-binaries additionally require external launch exclusion. The privileged experiment
-below tests pathname denial only. The retained-alias
-counterexample invalidates it as the sole boundary; select a boundary covering
-all access paths before implementing privileged targeting or recovery.
+The October 5 offline recovery decision above supersedes same-account ownership
+and inode sealing as the deployment mechanism. The original OS and processes must
+be absent, and an external owner must withhold affected storage through reboot.
+No such Mac deployment mechanism is proved. The alias, partial-sealing and
+restoration-race experiments below remain binding counterexamples; they are not
+steps toward implementing the newly selected boundary. Source-only work remains
+authorized; configured interruption, conversion, installation and release do not.
 
 ### Released writer bypass — October 5 source counterexample
 
@@ -375,25 +473,23 @@ creating `captures/`. New empty disposable Homes use `captures/` immediately.
 
 The authorized installer owns conversion, using its existing pinned candidate and
 switch recovery receipt. Ordinary history/status/replay reads never initiate it.
-The window must exclude old CLI/app/provider launch sources at the OS/installation
-boundary, including retained executable invocations. Neither an empty PID sample
-nor a controlled fixture launcher establishes this. The administrator-owned Home
-proposal is insufficient because outside aliases remain writable. Target-account selection, recovery and restoration depend on a
-replacement boundary. The sequence below remains conditional on that design and
+The window must use the external storage/boot boundary specified in the October 5
+decision, including all aliases and external volumes. Neither an empty PID sample
+nor a controlled fixture launcher establishes this. Offline target mapping and
+recovery depend on that boundary, not on running as another local account. The sequence below remains conditional on that design and
 proof. Isolated acceptance must attempt
 direct released commands after converter death as well as during conversion.
 Configured deployment additionally requires authorization for the operational
 freeze; fixture success cannot establish installed acceptance.
 
-1. Establish candidate recovery and durably record restoration evidence before
-   any exclusion mutation, including ownership/ACL changes before the layout move.
-   Under a proved external admission boundary, stabilize the resolved-object and
-   namespace inventory, establish exclusion, then validate quiescence. Recovery
-   must repeat that validation; permissions cannot revoke retained handles.
-   Inspect all exact selected-Home Exec,
-   provider and client evidence. Any live writer, unresolved process identity or
-   active sequencer retains the old layout and blocks conversion with the owner
-   named. A bounded check returns; it never waits indefinitely or signals a process.
+1. The external owner durably withholds every affected volume from the stopped
+   original OS, including after owner/recovery reboot. Candidate recovery and
+   original target-volume mapping are available before opening storage writable.
+   Validate exclusive custody again on recovery; a PID from the previous OS is
+   historical evidence, not a process to signal in the recovery OS. Preserve
+   unresolved Session/review and sequencer evidence without inventing completion.
+   Any still-running original OS, remote writer or unresolved volume ownership
+   keeps conversion unstarted. No ownership/ACL sealing is part of this boundary.
 2. Preserve a consistent SQLite backup, complete payload tree and matching prior
    executable after quiescence. Record source/target, candidate identity and backup
    in the existing switch recovery domain. No secrets or payload content in logs.
@@ -489,24 +585,17 @@ The released-writer and retained-alias counterexamples above prevent that depend
 
 ## Remaining implementation sequence
 
-The earlier iteration feedback to implement target-account selection next predates
-`71a784cdf`'s alias counterexample. That implementation order is superseded:
-exclusion design is unresolved, not merely awaiting a hosted check. Explicit
-account targeting is conditional on the replacement design needing it; adding
-privilege machinery alone cannot repair the demonstrated bypass. Jack Heart's
-autonomous source authorization still permits selecting and proving a replacement
-in isolation, without another product approval.
+The October 5 steer replaces same-account sealing. Runtime compression is preserved
+at `d537a095cfe3fbb8e6e48cc04ae1b1cb1f51cd58`; it is not layout acceptance.
 
-1. Replace the contradicted whole-account-Home boundary with an offline exclusion
-   design covering all access paths, not only original pathnames. Retain both
-   released-writer and newly opened alias counterexamples. Select and prove that
-   boundary before dependent privilege/recovery implementation; no replacement is
-   currently proved. The interrupted-sealing probe above now demonstrates the shared-namespace
-   gap; a durable metadata receipt alone cannot close it.
-   Then implement any required OS-account targeting, durable
-   recovery/restoration, and candidate-owned conversion through exact-schema
-   advancement and recovery. Inventory mutable absolute references, preserve the
-   frozen SQLite/payload/executable pair and prove released writers stay excluded.
+1. Establish a concrete external storage/boot owner for offline recovery, then
+   prove original-OS exclusion through recovery death and reboot in isolation.
+   The VM custody proposal and its Mac deployment gap are specified above.
+   Preserve existing negative probes unchanged. If no deployable owner can be
+   proved, the exact opaque-path contract change above remains unresolved;
+   autonomous source authorization does not silently amend acceptance.
+   Only after the boundary is proved, implement offline target mapping, frozen
+   backup and candidate-owned conversion in both advancement and recovery.
 2. Cut storage, watcher classification, replay and ablation/tooling to `captures/`
    together; remove the old runtime layout reader only with recoverable conversion.
    `record_dir` still derives `runs/`, watch paths hard-code its depth/root, and
@@ -583,4 +672,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5): compression recorded the isolated replacement-review test (1/1), formatting and all-target Clippy passing; realign `git diff --check` passed, with no behavioral rerun; privileged Linux exclusion remains CI-owned, conversion unproved.
+Check (October 5): source/Apple recovery documentation inspected; Docker unavailable (missing configured socket), offline reboot proof unexecuted; `git diff --check` passed. Prior compression checks remain recorded at `d537a095cfe3fbb8e6e48cc04ae1b1cb1f51cd58`; no behavioral rerun for this design reconciliation.

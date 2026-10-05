@@ -8,22 +8,25 @@ they mean the Mac surface.
 ## Live Session connection evidence (2026-10-05 UTC)
 
 Jack Heart selected live `lf session connect` performance (LOO-378), including
-his exact Flow-review selector. Acceptance separates retained output, verified
-input readiness and attached lifetime, with per-invocation/Session diagnostics.
-Owned isolated fixtures must preserve provider identity, history and drafts;
-stopped resume and automatic replacement cannot count as a live attachment.
-Jack authorized autonomous publication/landing on October 4; no manual performance
-demo is required. This grants no Desktop sustained-use KR credit.
+his Flow-review selector. Preserve identity, history and drafts; separate output,
+input readiness and attached lifetime. Resume/replacement earns no live-attachment
+proof. Jack authorized autonomous landing October 4 without a manual demo;
+no Desktop KR credit follows.
 
-Codex rejected remote resume's permission overrides. Removing them proved input
-with the same engine birth stamp; failed startup closed the engine.
-Driver transfer/cleanup needs repair. Flow-review
-still replaces clients without the relay; preserve Infrastructure's launch-lock
-ordering and exact review fences. The [dated evidence](../../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
-retains failures and synthetic-response limits. Response timing bounds input
-readiness, not its onset; continuity before cleanup proves no detach behavior.
-Observer changes need a fresh baseline. No representative baseline, target,
-durable diagnostic or speedup exists. Protocol fixtures missed the native rejection.
+Native rejection exposed destructive startup cleanup. The relay now transfers
+its driver after delivering successful thread resume; rejected startup/replacement
+preserves the engine, driver and native draft. Owner exit still closes its engine.
+`lf session timings EXEC` retains file-backed phases and unavailable UI endpoints;
+output survives SQLite contention, though accounting may delay reader exit.
+[Attachment evidence](../../scripts/benchmarks/session-connect/20261005-attachment/README.md)
+retains failures and synthetic/native limits. Response timing bounds readiness,
+not its onset. No representative baseline, targets or speedup exists.
+
+Normal Flow reviews launch native TUI without the Harness relay endpoint.
+Changing resume alone cannot preserve that provider/draft. Revise first-launch
+ownership before optimization; preserve Infrastructure's launch-lock ordering
+and exact review fences. Conversation proof cannot cover Jack's selector.
+Pagination, repeated native connects and authenticated providers remain unproven.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 

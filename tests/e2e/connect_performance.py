@@ -57,6 +57,24 @@ def _stop(child: subprocess.Popen, *, group: bool = False) -> None:
             child.wait(timeout=5)
 
 
+def _reject_attachment(
+    binary: Path, work: Path, env: dict[str, str], before: tuple, log: Path
+) -> None:
+    stamp = _process_stamp(before[3])
+    rejected = subprocess.run(
+        [str(binary), "session", "connect", before[0], "--replace"],
+        cwd=work,
+        env={**env, "LF_PROBE_NATIVE_UI": "1", "LF_PROBE_REJECT_UI": "1"},
+        capture_output=True,
+        timeout=30,
+    )
+    log.write_bytes(rejected.stderr)
+    if rejected.returncode == 0:
+        raise AssertionError("invalid native launch unexpectedly succeeded")
+    if _state(env) != before or _process_stamp(before[3]) != stamp:
+        raise AssertionError("rejected attachment changed driver or engine")
+
+
 def measure(
     binary: Path,
     work: Path,
@@ -86,7 +104,9 @@ def measure(
             "PTY byte markers, not terminal screen reconstruction or compositor presentation",
             "Input response includes a deliberate 300ms submission delay and synthetic tool work",
             "Database polling and concurrent host work affect timings",
-            "No draft retention, pagination, authenticated response, or Flow-review proof",
+            "No pagination, authenticated response, or Flow-review proof",
+            "Failed replacement preserves the original UI draft; "
+            "successful takeover does not copy drafts",
         ],
     )
     for index in range(samples):
@@ -118,6 +138,8 @@ def measure(
                 sample["engine_before"] = _process_stamp(before[3])
                 if sample["engine_before"] is None:
                     raise RuntimeError("recorded engine is no longer alive")
+                _reject_attachment(binary, work, env, before, output / f"rejected-{index}.log")
+                sample["failed_start_preserved"] = True
                 master, slave = pty.openpty()
                 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
                 started = time.monotonic()
@@ -173,7 +195,64 @@ def measure(
                                 break
                         if client.poll() is not None:
                             break
+                if sample["input_response_ms"] is not None:
+                    draft = f"Retain draft {uuid.uuid4().hex}"
+                    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
+                    draft_output = bytearray()
+                    deadline = time.monotonic() + 5
+                    while draft.encode() not in draft_output and time.monotonic() < deadline:
+                        if select.select([master], [], [], 0.05)[0]:
+                            draft_output.extend(os.read(master, 65536))
+                    (output / f"draft-{index}.bin").write_bytes(draft_output)
+                    if draft.encode() not in draft_output:
+                        raise AssertionError("native UI did not display the draft")
+                    current = _state(env)
+                    _reject_attachment(
+                        binary, work, env, current, output / f"rejected-draft-{index}.log"
+                    )
+                    if client.poll() is not None:
+                        raise AssertionError("failed replacement stopped the controlling UI")
+                    os.write(master, b"\r")
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        if any(
+                            draft in json.dumps(request["input"]) for request in server.requests
+                        ):
+                            sample["failed_replacement_preserved_draft"] = True
+                            break
+                        if select.select([master], [], [], 0.05)[0]:
+                            with (output / f"draft-{index}.bin").open("ab") as log:
+                                log.write(os.read(master, 65536))
+                    else:
+                        raise AssertionError("retained UI did not submit its exact draft")
                 sample["after"] = _state(env)
+                timing_path = output / f"timings-{index}.jsonl"
+                with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
+                    db.execute("BEGIN EXCLUSIVE")
+                    with timing_path.open("w") as timing_log:
+                        diagnostic = subprocess.Popen(
+                            [str(binary), "session", "timings", sample["after"][5]],
+                            cwd=work, env=env, stdout=timing_log, stderr=subprocess.DEVNULL,
+                        )
+                        try:
+                            deadline = time.monotonic() + 5
+                            while "input_accepted" not in timing_path.read_text():
+                                if time.monotonic() >= deadline or diagnostic.poll() is not None:
+                                    raise AssertionError("timing output waits for SQLite admission")
+                                time.sleep(0.02)
+                        finally:
+                            db.rollback()
+                            diagnostic.wait(timeout=15)
+                        if diagnostic.returncode != 0:
+                            raise AssertionError("timing reader failed")
+                phases = [json.loads(line) for line in timing_path.read_text().splitlines()]
+                if not {"lookup_complete", "attached", "input_accepted"}.issubset(
+                    {phase["phase"] for phase in phases}
+                ):
+                    raise AssertionError("connection diagnostic is missing an observed phase")
+                if any(phase["phase"] == "exited" for phase in phases):
+                    raise AssertionError("attached lifetime was recorded before client exit")
+                sample["diagnostic_while_attached"] = True
                 sample["engine_after"] = _process_stamp(before[3])
                 sample["continuity"] = (
                     sample["after"] is not None
@@ -199,6 +278,15 @@ def measure(
                 if client is not None:
                     _stop(client, group=True)
                 _stop(seed)
+                if sample.get("diagnostic_while_attached"):
+                    diagnostic = subprocess.run(
+                        [str(binary), "session", "timings", sample["after"][5]],
+                        cwd=work, env=env, capture_output=True, text=True, check=True, timeout=5,
+                    )
+                    (output / f"timings-after-{index}.jsonl").write_text(diagnostic.stdout)
+                    phases = [json.loads(line) for line in diagnostic.stdout.splitlines()]
+                    if not any(phase["attached_lifetime_ms"] is not None for phase in phases):
+                        sample.update(status="failed", error="attached lifetime was not recorded")
                 (output / "results.json").write_text(json.dumps(results, indent=2))
         if sample["status"] != "passed":
             break

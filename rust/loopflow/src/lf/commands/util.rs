@@ -273,7 +273,7 @@ pub(crate) fn resume_session_with_env(
         user_name.unwrap_or_default(),
     );
     // A native resume has no CaptureHandle, but still owns an exact driver.
-    // Remote connections already claimed their surviving engine's driver.
+    // The remote relay claims its surviving engine after native attachment.
     let owned = if remote.is_none() {
         if let Some(exec) = crate::journal::current_exec_id() {
             let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -413,9 +413,6 @@ fn replace_provider_clients_locked(
     for _ in 0..20 {
         if provider_clients_have_exited(clients, harness)? {
             require_unchanged_provider_clients(dir, clients)?;
-            if !active_provider_clients(dir, harness)?.is_empty() {
-                bail!("a provider client started while stopping; retry with its current identity");
-            }
             for client in clients {
                 crate::session_record::remove_provider_client(dir, client.pid)?;
             }
@@ -1247,7 +1244,7 @@ mod tests {
             &[],
             ProviderClientStopReason::Completed,
         )
-        .is_err());
+        .is_ok());
         assert!(fixture.child.try_wait().unwrap().is_none());
         assert_eq!(
             active_provider_clients(&dir, "fake-provider")

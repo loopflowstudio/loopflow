@@ -62,9 +62,14 @@ display-server or performance-budget blocker.
 
 The design must distinguish unsuccessful UI attachment from an established
 controlling UI's ordinary exit, using the existing Session/driver authority.
-A candidate is preparing the native UI without transferring write authority,
-then transferring at a provider-confirmed boundary; that is a proposal, not an
-accepted change to takeover semantics. It must retain driver fences and survive
+The implementation prepares the native UI without transferring write authority.
+The relay transfers only after delivering the matching successful thread/resume
+response. This is a protocol attachment boundary, not proof of rendered output
+or usable input. Native bootstrap reads remain passive; turn writes and approval
+responses keep the existing driver fence. Failed startup before that boundary
+leaves the original driver and clients intact. Explicit replacement snapshots
+old clients before launching and stops only those clients after attachment.
+A controlling UI's normal exit retains existing engine-close semantics. It must retain driver fences and survive
 failure without restoring stale authority. Merely skipping all driver cleanup
 would abandon current exit semantics and is not an adequate repair. Dependent
 latency optimization and delivery depend on this lifecycle revision; local
@@ -85,27 +90,73 @@ continuity when adapting it. A conversation-only success cannot stand in for
 Jack's exact selector. Claude/OpenCode remain unmeasured; their absence from the
 Codex relay path is not an all-provider support verdict.
 
+### First-launch counterexample and revised scope — October 5 UTC
+
+Source inspection found that the normal Task Flow-review launch has no relay
+endpoint to reuse. `serve_flow_locked` launches the skill with `--mode tui`;
+`run::exec_prompt`'s native branch calls `exec_session_with_env`, whose
+Codex command is the native executable with the prompt, not the owned app-server.
+The live relay fixture starts a batch Harness instead. Routing review resume
+through `connect_live_codex` therefore falls through to the existing destructive
+native replacement for normal reviews. The attempted adaptation was removed,
+not retained as an unexercised second path. This is a source-proven architecture
+gap, not a claim that Jack's live Session was inspected or changed.
+
+Dependent performance optimization stops at this counterexample. Revised design:
+Codex interactive/review first launch needs to reuse the owned app-server and
+remote UI path, preserving its captured input, exact review token, launch-lock
+ordering and driver/provider generations. Prepare that one engine before native
+UI startup and publish it through the existing Session owner. No second engine,
+parallel lifecycle record or automatic replacement of an incumbent native TUI is
+acceptable. An already-running standalone native UI has no recorded attach
+transport; report that route explicitly without pretending saved-history resume
+preserves its draft. The first-launch cut and its exact-selector native proof
+remain implementation work within Jack's existing authorization.
+
+### Implemented safety and diagnostic slice
+
+Driver transfer occurs after the relay delivers the matching successful native
+thread-resume response. Before that point, failed argument parsing, history
+recovery or bootstrap leaves the previous driver and engine intact. Native
+bootstrap metadata reads are passive; writes and approval replies keep their
+existing fences. After attachment the current UI still owns normal engine close.
+The native runner now rejects startup and `--replace` against an existing
+controlling UI, then submits that UI's exact retained draft. The draft probe's
+first attempt failed on input injection; bracketed paste plus observed draft
+text repaired the fixture. These smoke samples do not prove a distribution.
+
+`lf session timings EXEC` reads file-backed per-invocation JSON lines without
+SQLite admission. It retains selector, resolved Session, process-relative phase
+offsets, explicit unavailable first-output/readiness endpoints and attached
+lifetime through return or handled interruption. Native turn acceptance bounds
+readiness; it is not its onset. SIGKILL can leave lifetime unknown. The exclusive
+SQLite-lock probe initially timed out in generic CLI admission; diagnostics now
+dispatch before process observation. Timing output arrives while SQLite is
+locked; ordinary process accounting may delay command exit until unlock. No
+second lifecycle store or provider authority was added.
+
+Review caught a client-stop postcondition requiring *all* clients to disappear.
+That rejects a successfully attached replacement. Stop now succeeds when its
+exact observed clients exit, preserving other clients and existing PID/birth
+checks. Controlled protocol evidence confirms stale writes are rejected, a
+sibling thread survives, explicit replacement works, and current-owner exit
+still closes an exclusively owned engine. This is separate from native PTY proof.
+
 ### Remaining implementation and acceptance
 
-- Revise and implement failed-attachment preservation, then exercise failed and
-  successful native startup against a retained controlling client and draft.
-- Extend the production PTY runner to exact Flow-review selectors, completed
-  short/paginated history, repeated connections, retained drafts and supported
-  authenticated providers. Keep unsupported and unavailable routes explicit.
+- Implement the revised native/review first-launch ownership cut and prove Jack's
+  exact Flow-review selector with real native UI, retained draft/history, failed
+  startup and exact review completion/retirement fences.
+- Extend production PTY coverage to completed short/paginated history and repeated
+  connections. Check supported authenticated providers; Claude/OpenCode and
+  standalone native clients remain unmeasured or without this attachment route.
 - Capture comparable baseline samples and contributing startup/lookup/transport
   costs before choosing numeric median/p95 targets. At least 20 comparable samples
-  are required for p95. The five changing smoke probes establish no distribution
-  and justify no latency target or optimization claim.
-- Implement file-based per-invocation diagnostics, keyed to exact Exec, selector
-  and resolved Session, with a supported reader. Reuse `journal::process_elapsed`
-  for in-process phases and the runner's external spawn clock for endpoints.
-  Keep lookup, connection preparation, first output, verified input and attached
-  lifetime separate; flush while attached. Unobservable endpoints need an
-  explicit unavailable reason. SQLite contention can hide Exec receipts, so the
-  diagnostic must not depend on a successful database write. No second lifecycle
-  store is proposed; the supported reader and observation boundary remain design.
-- Only then optimize measured redundant work, verify comparable before/after
-  results, and complete the existing acceptance and authorized delivery.
+  are required for p95. Changing smoke probes establish no distribution.
+- Verify diagnostics on the revised review path. Record unavailable UI endpoints
+  explicitly; external PTY endpoints still require the runner's spawn clock.
+- Only then optimize measured work, verify before/after results and complete
+  acceptance and the caller's authorized delivery boundary.
 
 Delete — do not maintain: remote resume no longer applies local launch overrides.
 No history-recovery deletion is justified. `recover_history` still awaits every
@@ -122,6 +173,12 @@ readiness, including 300 ms before Enter and synthetic response work; it is not
 the instant the UI first accepted input. Continuity is checked before cleanup,
 so this success establishes neither attached lifetime nor detach preservation.
 
+The new [attachment evidence](../scripts/benchmarks/session-connect/20261005-attachment/README.md)
+retains native and diagnostic failures plus the repaired smoke probe. Its 652 ms
+output and 1,149 ms input-response sample establishes no speedup or distribution.
+The 998 ms attached lifetime includes post-input proof and ends at handled
+interruption; it is not connect latency.
+
 Review findings: protocol fixtures previously replaced the native UI and missed
 its rejected launch arguments. A successful socket/driver claim did not establish
 usable input. The failed native UI also exposed destructive cleanup; timing alone
@@ -129,4 +186,4 @@ would hide that regression. PTY bytes are not compositor presentation, synthetic
 responses are not provider service latency, and a single live seed turn is not
 representative retained history. Product has no child Wave memories in this checkout.
 
-Check: prior build/focused Rust test/fmt/Clippy/helper Ruff passed; compression's `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo378-compress-20261005a` passed (856/1528 ms); broader runner Ruff reported eight pre-existing E501 lines; reconciliation `git diff --check` passed; full acceptance remains with implementation/gate.
+Check: build, 32 Session tests, four client-stop tests, owned native/controlled-protocol probes and helper Ruff passed; fmt/Clippy/diff/context checked before checkpoint; first-launch revision and full performance acceptance remain with implementation/gate.

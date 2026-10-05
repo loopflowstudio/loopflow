@@ -1,0 +1,40 @@
+{
+  "binary_sha256": "7332218c89d204fe329030668d3aede43dc410366bc4a6b3d7786738b2968738",
+  "public_connect": {
+    "session_id": "session_389dce1462d74ae5abe4dda5e5711d4b",
+    "old_headless_driver": {
+      "exit_code": 130,
+      "outcome": "interrupted"
+    },
+    "public_connect": {
+      "provider_generation": 1,
+      "driver": "2ecdc15d-5cef-4f50-a7ac-a3562f4ec5a6",
+      "retained_client_rejected": true,
+      "active_turn_and_sibling_survived": true,
+      "replaced_clients_exited": true,
+      "nested_child_id": "67c0e3f7-b07a-430d-acb0-08792ec28b2c",
+      "nested_child_parent": "2ecdc15d-5cef-4f50-a7ac-a3562f4ec5a6",
+      "nested_child_session": "session_389dce1462d74ae5abe4dda5e5711d4b",
+      "native_client": "controlled protocol fixture"
+    }
+  },
+  "owner_exit": {
+    "session_id": "session_22871eec124c4c3d9b1cbfdd882a5be4",
+    "old_headless_driver": {
+      "exit_code": 130,
+      "outcome": "interrupted"
+    },
+    "owner_exit_closed_engine": true,
+    "public_connect": {
+      "provider_generation": 1,
+      "driver": "51439469-74e9-4742-8594-946e27e9ec62",
+      "retained_client_rejected": true,
+      "active_turn_and_sibling_survived": true,
+      "replaced_clients_exited": true,
+      "nested_child_id": "e56f3a9d-03ed-4aef-afc5-fe41ccad95eb",
+      "nested_child_parent": "51439469-74e9-4742-8594-946e27e9ec62",
+      "nested_child_session": "session_22871eec124c4c3d9b1cbfdd882a5be4",
+      "native_client": "controlled protocol fixture"
+    }
+  }
+}

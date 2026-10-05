@@ -534,6 +534,11 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Read per-invocation connection phases, including unavailable UI endpoints
+    Timings {
+        /// Exact Exec ID of the connection
+        exec: String,
+    },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID

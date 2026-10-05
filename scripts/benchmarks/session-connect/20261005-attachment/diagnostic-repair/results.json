@@ -1,0 +1,55 @@
+{
+  "binary_sha256": "a3054adbe14b2cf11680bc59ac85489ff9bd71b6917c485e9d67c5e23936925e",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 651.9674169976497,
+      "input_response_ms": 1148.897749997559,
+      "before": [
+        "session_b3e646b1ae074d2390b071860491fe58",
+        "01a10a8f-1b23-7c01-a9e3-5efb585d3ec9",
+        1,
+        14738,
+        1791178513,
+        "cf8423bc-f59f-4b01-8747-935a49e40742"
+      ],
+      "engine_before": "Sun Oct  4 22:35:13 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 522.3847089946503,
+      "input_sent_ms": 1003.9572089954163,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_b3e646b1ae074d2390b071860491fe58",
+        "01a10a8f-1b23-7c01-a9e3-5efb585d3ec9",
+        1,
+        14738,
+        1791178513,
+        "b71ae71b-bf23-459a-8122-29be458841d0"
+      ],
+      "diagnostic_while_attached": true,
+      "engine_after": "Sun Oct  4 22:35:13 2026",
+      "continuity": true,
+      "status": "passed",
+      "elapsed_ms": 1515.921708996757,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:35:10Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No pagination, authenticated response, or Flow-review proof",
+    "Failed replacement preserves the original UI draft; successful takeover does not copy drafts"
+  ]
+}

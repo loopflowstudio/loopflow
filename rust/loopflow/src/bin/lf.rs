@@ -1381,6 +1381,15 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
 
+    // Connection diagnostics must remain readable when SQLite admission is
+    // contended. This read has process observation but no Session authority.
+    if let Some(Commands::Session {
+        cmd: command @ loopflow::lf::SessionCommand::Timings { .. },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::session::run(command);
+    }
+
     // Machine diagnosis must reach incompatible or uninitialized Homes without
     // ordinary admission creating or migrating the database first.
     if let Some(Commands::Home {

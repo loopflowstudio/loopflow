@@ -1,3 +1,5 @@
+pub(crate) mod connect;
+
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};

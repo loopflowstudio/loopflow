@@ -1,0 +1,40 @@
+{
+  "binary_sha256": "7e2a0d8d575e1b63008e48bd15343e980b808c3f118ddd87e4b3718832eb60b7",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 642.9332919942681,
+      "input_response_ms": 1078.9502919942606,
+      "before": [
+        "session_31e39c4c34cb4668a279297bc99f53bf",
+        "01a10a81-44f5-78b0-bbe1-57bf3131ba06",
+        1,
+        26255,
+        1791177606,
+        "03ec12a9-6826-4545-9c63-8da19c0e745d"
+      ],
+      "engine_before": "Sun Oct  4 22:20:06 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 518.1798329940648,
+      "input_sent_ms": 944.0560829971218,
+      "status": "failed",
+      "error": "retained UI did not submit its exact draft"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:20:04Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No draft retention, pagination, authenticated response, or Flow-review proof"
+  ]
+}

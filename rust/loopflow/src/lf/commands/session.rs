@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -29,6 +30,14 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Timings { exec } => {
+            print!(
+                "{}",
+                crate::journal::connect::read(&crate::id::ExecId::parse(exec)?)?
+            );
+            std::io::stdout().flush()?;
+            Ok(())
+        }
         SessionCommand::Resume { id } => {
             let id = match id {
                 Some(id) => id.clone(),
@@ -284,8 +293,21 @@ async fn list(
 }
 
 async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
+    if !json {
+        if let Err(error) = crate::journal::connect::start(id) {
+            tracing::warn!(%error, "cannot start Session connection timings");
+        }
+    }
+    let result = async {
+        let store = open_shared_store().await?;
+        crate::journal::connect::phase("store_opened");
+        crate::ops::human_session::open(&store, id, mode, !json).await
+    }
+    .await;
+    if !json {
+        crate::journal::connect::finish(if result.is_ok() { "exited" } else { "failed" });
+    }
+    let session = result?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
     }

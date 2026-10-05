@@ -1,0 +1,2 @@
+Error: stdin is not a terminal
+Error: codex could not open this session (status exit status: 1). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.

@@ -450,7 +450,10 @@ def _terminate(signum: int, _frame: object) -> None:
 
 def _provider_entry() -> None:
     if os.environ.get("LF_PROBE_NATIVE_UI") and "app-server" not in sys.argv:
-        os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
+        args = sys.argv[1:]
+        if os.environ.get("LF_PROBE_REJECT_UI"):
+            args = ["--dangerously-bypass-approvals-and-sandbox", *args]
+        os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *args])
     if record := os.environ.get("LF_PROBE_LAUNCHES"):
         # What a launch handed the provider. A terminal resume is recorded and
         # not run: this proof is headless.

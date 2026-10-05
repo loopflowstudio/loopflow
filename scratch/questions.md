@@ -4,9 +4,12 @@ The current native smoke runner uses disposable provider storage and synthetic
 Responses, with no account dependency. The earlier authenticated probe below
 resolved a feasibility question; its account route and capacity observations
 are historical, not prerequisites or permission to change installed routing.
-Failed-attachment preservation remains an implementation problem within Jack
-Heart's accepted scope. Delayed driver transfer is a proposed mechanism; no
-change to takeover or review-completion semantics has been accepted.
+The relay now delays driver transfer until delivery of a successful native
+thread-resume response. This defines protocol attachment, not rendered/input
+readiness; normal controlling-client exit still closes its engine. No change to
+review-completion semantics is authorized by this mechanism. The newly identified
+normal native/review first-launch path has no recorded relay endpoint; the design
+now requires repairing that owner before dependent performance optimization.
 
 ## Dated probe evidence — October 5 UTC
 

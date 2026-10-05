@@ -94,11 +94,21 @@ lf mon show SESSION --context       # one step: instructions, memory, scratch, g
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session connect SESSION         # continue a conversation
+lf session timings EXEC            # read that connection's phase timings (JSON lines)
 lf session replace SESSION         # fresh conversation for the same scope
 lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
+
+Connection timings live under the selected Home's `runtime/session-connect/`.
+They identify the exact Exec, selector and resolved Session and remain readable
+while attached or while SQLite is busy; process accounting may still delay the
+reader's exit. Phase offsets start at process entry;
+`attached_lifetime_ms` records attachment through return or handled interruption.
+A missing final record leaves lifetime unknown. Native stdout and the instant
+input becomes usable are explicitly unavailable; `input_accepted` is the first
+successful turn submission, an upper bound on readiness.
 
 The repository and each Wave have one ongoing conversation. `session ensure`
 finds it or starts it, a Wave's with its goal and memory, and repeats return the

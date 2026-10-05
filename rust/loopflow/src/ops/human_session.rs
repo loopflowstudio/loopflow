@@ -1252,6 +1252,11 @@ pub(crate) async fn open(
             ),
         },
     };
+    let resolved = match &target {
+        SessionTarget::Row { session } => session.id.clone(),
+        SessionTarget::Flow { position, .. } => flow_id(position)?,
+    };
+    crate::journal::connect::resolved(&resolved);
     match &target {
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
@@ -1396,37 +1401,24 @@ async fn connect_live_codex(
     }
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
-    let driver =
-        match store
-            .sqlite
-            .claim_session_driver(&session.id, expected.as_ref(), &exec, false)
-        {
-            Ok(driver) => driver,
-            Err(crate::store::StoreError::InvalidAuthority(_))
-                if store.sqlite.session_connection(&session.id)?.is_none() =>
-            {
-                // Close won the race. The ordinary open path resumes saved history.
-                return Ok(false);
-            }
-            Err(error) => return Err(error.into()),
-        };
-    crate::session_record::register_session_driver_interrupt(
-        &store.sqlite,
-        session.id.clone(),
-        driver.clone(),
-    );
+    let claimed = std::sync::Arc::new(std::sync::Mutex::new(None::<crate::exec::SessionDriver>));
+    let clients = if replace_clients {
+        NativeSession::of(session)?.clients()?
+    } else {
+        Vec::new()
+    };
     let connected = async {
-        if replace_clients {
-            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-        }
-        store.sqlite.make_session_interactive(&session.id, &driver)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
         let listener = tokio::net::UnixListener::bind(&remote)?;
         let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, driver: Some(driver.clone()),
+            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, driver: None,
         };
         connection.recover_history(Path::new(&endpoint)).await?;
+        crate::journal::connect::phase("history_recovered");
+        let clients_to_replace = clients;
+        let attachment = claimed.clone();
+        let client_dir = dir.to_path_buf();
         let relay = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();
             loop {
@@ -1435,7 +1427,36 @@ async fn connect_live_codex(
                         let Ok((client, _)) = accepted else { break };
                         let connection = connection.clone();
                         let endpoint = endpoint.clone();
-                        clients.spawn(async move { connection.serve(client, Path::new(&endpoint)).await });
+                        let attachment = attachment.clone();
+                        let expected = expected.clone();
+                        let exec = exec.clone();
+                        let old_clients = clients_to_replace.clone();
+                        let client_dir = client_dir.clone();
+                        let owner = connection.clone();
+                        clients.spawn(async move {
+                            connection.serve_attaching(client, Path::new(&endpoint), Some(Box::new(move || {
+                                let mut attached = attachment.lock().expect("attachment mutex poisoned");
+                                if let Some(driver) = attached.as_ref() {
+                                    return Ok(driver.clone());
+                                }
+                                let driver = owner.store.claim_session_driver(
+                                    &owner.session_id, expected.as_ref(), &exec, false,
+                                )?;
+                                *attached = Some(driver.clone());
+                                crate::journal::connect::phase("attached");
+                                crate::session_record::register_session_driver_interrupt(
+                                    &owner.store, owner.session_id.clone(), driver.clone(),
+                                );
+                                owner.store.make_session_interactive(&owner.session_id, &driver)?;
+                                if !old_clients.is_empty() {
+                                    crate::lf::commands::util::replace_provider_clients(
+                                        &client_dir, "codex", &old_clients,
+                                        crate::session_record::ProviderClientStopReason::Moved,
+                                    )?;
+                                }
+                                Ok(driver)
+                            }))).await
+                        });
                     }
                     result = clients.join_next(), if !clients.is_empty() => {
                         if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
@@ -1446,6 +1467,7 @@ async fn connect_live_codex(
         let session = session.clone();
         let dir = dir.to_path_buf();
         let provider = provider.clone();
+        crate::journal::connect::phase("connection_prepared");
         let result = tokio::task::spawn_blocking(move || {
             crate::lf::commands::util::resume_session_with_env(
                 "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &dir, &provider,
@@ -1457,14 +1479,24 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match crate::session_record::finish_session_driver(
-        &store.sqlite,
-        &session.id,
-        &driver,
-        "completed",
-    ) {
-        Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-        Err(error) => return Err(error.into()),
+    let driver = claimed.lock().expect("attachment mutex poisoned").clone();
+    if let Some(driver) = driver {
+        let outcome = if connected.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        };
+        match crate::session_record::finish_session_driver(
+            &store.sqlite,
+            &session.id,
+            &driver,
+            outcome,
+        ) {
+            Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+    } else if connected.is_ok() {
+        bail!("Native client exited before attaching to the live conversation");
     }
     connected
 }

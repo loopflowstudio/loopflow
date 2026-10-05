@@ -1,0 +1,50 @@
+{
+  "binary_sha256": "80bac74f029760b60014cd1d3efabf14c482faabbd1c246761a05907ec3e83ae",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 665.0388749985723,
+      "input_response_ms": 1187.7467079975759,
+      "before": [
+        "session_8f11d64d9edf4538a98f9959c77d3fee",
+        "01a10a8a-cc37-7780-961b-f5a278fddcec",
+        1,
+        56971,
+        1791178230,
+        "3e5a4efd-18cd-44e6-a965-916112d62881"
+      ],
+      "engine_before": "Sun Oct  4 22:30:30 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 528.4661250043428,
+      "input_sent_ms": 1010.6323330037412,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_8f11d64d9edf4538a98f9959c77d3fee",
+        "01a10a8a-cc37-7780-961b-f5a278fddcec",
+        1,
+        56971,
+        1791178230,
+        "8b095a85-644e-4e6e-9ae3-2fd0d8c4ae24"
+      ],
+      "status": "failed",
+      "error": "Command '['/tmp/lf-connect-crlzqsga/bin/lf', 'session', 'timings', '8b095a85-644e-4e6e-9ae3-2fd0d8c4ae24']' timed out after 5 seconds"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:30:27Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No pagination, authenticated response, or Flow-review proof",
+    "Failed replacement preserves the original UI draft; successful takeover does not copy drafts"
+  ]
+}

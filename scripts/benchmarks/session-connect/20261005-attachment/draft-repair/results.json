@@ -1,0 +1,53 @@
+{
+  "binary_sha256": "7e2a0d8d575e1b63008e48bd15343e980b808c3f118ddd87e4b3718832eb60b7",
+  "endpoint": "native Codex PTY bytes, synthetic local Responses server",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "provider_paths": {
+    "codex_conversation": "attempted",
+    "codex_flow_review": "not measured; source route replaces native clients",
+    "claude": "no existing Codex relay path; not measured",
+    "opencode": "no existing Codex relay path; not measured"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "output_ms": 646.0731249972014,
+      "input_response_ms": 1129.6897909996915,
+      "before": [
+        "session_1b8490ff3564493da873fbb42e5bceac",
+        "01a10a82-006b-70e1-89fd-a4efb0b86ed0",
+        1,
+        50146,
+        1791177654,
+        "8dc8799d-75b8-4392-9313-13f1d8646cb0"
+      ],
+      "engine_before": "Sun Oct  4 22:20:54 2026",
+      "failed_start_preserved": true,
+      "driver_claim_ms": 522.3337909992551,
+      "input_sent_ms": 998.2479999962379,
+      "failed_replacement_preserved_draft": true,
+      "after": [
+        "session_1b8490ff3564493da873fbb42e5bceac",
+        "01a10a82-006b-70e1-89fd-a4efb0b86ed0",
+        1,
+        50146,
+        1791177654,
+        "42cfc46c-a119-4228-a20b-61986109c359"
+      ],
+      "engine_after": "Sun Oct  4 22:20:54 2026",
+      "continuity": true,
+      "status": "passed",
+      "elapsed_ms": 1424.3502079989412,
+      "exit_before_cleanup": null,
+      "history_population": "one in-flight seed turn"
+    }
+  ],
+  "targets": null,
+  "measured_at": "2026-10-05T05:20:52Z",
+  "observer_limits": [
+    "PTY byte markers, not terminal screen reconstruction or compositor presentation",
+    "Input response includes a deliberate 300ms submission delay and synthetic tool work",
+    "Database polling and concurrent host work affect timings",
+    "No draft retention, pagination, authenticated response, or Flow-review proof"
+  ]
+}

@@ -102,7 +102,6 @@ fn execute(
         model: cli.model.clone(),
         current_attempt: None,
         pending_session_id: None,
-        ready_summary: None,
         worker_generation: 0,
         claim: None,
         failure: None,
@@ -886,7 +885,7 @@ pub fn execute_step(id: &str, version: u64, cli: &Cli) -> Result<()> {
 fn landing_outcome(landing: Option<crate::pr_landing::PrLanding>) -> SkillOutcome {
     use crate::pr_landing::PrLandingState;
     match landing.map(|landing| landing.state) {
-        None | Some(PrLandingState::Merged) => SkillOutcome::Completed { feedback: None },
+        None | Some(PrLandingState::Merged) => SkillOutcome::Completed,
         Some(PrLandingState::Closed) => SkillOutcome::Blocked("PR closed without merging".into()),
         Some(PrLandingState::Blocked | PrLandingState::Watching | PrLandingState::Repairing) => {
             SkillOutcome::Waiting
@@ -1056,7 +1055,6 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,

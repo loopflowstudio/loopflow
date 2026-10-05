@@ -43,9 +43,9 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    help first. Leave a live driver running. Recover a stopped driver through
    the same saved Flow; never restart or replace it merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
-   merely to reach the person already present. At a review boundary, collect the
-   required feedback and complete that exact review Session after its feedback
-   has been saved. Let the authored Flow choose the next edge.
+   merely to reach the person already present. Discuss review feedback in the
+   ongoing conversation and save agreed direction. Inspect execution and effects
+   before selecting further work; feedback alone never restarts a Flow.
    Headless, a required judgment or review is a blocker: report it and exit.
    Report unavailable commands or services without upgrading or changing accounts.
 

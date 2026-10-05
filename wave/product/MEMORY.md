@@ -34,10 +34,13 @@ single-capture human-segment proposals preserved at
 Design review is approved; the full runtime cut remains. Scheduling/enrollment
 and five scheduling columns are deleted; Task/PR checks share delivery reconciliation
 and per-landing locks, preserving CI repair holds. Ready/Complete CLI/store/Desktop
-controls and review-completion restart are now deleted. The draft archives feedback
+controls, `exec_driver` and review-completion restart are now deleted. The draft archives feedback
 in Session observations before dropping its live column; historical feedback and
 completion remain readable without readiness or navigation authority. Task-worker
 claims, managed selection, saved resume and new review launch still exist.
+Compression removes duplicate Flow feedback plumbing; Session observations retain
+the history. It does not remove those controllers. Ordinary detached launch, Task
+primary selection, Waiting and workflow/loop authoring remain unimplemented.
 Focused migration, projection, CLI, Desktop and crash/effect checks establish local
 behavior only. Preserve main's confirmed-dead completed-provider admission exemption
 and Session fencing outside async waits. No live Home migration or configured

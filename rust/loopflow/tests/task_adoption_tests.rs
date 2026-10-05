@@ -252,7 +252,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                         model: None,
                         current_attempt: None,
                         pending_session_id: None,
-                        ready_summary: None,
                         worker_generation: 0,
                         claim: None,
                         failure: None,
@@ -397,7 +396,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             worker.version = 0;
             worker.current_attempt = None;
             worker.pending_session_id = None;
-            worker.ready_summary = None;
             let worker = runtime
                 .block_on(store.start_task_flow(&task.id, worker))
                 .unwrap();

@@ -80,8 +80,8 @@ worktrees, placement and execution history.
   impediments; discuss missing judgment in the ongoing Wave chat when present.
   Headless operation stops with the reason when it cannot proceed. Retry failed
   work with `lf --task <issue> flow start --reason "<what changed>"` only when new
-  evidence warrants it. Unknown liveness is not idle. Authored Task review
-  Sessions retain their own feedback and completion contract.
+  evidence warrants it. Unknown liveness is not idle. Preserve historical review
+  evidence; discuss feedback and next work in the ongoing Task conversation.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended. Give work an observable outcome.
 - Update the plan through `lf update-plan --wave <wave> --plan

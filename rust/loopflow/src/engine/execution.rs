@@ -43,7 +43,7 @@ pub enum NestedCursor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillOutcome {
-    Completed { feedback: Option<String> },
+    Completed,
     Waiting,
     Decided(FlowVerdict),
     Routed(String),
@@ -138,12 +138,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
             ConcreteStep::Command(op) => self.executor.run_command(op, ctx).await?,
         };
         match outcome {
-            SkillOutcome::Completed { feedback } => {
-                if let Some(feedback) = feedback {
-                    cursor.leaf_mut().progress.direction = Some(feedback);
-                }
-                settle_step(items, cursor)
-            }
+            SkillOutcome::Completed => settle_step(items, cursor),
             SkillOutcome::Waiting => Ok(Some(FlowOutcome::Waiting)),
             SkillOutcome::Blocked(reason) => Ok(Some(FlowOutcome::Blocked(reason))),
             SkillOutcome::Decided(verdict) => {
@@ -469,7 +464,7 @@ mod tests {
             if self.wait_on.as_deref() == Some(skill.skill.name.as_str()) {
                 Ok(SkillOutcome::Waiting)
             } else {
-                Ok(SkillOutcome::Completed { feedback: None })
+                Ok(SkillOutcome::Completed)
             }
         }
 
@@ -481,7 +476,7 @@ mod tests {
             let name = format!("op:{}", ops.item.display_name());
             self.contexts.lock().unwrap().push((name.clone(), ctx));
             self.calls.lock().unwrap().push(name);
-            Ok(SkillOutcome::Completed { feedback: None })
+            Ok(SkillOutcome::Completed)
         }
     }
 
@@ -713,7 +708,7 @@ mod tests {
             step("final", None),
         ];
         for outcome in [
-            SkillOutcome::Completed { feedback: None },
+            SkillOutcome::Completed,
             SkillOutcome::Blocked("need a policy".to_owned()),
             decision(FlowDecision::Advance, " "),
         ] {

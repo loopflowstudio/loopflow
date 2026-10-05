@@ -77,7 +77,6 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
             model: None,
             current_attempt: None,
             pending_session_id: None,
-            ready_summary: None,
             worker_generation: 0,
             claim: None,
             failure: None,

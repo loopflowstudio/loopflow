@@ -1349,7 +1349,6 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         model: None,
         current_attempt: None,
         pending_session_id: None,
-        ready_summary: None,
         worker_generation: 0,
         claim: None,
         failure: None,

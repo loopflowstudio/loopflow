@@ -36,7 +36,6 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
             AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
             AND done.kind='completed' WHERE start.seq=f.selected_start),
     f.pending_session_id,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=f.pending_session_id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),
     f.worker_generation, f.claim_json, f.failure_json, f.state, (SELECT receipt_key FROM session_events WHERE seq=f.current_capture)
     FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
 
@@ -115,11 +114,10 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
     let published: Option<bool> = row.get(12)?;
     let outcome: Option<String> = row.get(13)?;
     let pending_session_id: Option<String> = row.get(14)?;
-    let ready_summary: Option<String> = row.get(15)?;
-    let worker_generation: i64 = row.get(16)?;
-    let claim_json: Option<String> = row.get(17)?;
-    let failure_json: Option<String> = row.get(18)?;
-    let state: String = row.get(19)?;
+    let worker_generation: i64 = row.get(15)?;
+    let claim_json: Option<String> = row.get(16)?;
+    let failure_json: Option<String> = row.get(17)?;
+    let state: String = row.get(18)?;
     let decode = || -> StoreResult<FlowSession> {
         let invocation: QueuedInvocation = serde_json::from_str(&invocation_json)?;
         let updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?;
@@ -151,14 +149,13 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
                 .map(|captured| {
                     Ok::<_, StoreError>(FlowAttempt {
                         captured,
-                        run_id: row.get(20)?,
+                        run_id: row.get(19)?,
                         published: published.unwrap_or(false),
                         outcome,
                     })
                 })
                 .transpose()?,
             pending_session_id,
-            ready_summary,
             worker_generation: u64::try_from(worker_generation).map_err(invalid)?,
             claim: claim_json
                 .map(|claim| serde_json::from_str::<TaskWorkerClaim>(&claim))
@@ -544,9 +541,7 @@ fn selected_output_in(
         .current_step()
         .and_then(crate::engine::flow_output::FlowOutput::for_step)
     else {
-        return Ok(Ok(crate::engine::SkillOutcome::Completed {
-            feedback: None,
-        }));
+        return Ok(Ok(crate::engine::SkillOutcome::Completed));
     };
     let receipt: Option<(String, Option<String>)> = conn.query_row(
         "SELECT done.payload,output.payload FROM flow_sessions f
@@ -1693,7 +1688,6 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,
@@ -2233,7 +2227,6 @@ mod tests {
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,

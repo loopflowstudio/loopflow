@@ -1458,7 +1458,6 @@ esac
                         ),
                         current_attempt: None,
                         pending_session_id: None,
-                        ready_summary: None,
                         cursor: Default::default(),
                         version: 0,
                         worker_generation: 0,

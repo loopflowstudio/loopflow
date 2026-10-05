@@ -235,8 +235,6 @@ pub struct FlowSession {
     pub model: Option<String>,
     pub current_attempt: Option<FlowAttempt>,
     pub pending_session_id: Option<String>,
-    /// Historical feedback retained from the retired review handshake.
-    pub ready_summary: Option<String>,
     pub worker_generation: u64,
     pub claim: Option<TaskWorkerClaim>,
     pub failure: Option<TaskFlowBlocker>,

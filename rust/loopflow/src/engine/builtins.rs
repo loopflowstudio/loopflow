@@ -274,7 +274,7 @@ mod tests {
 
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "human feedback, revised artifact references, and remaining",
+            "feedback, revised artifact paths and remaining work",
             "headless surface",
             "blocker in ordinary output and stop",
             "closing, detaching, provider exit, or lack of response",
@@ -360,6 +360,8 @@ mod tests {
     #[test]
     fn builtin_skills_do_not_name_retired_child_controls() {
         let retired = [
+            "lf session ready",
+            "lf session complete",
             "lf handoff",
             "lf reviews",
             "lf task follow-up",

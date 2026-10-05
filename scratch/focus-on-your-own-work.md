@@ -49,7 +49,7 @@ without fetching, launching or migrating. Prior scratch is preserved at
 `6513477a5`; the superseded worker-start repair proposal is at
 `5090f672e:scratch/task-workspace-continuation.md`.
 
-The checkout includes local main `464ac18f0` through merge `85f969785`. Local
+The checkout includes local main `58d3b5b3e` through merge `0ea8de07b`. Local
 implementation removes repository-driven Flow restart scheduling, its five
 counters/columns and automatic enrollment. Task
 and PR checks share delivery reconciliation and per-landing locks; it removes
@@ -64,6 +64,10 @@ recovery mode. Infrastructure's older managed restart/review repairs explain
 retained process/effect evidence, not authority to restore those controllers.
 Product has no child Wave memory files in this checkout.
 
+The latest main change records LOO-292's published-installation and checkout-sync
+evidence only; it changes no runtime code and proves no LOO-353 provider behavior.
+Installation promotion and checkout integration remain separate operations.
+
 Preserve main's repo/Wave primaries, Ask removal, native conversation lookup,
 Session working-set filtering, configurable New Session and Task history filters.
 Task primary selection remains absent. Reuse the existing engine traversal,
@@ -72,10 +76,20 @@ The deletion inventory below identifies their controller dependencies. Claude's
 persistent stream-json stdin is not native-composer delivery and is unnecessary
 for workflow navigation.
 
-Inspected `lf/mod.rs` exposes `--mode batch`, while `ops/flow_run.rs::exec_driver`
-emits unparsed `-b`. Add ordinary detached skill/prompt/Flow launch through one
+Inspected `lf/mod.rs` still exposes `--mode batch` without ordinary `-b` detachment.
+`ops/flow_run.rs::exec_driver` and its invalid `-b` call are already deleted.
+Add ordinary detached skill/prompt/Flow launch through one
 placement/Exec path, returning durable Session/invocation identity after admission.
 Batch selects provider behavior; detachment is separate. Delete the worker path.
+
+October 4 source reconciliation corrects stale iteration feedback: Ready/Complete
+handlers and `exec_driver` no longer execute. `TaskWorkerClaim`, Task `__worker`,
+saved `flow resume`, `serve-flow` and managed selection still do. The compression
+diff removes redundant feedback plumbing, not these controllers. Attention still
+projects Review/Reply and `--needs-me`; Task primaries, workflows and autonomous
+loop syntax remain unimplemented. The draft migration only removes scheduling
+columns and live readiness; it does not yet convert legacy review boundaries or
+remove worker control state. These are substantial remaining implementation work.
 
 [Workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
 `bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` retain
@@ -219,6 +233,11 @@ Historical feedback cannot return an executable Flow result. Exact-client stop/i
 reversible Close view remain; conversations stay reopenable. Add no finish,
 resolve or archive-and-stop replacement. Primary replacement retains its own
 successor/history semantics, never review settlement.
+
+Compression removes the unused feedback payload from `SkillOutcome::Completed`
+and the duplicate feedback field/query from `FlowSession`. Archived feedback is
+read through Session evidence only; autonomous decision direction remains intact.
+Builtin operating guidance no longer prescribes the deleted review handshake.
 
 Preserve historical `completed_at` and feedback so completed records do not
 reappear as active. The single draft now copies `ready_summary` into an immutable Session observation
@@ -415,4 +434,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `cargo build -p loopflow --bin lf`, focused populated-draft migration, removed-command CLI, crash/no-restart, Session projection (14) and DTO checks passed; 33 Desktop DTO/store/control tests plus corrected navigation (29) passed; architecture and command-doc alignment (4) passed. Monitor/history and inventory regressions, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and context budgets passed. Full runtime cut, materialized gate and configured demo remain outstanding; previous consolidation checks are retained at `0db79697d:scratch/focus-on-your-own-work.md`.
+Checks: realign `git diff --check` passed; `lf context --skill realign` reports memory 15,904/16,000 and scratch below budget (stored Task goal over budget and excerpted; no submitted-input overage). No code changed or tests rerun in realign. Recorded prior checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow` focused engine/store/builtin/Session projection and native-resume/crash cases (55 tests), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `uv run python scripts/check_architecture.py` and `git diff --check` passed. Prior migration/CLI/Desktop evidence remains at `62e534140:scratch/focus-on-your-own-work.md`; full runtime cut, materialized gate and configured demo remain outstanding. Authored Task steers remain unchanged.

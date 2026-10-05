@@ -550,7 +550,6 @@ async fn local_started_task(
                 model: None,
                 current_attempt: None,
                 pending_session_id: None,
-                ready_summary: None,
                 worker_generation: 0,
                 claim: None,
                 failure: None,

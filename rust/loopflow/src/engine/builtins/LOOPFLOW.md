@@ -71,9 +71,9 @@ session merely to reach them. Headless work that lacks required input explains
 its failure in ordinary output and stops. The Wave
 operator reads existing logs and discusses unresolved judgment in its ongoing
 Wave chat. Taskless callers receive the failure.
-A `human: true` Flow step uses the same Session surface: Complete returns
-review feedback to the next step; a following loop-decide chooses navigation
-through its authored edge. Readiness alone does not release the caller.
+Discuss review feedback in the ongoing conversation and preserve agreed direction.
+Inspect execution and effect history before choosing further work. Historical
+review boundaries grant no authority to close a conversation or restart a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or

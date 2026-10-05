@@ -882,8 +882,7 @@ async fn store_pm_snapshot(
             snapshot: snapshot.clone(),
         })
         .await
-        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
-    Ok(())
+        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
 }
 
 pub(crate) async fn refresh_pm_snapshot(

@@ -170,14 +170,13 @@ reported ownership and revision, including null membership. The original collect
 test and the empty-Flow migration-adoption test also pass. These are synthetic
 collection/adoption proofs, not concurrent provider or durable-transfer acceptance.
 
-The first cut must preserve issue-reported ownership from acquisition through
-acceptance and projection. A listing endpoint is not ownership evidence overriding
-the returned issue. Project display names come from their separately accepted
-Project facts. If the reported destination was not among the listed Projects,
-retain that observation and resolve its ownership explicitly; never reattach it to
-the requested collection. Collection correction now has a partial atomic-projection
-replacement. Two of the six original regressions still fail: reteam identifier and
-cached relationships. Created-successor recovery adds the sequencing failure below.
+At `661622ee2`, collection preserves issue-reported ownership and rotation accepts
+confirmed Project/issue readbacks before durable projection. The prior instruction
+to replace rotation's durable-only writers is complete. Reteam's identifier writer
+and relationship acceptance remain the next cut; created-successor recovery stays
+with shared binding and exact-ID transitions. A reported destination outside the
+listed Projects still needs explicit ownership resolution, never reattachment to
+the requested collection. These source changes do not establish configured recovery.
 
 The table retains the five original store counterexamples and their current status.
 Project age now passes. The removed replay path is covered by delayed-response
@@ -307,7 +306,12 @@ store regressions; none establishes real Linear or installed behavior.
 Accept the exact confirmed relationship under reteam authority in the existing
 normalized planning owner, retaining independent entity revisions and acquisition
 times. Serialize list/detail acquisition and ingestion so delayed pre-reteam
-responses cannot reverse or invalidate that replacement. Keep ordinary membership
+responses cannot reverse or invalidate that replacement. Source inspection on
+October 5 confirms reteam acquires no Wave planning locks: it preflights all Waves,
+expands Teams, moves issues, narrows Teams, then refreshes. The replacement needs
+all participating Wave locks in stable ID order before acquisition, retained
+through confirmed acceptance; locking only the final refresh leaves the race.
+Already-held refresh paths must reuse that boundary. Keep ordinary membership
 validation: external changes still require reconciliation. Do not delete cached
 facts, bypass Projects with identifier-only writes, or add a relationship store.
 
@@ -452,7 +456,7 @@ The following surviving capabilities constrain their replacements:
 
 ## Desktop integration after upstream #1447 — October 5
 
-Current HEAD `c4373492c` integrates base `1f62e836d` and includes #1447's
+Merge `c4373492c` integrated base `1f62e836d`, including #1447's
 cached-workspace rendering changes.
 `PodiumModel` restores the saved workspace and retains last-good planning on read
 failure; its planning and Session refresh loops run independently. `WavesView`
@@ -851,12 +855,11 @@ ownership onto each issue: preserve the returned issue's own association and
 revision. Earlier reduction details remain at
 `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
 
-Compression details remain at `b4bf3b3e5:scratch/keep-every-wave-ready-for.md` and
-`/tmp/loo366-before-readback-realign.md`. Shared membership predicates, fixture
-migration-slice boundaries and first-error collection semantics remain intact.
-Four original regressions have replacement coverage; reteam identifier/cached
-relationships and the new created-successor recovery regression remain failing.
-These reductions prove neither admission exclusion nor configured acceptance.
+Earlier reductions and checks remain at
+`661622ee2a22386e1e51f192132116e36b1b46c8:scratch/keep-every-wave-ready-for.md`.
+Retain shared membership predicates, migration-slice boundaries and first-error
+collection semantics. Four original regressions have replacement coverage; reteam
+identifier/cached relationships and created-successor recovery still fail.
 
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
@@ -879,10 +882,11 @@ accepted body to the wrong Wave. Partial association now checks the accepted
 Initiative set transactionally; its focused regression preserves the newer body
 and leaves the Wave without an invented Project.
 
-Placement compression is checkpointed at `b4bf3b3e5`; its seven focused checks
-remain recorded there. The pre-readback design is retained at
-`/tmp/loo366-before-readback-realign.md`. Release's immediate-child goal and complete
-memory were reread; their publication and operation-entry lessons add no Project
-readiness evidence. No configured provider or installed Home was changed.
+The uncommitted compression copies accepted Task fields in one SQL update,
+retaining ownership/removal filters and entity ages. Its focused proof preserves
+an unobserved Task and PR; shared fixture setup replaces duplication. Realign
+reviewed the diff without changing production code. Release is the sole immediate
+child; its complete goal/memory retain entry-point recovery lessons already
+reflected here, with no new Project-readiness evidence.
 
-Checks: `cargo fmt --all`, lib/PR/status test builds and all-target Clippy pass; network-isolated focused checks: seven store/existing-successor proofs and one PR reader pass, created-successor recovery fails on name inference; two status fixture checks pass. Gate owns broader/materialized/configured proofs; isolated CI owns prohibited installation proofs.
+Checks: `git diff --check` passes (realign); retained compression `cargo fmt --all -- --check` and network-isolated nextest build/10 selected cases passed. No behavioral rerun for prose edits; gate owns broader/materialized/configured checks, isolated CI the prohibited installation proofs.

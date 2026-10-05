@@ -454,47 +454,27 @@ fn project_accepted_planning(
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
-    let items = {
-        let mut query = tx.prepare(
-            "SELECT i.body,i.observed_at,t.id,p.id FROM pm_items i
-             JOIN tasks t ON t.external_issue_id=i.id
-             JOIN projects current ON current.id=t.project_id
-             JOIN waves w ON w.id=current.wave_id
-             JOIN projects p ON p.external_project_id=i.project_id AND p.wave_id=current.wave_id
-             JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider AND observed.id=i.project_id
-             WHERE i.repo=?1 AND i.provider=?2 AND w.repo=i.repo AND i.needs_refresh=0
-             AND i.id IN (SELECT value FROM json_each(?3))
-             AND observed.archived=0 AND observed.membership_unresolved=0
-             AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
-             AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"
-        )?;
-        let rows = query
-            .query_map(params![repo, provider, item_ids], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows
-    };
-    for (body, observed_at, task_id, project_id) in items {
-        let item: PmItem = serde_json::from_str(&body)?;
-        tx.execute(
-            "UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
-             pm_snapshot_synced_at=?5,project_id=?6 WHERE id=?1",
-            params![
-                task_id,
-                item.identifier,
-                item.name,
-                item.description,
-                observed_at,
-                project_id
-            ],
-        )?;
-    }
+    // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
+    tx.execute(
+        "UPDATE tasks AS target SET
+             issue_identifier=json_extract(i.body,'$.identifier'),
+             issue_title=json_extract(i.body,'$.name'),
+             issue_description=json_extract(i.body,'$.description'),
+             pm_snapshot_synced_at=i.observed_at,project_id=p.id
+         FROM pm_items i
+         JOIN tasks source ON source.external_issue_id=i.id
+         JOIN projects current ON current.id=source.project_id
+         JOIN waves w ON w.id=current.wave_id
+         JOIN projects p ON p.external_project_id=i.project_id AND p.wave_id=current.wave_id
+         JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider AND observed.id=i.project_id
+         WHERE target.id=source.id
+         AND i.repo=?1 AND i.provider=?2 AND w.repo=i.repo AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND observed.archived=0 AND observed.membership_unresolved=0
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)",
+        params![repo, provider, item_ids],
+    )?;
     Ok(())
 }
 

@@ -1523,8 +1523,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh() {
+    async fn planning_store() -> (tempfile::TempDir, super::Store, Wave) {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             directory.path().join("registry.db"),
@@ -1533,6 +1532,12 @@ mod tests {
         .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
+        (directory, store, wave)
+    }
+
+    #[tokio::test]
+    async fn interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh() {
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
@@ -1572,14 +1577,7 @@ mod tests {
 
     #[tokio::test]
     async fn delayed_restart_project_projection_preserves_completed_provider_status() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
@@ -1623,14 +1621,7 @@ mod tests {
 
     #[tokio::test]
     async fn planning_projection_retains_independent_detail_entity_ages() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
@@ -1638,7 +1629,20 @@ mod tests {
         store.create_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
+        let mut other = make_task(&wave, &project);
+        other.plan.id = LinearIssueId::new("unobserved-issue").unwrap();
+        other.plan.identifier = "INF-124".into();
+        other.worktree = PathBuf::from("/repo.inf-124");
+        let other_pr = make_task_pr(&other);
+        store.create_task(&other, &other_pr).await.unwrap();
+        snapshot.snapshot.items.push(
+            task_planning_snapshot(&wave, &project, &other)
+                .snapshot
+                .items
+                .remove(0),
+        );
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        let unobserved = store.get_task(&other.id).await.unwrap().unwrap();
         let mut item = snapshot.snapshot.items[0].clone();
         item.name = "New issue title".into();
         item.revision = Some("2026-10-05T12:00:01Z".into());
@@ -1665,18 +1669,16 @@ mod tests {
         assert_eq!(refreshed.plan.pm_snapshot_synced_at, 20);
         assert_eq!(refreshed.worktree, task.worktree);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert_eq!(
+            store.get_task(&other.id).await.unwrap().unwrap(),
+            unobserved
+        );
+        assert_eq!(store.task_prs(&other.id).await.unwrap(), vec![other_pr]);
     }
 
     #[tokio::test]
     async fn planning_projection_failure_rolls_back_accepted_observations() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
@@ -1708,14 +1710,7 @@ mod tests {
 
     #[tokio::test]
     async fn project_projection_retains_accepted_entity_age() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
@@ -1737,14 +1732,7 @@ mod tests {
 
     #[tokio::test]
     async fn delayed_project_projection_preserves_a_newer_task_transfer() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
         let task = make_task(&wave, &predecessor);
@@ -1807,14 +1795,7 @@ mod tests {
 
     #[tokio::test]
     async fn stale_project_readback_cannot_assign_newer_membership_to_a_wave() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         let task = make_task(&wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -1852,14 +1833,7 @@ mod tests {
 
     #[tokio::test]
     async fn confirmed_project_preserves_full_refresh_age_and_rejects_another_wave() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
@@ -1913,14 +1887,7 @@ mod tests {
 
     #[tokio::test]
     async fn interrupted_rotation_transfer_survives_a_late_planning_response() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
+        let (_directory, store, wave) = planning_store().await;
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
         let mut successor = make_project(&wave);

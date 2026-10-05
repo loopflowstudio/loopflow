@@ -278,16 +278,12 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 October 5 source permits empty Flow and preserves names. Jack Heart's comment
 `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only correction,
 retaining original evidence and strict subsequent conflicts. At `ec5501f25`,
-full/detail ingestion commits accepted facts, conversion markers and durable
-projection together, retaining each entity's acquisition time. Projection failure
-rolls back acceptance; disputed membership remains recorded before that transaction.
-Independent replay and generic Task planning updates are deleted. Restart changes
-execution without restoring captured planning; delayed public restart coverage
-retains accepted content and age. Rotation now accepts confirmed Project and
-transfer readbacks atomically; its durable-only writers are deleted. A partial
-Project observation preserves the full-refresh age. Focused transfer/age and
-existing-successor recovery proofs pass; reteam identifiers and cached Team
-relationships remain unresolved.
+ingestion commits accepted facts, conversion markers and durable projection together
+with each entity's acquisition time; projection failure rolls back acceptance.
+Disputed membership remains recorded before that transaction. Replay and generic planning writers are deleted. Restart retains accepted planning.
+Rotation readbacks replace durable-only writes at `661622ee2`; partial reads retain refresh age. Reteam lacks full issue readbacks,
+planning locks and authorized Team-relationship acceptance. Lock all participating Waves from acquisition through acceptance, reusing held
+locks; final-refresh locking leaves earlier reads exposed. Focused proofs are synthetic; installed acceptance remains open.
 
 Created-successor recovery retains Task/PR/Flow identity, then rejects
 `A — next` and `A — previous` under the old selector. Its proof therefore belongs

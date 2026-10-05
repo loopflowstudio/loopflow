@@ -313,7 +313,6 @@ struct DesktopPerformanceTests {
                 }
             }, ready: { detailWindow.allText.contains { $0.contains("New terminal ready") } })
             detailWindow.contentView = nil
-            registry.surfaces.release(freshIdentity)
             detailWindow.orderOut(nil)
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }

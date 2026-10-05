@@ -18,7 +18,7 @@ import statistics
 import subprocess
 import sys
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,9 +160,11 @@ def _summarize(events: list[dict]) -> dict:
 
 def _soak(events: list[dict], plan: dict | None) -> dict:
     seconds = (plan or {}).get("soak_seconds", 0)
-    starts = [e for e in events if e["event"] == "soak_begin"]
-    ends = [e for e in events if e["event"] == "soak_end"]
-    rounds = [e for e in events if e["event"] == "soak_round"]
+    by_kind: dict[str, list[dict]] = defaultdict(list)
+    for event in events:
+        if event["event"].startswith("soak_"):
+            by_kind[event["event"]].append(event)
+    starts, ends, rounds = (by_kind[kind] for kind in ("soak_begin", "soak_end", "soak_round"))
     complete = (
         len(starts) == len(ends) == 1
         and ends[0]["elapsed_seconds"] >= seconds
@@ -175,7 +177,7 @@ def _soak(events: list[dict], plan: dict | None) -> dict:
         "requested_seconds": seconds,
         "status": "not_requested" if not seconds else "complete" if complete else "incomplete",
         "rounds": rounds,
-        "phases": [e for e in events if e["event"] == "soak_phase"],
+        "phases": by_kind["soak_phase"],
         "end": ends[0] if len(ends) == 1 else None,
         "limits": [
             "Fixture reads, not CLI processes or SQLite query volume",
@@ -338,6 +340,88 @@ def _stop(process: subprocess.Popen) -> None:
         process.wait()
 
 
+def _run_native(output: Path, samples: int, soak_seconds: int) -> dict:
+    metadata: dict = {}
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    isolated = output / "home"
+    isolated.mkdir()
+    environment.update(LF_HOME=str(isolated), HOME=str(isolated))
+    environment.update(
+        LOOPFLOW_NATIVE_TESTS="1",
+        LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
+        LF_DESKTOP_PERF_SAMPLES=str(samples),
+        LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
+    )
+    # These are host-boundary time limits, never latency targets. The attempt
+    # journal survives termination; only this invocation's process group stops.
+    with (output / "native.log").open("w") as log:
+        try:
+            process = subprocess.Popen(
+                COMMAND,
+                cwd=REPO,
+                env=environment,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except OSError as error:
+            return {"outcome": "unavailable", "reason": str(error), "exit_code": None}
+        recorder = None
+        recorder_attempted = False
+        timeout = 600 + samples * 120 + soak_seconds
+        try:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(COMMAND, timeout)
+                if soak_seconds and not recorder_attempted:
+                    events, _ = _read_events(output / "attempts.jsonl")
+                    began = next((e for e in events if e["event"] == "soak_begin"), None)
+                    if began:
+                        recorder_attempted = True
+                        try:
+                            recorder = subprocess.Popen(
+                                [
+                                    sys.executable,
+                                    str(RECORDER),
+                                    "record",
+                                    "--pid",
+                                    str(began["pid"]),
+                                    "--seconds",
+                                    str(soak_seconds),
+                                    "--output",
+                                    str(output / "soak-resources"),
+                                    "--phases",
+                                    str(output / "attempts.jsonl"),
+                                ],
+                                stdout=log,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=True,
+                            )
+                        except OSError as error:
+                            metadata["recorder_error"] = str(error)
+                if recorder_attempted and (recorder is None or recorder.poll() is not None):
+                    (output / "resources-finished").touch(exist_ok=True)
+                time.sleep(0.25)
+            metadata["exit_code"] = process.returncode
+            if recorder is not None:
+                try:
+                    metadata["recorder_exit_code"] = recorder.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    _stop(recorder)
+                    metadata["recorder_exit_code"] = recorder.returncode
+        except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+            metadata["outcome"] = (
+                "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
+            )
+            _stop(process)
+            metadata["exit_code"] = process.returncode
+        finally:
+            if recorder is not None:
+                _stop(recorder)
+    return metadata
+
+
 def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 0) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
@@ -373,86 +457,7 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
             outcome="unavailable", reason="Native benchmark requires macOS", exit_code=None
         )
     else:
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
-        isolated = output / "home"
-        isolated.mkdir()
-        environment.update(LF_HOME=str(isolated), HOME=str(isolated))
-        environment.update(
-            LOOPFLOW_NATIVE_TESTS="1",
-            LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
-            LF_DESKTOP_PERF_SAMPLES=str(samples),
-            LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
-        )
-        # These are host-boundary time limits, never latency targets. The attempt
-        # journal survives termination; only this invocation's process group stops.
-        with (output / "native.log").open("w") as log:
-            try:
-                process = subprocess.Popen(
-                    COMMAND,
-                    cwd=REPO,
-                    env=environment,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            except OSError as error:
-                metadata.update(outcome="unavailable", reason=str(error), exit_code=None)
-                process = None
-            if process is not None:
-                try:
-                    deadline = time.monotonic() + 600 + samples * 120 + soak_seconds
-                    recorder = None
-                    recorder_attempted = False
-                    while process.poll() is None:
-                        if time.monotonic() >= deadline:
-                            raise subprocess.TimeoutExpired(COMMAND, deadline)
-                        if soak_seconds and not recorder_attempted:
-                            events, _ = _read_events(output / "attempts.jsonl")
-                            began = next((e for e in events if e["event"] == "soak_begin"), None)
-                            if began:
-                                recorder_attempted = True
-                                try:
-                                    recorder = subprocess.Popen(
-                                        [
-                                            sys.executable,
-                                            str(RECORDER),
-                                            "record",
-                                            "--pid",
-                                            str(began["pid"]),
-                                            "--seconds",
-                                            str(soak_seconds),
-                                            "--output",
-                                            str(output / "soak-resources"),
-                                            "--phases",
-                                            str(output / "attempts.jsonl"),
-                                        ],
-                                        stdout=log,
-                                        stderr=subprocess.STDOUT,
-                                        start_new_session=True,
-                                    )
-                                except OSError as error:
-                                    metadata["recorder_error"] = str(error)
-                        if recorder is not None and recorder.poll() is not None:
-                            (output / "resources-finished").touch(exist_ok=True)
-                        elif recorder_attempted and recorder is None:
-                            (output / "resources-finished").touch(exist_ok=True)
-                        time.sleep(0.25)
-                    metadata["exit_code"] = process.returncode
-                    if recorder is not None:
-                        try:
-                            metadata["recorder_exit_code"] = recorder.wait(timeout=30)
-                        except subprocess.TimeoutExpired:
-                            _stop(recorder)
-                            metadata["recorder_exit_code"] = recorder.returncode
-                except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-                    metadata["outcome"] = (
-                        "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
-                    )
-                    _stop(process)
-                    metadata["exit_code"] = process.returncode
-                finally:
-                    if recorder is not None:
-                        _stop(recorder)
+        metadata.update(_run_native(output, samples, soak_seconds))
     metadata["source_after"] = _sources()
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)

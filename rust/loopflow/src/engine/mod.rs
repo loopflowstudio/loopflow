@@ -17,6 +17,7 @@ pub mod naming;
 pub mod platform;
 pub(crate) mod process;
 pub mod prompt;
+pub(crate) mod session_terminal;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;

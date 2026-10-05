@@ -149,6 +149,7 @@ pub(crate) enum OpenMode {
     Refuse,
     Replace,
     Try,
+    TakeControl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,9 +751,12 @@ async fn find_session(
 ) -> Result<Option<SessionTarget>> {
     // Membership outlives a pending boundary. Never reinterpret a retained
     // attempt's manifest as an independent conversation or current actor.
-    let owned = match crate::session_record::parse_artifact_key(session_id) {
-        Ok(run_id) => store.session_for_artifact(&run_id).await?,
-        Err(_) => store.session(session_id).await?,
+    let owned = match store.session(session_id).await? {
+        Some(session) => Some(session),
+        None => match crate::session_record::parse_artifact_key(session_id) {
+            Ok(run_id) => store.session_for_artifact(&run_id).await?,
+            Err(_) => None,
+        },
     };
     if let Some(session) = owned {
         return owned_target(store, session_id, session, open_completed)
@@ -1257,6 +1261,14 @@ pub(crate) async fn open(
         SessionTarget::Flow { position, .. } => flow_id(position)?,
     };
     crate::journal::connect::resolved(&resolved);
+    if resume {
+        // Presentation can answer the native UI's startup queries while its
+        // service still holds the launch lock. It acquires no Session driver or
+        // review authority; find_session validated the exact captured boundary.
+        if attach_terminal(&resolved, mode).await? {
+            return session_surface(store, &target).await;
+        }
+    }
     match &target {
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
@@ -1276,32 +1288,27 @@ pub(crate) async fn open(
             else {
                 let surface = surface(store, session).await?;
                 if resume {
-                    open_waiting(store, &session.id).await?;
+                    open_waiting(store, &session.id, mode).await?;
                 }
                 return Ok(surface);
             };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
             }
-            if resume
-                && native.provider == "codex"
-                && connect_live_codex(
-                    store,
-                    session,
-                    &native.dir,
-                    &provider_session,
-                    mode == OpenMode::Replace,
-                )
-                .await?
-            {
-                let session = store
-                    .sqlite
-                    .session(&session.id)?
-                    .ok_or_else(|| session_not_found(&session.id))?;
-                return surface(store, &session).await;
-            }
             if resume && mode == OpenMode::Replace {
                 native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+            }
+            if resume && mode == OpenMode::TakeControl {
+                bail!("This Session has no retained terminal to control");
+            }
+            if resume {
+                if let Some((endpoint, _)) = store.sqlite.session_connection(&session.id)? {
+                    match tokio::net::UnixStream::connect(endpoint).await {
+                        Ok(_) => bail!("This live engine has no retained UI to attach; its Session and driver were left unchanged"),
+                        Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => {},
+                        Err(error) => return Err(error).context("inspect live Session endpoint"),
+                    }
+                }
             }
             if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
                 require_session_action(
@@ -1324,13 +1331,14 @@ pub(crate) async fn open(
                 match mode {
                     OpenMode::Replace => result.open_argv.push("--replace".to_string()),
                     OpenMode::Try => result.open_argv.push("--try".to_string()),
+                    OpenMode::TakeControl => result.open_argv.push("--take-control".to_string()),
                     OpenMode::Refuse => {}
                 }
             }
             Ok(result)
         }
         SessionTarget::Flow { task, position, .. } => {
-            if mode != OpenMode::Refuse {
+            if !matches!(mode, OpenMode::Refuse | OpenMode::TakeControl) {
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
             #[cfg(test)]
@@ -1358,147 +1366,16 @@ pub(crate) async fn open(
             Ok(session)
         }
         SessionTarget::Row { session } => {
-            if mode != OpenMode::Refuse {
+            if !matches!(mode, OpenMode::Refuse | OpenMode::TakeControl) {
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
             let surface = surface(store, session).await?;
             if resume {
-                open_waiting(store, &session.id).await?;
+                open_waiting(store, &session.id, mode).await?;
             }
             Ok(surface)
         }
     }
-}
-
-/// Connect to one existing provider thread. Native UI traffic crosses the same
-/// driver fence as the headless writer; closing the current UI closes the runtime.
-#[cfg(unix)]
-async fn connect_live_codex(
-    store: &SharedStore,
-    session: &AgentSession,
-    dir: &Path,
-    provider: &crate::session_record::ProviderSessionRef,
-    replace_clients: bool,
-) -> Result<bool> {
-    let expected = store.sqlite.session_driver(&session.id)?;
-    let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
-        return Ok(false);
-    };
-    match tokio::net::UnixStream::connect(&endpoint).await {
-        Ok(socket) => drop(socket),
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ) =>
-        {
-            return Ok(false)
-        }
-        Err(error) => return Err(error.into()),
-    }
-    if thread != provider.provider_session_id {
-        bail!("Recorded conversation differs from the live provider thread");
-    }
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
-    let claimed = std::sync::Arc::new(std::sync::Mutex::new(None::<crate::exec::SessionDriver>));
-    let clients = if replace_clients {
-        NativeSession::of(session)?.clients()?
-    } else {
-        Vec::new()
-    };
-    let connected = async {
-        let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
-        let remote = directory.path().join("client.sock");
-        let listener = tokio::net::UnixListener::bind(&remote)?;
-        let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, driver: None,
-        };
-        connection.recover_history(Path::new(&endpoint)).await?;
-        crate::journal::connect::phase("history_recovered");
-        let clients_to_replace = clients;
-        let attachment = claimed.clone();
-        let client_dir = dir.to_path_buf();
-        let relay = tokio::spawn(async move {
-            let mut clients = tokio::task::JoinSet::new();
-            loop {
-                tokio::select! {
-                    accepted = listener.accept() => {
-                        let Ok((client, _)) = accepted else { break };
-                        let connection = connection.clone();
-                        let endpoint = endpoint.clone();
-                        let attachment = attachment.clone();
-                        let expected = expected.clone();
-                        let exec = exec.clone();
-                        let old_clients = clients_to_replace.clone();
-                        let client_dir = client_dir.clone();
-                        let owner = connection.clone();
-                        clients.spawn(async move {
-                            connection.serve_attaching(client, Path::new(&endpoint), Some(Box::new(move || {
-                                let mut attached = attachment.lock().expect("attachment mutex poisoned");
-                                if let Some(driver) = attached.as_ref() {
-                                    return Ok(driver.clone());
-                                }
-                                let driver = owner.store.claim_session_driver(
-                                    &owner.session_id, expected.as_ref(), &exec, false,
-                                )?;
-                                *attached = Some(driver.clone());
-                                crate::journal::connect::phase("attached");
-                                crate::session_record::register_session_driver_interrupt(
-                                    &owner.store, owner.session_id.clone(), driver.clone(),
-                                );
-                                owner.store.make_session_interactive(&owner.session_id, &driver)?;
-                                if !old_clients.is_empty() {
-                                    crate::lf::commands::util::replace_provider_clients(
-                                        &client_dir, "codex", &old_clients,
-                                        crate::session_record::ProviderClientStopReason::Moved,
-                                    )?;
-                                }
-                                Ok(driver)
-                            }))).await
-                        });
-                    }
-                    result = clients.join_next(), if !clients.is_empty() => {
-                        if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
-                    }
-                }
-            }
-        });
-        let session = session.clone();
-        let dir = dir.to_path_buf();
-        let provider = provider.clone();
-        crate::journal::connect::phase("connection_prepared");
-        let result = tokio::task::spawn_blocking(move || {
-            crate::lf::commands::util::resume_session_with_env(
-                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &dir, &provider,
-                &BTreeMap::new(), None, Some(&remote),
-            )
-        }).await;
-        relay.abort();
-        let _ = relay.await;
-        result??;
-        Ok::<_, anyhow::Error>(true)
-    }.await;
-    let driver = claimed.lock().expect("attachment mutex poisoned").clone();
-    if let Some(driver) = driver {
-        let outcome = if connected.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        };
-        match crate::session_record::finish_session_driver(
-            &store.sqlite,
-            &session.id,
-            &driver,
-            outcome,
-        ) {
-            Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-            Err(error) => return Err(error.into()),
-        }
-    } else if connected.is_ok() {
-        bail!("Native client exited before attaching to the live conversation");
-    }
-    connected
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
@@ -1533,7 +1410,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
 
 /// Open a conversation or a saved Flow's review: resume its native history, else
 /// launch its prepared Run, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, mode: OpenMode) -> Result<()> {
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
     // Resolve the current input under the launch lock, including completion
@@ -1546,6 +1423,14 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         bail!("session {id:?} is already complete");
     }
     let session = primary::admit_workspace(store, session).await?;
+    let name = session.id.clone();
+    let terminal = crate::engine::session_terminal::SessionTerminal::new(&name)?;
+    if terminal.is_running()? {
+        drop(launch_lock);
+        return tokio::task::spawn_blocking(move || terminal.attach(mode == OpenMode::TakeControl))
+            .await?
+            .map(|_| ());
+    }
     let mut launch_lock = Some(launch_lock);
     let token = session_token(&session);
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
@@ -1571,12 +1456,18 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         }
         publish_prepared_input(store, &next, flow)?
     };
-    serve_locked(
-        store,
-        &session,
-        launch_lock.expect("an unresumed Session retains its launch lock"),
-    )
-    .await
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let argv = vec![
+        lf.display().to_string(),
+        "session".to_string(),
+        "serve-conversation".to_string(),
+        session.artifact_key.clone(),
+    ];
+    start_durable_session(&name, &session.cwd, &argv).await?;
+    drop(launch_lock);
+    tokio::task::spawn_blocking(move || terminal.attach(false))
+        .await?
+        .map(|_| ())
 }
 
 async fn open_flow_locked(
@@ -1616,13 +1507,17 @@ async fn open_flow_locked(
             bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
-    serve_flow_locked(
-        store.clone(),
-        token,
-        position,
-        launch_lock.expect("unresumed review retains its launch lock"),
-    )
-    .await
+    launch_flow(task, position).await?;
+    drop(launch_lock);
+    attach_terminal(&flow_id(position)?, OpenMode::Refuse).await?;
+    let current = store
+        .task_flow(&task.id)
+        .await?
+        .context("review disappeared after attachment")?;
+    current
+        .review_artifact_key()
+        .cloned()
+        .context("review exited before publishing its input")
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
@@ -2013,11 +1908,13 @@ pub(crate) fn resume_native_session(
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
+    if !native.clients()?.is_empty() {
+        bail!("This live Session has no retained terminal; native resume would discard its draft");
+    }
     let Some(provider_session) = store.sqlite.input_provider_session(run_id)? else {
         return Ok(false);
     };
     crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::lf::commands::util::resume_session_with_env(
@@ -2183,40 +2080,33 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         step.step,
         position.cursor.iteration.to_string(),
     ];
-    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv).await
+    start_durable_session(&flow_id(position)?, &task.worktree, &argv).await
 }
 
 #[cfg(not(test))]
 async fn conversation_exec_is_running(id: &str) -> Result<bool> {
-    let status = tokio::process::Command::new("tmux")
-        .args([
-            "has-session",
-            "-t",
-            &format!("={}", conversation_background_name(id)),
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .context("inspect conversation launcher")?;
-    match status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => bail!("inspect conversation launcher: tmux exited with {status}"),
-    }
+    crate::engine::session_terminal::SessionTerminal::new(id)?.is_running()
 }
 
 #[cfg(test)]
 async fn conversation_exec_is_running(id: &str) -> Result<bool> {
-    Ok(tests::CONVERSATION_LAUNCHERS
-        .lock()
-        .unwrap()
-        .contains(&conversation_background_name(id)))
+    Ok(tests::CONVERSATION_LAUNCHERS.lock().unwrap().contains(id))
 }
 
 #[cfg(not(test))]
 async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    crate::engine::process::start_home_session(name, cwd, argv).await
+    crate::engine::process::start_session_terminal(name, cwd, argv)
+}
+
+async fn attach_terminal(name: &str, mode: OpenMode) -> Result<bool> {
+    let terminal = crate::engine::session_terminal::SessionTerminal::new(name)?;
+    if matches!(mode, OpenMode::Replace | OpenMode::Try) {
+        if terminal.is_running()? {
+            bail!("Session has a retained UI; connect normally or use --take-control");
+        }
+        return Ok(false);
+    }
+    tokio::task::spawn_blocking(move || terminal.attach(mode == OpenMode::TakeControl)).await?
 }
 
 #[cfg(test)]
@@ -2290,46 +2180,6 @@ pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
         }
     }
     Ok(file)
-}
-
-fn flow_background_name(position: &FlowSession) -> Result<String> {
-    let step = position.current();
-    Ok(flow_token_background_name(&FlowSessionToken {
-        task_id: position
-            .task_id
-            .clone()
-            .ok_or_else(|| anyhow!("review flow position belongs to no Task"))?,
-        invocation_id: position.invocation.id.clone(),
-        flow: step.flow,
-        node_id: step
-            .id
-            .ok_or_else(|| anyhow!("review flow position has no node id"))?,
-        skill: match position.current_plan() {
-            crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
-            _ => bail!("review flow position does not select a Skill"),
-        },
-        iteration: position.cursor.iteration,
-    }))
-}
-
-fn flow_token_background_name(token: &FlowSessionToken) -> String {
-    let task = token
-        .task_id
-        .to_string()
-        .chars()
-        .skip(5)
-        .take(8)
-        .collect::<String>();
-    let node = crate::engine::process::tmux_session_slug(&token.node_id)
-        .chars()
-        .take(24)
-        .collect::<String>();
-    let invocation = token.invocation_id.chars().take(8).collect::<String>();
-    format!("lf-human-{task}-{node}-{invocation}-{}", token.iteration)
-}
-
-fn conversation_background_name(id: &str) -> String {
-    format!("lf-human-{}", id.chars().take(12).collect::<String>())
 }
 
 fn active_session_token() -> Result<HumanSessionToken> {
@@ -2514,8 +2364,8 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     use super::{
-        flow_background_name, flow_id, flow_token_id, human_open_argv, session_is_resumable,
-        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
+        flow_id, flow_token_id, human_open_argv, session_is_resumable, token_matches,
+        FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
     use crate::durable::FlowSession;
     use crate::session::AgentSession;
@@ -3017,9 +2867,6 @@ mod tests {
         assert!(token_matches(&token, &position));
         assert!(flow_id(&position).unwrap().contains("review_kickoff"));
         assert_eq!(flow_id(&position).unwrap(), flow_token_id(&token));
-        assert!(flow_background_name(&position)
-            .unwrap()
-            .starts_with("lf-human-"));
     }
 
     #[test]

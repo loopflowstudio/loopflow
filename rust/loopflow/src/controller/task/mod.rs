@@ -510,6 +510,51 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[ignore = "writes an isolated native-review fixture; requires LF_REVIEW_FIXTURE"]
+    async fn write_native_review_fixture() {
+        let root = std::path::PathBuf::from(std::env::var_os("LF_REVIEW_FIXTURE").unwrap());
+        let (store, task, _) = human_task_fixture_at(&root.join("lf/loopflow.db")).await;
+        let wave = store.get_wave(&task.wave_id).await.unwrap().unwrap();
+        store
+            .relocate_waves(vec![crate::store::WaveLocatorUpdate {
+                wave_id: task.wave_id.clone(),
+                expected_repo: wave.repo().to_string(),
+                expected_slug: wave.slug().to_string(),
+                target: crate::work::wave::WaveLocator::discover(&task.worktree, wave.slug())
+                    .unwrap(),
+                retire_collision: None,
+            }])
+            .await
+            .unwrap();
+        store.set_task_agent(&task.id, "codex").await.unwrap();
+        // End at this review so completion needs no managed account for a
+        // following autonomous step. The selector and settlement stay real.
+        let flows = task.worktree.join(".lf/flows");
+        std::fs::create_dir_all(&flows).unwrap();
+        std::fs::write(
+            flows.join("feature.yaml"),
+            "- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n",
+        )
+        .unwrap();
+        let flow = super::start_task_flow(&task, "feature").unwrap();
+        assert!(flow.is_human());
+        let flow = store.start_task_flow(&task.id, flow).await.unwrap();
+        let flow = store
+            .reserve_task_review(flow.id(), flow.version)
+            .await
+            .unwrap();
+        let id = crate::ops::human_session::flow_id(&flow).unwrap();
+        std::fs::write(
+            root.join("review.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": id, "cwd": task.worktree, "task": task.id, "flow": flow.id(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn posted_direction_on_an_idle_task_does_not_start_advancement() {
         let (store, task, _) = human_task_fixture().await;
         assert!(store.task_flow(&task.id).await.unwrap().is_none());

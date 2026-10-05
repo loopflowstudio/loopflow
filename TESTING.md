@@ -529,32 +529,36 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-driver-loss both` for explicit retry after both driver and engine die,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
-or successful retry, `--flow-blocked` for keyed feedback continuation, and
-`--public-connect` for a live headless-to-terminal handoff.
-Use `--connect-performance 1 --output <new-dir>` for a native Codex PTY smoke
-probe. It records output and input-response endpoints separately, with engine
-identity before/after, and exits unsuccessfully on a failed sample. A rejected
-native startup must preserve the old driver and engine; a rejected replacement
-must preserve the controlling UI and its exact unsent draft. The probe reads
-`lf session timings EXEC` while attached with an exclusive SQLite lock, then
-checks attached lifetime after cleanup. It uses a held seed turn and synthetic
-responses; it does not establish paginated-history, Flow-review,
-authenticated-provider, or compositor performance. The input-response endpoint
-includes a deliberate 300 ms submission delay.
-Add `--check-reconnect-draft` with one sample to check a second ordinary live
-connection. The probe displays an unsent draft in the original native UI,
-connects again without `--replace`, and appends a unique input marker without
-copying the draft. The accepted request must contain both. This is currently a
-failing regression: engine continuity and accepted input do not preserve the
-old UI's composer. Reconnect cleanup errors remain separate from that failure.
+or successful retry, or `--flow-blocked` for keyed feedback continuation.
+Use `--connect-performance 1 --output <new-dir>` for a native Codex retained-UI
+smoke probe. It starts an isolated repository conversation, keeps an unsent draft
+across detach/reconnect, opens a passive view, transfers control and submits the
+original draft. Session/capture/driver identity must remain unchanged. Cleanup
+completes only the owned fixture Session. Output and composer-response endpoints
+are separate; composer response bounds readiness and final submission checks its
+contents. Use `--history-turns 8` to seed retained history, and at least 20 samples before
+reporting p95. To test an exact final Task-review selector, build the library test
+binary with `cargo test -p loopflow --lib --no-run`, then pass its printed executable
+path as `--review-fixture-bin PATH`. The fixture rejects premature completion,
+becomes Ready through native input, and settles the exact final review. It does
+not launch the full feature Flow's subsequent worker. Concurrent connects must
+produce one controller; terminating an unread passive view must preserve the UI.
+Synthetic Responses and PTY bytes do not prove authenticated providers, pagination,
+native images or compositor behavior. Failures and cleanup errors remain in the output directory.
+The replaced engine-reuse runner and its contrary draft evidence remain at
+`5e0b575b6:tests/e2e/connect_performance.py` and the dated benchmark directories.
 
 Compare retained terminal transports without an account or native provider:
 
 ```bash
-uv run python tests/e2e/terminal_transport.py --output /tmp/terminal-comparison
+uv run python tests/e2e/terminal_transport.py --snapshots --output /tmp/terminal-comparison
 ```
 
 Requires tmux with `get-clipboard request` support and a new output directory.
+The real server regression is opt-in:
+`cargo test -p loopflow --lib retained_screen_excludes_historical_queries -- --ignored`.
+`--snapshots` checks that a passive screen reader never becomes a query recipient.
+Omit it to reproduce the rejected read-only-client routing.
 The private server and raw PTY fixture exercise replay, draft submission,
 passive typing, control transfer, clipboard queries and detach/cleanup.
 Exit zero means the comparison completed, not that either transport meets the

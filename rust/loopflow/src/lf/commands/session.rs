@@ -122,8 +122,11 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             json,
             replace,
             try_open,
+            take_control,
         } => {
-            let mode = if *replace {
+            let mode = if *take_control {
+                OpenMode::TakeControl
+            } else if *replace {
                 OpenMode::Replace
             } else if *try_open {
                 OpenMode::Try

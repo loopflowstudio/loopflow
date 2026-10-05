@@ -13,21 +13,23 @@ input readiness and attached lifetime. Resume/replacement earns no live-attachme
 proof. Jack authorized autonomous landing October 4 without a manual demo;
 no Desktop KR credit follows.
 
-Engine reuse loses drafts:
-[reconnect evidence](../../scripts/benchmarks/session-connect/20261005-reconnect/README.md).
-Failed attachment preserves engine/draft; owner exit closes the engine. Cleanup
-remains unreliable. `lf session timings EXEC` separates phases/lifetime despite
-SQLite-delayed exit. No baseline or speedup exists.
+[Engine reuse loses drafts](../../scripts/benchmarks/session-connect/20261005-reconnect/README.md).
+The [retained owner](../../scripts/benchmarks/session-connect/20261005-retained-terminal/README.md)
+uses private tmux for prepared conversations/reviews. Passive snapshot readers
+never attach as clients, resolving the comparison's clipboard routing/replay
+counterexamples. Only the controller supplies input, query replies and PTY size;
+transfer revokes it first without changing the Session driver. Preserve
+Infrastructure's launch-lock ordering and exact review fences.
 
-The [terminal comparison](../../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
-preserves fixture drafts across tmux reattachment/transfer, but sends clipboard
-queries to recently active passive viewers. Raw replay repeats historical queries.
-Native images/providers/review completion remain unproven. Reviews'
-tmux cradle does not prevent UI replacement. Retention remains unimplemented.
-Late views need screen state without historical queries; only the controller
-may supply input, query replies and PTY size. Control transfer must revoke the
-old writer first, without transferring the Session driver. Preserve
-Infrastructure's launch-lock ordering and review fences.
+Twenty eight-turn synthetic reconnects preserve draft, PID/birth, history
+and driver. Final-review settlement and owned cleanup pass. Baseline output
+86.3/92.0 ms median/p95 became 81.7/89.7 after one fewer lookup process; input
+p95 worsened. Both fit baseline-derived 100/125 ms budgets, but build load differed.
+No reliable tail speedup follows. Timings distinguish phases/lifetime; native
+readiness remains explicitly unavailable. Authenticated providers, images,
+pagination, direct standalone first launches, full-feature successor startup and
+SIGKILL recovery remain unproven. An isolated full-feature trial saved feedback
+but lacked an account for its successor; the final-review fixture does not cover it.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -1034,19 +1036,19 @@ no owning Task (LOO-375 owns `wt list` only).
 ### Shared viewing boundary
 
 Optional Warp/Loopflow viewing retains a passive second attachment and explicit
-**Take control**. October 5's fixture comparison rejects plain tmux/raw replay;
-production transport remains unselected. Move here replacement stays distinct.
+**Take control**. October 5's retained owner uses controller-only tmux attachment
+and passive screen snapshots; plain tmux/raw replay remain rejected. Move here
+replacement stays distinct.
 
-Remaining proof includes native keyboard/image input, history, late attachment,
-one provider/UI/draft, owner-enforced takeover and view sizing. A passive crop is
-not independent reflow. Client-local scroll/selection is separate from durable
-process state. Earlier tmux color/terminal complaints and reported clipboard-image
-failures (anthropics/claude-code#25672) remain unverified on this stack; text-query
-fixtures do not resolve them. A retained owner needs bounded replay/backpressure,
-controller-bound queries, resize and failure recovery. App-quit survival and
-remote Home attachment remain separate scope decisions. Keep ELSEWHERE generic
-until shared client provenance exists. Earlier implementation history remains at
-`e15a024564f7ec20679b2a7640284754a1b141b6:wave/product/MEMORY.md`.
+The synthetic CLI proves retained keyboard input, short history, draft and
+controller transfer. Native Warp/Desktop interaction, image input, long history
+and remote Home attachment remain unproven. A passive crop is not independent
+reflow; view-local scroll/selection is separate from durable state. Earlier tmux
+color complaints and clipboard-image reports (anthropics/claude-code#25672) remain
+unverified; text-query fixtures do not resolve them. Bounded snapshots and writes
+still need saturated-output and failure-recovery stress. App-quit survival remains
+a separate scope decision. Keep ELSEWHERE generic until shared client provenance
+exists. Earlier history: `e15a024564f7ec20679b2a7640284754a1b141b6:wave/product/MEMORY.md`.
 
 The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
 Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
@@ -1060,11 +1062,9 @@ to close during this reconciliation.
 
 ## Historical remote client
 
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
+Superseded June recipes and migration evidence remain at
+`5e0b575b6:wave/product/MEMORY.md#historical-remote-client`; use current shared
+projections and explicit Home transport.
 
 ## Learnings
 

@@ -293,26 +293,6 @@ impl SqliteStore {
         Ok(ExecPage { entries, next })
     }
 
-    pub(crate) fn make_session_interactive(
-        &self,
-        session: &str,
-        expected: &SessionDriver,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
-            return Err(StoreError::InvalidAuthority(
-                "Session driver changed".into(),
-            ));
-        }
-        tx.execute(
-            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
-            [session],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(

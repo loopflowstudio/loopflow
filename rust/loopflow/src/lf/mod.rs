@@ -606,6 +606,9 @@ pub enum SessionCommand {
         /// Ask the provider to resume even when another client is active
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
+        /// Take control of the retained UI without replacing its provider
+        #[arg(long, conflicts_with_all = ["replace", "try_open"])]
+        take_control: bool,
     },
     /// Find or start the one ongoing conversation of this repository or a Wave
     Ensure {
@@ -2533,6 +2536,7 @@ mod tests {
                     id,
                     replace: true,
                     try_open: false,
+                    take_control: false,
                     json: false,
                 }
             }) if id == "run_123"

@@ -6,9 +6,8 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 
 use super::{
-    capture_is_prepared, conversation_background_name, conversation_exec_is_running,
-    lock_session_exec, publish_prepared_input, session_not_found, start_durable_session, surface,
-    NativeSession, SessionRecord,
+    capture_is_prepared, conversation_exec_is_running, lock_session_exec, publish_prepared_input,
+    session_not_found, start_durable_session, surface, NativeSession, SessionRecord,
 };
 use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
@@ -206,18 +205,14 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
             "serve-conversation".to_string(),
             session.artifact_key.to_string(),
         ];
-        start_durable_session(
-            &conversation_background_name(&session.id),
-            &session.cwd,
-            &argv,
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "launch primary Session {}; run the same command to retry",
-                session.id
-            )
-        })?;
+        start_durable_session(&session.id, &session.cwd, &argv)
+            .await
+            .with_context(|| {
+                format!(
+                    "launch primary Session {}; run the same command to retry",
+                    session.id
+                )
+            })?;
     }
     surface(store, &session).await
 }
@@ -248,10 +243,10 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
 #[cfg(test)]
 mod tests {
     use super::{ensure, replace};
+    use crate::ops::human_session::action_test::NativeClients;
     use crate::ops::human_session::tests::{
         SessionHome, CONVERSATION_LAUNCHERS, FAILED_CONVERSATION_LAUNCHERS,
     };
-    use crate::ops::human_session::{action_test::NativeClients, conversation_background_name};
     use crate::session::SessionKind;
 
     async fn wave(
@@ -282,10 +277,16 @@ mod tests {
                 .unwrap();
 
             assert_eq!(first.id, second.id);
-            assert!(CONVERSATION_LAUNCHERS
-                .lock()
-                .unwrap()
-                .contains(&conversation_background_name(&first.id)));
+            let opened = crate::ops::human_session::open(
+                &store,
+                &first.id,
+                crate::ops::human_session::OpenMode::Refuse,
+                false,
+            )
+            .await
+            .unwrap();
+            assert_eq!(opened.id, first.id);
+            assert!(CONVERSATION_LAUNCHERS.lock().unwrap().contains(&first.id));
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(session.kind, SessionKind::Conversation);
             assert!(session.interactive && session.input_published);
@@ -305,7 +306,11 @@ mod tests {
             let record = ensure(&store, repo.path(), None).await.unwrap();
             let session = store.session(&record.id).await.unwrap().unwrap();
             let lock = super::lock_session_exec(&session.id).unwrap();
-            let opening = super::super::open_waiting(&store, &session.id);
+            let opening = super::super::open_waiting(
+                &store,
+                &session.id,
+                crate::ops::human_session::OpenMode::Refuse,
+            );
             tokio::pin!(opening);
             tokio::select! {
                 biased;
@@ -338,7 +343,7 @@ mod tests {
             let admitted = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
-            let name = conversation_background_name(&admitted.id);
+            let name = admitted.id.clone();
             CONVERSATION_LAUNCHERS.lock().unwrap().remove(&name);
             FAILED_CONVERSATION_LAUNCHERS
                 .lock()

@@ -217,16 +217,16 @@ def main() -> None:
     parser.add_argument("--control", type=Path)
     parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
-    parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--connect-performance", type=int, metavar="SAMPLES")
-    parser.add_argument("--check-reconnect-draft", action="store_true")
+    parser.add_argument("--review-fixture-bin", type=Path)
+    parser.add_argument("--history-turns", type=int, default=1)
     parser.add_argument("--flow-blocked", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--flow-driver-loss", choices=("running", "completed", "both"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
-    if args.check_reconnect_draft and args.connect_performance != 1:
-        parser.error("--check-reconnect-draft requires --connect-performance 1")
+    if args.history_turns < 1:
+        parser.error("--history-turns must be positive")
     if args.connect_performance is not None:
         if args.connect_performance < 1:
             parser.error("--connect-performance requires a positive sample count")
@@ -314,7 +314,8 @@ enabled = false
                             results,
                             args.output,
                             args.connect_performance,
-                            args.check_reconnect_draft,
+                            args.review_fixture_bin.resolve() if args.review_fixture_bin else None,
+                            args.history_turns,
                         )
                         if any(sample["status"] != "passed" for sample in results["samples"]):
                             raise SystemExit(1)
@@ -322,14 +323,6 @@ enabled = false
                     if args.shared_provider_home:
                         _shared_provider_home_contract(
                             binary, args.codex, root, work, env, server, results
-                        )
-                        return
-                    if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(
-                            binary, work, env, server, shared_engine=True
-                        )
-                        results["owner_exit"] = _live_driver_contract(
-                            binary, work, env, server, shared_engine=False
                         )
                         return
                     if args.flow_blocked:
@@ -455,8 +448,7 @@ def _terminate(signum: int, _frame: object) -> None:
 def _provider_entry() -> None:
     if os.environ.get("LF_PROBE_NATIVE_UI") and "app-server" not in sys.argv:
         args = sys.argv[1:]
-        if os.environ.get("LF_PROBE_REJECT_UI"):
-            args = ["--dangerously-bypass-approvals-and-sandbox", *args]
+        args = ["-c", f'projects.{json.dumps(os.getcwd())}.trust_level="trusted"', *args]
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *args])
     if record := os.environ.get("LF_PROBE_LAUNCHES"):
         # What a launch handed the provider. A terminal resume is recorded and
@@ -474,37 +466,7 @@ def _provider_entry() -> None:
         stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
         (Path(os.environ["LF_PROBE_ENGINES"]) / f"{pid}.json").write_text(json.dumps([pid, stamp]))
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
-    if "--remote" not in sys.argv:
-        if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
-            raise RuntimeError("public connect bypassed the retained engine relay")
-        os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
-    # A controlled native-protocol client exercises public lf connect. This is
-    # deliberately not evidence of the rendered Codex TUI or Desktop.
-    remote = sys.argv[sys.argv.index("--remote") + 1].removeprefix("unix://")
-    thread = sys.argv[-1]
-    control = Path(os.environ["LF_PROBE_CLIENT"])
-    client = Client(Path(remote))
-    try:
-        client.call("thread/resume", {"threadId": thread})
-        (control / "ready").touch()
-        index = 0
-        while True:
-            if not client.reader.is_alive():
-                return
-            request = control / f"{index}.request"
-            if not request.exists():
-                time.sleep(0.02)
-                continue
-            action = json.loads(request.read_text())
-            if action["method"] == "exit":
-                return
-            value = client.call(
-                action["method"], action["params"], rejected=action.get("rejected", False)
-            )
-            (control / f"{index}.response").write_text(json.dumps(value))
-            index += 1
-    finally:
-        client.close()
+    os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
 
 
 def _stop_fixture_engines(directory: Path) -> None:
@@ -534,287 +496,6 @@ def _stop_fixture_engines(directory: Path) -> None:
                 assert os.getpgid(pid) == pid
                 os.killpg(pid, signal.SIGKILL)
                 raise AssertionError(f"fixture engine {pid} required force termination")
-
-
-def _public_connection_contract(
-    binary: Path,
-    work: Path,
-    env: dict[str, str],
-    server: Responses,
-    results: dict,
-    headless: subprocess.Popen,
-    shared_engine: bool,
-) -> None:
-    session = results["session_id"]
-    processes = []
-    replaced = []
-    controls = []
-    inspectors = []
-
-    def wait(path: Path) -> None:
-        deadline = time.monotonic() + 15
-        while not path.exists():
-            assert time.monotonic() < deadline, f"timed out: {path}"
-            for child in processes:
-                if child in replaced:
-                    continue
-                if child.poll() is not None:
-                    _, error = child.communicate(timeout=5)
-                    raise AssertionError(f"connect exited: {child.returncode}: {error.decode()}")
-            time.sleep(0.02)
-
-    def call(index: int, sequence: int, method: str, params: dict, rejected: bool = False):
-        root = controls[index]
-        (root / f"{sequence}.request").write_text(
-            json.dumps(dict(method=method, params=params, rejected=rejected))
-        )
-        output = root / f"{sequence}.response"
-        wait(output)
-        return json.loads(output.read_text())
-
-    def _connect(label: str, *, replace: bool = False) -> None:
-        control = work.parent / f"{session}-{label}"
-        control.mkdir()
-        controls.append(control)
-        argv = [str(binary), "session", "connect", session]
-        if replace:
-            argv.append("--replace")
-        processes.append(
-            subprocess.Popen(
-                argv,
-                cwd=work,
-                env={**env, "LF_PROBE_CLIENT": str(control)},
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-        )
-        wait(control / "ready")
-
-    try:
-        with sqlite3.connect(_database(env)) as database:
-            endpoint, thread, generation = database.execute(
-                "SELECT provider_endpoint,provider_thread,provider_generation "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-        engine = Client(Path(endpoint))
-        inspectors.append(engine)
-        engine.call("thread/resume", {"threadId": thread})
-        sibling = None
-        if shared_engine:
-            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})["thread"]["id"]
-            engine.start_turn(sibling, "held sibling")
-        assert server.held.wait(10)
-        for label in ["first", "second"]:
-            _connect(label)
-            if label == "first":
-                call(0, 0, "thread/read", {"threadId": thread})
-                with sqlite3.connect(_database(env)) as database:
-                    active = database.execute(
-                        "SELECT provider_turn FROM session_events WHERE session_id=? "
-                        "AND kind='started' ORDER BY seq DESC LIMIT 1",
-                        (session,),
-                    ).fetchone()[0]
-        headless.send_signal(signal.SIGINT)
-        headless.communicate(timeout=10)
-        assert headless.returncode == 130, headless.returncode
-        with sqlite3.connect(_database(env)) as database:
-            outcome = database.execute(
-                "SELECT outcome FROM execs "
-                "WHERE id=(SELECT provider_exec_id FROM agent_sessions WHERE id=?)",
-                (session,),
-            ).fetchone()[0]
-        assert outcome == "interrupted", outcome
-        results["old_headless_driver"] = dict(exit_code=130, outcome=outcome)
-        assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
-        )
-        call(0, 1, "turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
-        call(
-            0,
-            2,
-            "turn/start",
-            {"threadId": thread, "input": [{"type": "text", "text": "stale turn"}]},
-            rejected=True,
-        )
-        call(
-            0,
-            3,
-            "turn/steer",
-            {
-                "threadId": thread,
-                "expectedTurnId": active,
-                "input": [{"type": "text", "text": "stale steer"}],
-            },
-            rejected=True,
-        )
-        assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
-        )
-        if sibling:
-            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
-        # Explicit client replacement must use the same live-engine path as
-        # ordinary connect, with the current turn and shared sibling untouched.
-        with sqlite3.connect(_database(env)) as database:
-            before_prepare = database.execute(
-                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
-                "provider_generation FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-        prepared = _command(
-            [str(binary), "session", "connect", session, "--replace", "--json"],
-            work,
-            env,
-            timeout=15,
-        )
-        assert prepared.returncode == 0, prepared.stderr
-        assert "--replace" in json.loads(prepared.stdout)["open_argv"]
-        assert all(previous.poll() is None for previous in processes)
-        with sqlite3.connect(_database(env)) as database:
-            after_prepare = database.execute(
-                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
-                "provider_generation FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-        assert after_prepare == before_prepare
-        replaced.extend(processes)
-        _connect("replacement", replace=True)
-        for previous in replaced:
-            previous.communicate(timeout=10)
-        assert (
-            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
-        )
-        if sibling:
-            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
-        with sqlite3.connect(_database(env)) as database:
-            retained_connection = database.execute(
-                "SELECT provider_endpoint,provider_thread,provider_generation "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-            driver, observed_generation, interactive = database.execute(
-                "SELECT driver_exec_id,provider_generation,interactive "
-                "FROM agent_sessions WHERE id=?",
-                (session,),
-            ).fetchone()
-            before = {row[0] for row in database.execute("SELECT id FROM execs")}
-        assert observed_generation == generation and interactive == 1
-        assert retained_connection == (endpoint, thread, generation)
-        assert driver != before_prepare[0]
-        server.release.set()
-        engine.wait_turn(active)
-        with sqlite3.connect(_database(env)) as database:
-            after = database.execute(
-                "SELECT id,parent_exec_id,caller_session_id,caller_provider_generation "
-                "FROM execs WHERE via_agent=1"
-            ).fetchall()
-        children = [row for row in after if row[0] not in before]
-        assert len(children) == 1, children
-        child_id, child_parent, child_session, child_generation = children[0]
-        assert (child_parent, child_session, child_generation) == (driver, session, generation), (
-            children
-        )
-        call(2, 0, "thread/read", {"threadId": thread, "includeTurns": True})
-        history_command = [str(binary), "session", "history", session, "--json", "--limit", "0"]
-        recorded = _command(history_command, work, env, timeout=15)
-        assert recorded.returncode == 0, recorded.stderr
-        history = json.loads(recorded.stdout)
-        completions = [event for event in history if event["kind"] == "completed"]
-        assert len(completions) == 1, history
-        selected = [event for event in completions if event["provider_turn"] == active]
-        assert len(selected) == 1 and selected[0]["payload"]["status"] == "completed", selected
-        usage = [
-            event
-            for event in history
-            if event["kind"] == "usage" and event["provider_turn"] == active
-        ]
-        assert usage and usage[-1]["payload"]["total"]["inputTokens"] > 0, history
-        call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
-        replay = _command(history_command, work, env, timeout=15)
-        assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
-        if not shared_engine:
-            # Closing the current native UI releases the engine; obsolete UIs
-            # and the original headless driver's exit could not release it.
-            (controls[2] / "2.request").write_text(json.dumps({"method": "exit"}))
-            _, error = processes[2].communicate(timeout=15)
-            assert processes[2].returncode == 0, error.decode()
-            with sqlite3.connect(_database(env)) as database:
-                closed = database.execute(
-                    "SELECT provider_endpoint,provider_thread,driver_exec_id FROM agent_sessions WHERE id=?",
-                    (session,),
-                ).fetchone()
-            assert closed == (None, thread, None), closed
-            assert not Path(endpoint).exists() or not engine.reader.is_alive()
-            results["owner_exit_closed_engine"] = True
-        results["history"] = history
-        results["public_connect"] = dict(
-            provider_generation=generation,
-            driver=driver,
-            retained_client_rejected=True,
-            active_turn_and_sibling_survived=True,
-            replaced_clients_exited=True,
-            nested_child_id=child_id,
-            nested_child_parent=child_parent,
-            nested_child_session=child_session,
-            native_client="controlled protocol fixture",
-        )
-    finally:
-        server.release.set()
-        for client in inspectors:
-            client.close()
-        for child in processes:
-            if child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
-
-
-def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool) -> dict:
-    _init_repo(work, env)
-    _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
-    with sqlite3.connect(_database(env)) as database:
-        existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
-    server.held.clear()
-    server.release.clear()
-    log = tempfile.TemporaryFile(mode="w+t")
-    child = subprocess.Popen(
-        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
-        stdin=subprocess.DEVNULL,
-        cwd=work,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=log,
-        text=True,
-    )
-    try:
-        if not server.held.wait(15):
-            child.terminate()
-            stdout, stderr = child.communicate(timeout=10)
-            log.seek(0)
-            raise AssertionError(f"headless provider never reached held upstream: {stdout}\n{log.read()}")
-        with sqlite3.connect(_database(env)) as database:
-            sessions = [
-                row[0]
-                for row in database.execute("SELECT id FROM agent_sessions")
-                if row[0] not in existing
-            ]
-        assert len(sessions) == 1, sessions
-        result = {"session_id": sessions[0]}
-        _public_connection_contract(binary, work, env, server, result, headless=child, shared_engine=shared_engine)
-        return result
-    finally:
-        server.release.set()
-        if child.poll() is None:
-            child.terminate()
-            try:
-                child.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.communicate(timeout=5)
-        log.close()
 
 
 def _login(name: str, refresh: str = "issued") -> str:
@@ -1053,7 +734,9 @@ def _shared_provider_home_contract(
             running.terminate()
             stdout, stderr = running.communicate(timeout=10)
             log.seek(0)
-            raise AssertionError(f"the running agent never reached the provider: {stdout}\n{log.read()}")
+            raise AssertionError(
+                f"the running agent never reached the provider: {stdout}\n{log.read()}"
+            )
 
         def alive() -> set[int]:
             pids = {

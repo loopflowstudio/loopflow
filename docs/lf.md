@@ -95,13 +95,27 @@ lf usage --task LOO-265 --context   # each step's input by source, flagged over 
 lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
-lf session connect SESSION         # continue a conversation
+lf session connect SESSION         # attach to the retained conversation
+lf session connect SESSION --take-control  # move input to this terminal
 lf session timings EXEC            # read that connection's phase timings (JSON lines)
 lf session replace SESSION         # fresh conversation for the same scope
 lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
+
+Prepared conversations and Flow reviews retain their native UI when a view
+closes. Detach with Ctrl-B, D. A second connection views the screen without
+sending input or resizing the provider; Q closes it and arrow keys pan.
+`--take-control` detaches the previous controller before granting input here,
+without replacing the UI or changing the Session driver. Passive snapshots are
+cropped to the viewer's size; they do not reflow the provider's terminal.
+
+Live standalone clients launched without retained transport cannot be attached.
+Stopped Sessions still resume provider history. Explicit `--replace` remains a
+separate native replacement operation; it cannot preserve an unsent draft.
+Retained terminals require tmux with `get-clipboard request` support and use
+private configuration, independent of personal tmux sessions.
 
 Connection timings live under the selected Home's `runtime/session-connect/`.
 They identify the exact Exec, selector and resolved Session and remain readable

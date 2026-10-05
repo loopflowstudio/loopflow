@@ -27,155 +27,93 @@ Jack supplied this reproduction: lf session connect task_7c24c806bfaa464a877352b
 
 Additional acceptance: retain connect phase timings keyed to the exact invocation and Session, and expose them through a supported diagnostic command/log view so Product can answer how long a specific connect took afterward. Separate lookup, preparation/connection, first output and verified input readiness from total attached lifetime; record unavailable readiness evidence explicitly.
 
-## Remaining design and implementation — October 5 UTC
+## Implemented retained owner — October 5 UTC
 
-Ordinary reconnect loses the native UI's unsent draft. The disposable runner
-observes that draft in the original UI, connects again without `--replace`, then
-submits a fresh marker from the second UI. The accepted request contains the
-marker but not the draft, despite unchanged Session/thread/generation/PID/birth.
-Driver transfer and engine reuse cannot satisfy Jack Heart's continuity contract.
-[The reconnect evidence](../scripts/benchmarks/session-connect/20261005-reconnect/README.md)
-retains the submitted input, earlier inconclusive attempts and cleanup timeouts.
+The private tmux server now retains the native UI and application PTY for prepared
+conversations and Task Flow reviews. Only the controller attaches as a tmux client.
+Passive views poll `capture-pane` screen snapshots, keep one frame at a time with
+a 4 MiB bound, and crop/pan without resizing the application. Historical terminal
+queries never enter those snapshots. Explicit `--take-control` detaches the old
+client before attaching its replacement; no Session driver changes. View detach
+is separate from native exit/completion. This is an engineering selection within
+Jack Heart's accepted continuity contract, not a new product decision.
 
-**Proposal, not implemented:** retain the native UI and its PTY across connections.
-Establish terminal ownership at first launch for conversations and reviews, then
-attach presentation without creating another UI/provider or transferring the
-Session driver. Additional views stay passive until explicit control transfer.
-The terminal owner must handle replay, resize, input fencing and failure cleanup;
-view closure must be separate from provider shutdown. Do not scrape or retype
-composers or introduce a parallel draft store. Already-running standalone native
-clients without an attachment transport cannot be silently converted.
+Exact Session identity plus canonical Home determines the private socket. New
+launches use the existing service process and launch lock; presentation may attach
+while that service waits for startup input. Current review lookup still validates
+the exact captured boundary. Stopped resume remains native. Already-live standalone
+UIs without this transport are left unchanged; direct standalone launches do not
+yet acquire a retained owner. No draft scraping, retyping or parallel draft store
+was introduced. The existing engine-only attachment path is deleted.
 
-The normal Flow-review route launches `--mode tui` through `serve_flow_locked`
-→ `run::exec_prompt` → `exec_session_with_env`, without the batch Harness's relay.
-`launch_flow` → `start_durable_session` already provides a tmux cradle, but
-`resume_native_session` stops and recreates its native UI. Direct terminal launch
-has no retained transport. Routing reviews through `connect_live_codex` alone
-falls back to that replacement; the attempted adaptation was removed.
+Two implementation counterexamples changed the cut: a redundant controller-lifetime
+lock prevented transfer, so tmux's client registration owns control; exact Session
+IDs must resolve before artifact-key parsing, because ordinary IDs can look like
+artifact keys. The private native probes exposed startup trust prompts behind the
+launch lock. Early presentation attachment supplies input without claiming driver
+or review authority. Failed non-TTY attachment is checked before detaching a client.
 
-The [October 5 terminal comparison](../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
-now supplies bounded evidence, not a selected production transport. A private
-configured tmux server preserved truecolor/paste bytes, three reattachments,
-fixture draft submission and explicit input transfer. A 60-column passive view
-left the application's 100×30 PTY intact. Cleanup observed both server and fixture
-exit. This is a canned application, not native provider continuity or image proof.
+## Evidence and performance
 
-Two counterexamples invalidate a plain-attachment/raw-replay implementation:
+[Retained-terminal evidence](../scripts/benchmarks/session-connect/20261005-retained-terminal/README.md)
+contains native results, failed attempts, terminal bytes and per-invocation timings.
+Twenty eight-turn review reconnects establish the baseline: output median 86.3 ms /
+p95 92.0 ms, composer response median 87.6 ms / p95 93.7 ms. Before optimization,
+both endpoint budgets were set to median <=100 ms / p95 <=125 ms. Removing the
+redundant tmux existence process gave output 81.7/89.7 ms and response 83.5/97.1 ms.
+Both budgets pass; the input tail worsened and test compilation overlapped that
+comparison, so no reliable tail speedup is claimed. These are fixed synthetic
+populations on the same host/debug profile, not authenticated-service or Desktop
+measurements. The incompatible earlier UI-replacement probe is not a baseline.
 
-- With `get-clipboard request`, tmux directs an independently emitted clipboard
-  query to the recently active passive viewer. The controller gets no query;
-  the passive reply does not reach the application. Controller replies work
-  before passive attachment and after explicit transfer. Read-only typing alone
-  does not establish ownership of terminal responses.
-- Raw transcript replay contains historical clipboard queries. Responding to
-  those queries writes fresh clipboard data into the retained application PTY
-  unless the owner suppresses replayed queries and fences replies. This is a
-  counterexample to the proposed raw relay, not an existing production vulnerability.
+Native conversation and review probes preserve PID/birth, Session/capture/driver,
+history prefix, visible response and unsent draft across twenty detach/reconnects.
+Passive typing is ignored, explicit takeover preserves the driver, final submitted
+input contains the original draft, and completion removes the owned native UI and
+server. Review Complete fails before Ready and settles its exact capture afterward.
+The native review fixture ends at that review: the earlier full-feature trial saved
+feedback but failed to start its next worker without a managed account in the
+isolated Home. This failure and earlier cleanup/observer failures remain retained.
 
-**Revised design requirement, not implemented:** one retained terminal owner
-must hold application screen state and live terminal queries separately. Late
-views receive a display snapshot plus subsequent display updates, never past
-clipboard/device queries. Only the controller supplies query replies and PTY
-size; passive viewers have independent cropped/panned presentation. Transfer
-revokes the old input/reply path before granting the new one, without changing
-the Session driver. Full view-specific reflow is not promised by one PTY.
+`lf session timings EXEC` now records preparation/attachment/lifetime on retained
+conversation and review paths. Native output/readiness stay explicitly unavailable
+in the diagnostic; the external PTY runner observes screen bytes and composer
+responses separately. Response bounds readiness; it does not measure onset.
+File-backed diagnostics remain readable under SQLite write contention. Accounting
+can delay command exit and SIGKILL can leave lifetime unknown.
 
-Plain tmux attachment and an append-only byte replay are rejected as the complete
-owner. A tmux-backed presentation needs explicit controller-bound query routing;
-a transparent relay needs terminal state/replay handling, input fencing and bounded
-backpressure. The comparison does not choose between those implementations.
-This is a substantial remaining architectural cut, not a latency optimization.
-The comparison is complete at the fixture boundary. The next implementation
-work is selecting and building an owner that resolves both counterexamples,
-then integrating first launch and attachment for conversations and Flow reviews.
-That engineering choice needs no new product decision or manual demo; no
-production transport has yet been selected or implemented.
+The [original transport comparison](../scripts/benchmarks/session-connect/20261005-terminal-transport/README.md)
+rejected ordinary read-only tmux clients (passive clipboard-query interception) and
+raw replay (historical queries). The snapshot variant resolves both at the fixture
+boundary. It does not prove native images. Prior engine-reuse draft loss and
+failed-bootstrap ownership evidence remain in the dated reconnect/attachment
+benchmark directories and `5e0b575b6:scratch/connect-quickly-to-an-existing.md`.
 
-Preserve Infrastructure's LOO-377 launch-lock-before-driver-fence ordering and
-exact review revalidation (`c5dc238b0afb`). Attachment grants no review-completion
-authority. Keep captured input, review tokens, provider/driver generations and
-history intact; failed startup cannot settle a review.
+## Remaining acceptance
 
-### Delete — do not maintain
+- Extend retained ownership to direct first-launch conversations, or establish an
+  explicit supported-path boundary without claiming all live Sessions attach.
+  Existing standalone native UIs cannot be converted without replacement.
+- Prove authenticated supported providers, Claude/OpenCode, native image input and
+  paginated/very long history. Eight synthetic turns preserve history but do not
+  exercise pagination. Account routing/installed Homes must not become hidden
+  prerequisites. No configured account is available in the isolated review fixture.
+- Prove continuation into the full feature Flow's next worker, beyond the proven
+  final-review settlement and existing exact-boundary Rust regressions.
+- Prove failed native startup and SIGKILL recovery on the retained path.
+  Concurrent opens now prove one controller; SIGTERM of an unread passive view
+  preserves the UI. Passive writes have a two-second no-progress bound, but a
+  saturated-output stress probe remains distinct from that termination test.
+- Complete affected gate checks and reconcile CLI/Desktop action presentation for
+  the retained path. Publication and landing remain after complete acceptance.
 
-- In the retained-terminal cut, remove live attachment through
-  `resume_native_session` that stops/recreates the UI. Supply the replacement in
-  the same cut; preserve stopped resume and explicit replacement as distinct
-  operations. Do not polish that predecessor or its exclusive fixtures meanwhile.
-- Local launch overrides on remote resume are already removed. The live engine
-  owns workspace, model and permission policy.
-- Retain `recover_history`. It currently awaits every page before UI startup;
-  changing that requires history-ordering and readiness proof, not just faster
-  new-UI startup.
+## Delete — do not maintain
 
-### Acceptance still open
+Completed: removed live `connect_live_codex` UI replacement/driver transfer,
+`make_session_interactive`, the relay's attachment-claim callback, and their
+exclusive engine-reuse probe machinery. Full Session IDs replace truncated
+background names. Preserve stopped native resume, explicit standalone replacement,
+review capture/driver fences and `recover_history`; none grants live attachment
+proof. No compatibility flag or alternative production transport remains.
 
-- Prove Jack's exact Flow-review selector with retained native draft/history,
-  failed startup and exact review completion/retirement fences.
-- Prove successful and repeated retained-UI attachments, including detach
-  behavior; complete short/paginated history and supported authenticated-provider
-  coverage. Claude/OpenCode and standalone-native attachment remain unmeasured.
-- Capture comparable baseline samples and contributing lookup/startup/transport
-  costs. Select numeric median/p95 targets before optimization; p95 requires at
-  least 20 comparable samples. Then fix measured costs and compare on the same
-  host/data, preserving failures, timeouts and observer limitations.
-- Verify per-invocation diagnostics on the revised review path, keeping unavailable
-  UI endpoints explicit. Current `attached` and `connection_prepared` events exist
-  only in `connect_live_codex`; the review's native-resume path has no equivalent
-  attachment event, so its attached lifetime cannot yet be derived. Complete
-  acceptance before authorized delivery.
-
-## Existing safety and diagnostic evidence
-
-The runner uses real Codex engine/native UIs, private Loopflow/provider Homes and
-synthetic local Responses. Each sample begins with one fresh held seed turn.
-It checks engine identity including OS birth stamp, records output and response
-markers separately, and exits nonzero on failure. It needs no configured account.
-These are smoke checks, not representative history or provider-service timings.
-
-[Native smoke evidence](../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
-records Codex 0.160.0 rejecting local permission overrides during remote resume.
-That failure also exposed destructive cleanup: claiming the driver before UI
-startup let a rejected UI close the pre-existing engine. Remote resume now omits
-local overrides; stopped resume is unchanged.
-
-[Attachment evidence](../scripts/benchmarks/session-connect/20261005-attachment/README.md)
-records the lifecycle repair. The relay claims authority only after delivering
-the matching successful thread-resume response. Failed bootstrap retains the old
-driver/engine/UI; the runner submits the exact retained draft after a rejected
-replacement. Bootstrap reads stay passive; writes and approval replies retain
-driver fences. Explicit replacement snapshots old clients and stops only those
-clients after attachment. Current-owner exit still closes its engine. Protocol
-fixtures separately prove stale-write rejection and sibling-thread preservation.
-Neither protocol attachment nor failed-replacement proof establishes successful
-reconnect continuity.
-
-`lf session timings EXEC` reads file-backed JSON lines without SQLite admission:
-selector, resolved Session, process-relative phases, unavailable output/readiness
-endpoints and attached lifetime through return or handled interruption. Output
-arrives under an exclusive SQLite lock, though accounting can delay reader exit.
-SIGKILL may leave lifetime unknown. These observations grant no lifecycle authority.
-
-The attachment smoke recorded 652 ms output, 1,149 ms input response and 998 ms
-attached lifetime. Response bounds readiness rather than measuring onset; it
-includes 300 ms before Enter and synthetic tool work. Attached lifetime includes
-post-input proof. External PTY timing starts before spawn, internal phases at
-process entry. PTY bytes are not compositor presentation. Changing probes and
-reduced observer polling make these samples unsuitable for speedup/distribution
-claims. No Desktop KR credit follows.
-
-Review found that protocol-only fixtures missed native argument rejection and
-that cleanup exceptions could hide the behavioral failure. The runner now retains
-cleanup errors separately and attempts every owned cleanup. Reconnect cleanup
-still timed out; the later exact-path inspection found no remaining final-probe
-lf process, which does not prove reliable cleanup. Jack's live Session and
-unrelated processes were not touched.
-
-Earlier design chronology and observer notes are preserved at
-`42c4c791cea8d8cb07f8ee545c2b83194bf8fc63:scratch/connect-quickly-to-an-existing.md`.
-The transport comparison now centralizes attachment registration and detach/wait,
-so every view shares cleanup ownership. Review retained explicit controller-first
-revocation and both clipboard counterexamples. The native replacement path and
-its failing regression remain untouched pending the retained-terminal cut.
-
-Check: prior `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-compress-20261005-01` and Ruff passes retained; realign source/evidence review and `git diff --check` passed; native acceptance remains with implementation/gate.
+Check: native conversation/review baselines and lookup comparisons (20/20 each), concurrent/unread-view review smoke (3/3), snapshot fixture, 33 human_session tests, four terminal tests, exact-review regression, build, fmt, Ruff, all-target Clippy and diff check passed; affected gate and remaining provider coverage are still open.

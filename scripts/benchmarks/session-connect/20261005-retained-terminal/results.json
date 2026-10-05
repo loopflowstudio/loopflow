@@ -1,0 +1,1446 @@
+{
+  "review-03": {
+    "binary_sha256": "f7553c91e2cb3ea19a811af90f55d0169cc888a178f406f0e10f60948c578b05",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:57:31Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 85.90562500467058,
+        "input_response_ms": 87.27445800468558,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 85.01433399942471,
+        "input_response_ms": 86.73479199933354,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 92.791083996417,
+        "input_response_ms": 94.50270899833413,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 3,
+        "output_ms": 88.44233300624182,
+        "input_response_ms": 90.18441600346705,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 4,
+        "output_ms": 88.21383400209015,
+        "input_response_ms": 89.93125000415603,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 5,
+        "output_ms": 83.66987499903189,
+        "input_response_ms": 85.4100409997045,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 6,
+        "output_ms": 89.14754199940944,
+        "input_response_ms": 90.90300000389107,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 7,
+        "output_ms": 86.43604200187838,
+        "input_response_ms": 88.200833000883,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 8,
+        "output_ms": 84.09645899519091,
+        "input_response_ms": 84.65199999773176,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 9,
+        "output_ms": 82.78512499964563,
+        "input_response_ms": 83.39716699993005,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 10,
+        "output_ms": 83.60320900101215,
+        "input_response_ms": 85.27679200051352,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 11,
+        "output_ms": 91.37745900079608,
+        "input_response_ms": 91.99720899778185,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 12,
+        "output_ms": 85.90445800655289,
+        "input_response_ms": 87.64795800379943,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 13,
+        "output_ms": 84.26454200525768,
+        "input_response_ms": 84.80433300428558,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 14,
+        "output_ms": 83.48466699681012,
+        "input_response_ms": 84.06033299979754,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 15,
+        "output_ms": 86.23295799770858,
+        "input_response_ms": 86.81475000048522,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 16,
+        "output_ms": 89.69829200214008,
+        "input_response_ms": 90.24383400537772,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 17,
+        "output_ms": 86.99095799966017,
+        "input_response_ms": 87.54429200052982,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 18,
+        "output_ms": 90.90908299549483,
+        "input_response_ms": 91.46620799583616,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 19,
+        "output_ms": 92.01216700603254,
+        "input_response_ms": 93.7417919994914,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 8,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "not selected",
+      "codex_flow_review": "attempted",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "task_d987c0eeb7324f2b90ddebf6a7a66f64:3bf87458-3984-46b7-a121-1a641af3a30b:feature:review_kickoff:0",
+    "before": [
+      "task_d987c0eeb7324f2b90ddebf6a7a66f64:3bf87458-3984-46b7-a121-1a641af3a30b:feature:review_kickoff:0",
+      1,
+      "77010690-e572-4f72-abf6-22f030a3a912",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 74560,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:57:34.446699Z",
+        "os_birth": "Sun Oct  4 23:57:34 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 235488,
+    "history_prefix_sha256": "752d0721eb1328da571970c548b6ccda804dcdedcce279d93b30009cba8b7f83",
+    "service_pid": "74201",
+    "submitted_retained_draft": true,
+    "after": [
+      "task_d987c0eeb7324f2b90ddebf6a7a66f64:3bf87458-3984-46b7-a121-1a641af3a30b:feature:review_kickoff:0",
+      1,
+      "77010690-e572-4f72-abf6-22f030a3a912",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 74560,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:57:34.446699Z",
+        "os_birth": "Sun Oct  4 23:57:34 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "native_review_ready": true,
+    "exact_review_completion": true,
+    "cleanup_errors": [],
+    "server_absent": true,
+    "native_absent": true
+  },
+  "native-02": {
+    "binary_sha256": "64636eee0c5ed4242f9ba160c7ed94688420d2b9fa802bd418ba1e7f0926f842",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:33:35Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "1a71b2319d1346ed9a0c7c8608d66cd5",
+    "error": "AssertionError: terminal did not display b'retained-47a7e5574629425eb5852035a3a243b5': b'Error: Session launch is still busy; retry after its current launch settles\\r\\n'",
+    "cleanup_errors": [],
+    "server_absent": true
+  },
+  "review-04": {
+    "binary_sha256": "5bbc0fcd4f52db9bf8a429e0f45c270b36371aa734ab8827fbb5ccad03eac42e",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T07:01:30Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 79.04691700241528,
+        "input_response_ms": 79.57549999991897,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 79.23454100091476,
+        "input_response_ms": 79.81599999766331,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 80.95566599513404,
+        "input_response_ms": 81.49208299437305,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 3,
+        "output_ms": 79.9740419970476,
+        "input_response_ms": 81.76433300104691,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 4,
+        "output_ms": 85.01812500617234,
+        "input_response_ms": 86.75104199937778,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 5,
+        "output_ms": 83.32562499708729,
+        "input_response_ms": 83.87933399353642,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 6,
+        "output_ms": 83.80720899731386,
+        "input_response_ms": 85.51070900284685,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 7,
+        "output_ms": 81.89445800235262,
+        "input_response_ms": 83.62329100054922,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 8,
+        "output_ms": 84.00366700516315,
+        "input_response_ms": 85.84362500550924,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 9,
+        "output_ms": 81.54379200277617,
+        "input_response_ms": 83.3619999975781,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 10,
+        "output_ms": 88.35708299739053,
+        "input_response_ms": 88.95220799604431,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 11,
+        "output_ms": 83.05591699900106,
+        "input_response_ms": 83.65020900237141,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 12,
+        "output_ms": 89.70158299780451,
+        "input_response_ms": 99.50179099541856,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 13,
+        "output_ms": 81.23170900216792,
+        "input_response_ms": 81.71366700116778,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 14,
+        "output_ms": 77.64250000036554,
+        "input_response_ms": 78.1848339975113,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 15,
+        "output_ms": 78.53395900019677,
+        "input_response_ms": 80.23649999813642,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 16,
+        "output_ms": 78.42770899878815,
+        "input_response_ms": 78.99404199997662,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 17,
+        "output_ms": 78.61066700570518,
+        "input_response_ms": 80.32733300206019,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 18,
+        "output_ms": 86.58637500047917,
+        "input_response_ms": 87.10595899901818,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 19,
+        "output_ms": 95.39508300076704,
+        "input_response_ms": 97.12087500520283,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 8,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "not selected",
+      "codex_flow_review": "attempted",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "task_3228920edf1a46a7bcd3b4c392366280:df2a38b4-32c4-49c6-b6e0-380424e605eb:feature:review_kickoff:0",
+    "before": [
+      "task_3228920edf1a46a7bcd3b4c392366280:df2a38b4-32c4-49c6-b6e0-380424e605eb:feature:review_kickoff:0",
+      1,
+      "95064b5c-6b3d-42e4-892d-9fae483d812d",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 26011,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:01:32.651671Z",
+        "os_birth": "Mon Oct  5 00:01:32 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 235487,
+    "history_prefix_sha256": "175bcdf5cb7c9098a1d524302cd1f44deef3fb58fa0e51cc8218de6156796afe",
+    "service_pid": "25248",
+    "submitted_retained_draft": true,
+    "after": [
+      "task_3228920edf1a46a7bcd3b4c392366280:df2a38b4-32c4-49c6-b6e0-380424e605eb:feature:review_kickoff:0",
+      1,
+      "95064b5c-6b3d-42e4-892d-9fae483d812d",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 26011,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:01:32.651671Z",
+        "os_birth": "Mon Oct  5 00:01:32 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "native_review_ready": true,
+    "exact_review_completion": true,
+    "cleanup_errors": [],
+    "server_absent": true,
+    "native_absent": true
+  },
+  "native-05": {
+    "binary_sha256": "d3643126f3c346ba5631923cf7f0204946fce0acdfd213fb23f72f092cdecd98",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:37:18Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 86.08954200462904,
+        "input_response_ms": 86.64795799995773,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "f2b0b7e724e3424fbbc35f80616c1ef4",
+    "before": [
+      "f2b0b7e724e3424fbbc35f80616c1ef4",
+      1,
+      "6a5f8671-0d9c-4ca5-8b09-586965b761e3",
+      1,
+      1,
+      null
+    ],
+    "service_pid": "61540",
+    "error": "AssertionError: terminal did not display b'retain-draft-296578e933014bb2a4216e80da628561': b'Error: wait for detached controller\\r\\n\\r\\nCaused by:\\r\\n    Resource temporarily unavailable (os error 35)\\r\\n'",
+    "cleanup_errors": [
+      "Command '['/tmp/lf-connect-fvp8g_8i/bin/lf', 'session', 'connect', 'f2b0b7e724e3424fbbc35f80616c1ef4']' timed out after 5 seconds"
+    ],
+    "server_absent": true
+  },
+  "native-04": {
+    "binary_sha256": "d3643126f3c346ba5631923cf7f0204946fce0acdfd213fb23f72f092cdecd98",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:36:30Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "4096da678b7f46878bd2c9245c530f33",
+    "error": "OperationalError: no such column: artifact_key",
+    "cleanup_errors": [],
+    "server_absent": true
+  },
+  "review-02": {
+    "binary_sha256": "f7553c91e2cb3ea19a811af90f55d0169cc888a178f406f0e10f60948c578b05",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:52:41Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 90.00291700067464,
+        "input_response_ms": 90.54674999788404,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 87.32020900060888,
+        "input_response_ms": 89.01333399990108,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 86.92054199491395,
+        "input_response_ms": 87.47399999992922,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 1,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "not selected",
+      "codex_flow_review": "attempted",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "task_6c262ae28bfd48e8ab302d79c8992b1a:6ba15ae9-fbd2-4aaf-bf67-19d44d31d7bd:feature:review_kickoff:0",
+    "before": [
+      "task_6c262ae28bfd48e8ab302d79c8992b1a:6ba15ae9-fbd2-4aaf-bf67-19d44d31d7bd:feature:review_kickoff:0",
+      1,
+      "96b81e32-0494-496e-970c-c694015df58b",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 13219,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:52:46.09836Z",
+        "os_birth": "Sun Oct  4 23:52:46 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 82448,
+    "history_prefix_sha256": "ad9cbbf8b2ecffc5262329f43415afa5646ead9839dcb71c3b32e8f04dc99c38",
+    "service_pid": "12163",
+    "submitted_retained_draft": true,
+    "after": [
+      "task_6c262ae28bfd48e8ab302d79c8992b1a:6ba15ae9-fbd2-4aaf-bf67-19d44d31d7bd:feature:review_kickoff:0",
+      1,
+      "96b81e32-0494-496e-970c-c694015df58b",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 13219,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:52:46.09836Z",
+        "os_birth": "Sun Oct  4 23:52:46 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "native_review_ready": true,
+    "error": "AssertionError: ",
+    "cleanup_errors": [
+      "review feedback did not settle its exact Flow occurrence"
+    ],
+    "server_absent": true,
+    "native_absent": true
+  },
+  "native-03": {
+    "binary_sha256": "64636eee0c5ed4242f9ba160c7ed94688420d2b9fa802bd418ba1e7f0926f842",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:34:31Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "0adfcd68559e4e1680929b47ed5aa079",
+    "error": "AssertionError: terminal did not display b'retained-af8989eea43b4e25971715f12e748140': b'Error: Session launch is still busy; retry after its current launch settles\\r\\n'",
+    "cleanup_errors": [],
+    "server_absent": true
+  },
+  "snapshots-02": {
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "endpoint": "PTY bytes; no compositor or provider",
+    "tmux_version": "tmux 3.7c",
+    "tmux": {
+      "initial_history": true,
+      "bracketed_paste_exact": true,
+      "draft_visible": true,
+      "truecolor_bytes": true,
+      "clipboard_query_forwarded": true,
+      "controller_clipboard_reply_reaches_provider": true,
+      "passive_input_blocked": true,
+      "late_draft_replay": true,
+      "late_clipboard_query_replayed": false,
+      "pane_size_with_smaller_view": "100x30",
+      "passive_receives_clipboard_query": false,
+      "controller_receives_clipboard_query_with_passive_view": true,
+      "passive_clipboard_reply_reaches_provider": null,
+      "clients_after_transfer": [
+        "32943 0 attached,focused,UTF-8"
+      ],
+      "old_owner_fenced_after_transfer": true,
+      "new_owner_can_write": true,
+      "new_owner_receives_clipboard_query": true,
+      "new_owner_clipboard_reply_reaches_provider": true,
+      "detach_keeps_process": true,
+      "repeated_attachments": 3,
+      "same_process": true,
+      "submitted_retained_draft": true,
+      "image_input": "unmeasured: fixture has no native clipboard/image decoder",
+      "review_fences": "unmeasured: transport fixture is not lf session connect",
+      "cleanup_status": 0,
+      "server_absent_after_cleanup": true,
+      "provider_absent_after_cleanup": true,
+      "cleanup_errors": []
+    },
+    "relay": {
+      "truecolor_bytes": true,
+      "bracketed_paste_exact": true,
+      "clipboard_query_forwarded": true,
+      "late_draft_replay": true,
+      "late_clipboard_query_replayed": true,
+      "replayed_query_response_reaches_pty": true,
+      "replay_bytes": 95,
+      "image_input": "unmeasured: byte relay does not prove native image decoding",
+      "independent_sizes": "not implemented: one PTY has one size",
+      "cleanup_status": -15
+    },
+    "suitable_for_production": false,
+    "remaining": "controller-owned terminal queries; bounded screen replay; native provider/image proof; lf review and driver lifetime integration"
+  },
+  "conversation-08": {
+    "binary_sha256": "f7553c91e2cb3ea19a811af90f55d0169cc888a178f406f0e10f60948c578b05",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:58:25Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 89.56087499973364,
+        "input_response_ms": 91.30066700163297,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 88.68216600239975,
+        "input_response_ms": 90.44458300195402,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 84.26274999510497,
+        "input_response_ms": 84.73279199824901,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 3,
+        "output_ms": 87.0130419934867,
+        "input_response_ms": 88.71645799808903,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 4,
+        "output_ms": 78.79166699422058,
+        "input_response_ms": 80.47674999397714,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 5,
+        "output_ms": 84.90491699922131,
+        "input_response_ms": 86.5693339947029,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 6,
+        "output_ms": 88.20037500117905,
+        "input_response_ms": 89.87262500158977,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 7,
+        "output_ms": 99.24808299547294,
+        "input_response_ms": 99.78574999695411,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 8,
+        "output_ms": 88.70445800130256,
+        "input_response_ms": 90.40554200328188,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 9,
+        "output_ms": 93.3202500018524,
+        "input_response_ms": 95.04670799651649,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 10,
+        "output_ms": 94.95808399515226,
+        "input_response_ms": 96.70766699855449,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 11,
+        "output_ms": 94.03466599906096,
+        "input_response_ms": 95.69712499796879,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 12,
+        "output_ms": 92.98987500369549,
+        "input_response_ms": 94.74937499908265,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 13,
+        "output_ms": 90.20887500082608,
+        "input_response_ms": 100.96958400390577,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 14,
+        "output_ms": 86.35516600043047,
+        "input_response_ms": 88.13629100040998,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 15,
+        "output_ms": 85.61412500421284,
+        "input_response_ms": 87.29208400472999,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 16,
+        "output_ms": 82.75945800414775,
+        "input_response_ms": 83.30025000032037,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 17,
+        "output_ms": 87.24612500373041,
+        "input_response_ms": 88.91941700130701,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 18,
+        "output_ms": 86.34579199861037,
+        "input_response_ms": 88.00037499895552,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 19,
+        "output_ms": 84.38420799939195,
+        "input_response_ms": 86.1008329957258,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 8,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "70c7e794ab3248c2ac7cefe679c7b5b5",
+    "before": [
+      "70c7e794ab3248c2ac7cefe679c7b5b5",
+      1,
+      "269c4958-394c-4aa2-8c8e-4ae8fc37a953",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 14910,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:58:27.911498Z",
+        "os_birth": "Sun Oct  4 23:58:27 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 227619,
+    "history_prefix_sha256": "b56044cecec10a32c03165205bc53e12f57a7c4c1175cfb5391d40339391c22b",
+    "service_pid": "14514",
+    "submitted_retained_draft": true,
+    "after": [
+      "70c7e794ab3248c2ac7cefe679c7b5b5",
+      1,
+      "269c4958-394c-4aa2-8c8e-4ae8fc37a953",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 14910,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:58:27.911498Z",
+        "os_birth": "Sun Oct  4 23:58:27 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "cleanup_errors": [],
+    "server_absent": true,
+    "native_absent": true
+  },
+  "conversation-09": {
+    "binary_sha256": "5bbc0fcd4f52db9bf8a429e0f45c270b36371aa734ab8827fbb5ccad03eac42e",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T07:02:37Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 77.44862500112504,
+        "input_response_ms": 78.75679200515151,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 76.53204199596075,
+        "input_response_ms": 77.11154199932935,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 77.74516700010281,
+        "input_response_ms": 79.44191699789371,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 3,
+        "output_ms": 75.78729200031376,
+        "input_response_ms": 76.32400000147754,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 4,
+        "output_ms": 80.62016699841479,
+        "input_response_ms": 82.35233299637912,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 5,
+        "output_ms": 89.11904200067511,
+        "input_response_ms": 89.64925000327639,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 6,
+        "output_ms": 86.26566699967952,
+        "input_response_ms": 86.78666700143367,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 7,
+        "output_ms": 83.34620800451376,
+        "input_response_ms": 83.92137500050012,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 8,
+        "output_ms": 84.6078340036911,
+        "input_response_ms": 86.32904200203484,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 9,
+        "output_ms": 84.41691699408693,
+        "input_response_ms": 86.15479199943366,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 10,
+        "output_ms": 84.03833299962571,
+        "input_response_ms": 84.56324999860954,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 11,
+        "output_ms": 83.60199999879114,
+        "input_response_ms": 85.23850000347011,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 12,
+        "output_ms": 80.58079199690837,
+        "input_response_ms": 82.24479199998314,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 13,
+        "output_ms": 82.16758300113725,
+        "input_response_ms": 83.81858299981104,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 14,
+        "output_ms": 82.7169589974801,
+        "input_response_ms": 84.56879199366085,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 15,
+        "output_ms": 78.96825000352692,
+        "input_response_ms": 80.62191600038204,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 16,
+        "output_ms": 79.89370800351026,
+        "input_response_ms": 80.42812500207219,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 17,
+        "output_ms": 83.8052500039339,
+        "input_response_ms": 84.31120800378267,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 18,
+        "output_ms": 82.59450000332436,
+        "input_response_ms": 83.1570830050623,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 19,
+        "output_ms": 84.8695829990902,
+        "input_response_ms": 86.5879999983008,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 8,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "fcc412c1cdbe48e892970f34ee94b545",
+    "before": [
+      "fcc412c1cdbe48e892970f34ee94b545",
+      1,
+      "639a1074-625d-4ce5-98eb-a661d449815a",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 73815,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:02:40.223455Z",
+        "os_birth": "Mon Oct  5 00:02:40 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 227618,
+    "history_prefix_sha256": "ade3c26a5103a2540ff7302deca27d18e54140c8a1e6cd2082ab4c30e8c01543",
+    "service_pid": "73428",
+    "submitted_retained_draft": true,
+    "after": [
+      "fcc412c1cdbe48e892970f34ee94b545",
+      1,
+      "639a1074-625d-4ce5-98eb-a661d449815a",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 73815,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:02:40.223455Z",
+        "os_birth": "Mon Oct  5 00:02:40 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "cleanup_errors": [],
+    "server_absent": true,
+    "native_absent": true
+  },
+  "native-06": {
+    "binary_sha256": "c4d3b440a826344bc3730498a1529c37aa0009a5dcc30cc4d64fc49cd1bd93c1",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:39:33Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 99.11912499956088,
+        "input_response_ms": 100.48149999784073,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 86.05845900456188,
+        "input_response_ms": 87.79850000428269,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 86.04883299994981,
+        "input_response_ms": 87.88570799515583,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "3586e8b895b3415b972de4eb1b0cd43f",
+    "before": [
+      "3586e8b895b3415b972de4eb1b0cd43f",
+      1,
+      "71f501bf-2611-4f43-9dcb-35a23942495f",
+      1,
+      1,
+      null
+    ],
+    "service_pid": "45768",
+    "error": "TimeoutExpired: Command '['/tmp/lf-connect-tae5a95u/bin/lf', 'session', 'connect', '3586e8b895b3415b972de4eb1b0cd43f']' timed out after 5 seconds",
+    "cleanup_errors": [
+      "Command '['/tmp/lf-connect-tae5a95u/bin/lf', 'session', 'connect', '3586e8b895b3415b972de4eb1b0cd43f']' timed out after 5 seconds",
+      "Command '['/tmp/lf-connect-tae5a95u/bin/lf', 'session', 'connect', '3586e8b895b3415b972de4eb1b0cd43f', '--take-control']' timed out after 5 seconds"
+    ],
+    "server_absent": true
+  },
+  "native-01": {
+    "binary_sha256": "9d3d694512b9c540ecae06d86d3e8f610c694298078d00db19f75fec957ec99f",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:31:32Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "d6071994d2bd4ba6a2a7373e57a7cd15",
+    "error": "AssertionError: terminal did not display b'retained-e849d9b6b80145309cca0eb44298f410': b'Error: Input d6071994d2bd4ba6a2a7373e57a7cd15 does not belong to a Session\\r\\n'",
+    "cleanup_errors": [],
+    "server_absent": true
+  },
+  "review-01": {
+    "binary_sha256": "f7553c91e2cb3ea19a811af90f55d0169cc888a178f406f0e10f60948c578b05",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:49:33Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 87.52337499754503,
+        "input_response_ms": 89.30079099809518,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 87.94199999829289,
+        "input_response_ms": 89.7010419939761,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 84.99379100248916,
+        "input_response_ms": 85.57424999889918,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "not selected",
+      "codex_flow_review": "attempted",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "task_23c5d4ba783f46d598c7d05c400d0d25:957204d4-4ba8-46ec-bb77-ee73dd4e2e97:feature:review_kickoff:0",
+    "before": [
+      "task_23c5d4ba783f46d598c7d05c400d0d25:957204d4-4ba8-46ec-bb77-ee73dd4e2e97:feature:review_kickoff:0",
+      1,
+      "e265f680-0f65-4d1d-8c75-ae8632d99e83",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 97605,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:49:37.762373Z",
+        "os_birth": "Sun Oct  4 23:49:37 2026"
+      }
+    ],
+    "history_bytes_before": 81465,
+    "history_prefix_sha256": "1baa2a71101ff92548a1036506a125abdc4aa4d86d8682c7e374e6b7680af971",
+    "service_pid": "96524",
+    "submitted_retained_draft": true,
+    "after": [
+      "task_23c5d4ba783f46d598c7d05c400d0d25:957204d4-4ba8-46ec-bb77-ee73dd4e2e97:feature:review_kickoff:0",
+      1,
+      "e265f680-0f65-4d1d-8c75-ae8632d99e83",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 97605,
+        "terminal_id": null,
+        "started_at": "2026-10-05T06:49:37.762373Z",
+        "os_birth": "Sun Oct  4 23:49:37 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "native_review_ready": true,
+    "cleanup_errors": [
+      "Command '['/tmp/lf-connect-18z8j5r_/bin/lf', 'session', 'complete', 'task_23c5d4ba783f46d598c7d05c400d0d25:957204d4-4ba8-46ec-bb77-ee73dd4e2e97:feature:review_kickoff:0']' returned non-zero exit status 1."
+    ],
+    "server_absent": true
+  },
+  "native-07": {
+    "binary_sha256": "c4d3b440a826344bc3730498a1529c37aa0009a5dcc30cc4d64fc49cd1bd93c1",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T06:41:13Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 93.16537500126287,
+        "input_response_ms": 93.85283400479238,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 86.72245900379494,
+        "input_response_ms": 88.43720900040353,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 89.47154199995566,
+        "input_response_ms": 91.11516700068023,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "attempted",
+      "codex_flow_review": "unmeasured",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "ffa593a8a81c438abd5c0dbd7ddf2b45",
+    "before": [
+      "ffa593a8a81c438abd5c0dbd7ddf2b45",
+      1,
+      "3bd04b54-f724-4b7a-95ce-c919279eb31f",
+      1,
+      1,
+      null
+    ],
+    "service_pid": "6022",
+    "submitted_retained_draft": true,
+    "after": [
+      "ffa593a8a81c438abd5c0dbd7ddf2b45",
+      1,
+      "3bd04b54-f724-4b7a-95ce-c919279eb31f",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "cleanup_errors": [],
+    "server_absent": true
+  },
+  "snapshots-01": {
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "endpoint": "PTY bytes; no compositor or provider",
+    "tmux_version": "tmux 3.7c",
+    "tmux": {
+      "initial_history": true,
+      "bracketed_paste_exact": true,
+      "draft_visible": true,
+      "truecolor_bytes": true,
+      "clipboard_query_forwarded": true,
+      "controller_clipboard_reply_reaches_provider": true,
+      "passive_input_blocked": true,
+      "late_draft_replay": true,
+      "late_clipboard_query_replayed": false,
+      "pane_size_with_smaller_view": "100x30",
+      "passive_receives_clipboard_query": false,
+      "controller_receives_clipboard_query_with_passive_view": true,
+      "passive_clipboard_reply_reaches_provider": null,
+      "clients_after_transfer": [
+        "2765 0 attached,focused,UTF-8"
+      ],
+      "cleanup_status": 0,
+      "server_absent_after_cleanup": true,
+      "provider_absent_after_cleanup": true,
+      "cleanup_errors": []
+    },
+    "error": "OSError: [Errno 5] Input/output error"
+  },
+  "review-05": {
+    "binary_sha256": "69f9b58fe00a7d7953b925be385f9220fbba933d61a177492b2d9cce751e0a5e",
+    "endpoint": "native Codex screen bytes and composer response; no compositor",
+    "measured_at": "2026-10-05T07:08:53Z",
+    "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+    "tmux_version": "tmux 3.7c",
+    "samples": [
+      {
+        "index": 0,
+        "output_ms": 79.792541997449,
+        "input_response_ms": 80.33462500316091,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 1,
+        "output_ms": 79.14041700132657,
+        "input_response_ms": 80.94220800558105,
+        "status": "passed",
+        "same_identity": true
+      },
+      {
+        "index": 2,
+        "output_ms": 85.46470799774397,
+        "input_response_ms": 86.05983299639774,
+        "status": "passed",
+        "same_identity": true
+      }
+    ],
+    "history_turns": 8,
+    "targets": null,
+    "provider_paths": {
+      "codex_conversation": "not selected",
+      "codex_flow_review": "attempted",
+      "claude": "unmeasured",
+      "opencode": "unmeasured"
+    },
+    "observer_limits": [
+      "synthetic Responses, no authenticated provider",
+      "composer response is a readiness upper bound, final submission checks draft contents",
+      "fixed live UI/history; no provider restart between samples"
+    ],
+    "session": "task_45f6d0752f9f46ae92f20e4cf273cc45:a5a99058-ff25-48eb-8dc8-b586eca2c51a:feature:review_kickoff:0",
+    "before": [
+      "task_45f6d0752f9f46ae92f20e4cf273cc45:a5a99058-ff25-48eb-8dc8-b586eca2c51a:feature:review_kickoff:0",
+      1,
+      "a9c6481e-ed0e-4a0b-bc41-e8f3d0df22f0",
+      1,
+      1,
+      null
+    ],
+    "native_before": [
+      {
+        "schema_version": 1,
+        "pid": 92986,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:08:55.909855Z",
+        "os_birth": "Mon Oct  5 00:08:55 2026"
+      }
+    ],
+    "failed_attachment_preserved": true,
+    "history_bytes_before": 235492,
+    "history_prefix_sha256": "516375803286f365c8bd704aa1223ea3609cf91a82bb1070ca1ab42e4caf1be0",
+    "service_pid": "92761",
+    "concurrent_connects_one_controller": true,
+    "unread_passive_termination_preserves_session": true,
+    "submitted_retained_draft": true,
+    "after": [
+      "task_45f6d0752f9f46ae92f20e4cf273cc45:a5a99058-ff25-48eb-8dc8-b586eca2c51a:feature:review_kickoff:0",
+      1,
+      "a9c6481e-ed0e-4a0b-bc41-e8f3d0df22f0",
+      1,
+      1,
+      null
+    ],
+    "takeover_keeps_driver": true,
+    "native_after": [
+      {
+        "schema_version": 1,
+        "pid": 92986,
+        "terminal_id": null,
+        "started_at": "2026-10-05T07:08:55.909855Z",
+        "os_birth": "Mon Oct  5 00:08:55 2026"
+      }
+    ],
+    "native_history_preserved": true,
+    "native_review_ready": true,
+    "exact_review_completion": true,
+    "cleanup_errors": [],
+    "server_absent": true,
+    "native_absent": true
+  }
+}

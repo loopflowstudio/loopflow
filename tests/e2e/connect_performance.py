@@ -1,19 +1,20 @@
-"""PTY endpoints for the isolated Codex fixture; responses are synthetic."""
+"""Retained native terminal endpoints using private Homes and synthetic Responses."""
 
 import fcntl
+import hashlib
 import json
 import os
 import platform
 import pty
 import select
-import signal
+import shlex
 import sqlite3
 import struct
 import subprocess
 import termios
 import time
 import uuid
-from contextlib import ExitStack, closing
+from contextlib import closing
 from pathlib import Path
 
 
@@ -22,227 +23,82 @@ def _terminal() -> None:
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-def _state(env: dict[str, str]) -> tuple | None:
-    database = Path(env["LF_HOME"]) / "loopflow.db"
-    if not database.exists():
-        return None
-    with closing(sqlite3.connect(database)) as db:
+def _spawn(argv: list[str], work: Path, env: dict[str, str]) -> tuple[subprocess.Popen, int]:
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
+    try:
+        child = subprocess.Popen(
+            argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, preexec_fn=_terminal
+        )
+    finally:
+        os.close(slave)
+    return child, master
+
+
+def _read(master: int, marker: bytes, timeout: float = 20) -> bytes:
+    output = bytearray()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not select.select([master], [], [], 0.01)[0]:
+            continue
+        try:
+            value = os.read(master, 65536)
+        except OSError:
+            break
+        if not value:
+            break
+        output.extend(value)
+        if b"\x1b[6n" in value:
+            os.write(master, b"\x1b[1;1R")
+        if b"\x1b[c" in value:
+            os.write(master, b"\x1b[?1;2c")
+        if marker and marker in output:
+            return bytes(output)
+    if marker:
+        raise AssertionError(f"terminal did not display {marker!r}: {bytes(output)[-3000:]!r}")
+    return bytes(output)
+
+
+def _stop(child: subprocess.Popen, master: int) -> None:
+    try:
+        if child.poll() is None:
+            child.terminate()
+            try:
+                _wait(child, master)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
+    finally:
+        os.close(master)
+
+
+def _wait(child: subprocess.Popen, master: int) -> None:
+    deadline = time.monotonic() + 5
+    while child.poll() is None and time.monotonic() < deadline:
+        _read(master, b"", 0.05)
+    child.wait(timeout=1)
+
+
+def _state(env: dict[str, str], session: str) -> tuple:
+    with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
         return db.execute(
-            "SELECT id,provider_thread,provider_generation,provider_pid,"
-            "provider_started_at,driver_exec_id FROM agent_sessions "
-            "WHERE provider_endpoint IS NOT NULL ORDER BY created_at DESC LIMIT 1"
+            "SELECT id,current_capture,driver_exec_id,driver_generation,"
+            "provider_generation,provider_thread "
+            "FROM agent_sessions WHERE id=?",
+            (session,),
         ).fetchone()
 
 
-def _process_stamp(pid: int) -> str | None:
-    result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True, check=False
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _stop(child: subprocess.Popen, *, group: bool = False) -> None:
-    if child.poll() is None:
-        if group:
-            os.killpg(child.pid, signal.SIGTERM)
-        else:
-            child.terminate()
-        try:
-            child.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            if group:
-                os.killpg(child.pid, signal.SIGKILL)
-            else:
-                child.kill()
-            child.wait(timeout=5)
-
-
-def _reject_attachment(
-    binary: Path, work: Path, env: dict[str, str], before: tuple, log: Path
-) -> None:
-    stamp = _process_stamp(before[3])
-    rejected = subprocess.run(
-        [str(binary), "session", "connect", before[0], "--replace"],
-        cwd=work,
-        env={**env, "LF_PROBE_NATIVE_UI": "1", "LF_PROBE_REJECT_UI": "1"},
-        capture_output=True,
-        timeout=30,
-    )
-    log.write_bytes(rejected.stderr)
-    if rejected.returncode == 0:
-        raise AssertionError("invalid native launch unexpectedly succeeded")
-    if _state(env) != before or _process_stamp(before[3]) != stamp:
-        raise AssertionError("rejected attachment changed driver or engine")
-
-
-def _check_draft_preservation(
-    binary: Path,
-    work: Path,
-    env: dict[str, str],
-    server: object,
-    client: subprocess.Popen,
-    master: int,
-    draft_path: Path,
-    rejected_path: Path,
-) -> None:
-    draft = f"Retain draft {uuid.uuid4().hex}"
-    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
-    draft_output = bytearray()
-    deadline = time.monotonic() + 5
-    while draft.encode() not in draft_output and time.monotonic() < deadline:
-        if select.select([master], [], [], 0.05)[0]:
-            draft_output.extend(os.read(master, 65536))
-    draft_path.write_bytes(draft_output)
-    if draft.encode() not in draft_output:
-        raise AssertionError("native UI did not display the draft")
-    current = _state(env)
-    _reject_attachment(binary, work, env, current, rejected_path)
-    if client.poll() is not None:
-        raise AssertionError("failed replacement stopped the controlling UI")
-    os.write(master, b"\r")
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        if any(draft in json.dumps(request["input"]) for request in server.requests):
-            return
-        if select.select([master], [], [], 0.05)[0]:
-            with draft_path.open("ab") as log:
-                log.write(os.read(master, 65536))
-    raise AssertionError("retained UI did not submit its exact draft")
-
-
-def _check_attached_timings(
-    binary: Path, work: Path, env: dict[str, str], exec_id: str, timing_path: Path
-) -> None:
-    with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
-        db.execute("BEGIN EXCLUSIVE")
-        with timing_path.open("w") as timing_log:
-            diagnostic = subprocess.Popen(
-                [str(binary), "session", "timings", exec_id],
-                cwd=work,
-                env=env,
-                stdout=timing_log,
-                stderr=subprocess.DEVNULL,
-            )
-            try:
-                deadline = time.monotonic() + 5
-                while "input_accepted" not in timing_path.read_text():
-                    if time.monotonic() >= deadline or diagnostic.poll() is not None:
-                        raise AssertionError("timing output waits for SQLite admission")
-                    time.sleep(0.02)
-            finally:
-                db.rollback()
-                diagnostic.wait(timeout=15)
-            if diagnostic.returncode != 0:
-                raise AssertionError("timing reader failed")
-    phases = [json.loads(line) for line in timing_path.read_text().splitlines()]
-    if not {"lookup_complete", "attached", "input_accepted"}.issubset(
-        {phase["phase"] for phase in phases}
-    ):
-        raise AssertionError("connection diagnostic is missing an observed phase")
-    if any(phase["phase"] == "exited" for phase in phases):
-        raise AssertionError("attached lifetime was recorded before client exit")
-
-
-def _stop_reconnect(client: subprocess.Popen, sample: dict) -> None:
-    try:
-        _stop(client)
-    except Exception as error:
-        # Cleanup must not replace the behavioral failure that triggered it.
-        sample.update(status="failed", reconnect_cleanup_error=str(error))
-
-
-def _check_reconnect_draft(
-    binary: Path,
-    work: Path,
-    env: dict[str, str],
-    server: object,
-    master: int,
-    output: Path,
-    sample: dict,
-) -> None:
-    draft = f"Retain across connect {uuid.uuid4().hex}"
-    sample["reconnect_draft"] = draft
-    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
-    transcript = bytearray()
-    deadline = time.monotonic() + 5
-    while draft.encode() not in transcript and time.monotonic() < deadline:
-        if select.select([master], [], [], 0.05)[0]:
-            transcript.extend(os.read(master, 65536))
-    (output / "reconnect-original.bin").write_bytes(transcript)
-    if draft.encode() not in transcript:
-        raise AssertionError("original UI did not display reconnect draft")
-    before = _state(env)
-    if before is None:
-        raise AssertionError("original UI lost its engine before reconnect")
-    stamp = _process_stamp(before[3])
-    with ExitStack() as cleanup:
-        second_master, slave = pty.openpty()
-        cleanup.callback(os.close, second_master)
-        cleanup.callback(os.close, slave)
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
-        second = subprocess.Popen(
-            [str(binary), "session", "connect", before[0]],
-            cwd=work,
-            env={**env, "TERM": "xterm-256color", "LF_PROBE_NATIVE_UI": "1"},
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            preexec_fn=_terminal,
-        )
-        cleanup.callback(_stop_reconnect, second, sample)
-        transcript = bytearray()
-        deadline = time.monotonic() + 15
-        with (output / "reconnect-terminal.bin").open("wb") as log:
-            while time.monotonic() < deadline:
-                if select.select([second_master], [], [], 0.05)[0]:
-                    chunk = os.read(second_master, 65536)
-                    log.write(chunk)
-                    transcript.extend(chunk)
-                    if b"\x1b[6n" in chunk:
-                        os.write(second_master, b"\x1b[1;1R")
-                    if b"\x1b[c" in chunk:
-                        os.write(second_master, b"\x1b[?1;2c")
-                if server.response_text.encode() in transcript:
-                    break
-                if second.poll() is not None:
-                    raise AssertionError("reconnect exited before retained output")
-            else:
-                raise AssertionError("reconnect did not display retained output")
-            after = _state(env)
-            sample["reconnect_same_engine"] = (
-                after is not None and before[:5] == after[:5] and stamp == _process_stamp(before[3])
-            )
-            sample["reconnect_driver_changed"] = after is not None and before[5] != after[5]
-            if not sample["reconnect_same_engine"]:
-                raise AssertionError("reconnect changed the existing engine")
-            # Append a fresh marker to prove input works without copying the old draft.
-            marker = f" reconnect-input-{uuid.uuid4().hex}"
-            os.write(second_master, b"\x1b[200~" + marker.encode() + b"\x1b[201~")
-            time.sleep(0.3)
-            os.write(second_master, b"\r")
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline:
-                for request in server.requests:
-                    submitted = json.dumps(request["input"])
-                    if marker.strip() in submitted:
-                        user_input = [
-                            item for item in request["input"] if item.get("role") == "user"
-                        ]
-                        (output / "reconnect-input.json").write_text(
-                            json.dumps(user_input[-1], indent=2)
-                        )
-                        sample["reconnect_input_accepted"] = True
-                        sample["reconnect_preserved_draft"] = draft in submitted
-                        if sample["reconnect_preserved_draft"]:
-                            return
-                        raise AssertionError(
-                            "successful reconnect accepted input but lost the draft"
-                        )
-                if select.select([second_master], [], [], 0.05)[0]:
-                    log.write(os.read(second_master, 65536))
-            raise AssertionError(
-                "reconnect did not accept the input marker; draft continuity unknown"
-            )
+def _native_identity(env: dict[str, str]) -> list[dict]:
+    clients = []
+    for path in (Path(env["LF_HOME"]) / "runs").glob("*/*/provider-clients/*.json"):
+        client = json.loads(path.read_text())
+        client["os_birth"] = subprocess.check_output(
+            ["ps", "-p", str(client["pid"]), "-o", "lstart="], text=True
+        ).strip()
+        clients.append(client)
+    assert len(clients) == 1, "expected exactly one retained native UI"
+    return clients
 
 
 def measure(
@@ -253,181 +109,327 @@ def measure(
     results: dict,
     output: Path,
     samples: int,
-    check_reconnect_draft: bool = False,
+    review_fixture: Path | None = None,
+    history_turns: int = 1,
 ) -> None:
-    if samples < 1:
-        raise ValueError("samples must be positive")
-    with (Path(env["CODEX_HOME"]) / "config.toml").open("a") as config:
-        config.write(f'\n[projects.{json.dumps(str(work.resolve()))}]\ntrust_level = "trusted"\n')
     results.update(
-        endpoint="native Codex PTY bytes, synthetic local Responses server",
+        endpoint="native Codex screen bytes and composer response; no compositor",
+        measured_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         host=platform.platform(),
+        tmux_version=subprocess.check_output(["tmux", "-V"], text=True).strip(),
+        samples=[],
+        history_turns=history_turns,
+        targets=None,
         provider_paths={
             "codex_conversation": "attempted",
-            "codex_flow_review": "not measured; source route replaces native clients",
-            "claude": "no existing Codex relay path; not measured",
-            "opencode": "no existing Codex relay path; not measured",
+            "codex_flow_review": "unmeasured",
+            "claude": "unmeasured",
+            "opencode": "unmeasured",
         },
-        samples=[],
-        targets=None,
-        measured_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         observer_limits=[
-            "PTY byte markers, not terminal screen reconstruction or compositor presentation",
-            "Input response includes a deliberate 300ms submission delay and synthetic tool work",
-            "Database polling and concurrent host work affect timings",
-            "No pagination, authenticated response, or Flow-review proof",
-            "Failed replacement preserves the original UI draft; "
-            "successful takeover does not copy drafts",
+            "synthetic Responses, no authenticated provider",
+            "composer response is a readiness upper bound, final submission checks draft contents",
+            "fixed live UI/history; no provider restart between samples",
         ],
     )
-    for index in range(samples):
-        sample = {"index": index, "output_ms": None, "input_response_ms": None}
-        results["samples"].append(sample)
-        server.held.clear()
-        server.release.clear()
-        marker = f"retained-{uuid.uuid4().hex}"
-        server.response_text = marker
-        log_path = output / f"seed-{index}.log"
-        with log_path.open("wb") as log:
-            seed = subprocess.Popen(
-                [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+    config = work / ".lf"
+    (config / "skills/repo").mkdir(parents=True)
+    (config / "config.yaml").write_text("agent: codex\n")
+    (config / "skills/repo/session.md").write_text(
+        "Run the fixture command and report its response.\n"
+    )
+    subprocess.run(["git", "init", "-q", str(work)], env=env, check=True)
+    subprocess.run(["git", "add", ".lf"], cwd=work, env=env, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=work,
+        env=env,
+        check=True,
+    )
+    env = {**env, "TERM": "xterm-256color", "COLORTERM": "truecolor", "LF_PROBE_NATIVE_UI": "1"}
+    review = None
+    if review_fixture:
+        setup = subprocess.run(
+            [str(review_fixture), "write_native_review_fixture", "--ignored", "--test-threads=1"],
+            env={**env, "LF_REVIEW_FIXTURE": str(work.parent), "TMPDIR": str(work.parent)},
+            cwd=work,
+            capture_output=True,
+            timeout=30,
+        )
+        (output / "review-setup.log").write_bytes(setup.stdout + setup.stderr)
+        setup.check_returncode()
+        review = json.loads((work.parent / "review.json").read_text())
+        work = Path(review["cwd"])
+        results["provider_paths"]["codex_flow_review"] = "attempted"
+        results["provider_paths"]["codex_conversation"] = "not selected"
+    with (Path(env["CODEX_HOME"]) / "config.toml").open("a") as trusted:
+        trusted.write(f'\n[projects.{json.dumps(str(work.resolve()))}]\ntrust_level = "trusted"\n')
+    marker = f"retained-{uuid.uuid4().hex}"
+    server.response_text = marker
+    server.release.set()
+    if review:
+        session = review["id"]
+    else:
+        opened = subprocess.run(
+            [str(binary), "session", "ensure", "--json"],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            timeout=40,
+        )
+        (output / "ensure.log").write_bytes(opened.stderr)
+        opened.check_returncode()
+        session = json.loads(opened.stdout)["id"]
+    digest = hashlib.sha256(f"{Path(env['LF_HOME']).resolve()}\0{session}".encode()).hexdigest()[
+        :32
+    ]
+    socket = Path(f"/tmp/lf-term-{os.geteuid()}") / digest / "socket"
+    tmux = ["tmux", "-S", str(socket)]
+    clients = []
+    results["session"] = session
+    try:
+        child, master = _spawn([str(binary), "session", "connect", session], work, env)
+        clients.append((child, master))
+        initial = _read(master, marker.encode(), 40)
+        (output / "initial.bin").write_bytes(initial)
+        for index in range(1, history_turns):
+            marker = f"history-{index}-{uuid.uuid4().hex}"
+            server.response_text = marker
+            os.write(master, f"Continue fixture history turn {index}.".encode())
+            # Enter is separate from typing: Codex distinguishes pasted lines.
+            time.sleep(0.05)
+            os.write(master, b"\r")
+            _read(master, marker.encode())
+        draft = f"retain-draft-{uuid.uuid4().hex}"
+        os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
+        (output / "draft.bin").write_bytes(_read(master, draft.encode()))
+        before = _state(env, session)
+        results["before"] = before
+        results["native_before"] = _native_identity(env)
+        rejected = subprocess.run(
+            [str(binary), "session", "connect", session, "--take-control"],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+        (output / "rejected-attachment.log").write_bytes(rejected.stdout + rejected.stderr)
+        assert rejected.returncode != 0
+        assert _native_identity(env) == results["native_before"]
+        assert _state(env, session) == before
+        results["failed_attachment_preserved"] = True
+        histories = list((Path(env["CODEX_HOME"]) / "sessions").rglob("*.jsonl"))
+        assert len(histories) == 1, "expected one native conversation history"
+        history = histories[0].read_bytes()
+        results["history_bytes_before"] = len(history)
+        results["history_prefix_sha256"] = hashlib.sha256(history).hexdigest()
+        if review:
+            rejected = subprocess.run(
+                [str(binary), "session", "complete", session],
                 cwd=work,
                 env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
+                capture_output=True,
+                timeout=10,
             )
-            client = None
-            master = slave = None
+            (output / "not-ready.log").write_bytes(rejected.stdout + rejected.stderr)
+            assert rejected.returncode != 0, "unready review completed"
+            assert before == _state(env, session)
+        provider_pid = subprocess.check_output(
+            [*tmux, "display", "-p", "-t", "session:0.0", "#{pane_pid}"], text=True
+        ).strip()
+        results["service_pid"] = provider_pid
+        os.write(master, b"\x02d")
+        _wait(child, master)
+        assert child.returncode == 0, "initial attachment failed while detaching"
+        for index in range(samples):
+            sample = {
+                "index": index,
+                "output_ms": None,
+                "input_response_ms": None,
+                "status": "failed",
+            }
+            results["samples"].append(sample)
+            started = time.monotonic()
+            child, master = _spawn([str(binary), "session", "connect", session], work, env)
+            clients.append((child, master))
+            transcript = _read(master, draft.encode())
+            sample["output_ms"] = (time.monotonic() - started) * 1000
+            assert marker.encode() in transcript, "attachment lost visible retained history"
+            suffix = f"-input-{index}"
+            os.write(master, b"\x1b[200~" + suffix.encode() + b"\x1b[201~")
+            transcript += _read(master, suffix.encode())
+            sample["input_response_ms"] = (time.monotonic() - started) * 1000
+            (output / f"terminal-{index}.bin").write_bytes(transcript)
+            os.write(master, b"\x7f" * len(suffix))
+            _read(master, b"", 0.15)
+            sample["same_identity"] = before == _state(env, session)
+            assert sample["same_identity"], "attachment changed Session/driver identity"
+            os.write(master, b"\x02d")
+            _wait(child, master)
+            assert child.returncode == 0, "attachment failed while detaching"
+            sample["status"] = "passed"
+        simultaneous = [
+            _spawn([str(binary), "session", "connect", session], work, env) for _ in range(2)
+        ]
+        clients.extend(simultaneous)
+        for _, terminal in simultaneous:
+            _read(terminal, draft.encode())
+        attached = subprocess.check_output([*tmux, "list-clients", "-F", "#{client_pid}"])
+        assert len(attached.splitlines()) == 1, "concurrent connects acquired two controllers"
+        for presenter, terminal in simultaneous:
+            presenter.terminate()
+            _wait(presenter, terminal)
+        assert before == _state(env, session)
+        assert results["native_before"] == _native_identity(env)
+        results["concurrent_connects_one_controller"] = True
+        child, master = _spawn([str(binary), "session", "connect", session], work, env)
+        clients.append((child, master))
+        _read(master, draft.encode())
+        stalled, unread = _spawn([str(binary), "session", "connect", session], work, env)
+        clients.append((stalled, unread))
+        time.sleep(0.5)
+        stalled.terminate()
+        stalled.wait(timeout=3)
+        assert before == _state(env, session)
+        results["unread_passive_termination_preserves_session"] = True
+        # A second connection is passive. Its typing cannot alter the draft.
+        passive, second = _spawn([str(binary), "session", "connect", session], work, env)
+        clients.append((passive, second))
+        (output / "passive.bin").write_bytes(_read(second, draft.encode()))
+        os.write(second, b"FORBIDDEN INPUT\r")
+        _read(second, b"", 0.2)
+        replacement, third = _spawn(
+            [str(binary), "session", "connect", session, "--take-control"], work, env
+        )
+        clients.append((replacement, third))
+        (output / "takeover.bin").write_bytes(_read(third, draft.encode()))
+        _wait(child, master)
+        assert child.returncode == 0, "previous controller failed while detaching"
+        if review:
+            server.command = shlex.join([str(binary), "session", "ready", "retained review proof"])
+        os.write(third, b"\r")
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            requests = [
+                request for request in server.requests if draft in json.dumps(request.get("input"))
+            ]
+            if requests:
+                submitted = json.dumps(requests[-1]["input"])
+                assert "FORBIDDEN INPUT" not in submitted
+                assert "-input-" not in submitted
+                results["submitted_retained_draft"] = True
+                (output / "submitted.json").write_text(json.dumps(requests[-1]["input"], indent=2))
+                break
+            _read(third, b"", 0.1)
+        else:
+            raise AssertionError("retained draft did not reach the provider")
+        results["after"] = _state(env, session)
+        assert results["after"] == before
+        results["takeover_keeps_driver"] = True
+        results["native_after"] = _native_identity(env)
+        assert results["native_after"] == results["native_before"]
+        assert histories == list((Path(env["CODEX_HOME"]) / "sessions").rglob("*.jsonl"))
+        assert histories[0].read_bytes().startswith(history)
+        results["native_history_preserved"] = True
+        if review:
+            deadline = time.monotonic() + 15
+            while True:
+                with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
+                    ready = db.execute(
+                        "SELECT ready_summary FROM agent_sessions WHERE id=?", (session,)
+                    ).fetchone()[0]
+                if ready == "retained review proof":
+                    break
+                if time.monotonic() >= deadline:
+                    raise AssertionError("native review did not become ready")
+                _read(third, b"", 0.1)
+            results["native_review_ready"] = True
+        timings = Path(env["LF_HOME"]) / "runtime/session-connect"
+        for path in timings.glob("*.jsonl"):
+            diagnostic = subprocess.run(
+                [str(binary), "session", "timings", path.stem],
+                cwd=work,
+                env=env,
+                capture_output=True,
+                timeout=10,
+            )
+            diagnostic.check_returncode()
+            (output / path.name).write_bytes(diagnostic.stdout)
+            records = [json.loads(line) for line in diagnostic.stdout.splitlines()]
+            assert all(record["selector"] == session for record in records)
+            if not any(record["phase"] == "attached" for record in records):
+                assert any(record["phase"] == "failed" for record in records), records
+            assert any(
+                record["phase"] == "input_ready" and record["unavailable"] for record in records
+            )
+    except BaseException as error:
+        results["error"] = f"{type(error).__name__}: {error}"
+        raise
+    finally:
+        cleanup_errors = []
+        screen = subprocess.run(
+            [*tmux, "capture-pane", "-p", "-e", "-t", "session:0.0"], capture_output=True, timeout=5
+        )
+        (output / "last-screen.bin").write_bytes(screen.stdout + screen.stderr)
+        try:
+            completed = subprocess.run(
+                [str(binary), "session", "complete", session],
+                cwd=work,
+                env=env,
+                capture_output=True,
+                timeout=20,
+            )
+            (output / "complete.log").write_bytes(completed.stdout + completed.stderr)
+            completed.check_returncode()
+            if review:
+                with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
+                    settled = db.execute(
+                        "SELECT s.completed_at,s.ready_summary,f.state "
+                        "FROM agent_sessions s JOIN flow_sessions f ON f.id=s.flow_session_id "
+                        "WHERE s.id=? AND f.id=? AND s.current_capture=?",
+                        (session, review["flow"], before[1]),
+                    ).fetchone()
+                assert settled is not None and settled[0] is not None
+                assert settled[1:] == ("retained review proof", "completed"), settled
+                results["exact_review_completion"] = True
+            deadline = time.monotonic() + 5
+            while subprocess.run([*tmux, "has-session"], capture_output=True).returncode == 0:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("retained service survived Session completion")
+                time.sleep(0.05)
+        except Exception as error:
+            cleanup_errors.append(str(error))
+            subprocess.run([*tmux, "kill-server"], capture_output=True, timeout=5)
+        for child, master in clients:
             try:
-                if not server.held.wait(30):
-                    raise TimeoutError("seed did not reach held Responses request")
-                before = _state(env)
-                if before is None:
-                    raise RuntimeError("seed has no recorded live engine")
-                sample["before"] = before
-                sample["engine_before"] = _process_stamp(before[3])
-                if sample["engine_before"] is None:
-                    raise RuntimeError("recorded engine is no longer alive")
-                _reject_attachment(binary, work, env, before, output / f"rejected-{index}.log")
-                sample["failed_start_preserved"] = True
-                master, slave = pty.openpty()
-                fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
-                started = time.monotonic()
-                client = subprocess.Popen(
-                    [str(binary), "session", "connect", before[0]],
-                    cwd=work,
-                    env={**env, "TERM": "xterm-256color", "LF_PROBE_NATIVE_UI": "1"},
-                    stdin=slave,
-                    stdout=slave,
-                    stderr=slave,
-                    preexec_fn=_terminal,
-                )
-                os.close(slave)
-                slave = None
-                transcript = bytearray()
-                marker_bytes = marker.encode()
-                response = f"input-{uuid.uuid4().hex}"
-                response_bytes = response.encode()
-                submit_at = None
-                with (output / f"terminal-{index}.bin").open("wb") as terminal:
-                    while time.monotonic() - started < 45:
-                        if submit_at is not None and time.monotonic() >= submit_at:
-                            os.write(master, b"\r")
-                            sample["input_sent_ms"] = (time.monotonic() - started) * 1000
-                            submit_at = None
-                        if "driver_claim_ms" not in sample:
-                            state = _state(env)
-                            if state and state[5] != before[5]:
-                                sample["driver_claim_ms"] = (time.monotonic() - started) * 1000
-                                server.release.set()
-                        if select.select([master], [], [], 0.05)[0]:
-                            try:
-                                chunk = os.read(master, 65536)
-                            except OSError:
-                                break
-                            if not chunk:
-                                break
-                            terminal.write(chunk)
-                            terminal.flush()
-                            transcript.extend(chunk)
-                            # Answer terminal capability queries, never infer readiness from them.
-                            if b"\x1b[6n" in chunk:
-                                os.write(master, b"\x1b[1;1R")
-                            if b"\x1b[c" in chunk:
-                                os.write(master, b"\x1b[?1;2c")
-                            if sample["output_ms"] is None and marker_bytes in transcript:
-                                sample["output_ms"] = (time.monotonic() - started) * 1000
-                                server.response_text = response
-                                os.write(master, b"Report the input probe result.")
-                                submit_at = time.monotonic() + 0.3
-                            if sample["output_ms"] is not None and response_bytes in transcript:
-                                sample["input_response_ms"] = (time.monotonic() - started) * 1000
-                                break
-                        if client.poll() is not None:
-                            break
-                if sample["input_response_ms"] is None:
-                    raise AssertionError("native UI did not return the input probe response")
-                _check_draft_preservation(
-                    binary,
-                    work,
-                    env,
-                    server,
-                    client,
-                    master,
-                    output / f"draft-{index}.bin",
-                    output / f"rejected-draft-{index}.log",
-                )
-                sample["failed_replacement_preserved_draft"] = True
-                sample["after"] = _state(env)
-                _check_attached_timings(
-                    binary, work, env, sample["after"][5], output / f"timings-{index}.jsonl"
-                )
-                sample["diagnostic_while_attached"] = True
-                sample["engine_after"] = _process_stamp(before[3])
-                sample["continuity"] = (
-                    sample["after"] is not None
-                    and before[:5] == sample["after"][:5]
-                    and sample["engine_before"] == sample["engine_after"]
-                )
-                sample["status"] = "passed" if sample["continuity"] else "failed"
-                sample["elapsed_ms"] = (time.monotonic() - started) * 1000
-                sample["exit_before_cleanup"] = client.poll()
-                # This sample started with a held turn. It does not prove retained-history replay.
-                sample["history_population"] = "one in-flight seed turn"
-                if check_reconnect_draft:
-                    _check_reconnect_draft(binary, work, env, server, master, output, sample)
+                _stop(child, master)
             except Exception as error:
-                sample.update(status="failed", error=str(error))
-            finally:
-                server.release.set()
-                try:
-                    with ExitStack() as cleanup:
-                        cleanup.callback(_stop, seed)
-                        if client is not None:
-                            cleanup.callback(_stop, client, group=True)
-                        for fd in (master, slave):
-                            if fd is not None:
-                                cleanup.callback(os.close, fd)
-                    if sample.get("diagnostic_while_attached"):
-                        diagnostic = subprocess.run(
-                            [str(binary), "session", "timings", sample["after"][5]],
-                            cwd=work,
-                            env=env,
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                            timeout=5,
-                        )
-                        (output / f"timings-after-{index}.jsonl").write_text(diagnostic.stdout)
-                        phases = [json.loads(line) for line in diagnostic.stdout.splitlines()]
-                        if not any(phase["attached_lifetime_ms"] is not None for phase in phases):
-                            sample.update(
-                                status="failed", error="attached lifetime was not recorded"
-                            )
-                except Exception as error:
-                    sample.update(status="failed", cleanup_error=str(error))
-                finally:
-                    (output / "results.json").write_text(json.dumps(results, indent=2))
-        if sample["status"] != "passed":
-            break
+                cleanup_errors.append(str(error))
+        results["cleanup_errors"] = cleanup_errors
+        results["server_absent"] = (
+            subprocess.run([*tmux, "has-session"], capture_output=True, timeout=5).returncode != 0
+        )
+        if "native_before" in results:
+            native = results["native_before"][0]
+            process = subprocess.run(
+                ["ps", "-p", str(native["pid"]), "-o", "lstart="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            results["native_absent"] = (
+                process.returncode != 0 or process.stdout.strip() != native["os_birth"]
+            )
+            if not results["native_absent"]:
+                cleanup_errors.append("the owned native UI survived completion")
+    if results["cleanup_errors"] or not results["server_absent"]:
+        raise AssertionError("retained Session cleanup failed; see cleanup_errors")

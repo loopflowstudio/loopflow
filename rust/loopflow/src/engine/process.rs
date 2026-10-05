@@ -669,3 +669,15 @@ mod tests {
 pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
     start_lf_session_with_env(session, cwd, argv, &[]).await
 }
+
+#[cfg(not(test))]
+pub(crate) fn start_session_terminal(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    let context = execution_context()?;
+    let child_env = session_environment(&[], &context);
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell = lf_session_shell_command(cwd, argv, &environment);
+    crate::engine::session_terminal::SessionTerminal::new(session)?.start(cwd, &shell)
+}

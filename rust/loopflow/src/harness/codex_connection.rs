@@ -213,19 +213,6 @@ impl CodexConnection {
     }
 
     pub async fn serve(&self, client: UnixStream, engine: &Path) -> Result<()> {
-        self.serve_attaching(client, engine, None).await
-    }
-
-    /// Acquire input ownership only after the native client receives its
-    /// selected live thread. Startup errors leave the previous driver intact.
-    pub(crate) async fn serve_attaching(
-        &self,
-        client: UnixStream,
-        engine: &Path,
-        mut claim: Option<Box<dyn FnOnce() -> Result<SessionDriver> + Send>>,
-    ) -> Result<()> {
-        let mut connection = self.clone();
-        let mut resume_request = None;
         let mut input_request = None;
         let mut input_accepted = false;
         let mut client = accept_async(client).await?;
@@ -258,9 +245,6 @@ impl CodexConnection {
                             // Subscribe to the existing thread. Do not forward
                             // config/cwd overrides from a passive or stale UI.
                             rpc["params"] = json!({"threadId": self.thread_id});
-                            if claim.is_some() {
-                                resume_request = rpc.get("id").cloned();
-                            }
                             true
                         }
                         _ => false,
@@ -271,7 +255,7 @@ impl CodexConnection {
                         upstream.send(message).await?;
                     } else {
                         let outcome;
-                        (upstream, outcome) = connection.send(upstream, message).await?;
+                        (upstream, outcome) = self.send(upstream, message).await?;
                         match outcome {
                             Ok(()) => {
                                 if !input_accepted && starts_turn {
@@ -293,7 +277,7 @@ impl CodexConnection {
                             let rpc: Value = serde_json::from_str(&text)?;
                             super::dispatch::off_reactor(|| {
                                 history.record(&self.store, &self.session_id,
-                                    connection.driver.as_ref(), Some(&self.thread_id), &rpc)
+                                    self.driver.as_ref(), Some(&self.thread_id), &rpc)
                             })?;
                             if input_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id)) {
                                 input_request = None;
@@ -302,18 +286,7 @@ impl CodexConnection {
                                     input_accepted = true;
                                 }
                             }
-                            let resumed = resume_request.as_ref().is_some_and(|id| {
-                                rpc.get("id") == Some(id)
-                                    && rpc.pointer("/result/thread/id").and_then(Value::as_str)
-                                        == Some(self.thread_id.as_str())
-                                    && rpc.get("error").is_none()
-                            });
                             client.send(Message::Text(text)).await?;
-                            if resumed {
-                                if let Some(claim) = claim.take() {
-                                    connection.driver = Some(super::dispatch::off_reactor(claim)?);
-                                }
-                            }
                         }
                         message => client.send(message).await?,
                     }

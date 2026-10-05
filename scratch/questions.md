@@ -1,8 +1,8 @@
 # Assumptions and dated evidence — LOO-378
 
 The current smoke runner uses disposable Loopflow/provider Homes and synthetic
-Responses; it needs no account access. Retained terminal ownership, not merely
-an engine endpoint, is the unresolved design in
+Responses; it needs no account access. Retained terminal ownership is implemented for prepared conversations and reviews;
+remaining first-launch/provider coverage is recorded in
 [the plan](connect-quickly-to-an-existing.md). No reduced continuity acceptance
 has been approved.
 
@@ -20,7 +20,10 @@ They are neither current availability evidence nor authorization to change an
 installation. Future authenticated probes must resolve their actual account
 context and preserve unrelated data.
 
-October 5 context queries: compress/realign put the stored Work seed 844–863 tokens over its 16,000-token
-goal limit. It is assembled from live Task/steer content, not an editable local
-goal file; this implementation does not rewrite those authored inputs. Local
-scratch and Product memory remain within their limits.
+October 5 context query after evidence packing: local memory fits under
+16,000 tokens and scratch fits. The generated Work seed remains 1,968 tokens over
+its 16,000-token goal limit. Its Task/steer text plus automatic changed-file
+manifest is not an editable local goal; authored direction was not rewritten.
+Raw new probe files are packed losslessly into the evidence archive to keep the
+manifest bounded. No limit was raised. The full-feature probe's missing managed
+account is an isolated-fixture limitation, not evidence of installed account state.

@@ -1,6 +1,7 @@
 """Compare retained tmux presentation with raw PTY replay using owned processes."""
 
 import argparse
+import errno
 import fcntl
 import json
 import os
@@ -109,7 +110,9 @@ def _wait_file(path: Path) -> None:
         time.sleep(0.01)
 
 
-def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
+def _tmux(
+    root: Path, output: Path, env: dict[str, str], result: dict, *, snapshots: bool = False
+) -> None:
     socket = root / "tmux.sock"
     base = ["tmux", "-S", str(socket), "-f", "/dev/null"]
 
@@ -180,7 +183,15 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
             b"YWN0aXZlLWNsaXBib2FyZA==" in (root / "input").read_bytes()
         )
 
-        passive, second = _attach("-r", width=60)
+        if snapshots:
+            passive, second = _spawn(
+                [sys.executable, str(Path(__file__).resolve()), "--snapshot", str(socket)],
+                env,
+                width=60,
+            )
+            clients.append((passive, second))
+        else:
+            passive, second = _attach("-r", width=60)
         replay = _read(second, 1)
         (output / "tmux-passive.bin").write_bytes(replay)
         before = (root / "input").read_bytes()
@@ -202,6 +213,9 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
         (output / "tmux-controller-query.bin").write_bytes(controller_query)
         (output / "tmux-passive-query.bin").write_bytes(passive_query)
         result["passive_receives_clipboard_query"] = b"\x1b]52;" in passive_query
+        result["controller_receives_clipboard_query_with_passive_view"] = (
+            b"\x1b]52;" in controller_query
+        )
         if result["passive_receives_clipboard_query"]:
             reply = b"\x1b]52;;cGFzc2l2ZS1jbGlwYm9hcmQ=\x07"
             os.write(second, reply)
@@ -218,15 +232,28 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
             .stdout.decode()
             .splitlines()
         )
-        _command("refresh-client", "-t", client_names[str(owner.pid)], "-f", "read-only")
-        _command("switch-client", "-c", client_names[str(passive.pid)], "-r")
+        if snapshots:
+            # Revoke the only real client before granting a new attachment.
+            _command("detach-client", "-t", client_names[str(owner.pid)])
+            owner.wait(timeout=3)
+            passive.terminate()
+            passive.wait(timeout=3)
+            passive, second = _attach(width=60)
+            _read(second)
+        else:
+            _command("refresh-client", "-t", client_names[str(owner.pid)], "-f", "read-only")
+            _command("switch-client", "-c", client_names[str(passive.pid)], "-r")
         result["clients_after_transfer"] = (
             _command("list-clients", "-F", "#{client_pid} #{client_readonly} #{client_flags}")
             .stdout.decode()
             .splitlines()
         )
         before_transfer = (root / "input").read_bytes()
-        os.write(terminal, b"OLD OWNER MUST NOT WRITE")
+        try:
+            os.write(terminal, b"OLD OWNER MUST NOT WRITE")
+        except OSError as error:
+            if not snapshots or error.errno != errno.EIO:
+                raise
         _read(terminal)
         result["old_owner_fenced_after_transfer"] = (root / "input").read_bytes() == before_transfer
         os.write(second, b"NEW OWNER INPUT")
@@ -323,13 +350,35 @@ def _relay(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
         result["cleanup_status"] = child.returncode
 
 
+def _snapshot(socket: Path) -> None:
+    tty.setraw(0)
+    while True:
+        screen = subprocess.run(
+            ["tmux", "-S", str(socket), "capture-pane", "-p", "-e", "-t", "probe:0.0"],
+            capture_output=True,
+            timeout=5,
+        )
+        if screen.returncode:
+            return
+        os.write(1, b"\x1b[H\x1b[2J" + screen.stdout.replace(b"\n", b"\r\n"))
+        # No application input path and no tmux client registration.
+        if select.select([0], [], [], 0.05)[0]:
+            if not os.read(0, 65536):
+                return
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--fixture", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--snapshot", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--snapshots", action="store_true")
     args = parser.parse_args()
     if args.fixture:
         _fixture(args.fixture)
+        return
+    if args.snapshot:
+        _snapshot(args.snapshot)
         return
     if args.output is None or args.output.exists():
         parser.error("--output must name a new directory")
@@ -345,7 +394,10 @@ def main() -> None:
                 fixture = root / name
                 fixture.mkdir()
                 results[name] = {}
-                probe(fixture, args.output, env, results[name])
+                if name == "tmux":
+                    probe(fixture, args.output, env, results[name], snapshots=args.snapshots)
+                else:
+                    probe(fixture, args.output, env, results[name])
         required = [
             "initial_history",
             "bracketed_paste_exact",
@@ -368,10 +420,15 @@ def main() -> None:
         failures = [name for name in required if not results["tmux"].get(name)]
         if failures:
             raise AssertionError(f"tmux transport behavior failed: {failures}")
+        if args.snapshots:
+            assert results["tmux"]["controller_receives_clipboard_query_with_passive_view"]
+            assert not results["tmux"]["passive_receives_clipboard_query"]
+            assert not results["tmux"]["late_clipboard_query_replayed"]
         results["suitable_for_production"] = False
         results["remaining"] = (
-            "controller-owned terminal queries; bounded screen replay; native provider/image "
-            "proof; lf review and driver lifetime integration"
+            "native provider/image proof and lf review/driver integration are outside this fixture"
+            if args.snapshots
+            else "controller-owned queries, bounded screen replay and native integration"
         )
     except BaseException as error:
         results["error"] = f"{type(error).__name__}: {error}"

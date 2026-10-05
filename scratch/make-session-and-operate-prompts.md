@@ -1,8 +1,22 @@
 # Session and operate prompts keep work moving together (LOO-383)
 
-Status: draft implementation plan, 2026-10-05. Jack Heart accepted the two-part
-contract in the Task brief (session/operate pairing; LOOPFLOW.md audit). The
-mechanisms below are proposals until the kickoff review.
+Status: design reviewed with Jack Heart, 2026-10-05. Jack accepted the two-part
+contract in the Task brief and made the three decisions under "Decisions"
+below. Mechanisms not listed there remain proposals.
+
+## Decisions (Jack Heart, 2026-10-05)
+
+1. **Started work must keep moving.** A Wave makes sure every started Task in
+   its Wave/Project keeps moving. It is not asked to start unstarted work "for
+   now at least"; that "will evolve over time." The goal is "reliably finishing
+   stuff ive started and isnt blocked on me."
+2. **The procedure is inline in the session.** Jack is "ok with collapsing
+   operate into just inline in session. No strong opinions; just make it work
+   reliably." Loading operate by `lf help` at run time is dropped.
+3. **A defined Flow proceeds.** "We can assume good flows for now that
+   basically end at landing." If a Task's selected Flow does not end at
+   landing, the Task either changes its Flow (wanted, not yet designed) or
+   waits on Jack. "If there is a defined flow, we need to proceed."
 
 ## Problem
 
@@ -85,12 +99,13 @@ Prompt behavior, shown at two levels; neither is claimed to be the other.
   writes `task/session/SKILL.md`; `lf context --skill wave/session` shows the
   assembled prompt with one `<lf:loopflow>` block.
 - **For Jack, after install:** run `lf session replace <product-wave-session>`
-  and say nothing. The Wave conversation's first turn ends with every unfinished
-  Product Task in one named disposition — e.g. LOO-375 started through a chosen
-  Flow and verified live, LOO-367's failure read and retried or reported with
-  its log evidence, LOO-382 named as waiting on Jack's kickoff review with its
-  open command — and no line that says another role owns the next step. Then
-  ask "what's running?" mid-turn and file an idea; operation resumes afterwards.
+  and say nothing. The Wave conversation's first turn ends with every *started*
+  unfinished Product Task in one named disposition — e.g. LOO-367's failure
+  read and retried or reported with its log evidence, a Task whose Flow stopped
+  mid-way continued and verified live, LOO-382 named as waiting on Jack's
+  kickoff review with its open command — and no line that says another role
+  owns the next step. Unstarted backlog is listed, not started. Then ask
+  "what's running?" mid-turn and file an idea; operation resumes afterwards.
 
 ## Chosen approach
 
@@ -104,22 +119,34 @@ Prompt behavior, shown at two levels; neither is claimed to be the other.
 
 **Operate** owns the whole procedure for its scope and is complete standalone:
 read current evidence, act, recover through supported controls, verify, exit.
+It stays the headless and cron entry point.
 
-**Session** owns continuity and responsiveness only. It carries no procedure
-beyond: on start, on each return after a pause, and after anything it changed,
-load the matching operate skill with `lf help <scope>/operate` and apply it;
-answer the person first; capture ideas; then resume operating.
+**Session** owns continuity and responsiveness only: apply the procedure on
+start, on each return after a pause, and after anything it changed; answer the
+person first; capture ideas; then resume operating.
 
-Loading by command, not by assembling operate into the session prompt, is
-deliberate: a long conversation re-reads the *installed* procedure each time, so
-a released fix reaches an existing conversation's operating behavior without
-replacing it. The session keeps one short inline invariant (below) so a skipped
-read cannot reproduce the observed failure.
+The procedure reaches the session inline, from one source. Each session's
+builtin content is its short session file followed by its operate file's body,
+composed where builtins are registered (`build.rs` already generates the skill
+map). `lf help wave/session`, the vendor export and the launch prompt all carry
+the composed text; `wave/operate` remains its own skill. No frontmatter include
+feature, no run-time `lf help` read, and no hand-kept condensed copy or inline
+invariant. The session file itself contains no operating steps.
+
+Paying for this: `wave/session`'s 44-line persistent-workspace and publication
+section is mechanics, not conversation. It moves to the skill that exercises it
+or to user docs if one already covers it; otherwise it stays and the composed
+prompt is simply longer. Cross-scope application (`wave/operate` applying
+`task/operate` per Task, `repo/operate` applying `wave/operate` per Wave) keeps
+whatever form it has today; only the same-scope pairing is composed.
 
 ### The action contract (stated once, in each operate skill at its scope)
 
-An operate pass ends only when every unfinished item in scope has exactly one
-disposition, each with its evidence:
+An operate pass ends only when every *started* unfinished Task in scope has
+exactly one disposition, each with its evidence. Started is the recorded fact
+(a reservation set it once), independent of whether a worker is alive now.
+Unstarted backlog is reported as backlog and left alone: starting it is the
+person's selection for now.
 
 - **moving** — a live worker or driver was observed; left alone;
 - **acted** — this pass started, continued, recovered or delivered it through a
@@ -148,16 +175,20 @@ failure is not retried again. Authorization stays where it is: operators start
 and continue selected Flows without asking; they do not approve reviews, choose
 a merge the user reserved, cancel or abandon Tasks, or change direction.
 
-### Completion is read from the selected Flow
+### A defined Flow proceeds
 
-Each operate skill replaces "the Flow carries work through landing" with:
-read the actual Flow (`lf help <flow>`, `lf flow show`) before describing where
-it ends. A finished Flow, an accepted launch and a published PR are evidence to
-inspect. For a Task whose Flow finished short of its outcome, choose the next
-supported step — typically `queue` then the delivery the Task's owner selected
-(`ship` to land and complete; `lf submit` when a person merges) — or name the
-review it waits on. Publication, review, landing, Task completion and remaining
-scope (`lf pr next`) are reported as separate facts.
+A started Task with a selected Flow that has steps left and no live driver is
+continued (`lf --task <issue> flow start`) and verified. That is the whole
+rule for the common case, and it needs no permission.
+
+Builtin delivery Flows are assumed to end at landing. The operate skills stop
+claiming it as a fact about every Flow: a finished Flow, an accepted launch and
+a published PR are evidence to inspect. When a Task's Flow has finished and its
+work has not landed, the disposition is **waiting on a person**, naming the PR
+and what remains. The operator does not pick a different Flow for the Task;
+letting a Task change its Flow is wanted by Jack and not designed here.
+Publication, review, landing, Task completion and remaining scope
+(`lf pr next`) are reported as separate facts.
 
 ### Continuation, honestly
 
@@ -209,10 +240,14 @@ context budgets, scratch and memory owners. Change:
 
 ## Alternatives considered
 
-- **Assemble operate into the session prompt (frontmatter include).** Delivery
-  is guaranteed at launch, but it adds assembly and export code, doubles the
-  largest prompts on every session launch, and freezes the procedure for the
-  life of a conversation. Rejected for the re-read property above.
+- **Load operate at run time with `lf help <scope>/operate`.** An installed fix
+  would reach an existing conversation, but the observed failure was an
+  instruction not followed, and this adds one more. Dropped by decision 2.
+- **A general frontmatter include.** More machinery than three fixed pairs need.
+- **Delete the operate skills and keep only sessions.** Headless passes, crons
+  and `lf/commands/run.rs` placement depend on `wave/operate` and `repo/operate`.
+- **Operators choose the next Flow for a Task whose Flow ended before landing.**
+  Dropped by decision 3; such a Task waits on Jack.
 - **Keep a condensed procedure in each session.** Today's state; it drifted
   within a week of #1383.
 - **Have status stop saying "Wave" as next owner.** A DTO change across Rust,
@@ -232,11 +267,13 @@ Edit together:
 - `wave/skill/wave_operate.md`, `wave/skill/wave_session.md`
 - `ops/skill/repo_operate.md`, `ops/skill/repo_session.md`
 - `task/skill/task_operate.md`, new `task/skill/task_session.md`
+- `build.rs` (and `engine/builtins.rs` tests): compose each session from its
+  session file plus its operate body
 - `ops/task_automation.rs`: replace the `lf task run` hint with
   `lf --task <issue> flow start <flow>`
 - `engine/prompt.rs` assembled-prompt test: add the three sessions and
-  `task/operate`; assert each session names its own operate skill and none
-  contains `lf skill show`
+  `task/operate`; assert each session's content contains its own operate
+  body exactly once and none contains `lf skill show`
 - `tests/discovery_tests.rs`: `task/session` is listed
 - `tests/goldens/` via `tests/goldens/update_goldens.py`
 - Docs: `README.md` (pairs table beside `lf task/operate`), `docs/lf.md`
@@ -255,7 +292,8 @@ through landing"; "point the user there … instead of absorbing it here";
 41-line Task-brief section moves behind `capture-tasks` only if that skill
 already covers every rule in it; otherwise it stays (see questions).
 
-Forbidden outcomes: a session and its operate both describing recovery; a
+Forbidden outcomes: a hand-written second copy of the procedure in a session
+file; an operator starting unstarted backlog or selecting a Flow for a Task; a
 fourth "operations" role; a session that promises to watch; a prompt that
 completes or approves a review without the person; a new scheduler, controller
 or DTO; a warning paragraph layered over a contradiction instead of removing it.
@@ -269,13 +307,15 @@ functions intact in `wave/operate`; the default New Session skill, which stays
 
 - **Instruction-following, not authority, caused the failure.** Prompt edits
   improve odds; they prove nothing about runtime behavior. Mitigation: the
-  inline invariant, the post-install demo, and labelling simulations as such.
+  inline composed procedure, the post-install demo, and labelling simulations as such.
 - **The disposition rule can over-act** on stale reads. Mitigation: unknown is a
   disposition, live work is never duplicated, unchanged failures are not retried.
-- **`lf help` read is skipped** in a long conversation. The session's inline
-  invariant covers the failure Jack saw; the rest degrades to today's behavior.
-- **LOO-353 changes Flows and reviews underneath.** The prompts read the actual
-  Flow at run time instead of naming endpoints, so they survive that change.
+- **A long conversation keeps the procedure it launched with.** A released fix
+  reaches it only through `lf session replace`.
+- **Composed prompts are long.** `repo/session` carries `repo/operate`'s 323
+  lines. Accepted for reliability; trim operate itself, not the composition.
+- **LOO-353 changes Flows and reviews underneath.** The prompts continue a
+  Flow's remaining steps without naming endpoints, so they survive that change.
 - **Token cost.** LOOPFLOW.md must not grow; sessions shrink; `task/session` is
   new but short.
 
@@ -283,14 +323,16 @@ functions intact in `wave/operate`; the default New Session skill, which stays
 
 Builtins ship in the binary: nothing changes until a release is installed.
 Install refreshes vendor exports. A conversation assembled before the install
-keeps its old session text until `lf session replace <id>`; its operate
-procedure updates on its next `lf help <scope>/operate` read. Homes with the
+keeps its old session and operating text until `lf session replace <id>`. Homes with the
 minute check or Wave crons disabled gain no background progress from this Task.
 
 ## Done when
 
-- The six skills exist in source, `lf list --json` and a fresh export, and each
-  session names exactly its matching operate skill.
+- The six skills exist in `lf list --json` and a fresh export, and each
+  session's exported text contains its matching operate procedure once.
+- A started Task with remaining Flow steps and no live driver is continued and
+  verified; unstarted backlog is not started; a Task whose Flow ended before
+  landing waits on Jack.
 - Given the nine scenarios — idle runnable work, live worker, recoverable
   failure, unresolved liveness, pending user review, published PR with
   unfinished delivery, no useful action, returning user, question or capture
@@ -317,8 +359,8 @@ Check result (kickoff, 2026-10-05): no build or test run — plan only.
 One coherent change; order for the implementer:
 
 1. **This slice — contract and deletion.** Rewrite the three operate skills to
-   the action contract and Flow-endpoint rule; cut the sessions to continuity +
-   invariant; add `task/session`; fix the two broken commands. Focused test:
+   the action contract and defined-Flow rule; cut the session files to
+   continuity only and compose operate into them; add `task/session`; fix the two broken commands. Focused test:
    `cargo test -p loopflow --lib assembled_prompts_deliver_procedures_to_the_owning_skill`.
 2. LOOPFLOW.md rewrite and goldens.
 3. User docs and the scenario review document.

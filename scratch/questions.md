@@ -37,6 +37,65 @@ Exec field. A Flow is read from the driver Exec, its children in start order
 and their commands; iteration is the count of earlier siblings with the same
 command.
 
+3. "why does the skill lf exec even need to know what step position it is?
+   just runt the right skill. it doesnt need to know its part of a flow to
+   run".
+4. "its fine if a flow process does extra logging in lfdb or the file system,
+   or maintains state, to make querying about active/completed flows easier.
+   but i think that sould happen in the flow, not the step".
+
+5. "we should make the step part of a flow as radically simple as a normal
+   flow, and put the flow logic in the flow process".
+
+6. "to the extent that there was useful stuff going on with the flowsession
+   before, it should be part of any lf flow. for now we drop any notion of
+   'one primary flow' for a task, and we might add that back on as a layer on
+   top once we just have generally 'you can run flows for any tasks, and we
+   will do good tracking for any flow you run adhoc just the same as the
+   standard operating protocol one that is run aautomatically when you start
+   a task'".
+
+What this settles: tracking is uniform. Every Flow run, ad hoc or the
+Project's default started by `lf task run`, is tracked the same way; no Flow
+is primary for a Task. A primary Flow may return later as a layer on top.
+
+7. Confirming the reading below: "Yeah, we should be able to do taht stuff
+   for any running flow. the flow driver should be responsible for maintaining
+   the state to make that queryable and scalable and performant; the 'client'
+   code of it should be made to work on top of any flow". And: "we *dont*
+   right now need to make any flow like mutable on demand by some sort of API
+   - read only other than the parent process ctrl-cing it or whatever".
+
+Decided, then: the driver maintains queryable Flow state for every Flow;
+readers (`flow list/show`, `task status`, Desktop) are clients of that state
+and work for any Flow; the state is read-only to everyone but the driver. The
+only control is ending the driver process.
+
+What it reopened (agent's reading, since confirmed by point 7): `68c1ffc55` removed the
+Flow record outright, and with it things that were useful for any Flow: the
+graph as launched, each step's result and iteration, and a live position for
+Desktop's graph. Point 4 allows the driver to keep exactly that. The next
+loop should give every Flow a driver-written record (started with its
+compiled graph; each step started and ended with its child Exec, graph key
+and iteration; ended) and have `flow list/show`, `task status` and Desktop
+read it. It carries no Task selection, no resume and no authority, and no
+step reads or writes it.
+
+8. On a record that extends the driver Exec: "its not exactly 1:1 with exec
+   in the same way that a simple interactive skill session is not 1:1 with
+   its launching process". Then: "ok so yeah maybe we still want FlowSession.
+   And then the FlowSession is mutable, but the Flow exec is not".
+9. "but just in the same way the session api lets you replace / take over any
+   lf skill, the flow session api would let you replace / take over any
+   running flow".
+
+The consolidated model is in [the design](focus-on-your-own-work.md#flow-model--decided-october-5-governs-the-rest-of-this-document).
+Open: whether takeover is built in this PR or only designed for.
+
+The rule: Flow bookkeeping belongs to the driver process. It may record what
+it started and where it is (journal events, rows or files it writes itself).
+A step is told nothing and writes nothing about the Flow.
+
 Agent's reading of what follows, for the implementing pass to confirm in
 source:
 

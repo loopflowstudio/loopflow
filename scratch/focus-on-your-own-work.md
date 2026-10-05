@@ -9,6 +9,60 @@ reviewed evidence and Jack's exact words are in
 plan is at `67cd68157:scratch/focus-on-your-own-work.md`; the FlowSession
 architecture it removed is at `6f246fda4:scratch/focus-on-your-own-work.md`.
 
+## Flow model — decided October 5, governs the rest of this document
+
+Jack Heart's statements are quoted in [questions.md](questions.md) under
+"Step invocation". Where any section below still describes a Flow as only its
+driver Exec and step Execs, or steps carrying a `FlowStep` payload, this
+section replaces it.
+
+Three records, as for conversations:
+
+- **Exec:** one `lf` process. Immutable fact.
+- **AgentSession:** one conversation.
+- **FlowSession:** one run of a Flow. It has its own id and is mutable. Jack:
+  "maybe we still want FlowSession. And then the FlowSession is mutable, but
+  the Flow exec is not." It is not 1:1 with a process, "in the same way that a
+  simple interactive skill session is not 1:1 with its launching process".
+
+FlowSession holds the Flow's name, the graph as compiled at launch, the
+current position, a step log (each step's child Exec, graph key, iteration and
+result) and the Flow's own outcome (running, completed, blocked, stopped,
+handed off). Driver Execs link to it; none is its identity.
+
+Rules:
+
+- **Uniform.** Every Flow run has one, ad hoc or started by `lf task run`.
+  None is primary for a Task; no Task column points at one. Membership is the
+  driver's directory. A primary Flow may return later as a layer on top.
+- **The driver maintains it.** Queryable, scalable, performant state is the
+  Flow process's job. Clients (`lf flow list/show`, `task status`, Desktop)
+  read it and work for any Flow.
+- **Read-only to everyone else for now.** No API changes a running Flow; the
+  control is ending its driver. A record that says running while its driver
+  is dead is presented as stopped, never stored as a contradiction.
+- **Steps are oblivious.** The driver starts each step as the plain command, a
+  child process: `lf -b skill <name> [message]` or the operation's own
+  command. No `FlowStep` payload, `--__flow-step`, `__flow-step` command or
+  position variable. A step never reads or writes the FlowSession. A deciding
+  or routing step gets its answer contract in its message; the driver
+  validates it and corrects it by resuming the same conversation.
+- **Gone for good:** worker claims and generations, automatic recovery, the
+  pending-review pointer, the `replaced` state, steps reading a cursor row.
+
+Designed for, not built in this pass: Jack, "in the same way the session api
+lets you replace / take over any lf skill, the flow session api would let you
+replace / take over any running flow". The record therefore keeps enough
+position for another driver to continue, and the driver link is replaceable.
+Whether takeover is built in this PR is unanswered.
+
+Implementation: reshape the FlowSession code that existed before `68c1ffc55`
+(`store/sqlite/flows.rs`, `store/flows.rs`, the DTOs and Swift decoders at
+`88942accf`) rather than writing a new record beside the Exec-derived readers.
+The one draft migration reshapes `flow_sessions` and `flow_events` instead of
+dropping them: remove claim, generation, pending-session and review columns
+and the Task pointer; keep every row as history.
+
 ## Outcome
 
 One native Task conversation holds design and review, files, drafts, shells and

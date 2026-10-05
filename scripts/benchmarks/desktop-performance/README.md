@@ -65,7 +65,10 @@ The endpoint is a native bitmap with recognized Task identity, not OS applicatio
 launch, compositor presentation or usable Session input. Read timings and sampled
 window/focus/sheet transitions are in `attempts.jsonl`. The
 [October 4 evidence](20261004-task-open/README.md) records failed attempts,
-overlapping-run discovery and remaining acceptance; it establishes no speedup.
+overlapping-run discovery and the budgets' origin; it establishes no speedup.
+The [October 5 evidence](20261005-task-open/README.md) compares base and branch
+on one snapshot: warm and reopen meet 250 ms, cold misses 5,000 ms behind one
+`lf` read. The runner changed afterward, so new runs need a fresh baseline.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes

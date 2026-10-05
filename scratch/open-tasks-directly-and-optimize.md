@@ -70,4 +70,7 @@ always `-1`, so focus is unproven.
 Sheet removal, single window and the warm/reopen budgets hold in sampled attempts.
 The cold budget, Session readiness and every KR remain unmet or unscored.
 
+Reconciled October 5 against `origin/main` (no commits past base `8ea0bec9c`); the
+runner README now cites the October 5 comparison. Prose only, no rerun.
+
 Checks (after compression: loaded links open through one match lookup instead of re-filtering a snapshot; runner sources changed, so new runs do not compare against the October 5 reports): `swift test --filter WorkspaceDestinationTests` 16 passed; `uv run pytest python/tests/test_desktop_performance.py -q` 13 passed; ruff clean. Rust unchanged (`cargo fmt --check`, Clippy reused). Snapshot sweep not rerun; gate owns affected suites.

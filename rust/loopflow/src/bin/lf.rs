@@ -509,17 +509,6 @@ fn resolve_cli_target(
         None => return Ok(None),
     };
     let repo = loopflow::repo::working_directory()?;
-    if kind == Some(DefinitionKind::Skill) {
-        if let Some(flow) = loopflow::lf::commands::run::saved_flow(cli)? {
-            let skill = loopflow::engine::current_skill(&flow.invocation.steps, &flow.cursor)
-                .ok_or_else(|| anyhow::anyhow!("saved FlowSession has no current skill"))?;
-            anyhow::ensure!(
-                skill.skill.name == name,
-                "skill does not match saved FlowSession"
-            );
-            return Ok(Some((Target::Skill(skill.skill), message)));
-        }
-    }
     let target = loopflow::lf::discovery::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
@@ -752,9 +741,7 @@ fn print_task_snapshot(
         for flow in &snapshot.work.flows {
             println!(
                 "  Flow: {}  {}  {:?}",
-                flow.summary.id,
-                flow.summary.name.as_deref().unwrap_or("unnamed"),
-                flow.summary.state,
+                flow.summary.id, flow.summary.name, flow.summary.state,
             );
         }
         for exec in &snapshot.work.execs {
@@ -1756,8 +1743,8 @@ fn execute_command(
             json,
             all,
         }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
-        Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::flow::execute_step(id, *version, cli)
+        Some(Commands::FlowStep { command, .. }) => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::flow::execute_step(command, cli)
         }),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),

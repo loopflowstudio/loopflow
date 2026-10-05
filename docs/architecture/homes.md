@@ -46,12 +46,10 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-      FlowSession driver --> AgentSession <--> native engine
-                             |
-                        driving Exec
+       Flow driver Exec --> step Exec --> AgentSession <--> native engine
 ```
 
-Wave operations are finite attributed conversations. Each Task Flow invocation
+Wave operations are finite attributed conversations. Each Task Flow
 runs through the common driver. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 

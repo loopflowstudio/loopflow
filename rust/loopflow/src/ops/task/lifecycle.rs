@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::durable::{FlowSession, WorkRef, WorkStatus};
+use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
@@ -102,24 +102,6 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
         return Err(task_error("branch belongs to a Task in another repository"));
     }
     Ok(Some((store, task)))
-}
-
-fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
-    let step = store
-        .sqlite
-        .pending_flow_step_exec(flow.id())
-        .map_err(task_error)?;
-    let provider_pending = store
-        .sqlite
-        .pending_flow_conversation(flow.id())
-        .map_err(task_error)?
-        .is_some();
-    Ok(provider_pending
-        || step.as_ref().is_some_and(|exec| {
-            crate::journal::exec_process_evidence(&store.sqlite, exec)
-                != crate::journal::ProcessIdentityEvidence::Dead
-        })
-        || crate::ops::flow_run::driver_live(flow.id()))
 }
 
 async fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -513,58 +495,13 @@ fn execution_blockers(
             .map_err(task_error)?
             .and_then(|exec| exec.parent_exec_id);
     }
-    let ended_flows: HashSet<&str> = work
-        .flows
-        .iter()
-        .filter(|flow| flow.summary.state != crate::session::FlowSummaryState::Current)
-        .map(|flow| flow.summary.id.as_str())
-        .collect();
-    let mut own_flows = HashSet::new();
-    for flow in work
-        .flows
-        .iter()
-        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
-    {
-        if store
-            .sqlite
-            .flow_exec_ids(&flow.summary.id)
-            .map_err(task_error)?
-            .iter()
-            .any(|exec| lineage.contains(exec))
-        {
-            own_flows.insert(flow.summary.id.as_str());
-            continue;
-        }
-        if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
-            if execution_unsettled(store, &position)? {
-                blockers.push(format!(
-                    "Flow {} has live or unresolved execution",
-                    flow.summary.id
-                ));
-            }
-        }
-    }
-    for session in work.sessions.iter().filter(|session| {
-        session
-            .flow_session_id
-            .as_deref()
-            .is_none_or(|flow| !own_flows.contains(flow))
-    }) {
+    // A Flow is its driver and step Execs; the loop over Execs below judges
+    // them. Sessions are judged here on their own evidence.
+    for session in &work.sessions {
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
             if input.completed_at.is_none() && !input.interactive && !input.input_published {
                 blockers.push(format!("Session {} has a reserved input", session.id));
             }
-        }
-        // Nothing waits for a review whose Flow ended; its Execs and turns are
-        // still judged on their own evidence.
-        if session.completed_at.is_none()
-            && session.kind != crate::session::SessionKind::Conversation
-            && !session
-                .flow_session_id
-                .as_deref()
-                .is_some_and(|flow| ended_flows.contains(flow))
-        {
-            blockers.push(format!("Session {} awaits completion", session.id));
         }
         if store
             .sqlite

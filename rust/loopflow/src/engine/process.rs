@@ -345,7 +345,6 @@ pub(crate) async fn start_tmux_session(
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::lf::WORK_DECLARATION_ENV,
-    crate::ops::flow_run::FLOW_STEP_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
     crate::session_record::RUN_DIR_ENV,
@@ -356,6 +355,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::exec::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
+    crate::ops::flow_run::FLOW_ID_ENV,
     crate::machine_install::INSTALL_SWITCH_ENV,
     crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
     "LF_TERMINAL_ID",
@@ -536,7 +536,7 @@ mod tests {
         let argv = vec![
             "sh".into(),
             "-c".into(),
-            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_STEP-}${LF_BIN-}${LF_HOME-unset}\""
+            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_ID-}${LF_BIN-}${LF_HOME-unset}\""
                 .into(),
         ];
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
@@ -544,7 +544,7 @@ mod tests {
             .args(["-c", &command])
             .env("LF_RUN_ID", "run_dead")
             .env("LF_RUN_DIR", "/dead/run")
-            .env("LF_FLOW_STEP", "{}")
+            .env("LF_FLOW_ID", "stale-flow")
             .env("LF_BIN", "/stale/lf")
             .env("LF_HOME", "/stale/home")
             .output()

@@ -67,28 +67,31 @@ pub struct SessionFlowStep {
     pub step: String,
     /// Older manifests omitted the structural path; never infer it from a leaf index.
     pub node: Option<String>,
+    /// The step's node in its driver's graph; absent in older manifests.
+    #[serde(default)]
+    pub key: Option<u32>,
     /// Older captures have no tuple; never derive it from their scalar visit token.
     pub iterations: Option<Vec<Vec<u32>>>,
 }
 
 impl SessionFlowStep {
-    /// The step an invocation's cursor selects; its Task is the invocation's.
-    pub(crate) fn of(flow: &crate::durable::FlowSession) -> anyhow::Result<Self> {
-        let step = flow
-            .step_name()
-            .ok_or_else(|| anyhow::anyhow!("Flow position has no current step"))?;
-        Ok(Self {
-            task_id: flow.task_id.clone(),
+    /// A step as its Session records it. `driver` is the Exec that started
+    /// the step's process and names the Flow.
+    pub(crate) fn of(
+        step: &crate::ops::flow_run::FlowStep,
+        driver: &crate::id::ExecId,
+        task_id: Option<crate::work::task::TaskId>,
+    ) -> Self {
+        Self {
+            task_id,
             task_pr_id: None,
-            invocation_id: flow.invocation.id.clone(),
-            flow: flow.invocation.flow.clone(),
-            step,
-            node: Some(flow.cursor.node_key()),
-            iterations: Some(crate::engine::flow_graph::flow_iterations(
-                &flow.invocation.steps,
-                &flow.cursor,
-            )),
-        })
+            invocation_id: driver.to_string(),
+            flow: step.flow.clone(),
+            step: step.label.clone(),
+            node: Some(step.cursor.node_key()),
+            key: Some(step.key),
+            iterations: Some(step.iterations.clone()),
+        }
     }
 }
 
@@ -2241,13 +2244,6 @@ impl CaptureHandle {
         Ok(())
     }
 
-    pub(crate) fn flow_turn_selection(
-        &self,
-    ) -> StoreResult<Option<crate::durable::FlowTurnSelection>> {
-        let capture = self.0.lock().expect("Session capture mutex poisoned");
-        row_store(&capture.dir)?.flow_turn_selection(&capture.manifest.artifact_key)
-    }
-
     pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
         self.0
             .lock()
@@ -2424,8 +2420,8 @@ impl SessionCapture {
         dir: &Path,
         work: Option<crate::session::SessionWork>,
     ) -> StoreResult<Option<crate::session::AgentSession>> {
-        let invocation_id = match &manifest.flow {
-            Some(SessionFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
+        let step = match &manifest.flow {
+            Some(SessionFlowMembership::Step(step)) => Some(step),
             Some(SessionFlowMembership::Independent) | None => None,
         };
         // Mechanical commands have an Exec and, in a Flow, operation history.
@@ -2434,11 +2430,6 @@ impl SessionCapture {
             return Ok(None);
         }
         let store = row_store(dir)?;
-        if invocation_id.is_some() {
-            return Err(crate::store::StoreError::InvalidAuthority(
-                "Flow agent input must be published through its reservation".into(),
-            ));
-        }
         let session = store.create_session(
             crate::session::AgentSession {
                 captured: None,
@@ -2450,12 +2441,12 @@ impl SessionCapture {
                 skill: manifest.skill.clone(),
                 provider: Some(manifest.harness.clone()),
                 model: manifest.model.clone(),
-                node: None,
-                iterations: None,
+                node: step.and_then(|step| step.key),
+                iterations: step.and_then(|step| step.iterations.clone()),
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_session_id: None,
+                flow_id: None,
                 bound_at: None,
                 kind: crate::session::SessionKind::Conversation,
                 interactive: manifest.surface != "headless",
@@ -2469,7 +2460,6 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            None,
             crate::journal::current_exec_id().as_ref(),
         )?;
         Ok(Some(session))
@@ -3282,6 +3272,7 @@ mod tests {
             flow: "feature".into(),
             step: "review".into(),
             node: Some("1".into()),
+            key: Some(1),
             iterations: Some(Vec::new()),
         };
         let mut prepared = spec(home.path());

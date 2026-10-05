@@ -26,9 +26,6 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    if let Some(flow) = saved_flow(cli)? {
-        return run_flow_skill(flow, skill, cli);
-    }
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.exec_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -51,108 +48,6 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
 
     print_context_header(&built, cli);
     exec_prompt(&built, cli).map(|_| ())
-}
-
-/// Read a Flow command's captured definition; ordinary skill commands have none.
-pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
-    let Some(value) = &cli.flow_step else {
-        return Ok(None);
-    };
-    let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let flow = store
-        .flow(&token.invocation)?
-        .ok_or_else(|| anyhow!("Flow disappeared"))?;
-    anyhow::ensure!(
-        flow.version == token.version && !flow.finished && !flow.is_human(),
-        "Flow boundary changed before skill execution"
-    );
-    Ok(Some(flow))
-}
-
-fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &Cli) -> Result<()> {
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let binding = implicit_binding(cli)?;
-    let task = binding.as_ref().and_then(|binding| match &binding.work {
-        crate::durable::WorkRef::Task(id) => Some(id.clone()),
-        _ => None,
-    });
-    anyhow::ensure!(
-        task == flow.task_id,
-        "Flow Task and current checkout disagree; restore the Flow checkout before resuming"
-    );
-    let flow = store.reserve_attempt(flow.id(), flow.version, Some(&exec))?;
-    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
-        .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
-    anyhow::ensure!(
-        name == Some(skill.skill.name.as_str()),
-        "command does not name the selected Flow skill"
-    );
-    let mut launch = cli.exec_options();
-    launch.batch = true;
-    launch.task = task.as_ref().map(ToString::to_string);
-    launch.wave = flow
-        .wave_id
-        .as_ref()
-        .map(|id| {
-            store
-                .get_wave(id)?
-                .map(|wave| wave.slug().to_owned())
-                .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
-        })
-        .transpose()?;
-    launch.bound_cwd = Some(flow.cwd.clone());
-    launch.model = launch.model.or_else(|| flow.model.clone());
-    let _token = super::flow::EnvVarGuard::set(
-        crate::ops::flow_run::FLOW_STEP_ENV,
-        &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
-    );
-    let mut message = flow.message.clone().unwrap_or_default();
-    if let Some(repeat) = &skill.repeat {
-        let edge = skill.id.as_deref().expect("repeat occurrence has an id");
-        let traversals = flow
-            .cursor
-            .leaf()
-            .progress
-            .repeats
-            .get(edge)
-            .copied()
-            .unwrap_or(0);
-        message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
-    }
-    if let Some(direction) = &flow.cursor.leaf().progress.direction {
-        message.push_str(&format!(
-            "\n\nPrevious step feedback or iteration direction:\n{direction}"
-        ));
-    }
-    if let Some(output) = flow
-        .current_step()
-        .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
-    {
-        message.push_str(&output);
-    }
-    let mut built = build_prompt_at(
-        Some(&skill.skill.name),
-        Some(&message),
-        &launch,
-        flow.cwd.clone(),
-        false,
-        None,
-        Some(skill.skill.clone()),
-    )?;
-    built.subjects = launch.work_subject_selector().into_iter().collect();
-    built.work = binding
-        .as_ref()
-        .map(|binding| crate::session::SessionWork {
-            task_id: task,
-            wave_id: Some(binding.wave_id.clone()),
-            source: binding.source,
-        })
-        .or_else(|| flow.declared_work().filter(|work| work.task_id.is_none()));
-    print_context_header(&built, &launch);
-    exec_prompt(&built, &launch).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -300,7 +195,16 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, true, None, None)
+    let step = crate::ops::flow_run::current_step(cli)?;
+    build_prompt_at(
+        skill,
+        message,
+        cli,
+        repo_root,
+        step.is_none(),
+        None,
+        step.and_then(|step| step.skill),
+    )
 }
 
 fn build_bound_prompt_at(
@@ -322,7 +226,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        None,
+        crate::ops::flow_run::current_step(cli)?.and_then(|step| step.skill),
     )
 }
 
@@ -353,7 +257,9 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
+        let step = crate::ops::flow_run::current_step(cli)?;
+        let seed =
+            crate::ops::task_input::prepare(&store, &task, wave.slug(), step.as_ref()).await?;
         Ok(Some((store, seed)))
     })
 }
@@ -695,7 +601,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         } else {
             "tui"
         };
-        let capture = begin_run_capture(built, surface, &built.agent_config)?;
+        let capture = begin_run_capture(built, surface, &built.agent_config, None)?;
         let provider_session_id = if target == ExecTarget::Tui && built.harness == "claude" {
             let run_id = capture.artifact_key();
             let raw_id = run_id.as_str().strip_prefix("run_").unwrap_or(&run_id);
@@ -749,11 +655,19 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     );
 
     let mut agent_config = built.agent_config.clone();
+    let step = crate::ops::flow_run::current_step(cli)?;
+    agent_config.output = step.as_ref().and_then(|step| step.output.clone());
+    let _flow = step
+        .as_ref()
+        .and_then(|_| crate::journal::current_parent_exec_id())
+        .map(|driver| {
+            super::flow::EnvVarGuard::set(crate::ops::flow_run::FLOW_ID_ENV, driver.as_str())
+        });
     crate::engine::agent::pin_provider_account_id_blocking(&mut agent_config)
         .map_err(anyhow::Error::from)?;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    let capture = begin_run_capture(built, "headless", &agent_config)?;
+    let capture = begin_run_capture(built, "headless", &agent_config, step.as_ref())?;
 
     let result = exec_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -853,6 +767,7 @@ fn begin_run_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
+    step: Option<&crate::ops::flow_run::FlowStep>,
 ) -> Result<CaptureHandle> {
     let cwd = built
         .agent_config
@@ -865,7 +780,17 @@ fn begin_run_capture(
         .cloned()
         .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
-    let step = crate::ops::flow_run::capture_membership()?;
+    let flow = match step {
+        Some(step) => crate::session_record::SessionFlowMembership::Step(
+            crate::session_record::SessionFlowStep::of(
+                step,
+                &crate::journal::current_parent_exec_id()
+                    .ok_or_else(|| anyhow!("a Flow step requires its driver's Exec"))?,
+                built.work.as_ref().and_then(|work| work.task_id.clone()),
+            ),
+        ),
+        None => crate::session_record::SessionFlowMembership::Independent,
+    };
     let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -875,30 +800,13 @@ fn begin_run_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: step.membership,
+        flow: flow.clone(),
         work: built.work.clone(),
     };
-    let capture = if let Some((token, captured, run_id)) = step.reserved {
-        // The step command reserved this capture; publication retains its claim.
-        let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        CaptureHandle::begin_reserved_with_context(
-            spec,
-            run_id,
-            (surface == "headless")
-                .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
-            &built.context,
-            |_artifact| {
-                let path = crate::store::database_path_from_env()
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
-                    &token.invocation,
-                    token.version,
-                    captured,
-                    &provider,
-                    model.as_deref(),
-                )
-            },
-        )
+    let capture = if let Some(session) = step.and_then(|step| step.session.as_deref()) {
+        // A correction is another turn of the conversation that gave the answer.
+        let input = crate::ops::human_session::continue_conversation(session, flow)?;
+        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
@@ -1504,10 +1412,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            crate::ops::flow_run::FLOW_STEP_ENV,
         ];
         let _environment = EnvironmentRestore::capture(&keys);
-        std::env::remove_var(crate::ops::flow_run::FLOW_STEP_ENV);
         let path = format!(
             "{}:{}",
             bin.display(),
@@ -1561,7 +1467,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
         };
-        let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
+        let capture = begin_run_capture(&built, "headless", &built.agent_config, None).unwrap();
         let run_id = capture.artifact_key();
         let run_dir = capture.artifact_dir();
 
@@ -1702,7 +1608,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            crate::ops::flow_run::FLOW_STEP_ENV,
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];

@@ -25,30 +25,40 @@ impl SqliteStore {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
-    /// Only an exact completion consumed by this Flow node acknowledges direction.
-    /// Missing evidence replays input; retries and other nodes cannot consume it.
+    /// Direction is acknowledged per Flow node: only an earlier successful run
+    /// of `step`'s own node, under the same driver, consumed it. Missing
+    /// evidence replays input; retries and other nodes cannot consume it.
     pub(crate) fn completed_step_steer_id(
         &self,
-        flow: &crate::durable::FlowSession,
+        driver: &crate::id::ExecId,
+        step: &crate::ops::flow_run::FlowStep,
     ) -> StoreResult<i64> {
-        let node = flow
-            .invocation
-            .node_id(&flow.cursor)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let inputs: Vec<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare(
-                "SELECT DISTINCT capture.receipt_key FROM flow_events consumed
-                 JOIN session_events done ON done.seq=consumed.session_event
-                 JOIN session_events start ON start.session_id=done.session_id
-                    AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
-                    AND start.kind='started'
-                 JOIN session_events capture ON capture.seq=start.captured_event AND capture.kind='captured'
-                 WHERE consumed.flow_id=?1 AND consumed.node=?2 AND consumed.kind='consumed'
-                    AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'",
+                "SELECT capture.receipt_key,earlier.command FROM execs earlier
+                 JOIN session_events capture ON capture.exec_id=earlier.id AND capture.kind='captured'
+                 WHERE earlier.parent_exec_id=?1 AND earlier.outcome='succeeded'",
             )?;
-            let rows = query.query_map(params![flow.id(), node], |row| row.get(0))?;
-            rows.collect::<Result<_, _>>()?
+            let rows = query.query_map(params![driver], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            let mut inputs = Vec::new();
+            for row in rows {
+                let (input, command) = row?;
+                let earlier = command
+                    .and_then(|command| serde_json::from_str::<Vec<String>>(&command).ok())
+                    .and_then(|argv| {
+                        let marker = argv
+                            .iter()
+                            .position(|arg| arg == crate::ops::flow_run::FLOW_STEP_ARG)?;
+                        crate::ops::flow_run::FlowStep::parse(argv.get(marker + 1)?).ok()
+                    });
+                if earlier.is_some_and(|earlier| earlier.key == step.key) {
+                    inputs.push(input);
+                }
+            }
+            inputs
         };
         let mut through = 0;
         for input in inputs {
@@ -628,7 +638,7 @@ mod tests {
             session.id = format!("conversation-{at}");
             session.artifact_key = format!("run_{at:032x}");
             session.created_at = at;
-            let session = store.create_session(session, None, None).unwrap();
+            let session = store.create_session(session, None).unwrap();
             store
                 .record_session_event(
                     &session.id,

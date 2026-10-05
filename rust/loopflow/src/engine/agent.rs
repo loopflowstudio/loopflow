@@ -201,17 +201,13 @@ pub struct AgentConfig {
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
     pub session_driver: Option<(String, crate::exec::SessionDriver)>,
-    /// Only this launch may select the native turn for its Flow boundary.
-    pub flow_selection: Option<crate::durable::FlowTurnSelection>,
+    /// The structured final answer this turn must return.
+    pub output: Option<crate::engine::flow_output::FlowOutput>,
 }
 
 impl AgentConfig {
     pub fn output_schema(&self) -> Option<serde_json::Value> {
-        self.flow_selection
-            .as_ref()?
-            .output
-            .as_ref()
-            .map(|output| output.schema())
+        self.output.as_ref().map(|output| output.schema())
     }
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
@@ -1211,9 +1207,6 @@ pub fn exec_agent(
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
         launch.session_driver = capture.0.session_driver();
-        launch.flow_selection = capture.0.flow_turn_selection().map_err(|error| {
-            CoreError::ExecutionFailed(format!("Flow admission failed: {error}"))
-        })?;
         if launch.resume_token.is_none() {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
@@ -1808,7 +1801,7 @@ fn _exec_agent_once(
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
     if (matches!(harness.as_str(), "codex" | "opencode")
-        || (harness == "claude" && launch.flow_selection.is_some()))
+        || (harness == "claude" && launch.output.is_some()))
         && process.auto
     {
         return _exec_harness_once(launch, process, model, retry);
@@ -3068,7 +3061,7 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -3101,7 +3094,7 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -3134,7 +3127,7 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
             agent: None,

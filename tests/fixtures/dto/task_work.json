@@ -5,25 +5,23 @@
       "title": "Checkout conversation",
       "kind": "conversation",
       "interactive": false,
-      "flow_session_id": null,
+      "flow_id": null,
       "completed_at": null
     },
     {
       "id": "review",
       "title": "Review",
-      "kind": "flow_review",
+      "kind": "conversation",
       "interactive": true,
-      "flow_session_id": "managed",
+      "flow_id": "11111111-1111-4111-8111-111111111111",
       "completed_at": null
     }
   ],
   "flows": [
     {
-      "id": "managed",
+      "id": "11111111-1111-4111-8111-111111111111",
       "name": "feature",
       "state": "current",
-      "current_capture": null,
-      "pending_session": "review",
       "task_id": null,
       "wave_id": null,
       "updated_at": 1,

@@ -66,7 +66,6 @@ impl SqliteStore {
             // Legacy Starts have not all been imported as Runs. They remain
             // retirement evidence, never a second definition of current Started.
             "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
-                 OR EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')",
             [task.as_str()],
@@ -94,7 +93,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
-                 AND NOT EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1)
                  AND started_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1
                     AND (publication_requested_at IS NOT NULL OR merge_commit IS NOT NULL))

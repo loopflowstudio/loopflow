@@ -1,4 +1,4 @@
-use crate::durable::{FlowSession, TaskId};
+use crate::durable::TaskId;
 use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -28,14 +28,10 @@ impl Store {
         .await
     }
 
-    pub async fn create_session(
-        &self,
-        session: AgentSession,
-        review: Option<FlowSession>,
-    ) -> StoreResult<AgentSession> {
+    pub async fn create_session(&self, session: AgentSession) -> StoreResult<AgentSession> {
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, review.as_ref(), caller.as_ref())
+            store.create_session(session, caller.as_ref())
         })
         .await
     }
@@ -134,6 +130,36 @@ impl Store {
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.rename_session(&id, expected_capture, &title, source)
+        })
+        .await
+    }
+}
+
+impl Store {
+    pub async fn flow_inventory(
+        &self,
+        filter: &crate::durable::FlowFilter,
+        after: Option<&str>,
+        limit: std::num::NonZeroU32,
+    ) -> StoreResult<crate::durable::FlowPage> {
+        let filter = filter.clone();
+        let after = after.map(str::to_owned);
+        run_sqlite(&self.sqlite, move |store| {
+            store.flow_inventory(&filter, after.as_deref(), limit)
+        })
+        .await
+    }
+
+    /// One Flow by driver Exec id or unique prefix, drawn from its Execs.
+    pub async fn flow_detail(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<crate::durable::FlowDetail>> {
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            Ok(store
+                .flow_execs(&selector)?
+                .map(|(flow, entry)| flow.detail(entry)))
         })
         .await
     }

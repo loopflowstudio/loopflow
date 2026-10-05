@@ -112,43 +112,44 @@ across the combined migration frontier remain unfinished.
 
 ```bash
 lf flow build
-lf flow show FLOW_SESSION --sessions --json
+lf flow show DRIVER_EXEC --sessions --json
 ```
 
-Starting a Flow compiles its definition into one FlowSession's captured graph,
-including every Skill, router, alternative and review policy. Source edits or
-deletion cannot change it. One cursor and its return counters identify loop
-passes. Subflows and passes are display lenses, with no separate FlowSession
-or process.
+A Flow is one driver Exec and the step Execs it starts; its ID is the driver
+Exec's. Starting one compiles its definition, including every router and
+alternative, into a graph the driver holds in memory. One cursor and its return
+counters identify loop passes. Subflows and passes are display lenses over the
+step Execs, with no separate record or driver.
 
-Every FlowSession naming a Task, or run in its checkout, is equally that Task's
+Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `task run` captures a fresh FlowSession; the Project's Flow
+driver. Each `task run` starts a fresh Flow; the Project's Flow
 supplies the default and naming a Flow selects another. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
 complete Task Work.
 
-## Settle the exact boundary
+## Read each step's result
 
-A boundary is the FlowSession, node and iteration tuple. One process drives the
-invocation under its per-invocation driver lock, and the row's position version
-fences each mutation. Agent boundaries select a native start in an AgentSession
-and consume its exact successful completion once. Mechanical boundaries retain
-correlated starts and results in Flow history. Each executed skill or operation
-runs in its own child lf Exec through the ordinary command path. The Flow driver
-owns navigation; a child's command outcome alone cannot settle agent work.
+Each executed skill or operation runs in its own child lf Exec through the
+ordinary command path. The driver passes the step a hidden `--__flow-step`
+JSON argument: the Flow name, a launch sequence number, the step label, the
+cursor (index, selected XOR paths, per-edge return counts), the graph node key
+and per-edge iterations, and for a deciding or routing step the structured
+answer required. Recorded on the step Exec's argv, it is the only record of
+position; nothing reads it back to resume. The driver owns navigation. A step's
+result is how its process exited; a deciding or routing step also answers
+through the final answer of the Session turn its Exec captured. An operation
+that hands its effect to a watcher, such as a landing still being watched,
+exits with status 75: the Flow stops there, and neither failed.
 
 A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
 `summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
-keys are required in the provider schema. Settlement also accepts persisted receipts
-that omitted the unused field. A router returns a JSON object containing
-`path`, constrained to the captured branch's path names. Each provider receives
+keys are required in the provider schema. A router returns a JSON object containing
+`path`, constrained to the branch's path names. Each provider receives
 the schema before generation. Session history retains the native output and
-completion separately; only the exact selected successful result is consumed
-inside the Flow's fenced settlement transaction. Invalid output receives at most
-two corrective turns in the same conversation; provider failure remains distinct.
-Helpers, older successes and late generations cannot settle the current selection.
+completion separately. Invalid output receives at most two corrective turns in
+the same conversation, then the Flow fails; provider failure remains distinct.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
@@ -159,13 +160,15 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show FLOW_SESSION --sessions --json
+lf flow show DRIVER_EXEC --sessions --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A FlowSession whose driver died keeps its last cursor, failure, events and effect
-receipts as history. Nothing resumes it and no command does. Crash recovery
+A killed driver leaves its Execs as history; the last step Exec's argv shows
+where it stood. Nothing restarts or resumes it. A Flow is `current` while its
+driver has no recorded exit, `completed` when the driver succeeded and `stopped`
+when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.

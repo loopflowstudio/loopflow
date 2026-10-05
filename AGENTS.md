@@ -202,17 +202,18 @@ Project. Linear Project status owns current/planned/completed history; there is
 no Chapter table or plan packet. Project owns Tasks, KRs, targets and its `flow:`
 default, not another objective, memory or operator.
 
-A Task's work includes every AgentSession, FlowSession and Exec associated with
+A Task's work includes every Session, Flow and Exec associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Flow authority and never rewrites historical usage. Every Flow naming the Task
 is equally its work; a stopped Flow is history its caller inspects, never a
 position to resume. The Project's Flow supplies the default for a fresh launch;
 explicit Flow selection is allowed.
-Taskless execution uses the same captured graph, cursor, return counts and driver.
-Template composition expands the graph. One started Flow is one FlowSession;
-loop passes are node/iteration positions and lenses over its history, not child
-FlowSessions. Retry retains the pass; Iterate advances its return counters.
+Taskless execution uses the same driver. A Flow is one driver Exec and the step
+Execs it starts; its id is the driver Exec id. The driver holds the compiled
+graph, cursor and return counts in memory and gives each step its position on
+the step Exec's argv, the only record of position. Template composition expands
+the graph; loop passes are node/iteration positions on step Execs, not child Flows.
 
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated
@@ -222,10 +223,12 @@ Current navigation stays Wave → Task and Linear retains past Projects.
 
 Exec is one actual lf process, including direct and agent-issued nested commands.
 AgentSession is one durable agent conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. FlowSession owns
-captured progression and references exact successful agent completions. Agent
-outcomes and retries belong in Session history; mechanical results belong in
-Flow history. Do not replace Run with another generic attempt object.
+name, feedback and native history survive driver replacement. A step's result
+is how its process exited; a deciding or routing step also answers through the
+Session turn its Exec captured. Agent outcomes and retries belong in Session
+history; mechanical results are step Exec exits. A Session reaches its Flow
+through the step Exec that captured its input. Do not replace Run with another
+generic attempt object.
 
 Main records have one SQLite owner. Task implies Wave; constructors fill omitted
 ancestors and reject mismatches. Bind assigns an unassigned conversation once,

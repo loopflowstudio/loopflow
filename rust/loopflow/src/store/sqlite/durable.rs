@@ -759,7 +759,7 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{FlowSession, ProjectId, TaskId};
+    use crate::durable::{ProjectId, TaskId};
 
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -788,7 +788,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_session_id: None,
+            flow_id: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             kind: SessionKind::Conversation,
@@ -903,32 +903,8 @@ mod durable_store_tests {
         assert_eq!(store.task_events_after(&task, 0).unwrap(), vec![event]);
     }
 
-    fn autonomous_position(task_id: &TaskId) -> FlowSession {
-        FlowSession {
-            invocation: crate::durable::test_flow_invocation(
-                "task",
-                0,
-                "implement",
-                Some("implement"),
-                false,
-            ),
-            cursor: Default::default(),
-            version: 0,
-            task_id: Some(task_id.clone()),
-            wave_id: None,
-            cwd: "/repo.probe".into(),
-            message: None,
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
     fn conversation(
-        flow_session_id: Option<String>,
+        flow_id: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::AgentSession {
@@ -946,7 +922,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_session_id,
+            flow_id,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             kind: crate::session::SessionKind::Conversation,
@@ -965,7 +941,6 @@ mod durable_store_tests {
     fn session_admission_infers_ancestors_and_rejects_conflicts_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let position = store.create_flow(&autonomous_position(&task_id)).unwrap();
         let mut conn = store.conn.lock().unwrap();
         let other_wave = WaveId::new();
         conn.execute(
@@ -977,18 +952,6 @@ mod durable_store_tests {
         conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
             SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
             rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
-        let taskless = crate::engine::invocation::QueuedInvocation::new(
-            "taskless",
-            position.invocation.steps.clone(),
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-            position_version,updated_at,state)
-            VALUES(?1,?2,'/repo',0,0,1,1,'current')",
-            rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
-        )
-        .unwrap();
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
             (
@@ -1006,26 +969,11 @@ mod durable_store_tests {
                 Some(task.wave_id.clone()),
             ),
             (
-                Some(position.invocation.id.clone()),
                 None,
-                None,
-                Some(task_id.clone()),
-                Some(task.wave_id.clone()),
-            ),
-            (
-                Some(position.invocation.id.clone()),
                 Some(task_id.clone()),
                 Some(task.wave_id.clone()),
                 Some(task_id.clone()),
                 Some(task.wave_id.clone()),
-            ),
-            (Some(taskless.id.clone()), None, None, None, None),
-            (
-                Some(taskless.id.clone()),
-                None,
-                Some(other_wave.clone()),
-                None,
-                Some(other_wave.clone()),
             ),
         ] {
             let tx = conn
@@ -1048,29 +996,9 @@ mod durable_store_tests {
         let run_count: i64 = conn
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        // Callers cannot publish a Run under a different node or loop pass.
-        for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
-            let mut requested = conversation(Some(position.invocation.id.clone()), None, None);
-            requested.node = node;
-            requested.iterations = iterations;
-            {
-                let tx = conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .unwrap();
-                assert!(super::super::sessions::reserve_session_in(&tx, requested, None).is_err());
-            }
-            assert_eq!(
-                conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                run_count
-            );
-        }
         for (invocation, task_input, wave_input) in [
             (None, Some(task_id.clone()), Some(other_wave.clone())),
-            (Some(position.invocation.id.clone()), Some(other_task), None),
-            (Some(taskless.id.clone()), Some(task_id.clone()), None),
-            (Some("missing".into()), None, None),
+            (None, Some(other_task), Some(other_wave.clone())),
             (None, Some(TaskId::new()), None),
             (None, None, Some(WaveId::new())),
         ] {
@@ -1099,12 +1027,6 @@ mod durable_store_tests {
             );
         }
         // Changing a parent cannot invalidate an already reserved child's ancestry.
-        assert!(conn
-            .execute(
-                "UPDATE flow_sessions SET task_id=NULL WHERE id=?1",
-                [&position.invocation.id]
-            )
-            .is_err());
         assert!(conn
             .execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
@@ -1356,7 +1278,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),
@@ -1378,7 +1300,7 @@ mod durable_store_tests {
                 completed_at: None,
                 created_at: 1,
             };
-            store.create_session(session, None, None).unwrap()
+            store.create_session(session, None).unwrap()
         };
         let first = open("orphan", None);
         let replacement = store
@@ -1525,7 +1447,7 @@ mod durable_store_tests {
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
         let session = store
-            .create_session(unpublished_conversation(None, None, 1), None, None)
+            .create_session(unpublished_conversation(None, None, 1), None)
             .unwrap();
         {
             let conn = store.conn.lock().unwrap();

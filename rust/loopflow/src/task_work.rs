@@ -21,6 +21,7 @@ pub struct TaskSession {
     pub title: String,
     pub kind: SessionKind,
     pub interactive: bool,
-    pub flow_session_id: Option<String>,
+    /// The Flow whose step opened its current input.
+    pub flow_id: Option<String>,
     pub completed_at: Option<i64>,
 }

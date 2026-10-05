@@ -20,7 +20,7 @@ struct TaskWorkView: View {
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.flows) { flow in
-                    row("Flow", id: flow.id, name: flow.name ?? "Unnamed", state: flow.state)
+                    row("Flow", id: flow.id, name: flow.name, state: flow.state.rawValue)
                 }
                 ForEach(work.execs) { exec in
                     row("Exec", id: exec.id, name: exec.command ?? "Unknown command",

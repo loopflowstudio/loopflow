@@ -1918,6 +1918,10 @@ mod tests {
             UPDATE agent_sessions SET flow_session_id='legacy-flow' WHERE id='review';
             INSERT INTO flow_events(flow_id,version,node,iterations,kind,observed_at,payload)
             VALUES('legacy-flow',4,2,'[]','operation_started',5,'{"command":"pr publish"}');
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree)
+            VALUES('flow-only','p','linear-f','LOO-2',1,'/repo/flow-only');
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+            VALUES('only','flow-only','w','{"id":"only","flow":"code"}',0,0,1,0,9,'current');
         "#).unwrap();
         conn.execute_batch(&current_draft_sql("task_flow_observations"))
             .unwrap();
@@ -1939,34 +1943,39 @@ mod tests {
             boundary,
             ("conversation".into(), "legacy-flow".into(), 1, None)
         );
-        let history: (i64, i64, String, String) = conn.query_row(
-            "SELECT f.step_index,f.iteration,f.pending_session_id,e.payload FROM flow_sessions f JOIN flow_events e ON e.flow_id=f.id WHERE f.id='legacy-flow'",
+        // The saved Flow's name, state and last position stay on the
+        // conversation it opened; nothing else of the Flow record remains.
+        let history: (String, String, i64, i64) = conn.query_row(
+            "SELECT json_extract(e.payload,'$.flow'),json_extract(e.payload,'$.state'),
+                json_extract(e.payload,'$.step_index'),json_extract(e.payload,'$.iteration')
+             FROM session_events e WHERE e.session_id='review' AND e.receipt_key='legacy_flow:legacy-flow'",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).unwrap();
-        assert_eq!(
-            history,
-            (2, 3, "review".into(), r#"{"command":"pr publish"}"#.into())
-        );
-        // The Task's former selection and worker claim are gone; the Flow row
-        // keeps its last cursor as history under the Task that launched it.
+        assert_eq!(history, ("feature".into(), "current".into(), 2, 3));
         let control: i64 = conn.query_row(
             "SELECT (SELECT count(*) FROM pragma_table_info('tasks') WHERE name='current_invocation_id')
-                + (SELECT count(*) FROM pragma_table_info('flow_sessions') WHERE name IN ('claim_json','worker_generation'))",
+                + (SELECT count(*) FROM pragma_table_info('agent_sessions') WHERE name='flow_session_id')
+                + (SELECT count(*) FROM sqlite_master WHERE name IN ('flow_sessions','flow_events')
+                    OR sql LIKE '%flow_sessions%' OR sql LIKE '%flow_events%')",
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(control, 0);
+        // A conversation still cannot leave its Task, and Started is still set once.
+        assert!(conn
+            .execute(
+                "UPDATE agent_sessions SET task_id=NULL WHERE id='review'",
+                []
+            )
+            .is_err());
         assert_eq!(
             conn.query_row(
-                "SELECT task_id,state,position_version FROM flow_sessions WHERE id='legacy-flow'",
+                "SELECT started_at FROM tasks WHERE id='flow-only'",
                 [],
-                |row| Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?
-                ))
+                |row| row.get::<_, Option<i64>>(0)
             )
             .unwrap(),
-            ("t".into(), "current".into(), 4)
+            Some(9),
+            "a Task whose only start evidence was its Flow row keeps it"
         );
         assert_eq!(
             conn.query_row(
@@ -4747,13 +4756,12 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .unwrap();
-        let plan: crate::engine::invocation::QueuedInvocation =
-            serde_json::from_str(&plan).unwrap();
-        assert_eq!(plan.id, "saved");
-        assert!(
-            matches!(&plan.steps[0], crate::engine::ConcreteStep::Skill(step)
-            if step.human && step.skill.content.as_deref() == Some("Saved instructions") && step.sources == ["custom"])
-        );
+        let plan: serde_json::Value = serde_json::from_str(&plan).unwrap();
+        assert_eq!(plan["id"], "saved");
+        let step = &plan["steps"][0]["Skill"];
+        assert_eq!(step["human"], true);
+        assert_eq!(step["skill"]["content"], "Saved instructions");
+        assert_eq!(step["sources"], serde_json::json!(["custom"]));
         assert_eq!(feedback, "Keep this feedback");
         assert_eq!(started, 17);
         assert_eq!(worktree, "/repo/task");

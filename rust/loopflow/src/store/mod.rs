@@ -14,7 +14,6 @@ mod children;
 pub(crate) mod ci_incidents;
 mod durable;
 mod execs;
-mod flows;
 mod metrics;
 mod migration_catalog;
 mod migration_schema;
@@ -1250,7 +1249,7 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
-    use crate::durable::{Author, FlowSession, WorkRef};
+    use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
@@ -1433,29 +1432,6 @@ mod tests {
         }
     }
 
-    /// A fresh Task Flow at `cursor`, as `lf task run` starts one.
-    fn task_flow(
-        task: &Task,
-        invocation: crate::engine::invocation::QueuedInvocation,
-        cursor: crate::engine::ExecutionCursor,
-    ) -> FlowSession {
-        FlowSession {
-            invocation,
-            cursor,
-            version: 0,
-            task_id: Some(task.id.clone()),
-            wave_id: Some(task.wave_id.clone()),
-            cwd: task.worktree.clone(),
-            message: None,
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: OffsetDateTime::now_utc(),
-        }
-    }
-
     fn make_project(wave: &Wave) -> Project {
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .expect("current unix time");
@@ -1493,24 +1469,17 @@ mod tests {
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
-        let flow = store
-            .create_flow(task_flow(
-                &task,
-                crate::durable::test_flow_invocation("code", 3, "review", None, false),
-                crate::engine::ExecutionCursor {
-                    index: 2,
-                    iteration: 4,
-                    ..Default::default()
-                },
-            ))
-            .await
-            .unwrap();
-        // A launched Flow is started work even before its first step reserves input.
+        // An operation step run in the checkout is started work.
+        store.sqlite.test_flow(
+            "code",
+            &task.worktree.to_string_lossy(),
+            &[("commit -m work", Some("succeeded"))],
+            None,
+        );
+        store.sqlite.mark_task_started(&task.id).unwrap();
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
-        let flow = store
-            .reserve_attempt(flow.id(), flow.version, None)
-            .await
-            .unwrap();
+        let flows = store.sqlite.task_flows(&task.id).unwrap();
+        assert_eq!(flows.len(), 1);
         assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
         let mut successor = make_project(&wave);
         successor.plan.id = LinearProjectId::new("next-chapter").unwrap();
@@ -1524,10 +1493,7 @@ mod tests {
         assert_eq!(moved.project_id, successor.id);
         assert_eq!(moved.worktree, task.worktree);
         assert_eq!(moved.plan, task.plan);
-        assert_eq!(
-            store.latest_task_flow(&task.id).await.unwrap().unwrap(),
-            flow
-        );
+        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flows);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         store
             .append_task_event(
@@ -3137,14 +3103,12 @@ mod tests {
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
-        let flow = store
-            .create_flow(task_flow(
-                &task,
-                crate::durable::test_flow_invocation("code", 0, "implement", None, false),
-                Default::default(),
-            ))
-            .await
-            .unwrap();
+        store.sqlite.test_flow(
+            "code",
+            &task.worktree.to_string_lossy(),
+            &[("implement", Some("failed"))],
+            Some("failed"),
+        );
         let work = WorkRef::Task(task.id.clone());
         store.sqlite.require_task_launch(&task.id).unwrap();
         store.begin_task_abandon(&task.id).await.unwrap();
@@ -3152,7 +3116,7 @@ mod tests {
 
         store.abandon(&work, "canceled").await.unwrap();
         assert!(store.sqlite.require_task_launch(&task.id).is_err());
-        assert_eq!(store.latest_task_flow(&task.id).await.unwrap(), Some(flow));
+        assert_eq!(store.sqlite.task_flows(&task.id).unwrap().len(), 1);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store
             .get_task_by_issue(&task.plan.identifier)

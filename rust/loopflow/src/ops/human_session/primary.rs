@@ -162,7 +162,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_session_id: None,
+        flow_id: None,
         work_source: None,
         bound_at: None,
         kind: SessionKind::Conversation,
@@ -191,7 +191,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
         session
     } else {
         publish_prepared_input(
-            store,
+            &store.sqlite,
             &session,
             crate::session_record::SessionFlowMembership::Independent,
         )?

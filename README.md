@@ -178,14 +178,13 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work and mechanical operations | `.lf/flows/*.yaml` |
+| **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, serial PRs and every Flow run for it | Linear and local SQLite |
 | **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
 | **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
-| **FlowSession** | Keeps a captured Flow and consumes exact boundary completions | Home-local SQLite |
 | **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)

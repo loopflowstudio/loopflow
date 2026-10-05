@@ -171,7 +171,6 @@ impl ClaudeHarness {
             stdout,
             super::claude_history::History {
                 owner,
-                selection: config.flow_selection.clone(),
                 requests: self.requests.clone(),
                 pending: VecDeque::new(),
             },
@@ -679,7 +678,7 @@ mod tests {
         harness.config = Some(AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -736,7 +735,7 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

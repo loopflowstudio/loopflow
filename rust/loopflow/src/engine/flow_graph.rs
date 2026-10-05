@@ -1,9 +1,9 @@
-//! Display projection of one captured Flow definition.
+//! Display projection of one compiled Flow definition.
 //!
 //! Surfaces draw the Flow from this shape instead of parsing YAML or inferring
-//! topology from skill names. Node keys are captured preorder IDs, including
-//! every sorted XOR alternative. Authored names and runtime cursor paths remain
-//! separate; repeated skills keep distinct IDs within their captured Flow.
+//! topology from skill names. Node keys are preorder IDs, including every
+//! sorted XOR alternative. Authored names and runtime cursor paths remain
+//! separate; repeated skills keep distinct IDs within their Flow.
 
 use std::collections::BTreeMap;
 
@@ -409,6 +409,54 @@ fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     steps[..index].iter().position(|target| {
         matches!(target, ConcreteStep::Skill(target) if target.id.as_deref() == Some(from))
     })
+}
+
+/// Exact occurrence in this compiled graph: its preorder node key, counting
+/// every XOR alternative, and the returns taken at each nesting level.
+pub(crate) fn location(
+    steps: &[ConcreteStep],
+    cursor: &ExecutionCursor,
+) -> anyhow::Result<(u32, Vec<Vec<u32>>)> {
+    fn count(steps: &[ConcreteStep]) -> usize {
+        steps
+            .iter()
+            .map(|step| {
+                1 + match step {
+                    ConcreteStep::Xor(branch) => {
+                        branch.paths.values().map(|path| count(&path.steps)).sum()
+                    }
+                    _ => 0,
+                }
+            })
+            .sum()
+    }
+    fn locate(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> anyhow::Result<usize> {
+        let step = steps
+            .get(cursor.index)
+            .ok_or_else(|| anyhow::anyhow!("cursor has no captured node"))?;
+        let mut index = count(&steps[..cursor.index]);
+        if let Some(child) = cursor.child.as_deref() {
+            let (ConcreteStep::Xor(branch), NestedCursor::Xor { selected, cursor }) = (step, child)
+            else {
+                anyhow::bail!("cursor child does not belong to a captured XOR");
+            };
+            let mut paths: Vec<_> = branch.paths.iter().collect();
+            paths.sort_by_key(|(name, _)| *name);
+            index += 1;
+            for (name, path) in paths {
+                if name == selected {
+                    return Ok(index + locate(&path.steps, cursor)?);
+                }
+                index += count(&path.steps);
+            }
+            anyhow::bail!("cursor selects an uncaptured XOR alternative");
+        }
+        Ok(index)
+    }
+    Ok((
+        u32::try_from(locate(steps, cursor)?)?,
+        flow_iterations(steps, cursor),
+    ))
 }
 
 /// Ordered backward-edge traversal counts at each active nesting level, outermost
@@ -1023,7 +1071,9 @@ mod tests {
 
     #[test]
     fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
-        use crate::engine::invocation::QueuedInvocation;
+        struct Captured {
+            steps: Vec<ConcreteStep>,
+        }
         use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
 
         fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
@@ -1065,7 +1115,7 @@ mod tests {
             ]),
             check(),
         ];
-        let invocation = QueuedInvocation::new("nested", steps).unwrap();
+        let invocation = Captured { steps };
         let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
         ))
@@ -1103,7 +1153,7 @@ mod tests {
         }
         let mut ids = Vec::new();
         for cursor in cursors(&invocation.steps) {
-            let id = invocation.node_id(&cursor).unwrap();
+            let id = super::location(&invocation.steps, &cursor).unwrap().0;
             ids.push(id);
             assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
             assert_eq!(graph.node_at(id).unwrap().key, id);

@@ -1,12 +1,13 @@
-# Task conversation and ordinary Flows — design for the next pass
+# Task conversation and ordinary Flows — design and state
 
-October 5, 2026. LOO-353, Product, PR #1439. Rewritten after Jack Heart's
-delivery review of `e10e2add4`. The reviewed evidence and Jack's exact words
-are in [demo-task-flows.md](demo-task-flows.md); open choices are in
-[questions.md](questions.md); the code walkthrough of the reviewed revision is
-[pr-review.html](pr-review.html). The previous design, including the retained
-FlowSession architecture this one removes, is at
-`6f246fda4:scratch/focus-on-your-own-work.md`.
+October 5, 2026. LOO-353, Product, PR #1439. Written after Jack Heart's
+delivery review of `e10e2add4`; the pass he then requested is built. The
+reviewed evidence and Jack's exact words are in
+[demo-task-flows.md](demo-task-flows.md); open choices are in
+[questions.md](questions.md); the code walkthrough of the reviewed revision
+(before this pass) is [pr-review.html](pr-review.html). The pass's step-by-step
+plan is at `67cd68157:scratch/focus-on-your-own-work.md`; the FlowSession
+architecture it removed is at `6f246fda4:scratch/focus-on-your-own-work.md`.
 
 ## Outcome
 
@@ -57,105 +58,65 @@ October 5 (delivery review):
   I dont think we need the FlowSession datatype." Then: "fold it into this pr."
 - `lf commit`: "should always push i guess ... or else should accept -p."
 
-## Branch state at `6f246fda4`
+## Branch state after the October 5 pass
 
-Done: scheduling and its five columns; Ready/Complete, review launch and
-tokens; saved Flow resume; Task-worker claims, generations, `__worker`,
-`task restart`, `--retry`, managed flags, `tasks.current_invocation_id`;
-`controller/`; builtin Flows without human steps (`feature` = `task-design`
-then `pursue`, ends at a published PR; `code` = `pursue`; `ship-demo` gone).
-`-i/-b/--tui/--ide` and `commit -p` restored and `--mode` deleted
-(`8847ba5ab`). Completion, cleanup and landing wait only for live or
-unresolved execution.
+Built on `67cd68157`; Jack Heart has not reviewed it.
 
-Still present and now wrong: `lf --task ISSUE flow start`, its tmux launcher,
-`LF_TASK_FLOW_OPTIONS`, and every FlowSession structure.
+- **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
+  `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
+  as the Task's agent and `--reason` as a steer, then continues as
+  `lf --task ISSUE run FLOW`. It honors `-b`/`-i`, prints and blocks. Gone:
+  `flow start`, the tmux launcher, `LF_TASK_FLOW_OPTIONS`, launch-time PR
+  preparation and agent preflight, `task create --run/--flow`.
+- **One path.** Every Flow launch that resolves to a Task, by the entry,
+  `--task` or its worktree, gets the same check: ready Work, matching
+  planning, current chapter, not being abandoned.
+- **No FlowSession.** A Flow is its driver Exec and the step Execs it starts.
+  The driver holds graph and cursor in memory and tells each step what it is on
+  argv (`--__flow-step '<json>'`: Flow name, launch number, label, cursor,
+  graph key, per-edge iterations, required answer, Session to continue).
+  A step's result is its exit; a deciding or routing step's answer is the final
+  answer of the Session turn its Exec captured. An invalid answer is corrected
+  in the same conversation, three turns at most. Gone: `flow_sessions`,
+  `flow_events`, `agent_sessions.flow_session_id`, the cursor row, position
+  versions, attempts, turn selection, the driver lock, `LF_FLOW_STEP`.
+- **Readers.** `task status`, completion/cleanup/landing blockers, chapter
+  "started", `lf flow list/show --sessions`, `lf monitor`, Session Flow
+  membership and Desktop's Task work read Execs. A Flow is `current` (driver
+  has no recorded exit), `completed` or `stopped`; a failed Flow no longer
+  reads as current. A past Flow whose YAML changed is drawn from its step
+  sequence.
+- **Migration.** The one draft archives each Flow row's name, state and last
+  cursor as a `legacy_flow` observation on the Sessions it opened, keeps Task
+  Started evidence, drops both tables and the Session column, and rewrites the
+  ancestry and Started triggers.
+- **Callers.** Builtin skills, `skills/loopflow/SKILL.md`, docs and README name
+  `lf task run` and say it blocks; Desktop Start owns the command as a child
+  process and reports an immediate refusal.
 
-## Next pass
+## Remaining from this pass
 
-Do these in order; each leaves the build green.
-
-### 1. One Task entry, then ordinary run
-
-Replace `flow start` with one thin command (working name `lf task run ISSUE
-[FLOW]`; Jack left the name open). It may do exactly two things, then enter
-the same code as `lf --task ISSUE run FLOW`:
-
-- **Place:** create the worktree for an unplaced Task, apply `--stack-on`,
-  restore the checkout. This is `ops::task::task_run` with `launch: false`,
-  which `lf task checkout` already calls.
-- **Default:** the Project's Flow when none is named; `-m` recorded as the
-  Task's agent; `--reason` published as a steer.
-
-It honors `-b`/`-i` like any run and blocks. Delete `launch_task_flow`,
-`launch_existing_task`'s launch tail, `ops/run.rs::exec_task_flow`,
-`TaskFlowExec`, `TASK_FLOW_OPTIONS_ENV`, the tmux session naming and the
-ten-second wait.
-
-Drop launch-time PR preparation (`task_recovery_adoption`,
-`reconcile_task_pr`, `clear_task_pr_merge`, `refuse_dirty_between_prs`,
-`ensure_working_pr` at `ops/task.rs:4759-4784`). Before deleting, prove with a
-test that `pr publish` succeeds or fails clearly when a Flow commits in a
-worktree whose PR already merged; `lf pr reconcile` and `lf pr next` remain
-the owners.
-
-### 2. One path, one set of checks
-
-`--task X` already enters the Task worktree (`bin/lf.rs`:
-`prepare_work_binding`, `CwdGuard::enter`), and a launch from the worktree
-without `--task` already binds to the Task. Make validation match: whatever
-check a Task launch gets, it gets from Task resolution, whichever way the Task
-was named. `require_task_launch` and the planning refusal (terminal, moved or
-removed Task) are currently reached only through `flow start`.
-`require_autonomous_steps` applies to every Flow launch.
-
-### 3. Remove FlowSession
-
-Target: a Flow is a driver Exec and its child step Execs.
-
-- **Record.** Flow name, step label, graph key, loop path and per-edge
-  iteration go on the step Exec's command/argv. Delete `flow_sessions`,
-  `flow_events`, the cursor, `position_version`, `pending_session_id`,
-  `store/sqlite/flows.rs`, `store/flows.rs`, `flow_inventory.rs`, and the
-  `FlowSession`, `FlowTurnSelection`, `FlowFilter` types.
-- **Driver.** Graph and cursor live in the driver's memory; it passes each
-  step to its child as arguments. Delete `__flow-step <flow> <n>` reading a
-  row, `ops/flow_run.rs::driver_lock`/`driver_live`, and
-  `settle_flow_step`/`record_flow_cursor`. Liveness is Exec process evidence.
-  Keep same-Session decision-output repair and the engine traversal and XOR
-  selection.
-- **Receipts.** Publish and landing idempotency stay in PR and landing
-  records. First confirm nothing reads the `flow_events` copy
-  (`ops/pr_landing.rs`, `ops/task_execution.rs`, CI repair); move any reader
-  to the PR/landing record.
-- **Readers.** `task status`, `execution_blockers` (`ops/task/lifecycle.rs`),
-  chapter "started work", `lf flow list/show --sessions` and Desktop's Flow
-  graph (`TaskFlowSnapshot`, `TaskFlow.swift`, `TaskFlowView`) read Execs plus
-  the authored template. A past Flow whose YAML changed is drawn from its Exec
-  sequence. Remove `agent_sessions.flow_session_id`; Sessions link through
-  their Exec's parent.
-- **Migration.** Extend the one draft `task_flow_observations`: archive each
-  Flow row's name, state and last cursor as observations on its Sessions or
-  Execs, then drop both tables and the Session column. No second draft. No
-  live Home conversion.
-- **Docs.** Rewrite AGENTS.md "Wave Planning" and
-  `docs/architecture-reference.md` where they say one started Flow is one
-  FlowSession; README, `docs/`, DTO fixtures.
-
-### 4. Callers
-
-`git grep -lE "flow start|LF_TASK_FLOW_OPTIONS"` lists 49 files: builtin
-skills (`task_operate`, `advance`, `launch-plan`, `repo_operate`,
-`repo_session`, `wave_operate`, `wave_session`, `s1`, `init`),
-`skills/loopflow/SKILL.md`, `docs/`, README, Desktop Start
-(`RegistryQuery.swift:190`, `MacLocalWaveAgentLauncher.swift:96`) and tests.
-Point them at the entry or at `lf --task X -b <flow>`. Callers that relied on
-an immediate return background the command themselves; see
-[questions](questions.md).
+- **Unproven.** A real provider step; a driver killed mid-agent-step (the
+  surviving provider turn is left to its Session, nothing settles it into the
+  Flow); the migration against a populated store; Desktop Start against a real
+  `lf`. The real-Codex e2e (`tests/e2e/codex_connect.py --flow-decision-retry`)
+  is ported but not run.
+- **Publish after an unobserved merge.** The proof covers a merge already
+  observed: publication refuses, names the merged PR and `lf pr next`. A merge
+  nobody has observed still reaches GitHub through `pr publish`; `lf pr
+  reconcile` remains its owner.
+- **History not archived.** A saved Flow that opened no Session (operations
+  only) leaves no observation; its Execs remain.
+- **Desktop.** Task work now decodes `execution.work`, where `lf task status
+  --json` has emitted it since #1379; before, the read failed on real output.
+  Desktop does not draw step Execs or why a Flow stopped.
+- **Leftovers.** `SessionKind::FlowReview` and `SessionAttention::Review` are
+  unreachable for new work and go with the Waiting slice. Task status still
+  lists every Exec (defect 2 in [the demo notes](demo-task-flows.md)).
 
 ## Later slices (approved October 4, unbuilt)
 
-Flow history in these now means Exec sequence, not captured rows.
+Flow history in these means Exec sequence.
 
 - **Workflows.** `.lf/workflows/<name>.yaml`: conversation-stage keys with
   optional review skills, and edges with `from`, `to`, `flow`. Source guidance
@@ -195,24 +156,20 @@ Exclusions: general messaging, automatic recovery, a Run entity, Project
 reset (LOO-366), completion-policy redesign (LOO-367), Claude hooks/SDK,
 external-progress credit from self-hosting, Task status presentation.
 
-## Checks for the next pass
+## Checks
 
 Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 
 | Command | Proves |
 | --- | --- |
-| `cargo test -p loopflow --test task_flow_launch_tests` | The Task entry places, defaults, then runs in the foreground; `flow start`, `task restart`, `--retry` are rejected; a worktree launch and a `--task` launch record identical Execs and get identical refusals. |
-| `cargo test -p loopflow --test flow_tests` | Nested loops, repeated skills and XORs read back from Execs alone; a killed driver leaves dead Execs and no restart; human steps rejected. |
-| `cargo test -p loopflow --test pr_tests --test land_tests` | Publish/landing idempotency without `flow_events`; publish in a merged-PR worktree. |
-| `cargo test -p loopflow --test dto_fixtures` then `scripts/test_desktop.sh --no-parallel -Xswiftc -gnone` | Task and Flow DTOs agree across Rust and Swift with no FlowSession fields. |
-| `uv run python scripts/materialize_rust_tests.py -- cargo test -p loopflow --lib store::` | Released frontier converts through the one draft, archiving Flow rows. |
-| `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `uv run python scripts/check_architecture.py` | One implementation. |
-| `git grep -E "FlowSession\|flow_sessions\|flow_events\|flow start\|LF_TASK_FLOW_OPTIONS"` | Matches only released migrations, the draft and removed-command assertions. |
+| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical Execs and get identical refusals; the default Flow; removed commands. |
+| `cargo test -p loopflow --test session_lifecycle_tests` | Against a fake provider: decisions, same-conversation correction bounded at three turns, routing, three loop passes under one driver, a blocked decision. |
+| `cargo test -p loopflow --test flow_tests --test flow_discovery_tests` | Flows read back from Execs; a Flow whose definition is gone. |
+| `cargo test -p loopflow --test pr_tests publishing_after` | Publish after an observed merge names the PR and `lf pr next`. |
+| `cargo test -p loopflow --lib store::migrations` | Released frontier converts through the one draft. |
+| `cargo test -p loopflow --test dto_fixtures`, `swift build --build-tests` | Wire shapes agree across Rust and Swift. |
+| `git grep -E "FlowSession\|flow_sessions\|flow_events\|flow start\|LF_TASK_FLOW_OPTIONS"` | Matches only migrations, their tests and removed-command assertions. |
 
-Configured demo, still separate: in a private Home, `lf task run INF-123
-proof -b` prints and blocks; `lf monitor` shows a looping Flow's driver, step
-and iteration; a real provider step; Desktop.
-
-Recorded at `8847ba5ab`: build, Clippy, `cli_discovery` 18, `flow_tests` 23,
-`session_lifecycle_tests` 17, `task_flow_launch_tests` 1, `run` unit tests 33,
-`swift build --build-tests`. PR CI ran only `scratch-clear`.
+Configured demo, still separate: in a private Home, `lf -b task run INF-123
+proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a
+looping Flow's driver, step and iteration; a real provider step; Desktop.

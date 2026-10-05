@@ -1494,7 +1494,7 @@ Design the feature.
                 assert!(step.repeat.is_none());
                 let content = step.skill.content.as_ref().unwrap();
                 assert!(content.contains("lf wave list --current --json"));
-                assert!(content.contains("LF_FLOW_STEP"));
+                assert!(content.contains("LF_FLOW_ID"));
                 step.skill.name.as_str()
             })
             .collect();

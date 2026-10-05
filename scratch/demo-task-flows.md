@@ -1,6 +1,7 @@
 # Demo: Task Flows without a Task worker — October 4–5, 2026
 
-LOO-353 delivery review of the local runtime cut at `e10e2add4`. Design:
+LOO-353 delivery review of the local runtime cut at `e10e2add4`, before the
+October 5 pass. Design:
 [focus-on-your-own-work.md](focus-on-your-own-work.md); open interpretations:
 [questions.md](questions.md); code walkthrough: [pr-review.html](pr-review.html). Jack Heart's feedback is quoted below; the rest is the agent's rehearsal and
 interpretation.
@@ -95,7 +96,9 @@ operational Flow, Waiting, Task primary selection, workflow files,
 `loop-or-next`, taskless `-b`, all-Flow Desktop views, a real provider step, a
 driver killed mid-step, and the migration against a populated store.
 
-## Next action
+## After the review
 
-Run the next pass in [the design](focus-on-your-own-work.md): the thin Task
-entry, one launch path, FlowSession removal, callers.
+The pass Jack requested is built; its state and what stays unproven are in
+[the design](focus-on-your-own-work.md). Of the defects above, 1 is fixed (a
+Flow whose driver failed reads `stopped`), 5 and 7 are unchanged, and the rest
+were not rechecked.

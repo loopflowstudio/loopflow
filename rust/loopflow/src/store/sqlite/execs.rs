@@ -95,21 +95,27 @@ fn exec_query(
         });
     }
     if let Some(work) = &filter.performed_work {
-        let (column, value) = match work {
-            ExecWorkFilter::Task(id) => ("task_id", id.as_str()),
-            ExecWorkFilter::Wave(id) => ("wave_id", id.as_str()),
+        let (column, value, tasks, close) = match work {
+            ExecWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
+            ExecWorkFilter::Wave(id) => (
+                "wave_id",
+                id.as_str(),
+                "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
+                ")",
+            ),
         };
         let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. Mechanical starts
-        // reference their owning captured Flow. Neither a current Session bind
-        // nor an Exec's command context establishes performed work.
+        // Native starts retain their original assignment. A Flow's operation
+        // steps ran in their Task's checkout. Neither a current Session bind
+        // nor another Exec's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
             SELECT exec_id FROM session_events
             WHERE kind='started' AND {column}={value} AND exec_id IS NOT NULL
             UNION
-            SELECT h.exec_id FROM flow_events h JOIN flow_sessions f ON f.id=h.flow_id
-            WHERE h.kind='operation_started' AND f.{column}={value} AND h.exec_id IS NOT NULL
+            SELECT op.id FROM execs op JOIN tasks tw ON {tasks}{value}{close}
+            WHERE instr(op.command,'\"__flow-step\"')>0 AND tw.worktree!=''
+              AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
         )"
         ));
     }
@@ -644,9 +650,10 @@ impl SqliteStore {
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
              AND s.completed_at IS NULL AND s.kind='conversation' AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND s.flow_session_id IS NULL
+             AND s.wave_id IS NULL AND {} IS NULL
              AND s.driver_exec_id=s.provider_exec_id
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
+                super::sessions::SESSION_FLOW,
                 super::task_work::session_tasks("s")
             ),
             params![session, now, outcome],
@@ -1041,12 +1048,16 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,updated_at,state,ended_at) VALUES('mechanical',?1,?2,'{\"id\":\"mechanical\"}',0,0,1,1,'completed',2)",params![first.as_str(),wave]).unwrap();
+            // Both Execs ran a Flow operation step in the first Task's checkout.
+            conn.execute(
+                "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
+                [first.as_str()],
+            )
+            .unwrap();
             for exec in [&shared, &mechanical] {
                 conn.execute(
-                    "INSERT INTO flow_events(flow_id,node,iterations,kind,exec_id,payload)
-                    VALUES('mechanical',0,'[]','operation_started',?1,'unreadable payload')",
-                    [exec],
+                    "UPDATE execs SET cwd='/repo.first',command=?2 WHERE id=?1",
+                    params![exec, r#"["lf","__flow-step","{}","commit"]"#],
                 )
                 .unwrap();
             }

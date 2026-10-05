@@ -481,3 +481,86 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
         std::fs::set_permissions(&path, perms).expect("chmod");
     }
 }
+
+/// Record a Flow the way `lf run` leaves one: a driver Exec and one step Exec
+/// in `cwd`, both exited. Returns the driver's id, which names the Flow.
+#[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
+pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let driver = loopflow::id::ExecId::new();
+    let step = serde_json::json!({
+        "flow": flow, "seq": 1, "label": label, "cursor": {"index": 0}, "key": 0, "iterations": [[]]
+    })
+    .to_string();
+    for (id, parent, argv) in [
+        (driver.clone(), None, vec!["lf", "run", flow]),
+        (
+            loopflow::id::ExecId::new(),
+            Some(driver.clone()),
+            vec!["lf", "--batch", "--__flow-step", &step, "skill", label],
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,completed_at,outcome)
+             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
+            rusqlite::params![
+                id.as_str(),
+                loopflow::id::TraceId::new().as_str(),
+                parent.as_ref().map(|parent| parent.as_str().to_owned()),
+                serde_json::to_string(&argv).expect("argv serializes"),
+                cwd.to_string_lossy(),
+                outcome
+            ],
+        )
+        .expect("record Flow Exec");
+    }
+    driver.to_string()
+}
+
+/// Every Flow's Execs in launch order: each driver's outcome and its steps'
+/// recorded argv without the binary path.
+#[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
+pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<Vec<String>>)> {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let mut drivers = db
+        .prepare(
+            "SELECT d.id,d.outcome FROM execs d WHERE EXISTS(SELECT 1 FROM execs s
+                WHERE s.parent_exec_id=d.id AND instr(s.command,'__flow-step')>0) ORDER BY d.rowid",
+        )
+        .expect("select Flow drivers");
+    let rows = drivers
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get(1)?)))
+        .expect("read Flow drivers")
+        .collect::<rusqlite::Result<Vec<(String, Option<String>)>>>()
+        .expect("decode Flow drivers");
+    rows.into_iter()
+        .map(|(driver, outcome)| {
+            let mut steps = db
+                .prepare(
+                    "SELECT command FROM execs WHERE parent_exec_id=?1
+                     AND instr(command,'__flow-step')>0 ORDER BY rowid",
+                )
+                .expect("select Flow steps");
+            let steps = steps
+                .query_map([driver], |row| row.get::<_, String>(0))
+                .expect("read Flow steps")
+                .map(|argv| {
+                    serde_json::from_str::<Vec<String>>(&argv.expect("step argv"))
+                        .expect("argv is a JSON array")[1..]
+                        .to_vec()
+                })
+                .collect();
+            (outcome, steps)
+        })
+        .collect()
+}
+
+/// The step a recorded argv names: its `--__flow-step` (or `__flow-step`) value.
+#[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
+pub fn flow_step(argv: &[String]) -> serde_json::Value {
+    let marker = argv
+        .iter()
+        .position(|arg| arg.ends_with("__flow-step"))
+        .expect("a Flow step argv");
+    serde_json::from_str(&argv[marker + 1]).expect("a Flow step")
+}

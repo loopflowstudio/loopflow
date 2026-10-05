@@ -89,8 +89,8 @@ lf task run INF-123 --reason "provider credentials repaired"
 ```
 
 `task run` runs a fresh Flow in the Task checkout with its Steers and
-active PR. It never continues an earlier Flow; a stopped one keeps its last
-position, failure and effect receipts as history. Unknown liveness stays
+active PR. It never continues an earlier Flow; a stopped one leaves its
+Execs as history. Unknown liveness stays
 unknown. A Task Steer is a Linear Task comment; the running Flow receives new
 comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt

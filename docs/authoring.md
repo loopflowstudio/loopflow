@@ -77,8 +77,7 @@ Keep design and review in the Task conversation. Operational Flows reject
 `human: true` steps, including inside composed Flows and XOR alternatives, before
 launching work. Save agreed feedback and remaining work in the conversation;
 Session completion controls are retired. Inspect the exact
-invocation and its effects before selecting further work. Historical captures
-with human steps retain their evidence; they are not approval to replay work.
+Flow and its effects before selecting further work.
 
 Mechanical git/PR operations ride along as `cmd:` steps:
 
@@ -175,9 +174,9 @@ implementation loop with no human review or outer return edge.
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
 `{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The provider receives
-this schema before generation. The Flow validates and consumes the exact selected
-successful completion; invalid output gets at most two corrective turns in the
-same conversation. Failed turns, older results and command exit cannot navigate.
+this schema before generation. The Flow reads the final answer of the turn its
+step captured; invalid output gets at most two corrective turns in the same
+conversation, then the Flow fails. A failed turn cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
@@ -187,14 +186,13 @@ Existing logs and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. A stopped Flow
 is never retried or resumed; its caller launches fresh work explicitly.
 
-Inspect saved invocation history and effects before launching further work.
-Edits to the source apply to new invocations.
+Inspect a Flow's Execs and effects before launching further work.
+Edits to the source apply to new Flows.
 Finishing a Flow grants no implicit merge or Task-completion authority and
 does not choose another Flow; author delivery explicitly.
 
-`pursue` starts at implementation. Ordinary and Task invocations capture every XOR router and path
+`pursue` starts at implementation. Ordinary and Task Flows compile every XOR router and path
 before execution and use the same cursor for nested paths and backward edges.
-Recovery reads that captured definition, including paths not yet selected.
 The implementation and recovery fixtures do not establish live provider/Session
 handoff parity; that still requires a configured end-to-end demonstration.
 

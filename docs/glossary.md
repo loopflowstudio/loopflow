@@ -19,7 +19,6 @@ first, then the engineering words it borrows.
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Exec** | One actual lf process, its causal parent and its observed command outcome. |
-| **FlowSession** | One captured Flow invocation, its cursor and exact boundary completion history. It is never resumed. |
 | **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

@@ -53,9 +53,11 @@ def main() -> None:
         "lf task interrupt EXP-12",
         "```",
         "",
-        "Each start captures a new invocation. A Flow whose driver stopped keeps its",
-        "cursor, failure and effects as history; nothing resumes it. Inspect it, then",
-        "launch the work that remains.",
+        "Each start is a new Flow: one driver Exec and the step Execs it starts. Its ID",
+        "is the driver Exec's. `--state` selects `current` (the driver has no recorded",
+        "exit), `completed` (it succeeded) or `stopped` (it exited before the last",
+        "step). A stopped Flow's Execs are its history; nothing resumes it. Inspect",
+        "them, then launch the work that remains.",
         "",
     ]
     for row in rows:

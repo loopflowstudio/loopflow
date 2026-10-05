@@ -225,15 +225,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
     if session.completed_at.is_some() {
         return None;
     }
-    let current_review = session.kind == crate::session::SessionKind::FlowReview
-        && !session.task_terminal
-        && session.flow.as_ref().is_some_and(|flow| {
-            flow.state == crate::session::FlowSummaryState::Current
-                && flow.pending_session.as_deref() == Some(&session.id)
-        });
-    if current_review {
-        Some(SessionAttention::Review)
-    } else if session.interactive
+    if session.interactive
         && session.latest_turn.as_deref() == Some("completed")
         && session.driver_outcome.is_none()
     {
@@ -278,8 +270,27 @@ pub enum SessionFlowOccurrence {
     Past,
 }
 
+/// Add one headless input to an open conversation and return it prepared; the
+/// launch that takes it resumes the conversation's native history.
+pub(crate) fn continue_conversation(
+    id: &str,
+    flow: crate::session_record::SessionFlowMembership,
+) -> Result<String> {
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
+    anyhow::ensure!(
+        next.completed_at.is_none(),
+        "session {id:?} is already complete"
+    );
+    let replaced = next.captured;
+    next.artifact_key = crate::session_record::new_artifact_key();
+    next.input_published = false;
+    let next = store.replace_session_input(replaced, next)?;
+    Ok(publish_prepared_input(&store, &next, flow)?.artifact_key)
+}
+
 pub(crate) fn publish_prepared_input(
-    store: &SharedStore,
+    store: &crate::store::sqlite::SqliteStore,
     session: &AgentSession,
     flow: crate::session_record::SessionFlowMembership,
 ) -> Result<AgentSession> {
@@ -313,11 +324,8 @@ pub(crate) fn publish_prepared_input(
         session.caller_artifact_key.clone(),
         session.artifact_key.clone(),
     )?;
+    store.publish_capture(&session.id, session.captured)?;
     store
-        .sqlite
-        .publish_capture(&session.id, session.captured)?;
-    store
-        .sqlite
         .session(&session.id)?
         .ok_or_else(|| session_not_found(&session.id))
 }
@@ -413,10 +421,22 @@ pub(crate) async fn list_attention(
     }
 }
 
+/// Where a Session's step stands in its Flow: the last one a still-open driver
+/// launched, an earlier one, or part of a Flow whose driver has exited.
+fn flow_occurrence(
+    state: crate::session::FlowSummaryState,
+    latest_step: bool,
+) -> SessionFlowOccurrence {
+    match (state, latest_step) {
+        (crate::session::FlowSummaryState::Current, true) => SessionFlowOccurrence::Current,
+        (crate::session::FlowSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
+        _ => SessionFlowOccurrence::Past,
+    }
+}
+
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter owned_target and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
-    use crate::session::FlowSummaryState;
     let kind = match session.kind {
         crate::session::SessionKind::Conversation => SessionKind::Conversation,
         crate::session::SessionKind::FlowReview => SessionKind::Flow,
@@ -439,30 +459,18 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_session_id, &session.flow) {
+    let flow_membership = match (&session.flow_id, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
-        (Some(id), Some(flow)) if flow.name.is_some() => SessionFlowMembership::Step {
-            flow: flow.name.clone().expect("matched a recorded Flow name"),
+        (Some(id), Some(flow)) => SessionFlowMembership::Step {
+            flow: flow.name.clone(),
             invocation_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
-            // Recorded membership is not revalidated by opening the capture.
-            // Detail/actions validate that exact occurrence before using it.
             node: session.node,
             iterations: session.iterations.clone(),
-            occurrence: if flow.state != FlowSummaryState::Current {
-                SessionFlowOccurrence::Past
-            } else if flow.current_capture == session.captured {
-                SessionFlowOccurrence::Current
-            } else if flow.current_capture.is_some() {
-                SessionFlowOccurrence::Earlier
-            } else if flow.pending_session.as_deref() == Some(session.id.as_str()) {
-                SessionFlowOccurrence::Current
-            } else {
-                SessionFlowOccurrence::Unknown
-            },
+            occurrence: flow_occurrence(flow.state, session.flow_step_latest),
         },
         (Some(id), _) => SessionFlowMembership::Unknown {
             reason: format!("Flow {id} metadata is unavailable"),
@@ -978,7 +986,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
             next = store.replace_session_input(replaced, next).await?;
         }
         publish_prepared_input(
-            store,
+            &store.sqlite,
             &next,
             crate::session_record::SessionFlowMembership::Independent,
         )?
@@ -1024,64 +1032,22 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         .session_summary(&session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
-    let mut actions = session_actions(kind, state);
-    let flow_membership = match &session.flow_session_id {
-        None => match store.sqlite.session_summary(&session.id)? {
-            Some(metadata) if metadata.independent => SessionFlowMembership::Independent,
-            _ => SessionFlowMembership::Unknown {
-                reason: "Flow membership was not recorded".into(),
-            },
+    let actions = session_actions(kind, state);
+    let flow_membership = match (&session.flow_id, &metadata.flow) {
+        (None, _) if metadata.independent => SessionFlowMembership::Independent,
+        (None, _) => SessionFlowMembership::Unknown {
+            reason: "Flow membership was not recorded".into(),
         },
-        Some(id) => match store.flow(id).await {
-            Ok(Some(flow)) => {
-                let graph = crate::engine::flow_graph::FlowGraph::new(
-                    &flow.invocation.flow,
-                    &flow.invocation.steps,
-                );
-                let node = session
-                    .node
-                    .map(|id| {
-                        graph.node_at(id).map(|node| node.key).ok_or_else(|| {
-                            anyhow!(
-                                "Session {} names an absent captured Flow node {id}",
-                                session.id
-                            )
-                        })
-                    })
-                    .transpose()?;
-                SessionFlowMembership::Step {
-                    flow: flow.invocation.flow.clone(),
-                    invocation_id: id.clone(),
-                    step: session.skill.clone().unwrap_or_default(),
-                    node,
-                    iterations: session.iterations.clone(),
-                    occurrence: if flow.finished {
-                        SessionFlowOccurrence::Past
-                    } else if flow
-                        .current_attempt
-                        .as_ref()
-                        .is_some_and(|attempt| attempt.run_id == session.artifact_key)
-                    {
-                        SessionFlowOccurrence::Current
-                    } else if flow.current_attempt.is_some() {
-                        SessionFlowOccurrence::Earlier
-                    } else if flow.pending_session_id.as_deref() == Some(session.id.as_str()) {
-                        SessionFlowOccurrence::Current
-                    } else {
-                        SessionFlowOccurrence::Unknown
-                    },
-                }
-            }
-            Ok(None) => SessionFlowMembership::Unknown {
-                reason: format!("Flow {id} is unavailable"),
-            },
-            Err(crate::store::StoreError::InvalidData(reason)) => {
-                for action in &mut actions {
-                    action.unavailable_reason = Some(reason.clone());
-                }
-                SessionFlowMembership::Unknown { reason }
-            }
-            Err(error) => return Err(error.into()),
+        (Some(id), Some(flow)) => SessionFlowMembership::Step {
+            flow: flow.name.clone(),
+            invocation_id: id.clone(),
+            step: session.skill.clone().unwrap_or_default(),
+            node: session.node,
+            iterations: session.iterations.clone(),
+            occurrence: flow_occurrence(flow.state, metadata.flow_step_latest),
+        },
+        (Some(id), None) => SessionFlowMembership::Unknown {
+            reason: format!("Flow {id} is unavailable"),
         },
     };
     let mut reading = SessionRecord {
@@ -1527,19 +1493,18 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_session_id: Some("flow".into()),
+            flow_id: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
             model: None,
             node: Some(2),
             iterations: None,
+            flow_step_latest: false,
             flow: Some(crate::session::FlowSummary {
                 id: "flow".into(),
-                name: Some("retained".into()),
+                name: "retained".into(),
                 state: crate::session::FlowSummaryState::Current,
-                current_capture: None,
-                pending_session: None,
                 task_id: Some(task.clone()),
                 wave_id: Some(wave.clone()),
                 updated_at: 1,
@@ -1558,11 +1523,19 @@ mod tests {
             row.flow_membership,
             super::SessionFlowMembership::Step {
                 node: Some(2),
-                occurrence: super::SessionFlowOccurrence::Unknown,
+                occurrence: super::SessionFlowOccurrence::Earlier,
                 ..
             }
         ));
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Completed;
+        summary.flow_step_latest = true;
+        assert!(matches!(
+            super::summary_surface(&summary).flow_membership,
+            super::SessionFlowMembership::Step {
+                occurrence: super::SessionFlowOccurrence::Current,
+                ..
+            }
+        ));
+        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Stopped;
         let row = super::summary_surface(&summary);
         assert!(matches!(
             row.flow_membership,
@@ -1576,7 +1549,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_session_id = None;
+        summary.flow_id = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1597,18 +1570,6 @@ mod tests {
             super::summary_surface(&summary).state,
             super::SessionState::Interrupted
         );
-        summary.kind = crate::session::SessionKind::FlowReview;
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Current;
-        summary.flow.as_mut().unwrap().pending_session = Some(summary.id.clone());
-        assert_eq!(
-            super::summary_surface(&summary).attention,
-            Some(super::SessionAttention::Review)
-        );
-        summary.task_terminal = true;
-        assert_eq!(super::summary_surface(&summary).attention, None);
-        summary.task_terminal = false;
-        summary.completed_at = Some(1);
-        assert_eq!(super::summary_surface(&summary).attention, None);
     }
 
     use std::collections::HashSet;
@@ -1616,7 +1577,6 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     use super::{human_open_argv, session_is_resumable};
-    use crate::durable::FlowSession;
     use crate::session::AgentSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
@@ -1835,7 +1795,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_session_id: None,
+            flow_id: None,
             work_source: None,
             bound_at: None,
             kind: crate::session::SessionKind::Conversation,
@@ -1872,70 +1832,45 @@ mod tests {
         );
     }
 
-    fn position() -> FlowSession {
-        FlowSession {
-            invocation: crate::durable::test_flow_invocation(
-                "review",
-                1,
-                "review-design",
-                Some("review_kickoff"),
-                true,
-            ),
-            cursor: crate::engine::ExecutionCursor {
-                index: 1,
-                iteration: 3,
-                ..Default::default()
-            },
-            version: 0,
-            task_id: Some(TaskId::new()),
-            wave_id: None,
-            cwd: "/repo".into(),
-            message: None,
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    fn nested_position() -> FlowSession {
-        use crate::engine::flow::{ConcretePath, ConcreteStep, ConcreteXor, RepeatPolicy, Skill};
+    #[test]
+    fn captured_nested_membership_retains_its_exact_graph_occurrence() {
+        use crate::engine::flow::{
+            ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
+        };
         use crate::engine::{ExecutionCursor, NestedCursor};
+        use crate::session_record::SessionFlowStep;
 
-        let mut position = position();
-        let mut review = position.invocation.steps[1].clone();
-        let ConcreteStep::Skill(start) = &mut review else {
-            panic!("skill")
+        let skill = |id: &str, from: Option<&str>| {
+            ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("review-design"),
+                id: Some(id.into()),
+                human: false,
+                repeat: from.map(|from| RepeatPolicy { from: from.into() }),
+                sources: Vec::new(),
+            })
         };
-        start.id = Some("begin".into());
-        start.human = false;
-        let mut decide = review.clone();
-        let ConcreteStep::Skill(end) = &mut decide else {
-            panic!("skill")
-        };
-        end.id = Some("decide".into());
-        end.repeat = Some(RepeatPolicy {
-            from: "begin".into(),
-        });
-        position.invocation.steps = vec![
-            review.clone(),
+        let steps = vec![
+            skill("begin", None),
             ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("route"),
                 paths: std::collections::HashMap::from([(
                     "fix".into(),
                     ConcretePath {
                         description: "Revision".into(),
-                        steps: vec![review.clone(), decide.clone()],
+                        steps: vec![skill("begin", None), skill("decide", Some("begin"))],
                     },
                 )]),
                 sources: Vec::new(),
             }),
-            decide,
+            skill("decide", Some("begin")),
         ];
-        position.cursor.progress.repeats.insert("decide".into(), 5);
-        position.cursor.child = Some(Box::new(NestedCursor::Xor {
+        let mut cursor = ExecutionCursor {
+            index: 1,
+            iteration: 3,
+            ..Default::default()
+        };
+        cursor.progress.repeats.insert("decide".into(), 5);
+        cursor.child = Some(Box::new(NestedCursor::Xor {
             selected: "fix".into(),
             cursor: ExecutionCursor {
                 index: 1,
@@ -1947,128 +1882,41 @@ mod tests {
                 ..Default::default()
             },
         }));
-        position
-    }
-
-    #[test]
-    fn captured_nested_membership_retains_its_exact_graph_occurrence() {
-        use crate::engine::flow_graph::FlowGraph;
-        use crate::session_record::SessionFlowStep;
-
-        let position = nested_position();
-        let graph = FlowGraph::new("review", &position.invocation.steps);
-        let expected = &graph.steps[1].paths[0].steps[1].key;
-        assert_eq!(*expected, 3);
-        let captured = SessionFlowStep::of(&position).unwrap();
-        // Immutable legacy input retains its runtime path; the public wire uses its captured ID.
-        assert_eq!(captured.node.as_deref(), Some("1/fix/1"));
-        assert_eq!(
-            position.invocation.node_id(&position.cursor).unwrap(),
-            *expected
+        let (key, iterations) = crate::engine::flow_graph::location(&steps, &cursor).unwrap();
+        let driver = crate::id::ExecId::new();
+        let captured = SessionFlowStep::of(
+            &crate::ops::flow_run::FlowStep {
+                flow: "review".into(),
+                seq: 4,
+                label: "review-design".into(),
+                cursor,
+                key,
+                iterations,
+                skill: None,
+                output: None,
+                session: None,
+            },
+            &driver,
+            None,
         );
+        // The Session names its Flow by the driver Exec and keeps the step's
+        // structural path, graph key and per-edge returns.
+        assert_eq!(captured.invocation_id, driver.as_str());
+        assert_eq!(captured.node.as_deref(), Some("1/fix/1"));
+        assert_eq!(captured.key, Some(3));
         assert_eq!(captured.iterations, Some(vec![vec![5], vec![2]]));
 
         // Old captures keep their known Flow provenance without fabricating a
         // structural node from the former leaf index.
         let mut old = serde_json::to_value(&captured).unwrap();
-        old.as_object_mut().unwrap().remove("node");
-        old.as_object_mut().unwrap().remove("iterations");
+        for field in ["node", "key", "iterations"] {
+            old.as_object_mut().unwrap().remove(field);
+        }
         old["iteration"] = serde_json::json!(3);
         old["step_index"] = serde_json::json!(1);
         let old: SessionFlowStep = serde_json::from_value(old).unwrap();
-        assert_eq!(old.node, None);
-        assert_eq!(old.iterations, None);
+        assert_eq!((old.node, old.key, old.iterations), (None, None, None));
         assert_eq!(old.invocation_id, captured.invocation_id);
-    }
-
-    #[test]
-    fn stored_session_membership_resolves_nested_and_post_xor_graph_nodes() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let store = home.store().await;
-                let mut flow = nested_position();
-                flow.task_id = None;
-                flow.cwd = home.home.path().into();
-                let nested = flow.cursor.clone();
-                let graph =
-                    crate::engine::flow_graph::FlowGraph::new("review", &flow.invocation.steps);
-                let expected = [
-                    graph.steps[1].paths[0].steps[1].clone(),
-                    graph.steps[2].clone(),
-                    graph.steps[0].clone(),
-                ];
-                let mut flow = store.create_flow(flow).await.unwrap();
-                let mut sessions = Vec::new();
-                for (index, cursor) in [
-                    nested,
-                    crate::engine::ExecutionCursor {
-                        index: 2,
-                        ..Default::default()
-                    },
-                    crate::engine::ExecutionCursor::default(),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    if index != 0 {
-                        store.publish_attempt(
-                            flow.id(), flow.version,
-                flow.current_attempt.as_ref().unwrap().captured, "codex", None,
-                        ).await.unwrap();
-                        let actor = store.sqlite.test_flow_turn(
-                            &flow.current_attempt.as_ref().unwrap().run_id,
-                        );
-                        store.sqlite.test_output(
-                            &actor,
-                            &serde_json::json!({"decision":"advance","summary":"Membership fixture completed"}),
-                        ).unwrap();
-                        store.sqlite.test_finish_flow_turn(&actor, "completed");
-                        flow = store
-                            .record_flow_cursor(flow.id(), flow.version, &cursor, None)
-                            .await
-                            .unwrap();
-                    }
-                    flow = store
-                        .reserve_attempt(flow.id(), flow.version, None)
-                        .await
-                        .unwrap();
-                    let run_id = &flow.current_attempt.as_ref().unwrap().run_id;
-                    let session = store.session_for_artifact(run_id).await.unwrap().unwrap();
-                    let run = session.clone();
-                    assert_eq!(run.node, Some([3, 4, 0][index]));
-                    sessions.push((session.id, run.iterations.clone()));
-                    for (previous, (id, iterations)) in sessions.iter().enumerate() {
-                        let session = store.session(id).await.unwrap().unwrap();
-                        let projected = super::surface(&store, &session).await.unwrap();
-                        let super::SessionFlowMembership::Step {
-                            node,
-                            step,
-                            iterations: actual_iterations,
-                            occurrence,
-                            ..
-                        } = projected.flow_membership
-                        else {
-                            panic!("stored Session must name its captured node")
-                        };
-                        assert_eq!(node, Some(expected[previous].key));
-                        assert_eq!(step, expected[previous].label);
-                        assert_eq!(&actual_iterations, iterations);
-                        assert_eq!(
-                            occurrence,
-                            if previous == index {
-                                super::SessionFlowOccurrence::Current
-                            } else {
-                                super::SessionFlowOccurrence::Earlier
-                            }
-                        );
-                    }
-                }
-            });
     }
 
     #[test]

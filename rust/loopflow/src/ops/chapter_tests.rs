@@ -8,9 +8,6 @@ use tokio::sync::Mutex;
 use super::{
     classify_task, plan_rotation, rotate, successor_id, TaskDisposition, TaskStartEvidence,
 };
-use crate::durable::FlowSession;
-use crate::engine::invocation::QueuedInvocation;
-use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
@@ -507,7 +504,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, FlowSession) {
+) -> (Task, TaskPr, Vec<crate::ops::flow_run::FlowExecs>) {
     let (task, _) = local_task(
         context,
         repo,
@@ -517,47 +514,22 @@ async fn local_started_task(
         "0000000000000000000000000000000000000000",
     )
     .await;
-    let now = OffsetDateTime::now_utc();
-    let flow = context
-        .store
-        .create_flow(FlowSession {
-            invocation: QueuedInvocation::new(
-                "captured",
-                vec![ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named("implement"),
-                    sources: Vec::new(),
-                    id: Some("implement".into()),
-                    human: false,
-                    repeat: None,
-                })],
-            )
-            .unwrap(),
-            cursor: ExecutionCursor::default(),
-            version: 0,
-            task_id: Some(task.id.clone()),
-            wave_id: Some(task.wave_id.clone()),
-            cwd: repo.into(),
-            message: Some("original input".into()),
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: now,
-        })
-        .await
-        .unwrap();
     assert!(!context.store.task_started(&task.id).await.unwrap());
-    let flow = context
-        .store
-        .reserve_attempt(flow.id(), flow.version, None)
-        .await
-        .unwrap();
+    // An operation step run in the checkout is the Task's first recorded work.
+    context.store.sqlite.test_flow(
+        "captured",
+        &repo.to_string_lossy(),
+        &[("commit -m work", Some("succeeded"))],
+        None,
+    );
+    context.store.sqlite.mark_task_started(&task.id).unwrap();
     assert!(context.store.task_started(&task.id).await.unwrap());
+    let flows = context.store.sqlite.task_flows(&task.id).unwrap();
+    assert_eq!(flows.len(), 1);
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
     // Compare persisted values: SQLite stores timestamps at second precision.
     let task = context.store.get_task(&task.id).await.unwrap().unwrap();
-    (task, pr, flow)
+    (task, pr, flows)
 }
 
 fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
@@ -811,10 +783,7 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(retained.project_id, task.project_id);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(
-        store.latest_task_flow(&task.id).await.unwrap().unwrap(),
-        flow
-    );
+    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
     server.abort();
 }
 
@@ -908,10 +877,7 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
                         assert_eq!(moved.worktree, task.worktree);
                         assert_eq!(moved.plan, task.plan);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-                        assert_eq!(
-                            store.latest_task_flow(&task.id).await.unwrap().unwrap(),
-                            flow
-                        );
+                        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
                         assert_eq!(task_started_at(&path, &task.id), started_at);
                     })
                     .await;
@@ -1074,10 +1040,7 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
     }
     assert_eq!(task_started_at(&path, &task.id), started_at);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(
-        store.latest_task_flow(&task.id).await.unwrap().unwrap(),
-        flow
-    );
+    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
     let state = provider.lock().await;
     assert_eq!(state.mutations, mutations);
     assert_eq!(state.projects, projects);
@@ -1175,10 +1138,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             let store = super::pm_store().await.unwrap();
             assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(
-                store.latest_task_flow(&task.id).await.unwrap().unwrap(),
-                flow
-            );
+            assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
         })
         .await;
     assert_eq!(provider.lock().await.mutations, 0);
@@ -1304,7 +1264,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         let store = super::pm_store().await.unwrap();
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
-                        let flow = store.latest_task_flow(&task.id).await.unwrap();
+                        let flow = store.sqlite.task_flows(&task.id).unwrap();
                         let ctx = super::resolve_context(&repo, "a").await.unwrap();
                         super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                             .await
@@ -1321,7 +1281,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         assert_eq!(provider.lock().await.mutations, mutations);
                         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.latest_task_flow(&task.id).await.unwrap(), flow);
+                        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
                         {
                             let state = provider.lock().await;
                             assert_eq!(state.projects.len(), 4);
@@ -1339,7 +1299,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         assert_ne!(moved.project_id, task.project_id);
                         assert_eq!(moved.worktree, task.worktree);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.latest_task_flow(&task.id).await.unwrap(), flow);
+                        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
                     })
                     .await;
             }

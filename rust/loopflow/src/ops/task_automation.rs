@@ -77,16 +77,6 @@ pub(crate) fn admission_blocker(
             return Ok(Some(format!("Exec {} is live or unresolved", exec.id)));
         }
     }
-    for flow in &work.flows {
-        if let Some(flow) = store.flow(&flow.summary.id).map_err(error)? {
-            if !flow.finished && crate::ops::flow_run::driver_live(flow.id()) {
-                return Ok(Some(format!(
-                    "Flow {} has a live driver",
-                    flow.invocation.id
-                )));
-            }
-        }
-    }
     Ok(None)
 }
 

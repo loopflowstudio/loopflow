@@ -7,9 +7,6 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
-// Bound Flows inherit their Task's checkout instead of storing a second path.
-const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.task_id))";
-
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -20,22 +17,12 @@ fn checkout(cwd: &str) -> String {
     format!("tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
-pub(super) fn flow_ids(selector: &str) -> String {
-    format!(
-        "SELECT af.id FROM flow_sessions af JOIN ({}) tw ON af.task_id=tw.id OR ({})",
-        tasks(selector),
-        checkout(FLOW_CWD)
-    )
-}
-
 fn session_membership(session: &str) -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
          AND scoped.primary_scope IS NOT NULL)
-         AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
-         WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
+         AND ({session}.task_id=tw.id OR ({}))",
         checkout(&format!("{session}.cwd")),
-        checkout(FLOW_CWD)
     )
 }
 
@@ -54,12 +41,22 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-fn exec_ids(selector: &str) -> String {
+pub(super) fn exec_ids(selector: &str) -> String {
     format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
-        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
-        UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
-        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
+        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL",
+        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector))
+}
+
+fn flows_of_task(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Vec<crate::ops::flow_run::FlowExecs>> {
+    super::flow_inventory::flows_in(
+        conn,
+        &format!("e.id IN ({})", exec_ids("?1")),
+        &[&task.as_str()],
+    )
 }
 
 impl SqliteStore {
@@ -83,8 +80,9 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let sessions = tx
             .prepare(&format!(
-                "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at
+                "SELECT s.id,s.title,s.kind,s.interactive,{},s.completed_at
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
+                super::sessions::SESSION_FLOW,
                 session_ids("?1")
             ))?
             .query_and_then([task.as_str()], |row| {
@@ -93,21 +91,15 @@ impl SqliteStore {
                     title: row.get(1)?,
                     kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
                     interactive: row.get(3)?,
-                    flow_session_id: row.get(4)?,
+                    flow_id: row.get(4)?,
                     completed_at: row.get(5)?,
                 })
             })?
             .collect::<StoreResult<Vec<_>>>()?;
-        let flows = tx
-            .prepare(&format!(
-                "SELECT {},{} {} WHERE f.id IN ({}) ORDER BY f.id",
-                super::flows::FLOW_METADATA_COLUMNS,
-                super::flow_inventory::INVENTORY_EXTRA,
-                super::flow_inventory::INVENTORY_FROM,
-                flow_ids("?1")
-            ))?
-            .query_map([task.as_str()], super::flow_inventory::read_entry)?
-            .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
+        let flows = flows_of_task(&tx, task)?
+            .iter()
+            .map(|flow| super::flow_inventory::entry_in(&tx, flow))
+            .collect::<StoreResult<Vec<_>>>()?;
         let execs = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -124,16 +116,13 @@ impl SqliteStore {
         })
     }
 
-    /// Exact Flow membership is used only to exempt the completing worker from
-    /// its own completion gate. Causal ancestry does not establish membership.
-    pub(crate) fn flow_exec_ids(&self, flow: &str) -> StoreResult<Vec<crate::id::ExecId>> {
+    /// Every Flow among the Task's work, oldest first.
+    pub(crate) fn task_flows(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::ops::flow_run::FlowExecs>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT exec_id FROM flow_events WHERE flow_id=?1 AND exec_id IS NOT NULL
-            UNION SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-                WHERE s.flow_session_id=?1 AND e.exec_id IS NOT NULL
-            UNION SELECT driver_exec_id FROM agent_sessions WHERE flow_session_id=?1 AND driver_exec_id IS NOT NULL")?;
-        let rows = query.query_map([flow], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        flows_of_task(&conn, task)
     }
 
     /// A turn runs in a local provider process, so one that began before this
@@ -336,14 +325,6 @@ mod tests {
                     &crate::session_record::new_artifact_key(),
                 );
             }
-            for (id, cwd, bound) in [
-                ("bound", "/elsewhere", true),
-                ("independent", "/missing/task%_/sub", false),
-                ("unrelated", "/other", false),
-            ] {
-                conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,updated_at,state)
-                    VALUES(?1,?2,?3,?4,?5,0,0,1,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),(!bound).then_some(cwd),serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
-            }
             for (id, cwd) in [
                 (&mechanical, "/missing/task%_"),
                 (&bound_exec, "/elsewhere"),
@@ -360,6 +341,14 @@ mod tests {
             )
             .unwrap();
         }
+        // A Flow is the Task's work when its Execs ran in the checkout.
+        let independent = store.test_flow(
+            "independent",
+            "/missing/task%_/sub",
+            &[("implement", None)],
+            None,
+        );
+        store.test_flow("unrelated", "/other", &[("implement", None)], None);
         let work = store.task_work(&task).unwrap();
         assert_eq!(
             work.sessions
@@ -373,9 +362,10 @@ mod tests {
                 .iter()
                 .map(|f| f.summary.id.as_str())
                 .collect::<Vec<_>>(),
-            ["bound", "independent"]
+            [independent.as_str()]
         );
-        assert_eq!(work.execs.len(), 2);
+        assert_eq!(work.flows[0].summary.task_id.as_ref(), Some(&task));
+        assert_eq!(work.execs.len(), 4);
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
         assert!(work.execs.iter().any(|exec| exec.id == bound_exec));
         assert_eq!(
@@ -423,14 +413,20 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,flow_session_id,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/elsewhere','child-flow',?1,?2)", params![child.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
+        // A nested checkout's work is also its enclosing Task's.
+        let child_flow = store.test_flow(
+            "child",
+            "/missing/task%_/child",
+            &[("implement", None)],
+            None,
+        );
         let work = store.task_work(&task).unwrap();
         assert!(work
             .flows
             .iter()
-            .any(|flow| flow.summary.id == "child-flow"));
+            .any(|flow| flow.summary.id == child_flow.as_str()));
         assert!(work
             .sessions
             .iter()
@@ -450,12 +446,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert_eq!(
-            work.flows
-                .iter()
-                .map(|flow| flow.summary.id.as_str())
-                .collect::<Vec<_>>(),
-            ["bound"]
-        );
+        assert!(work.flows.is_empty());
     }
 }

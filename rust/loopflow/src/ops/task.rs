@@ -4729,35 +4729,32 @@ mod tests {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
-        let flow = runtime
-            .block_on(fixture.store.create_flow(crate::durable::FlowSession {
-                invocation: crate::durable::test_flow_invocation(
-                    "code",
-                    0,
-                    "implement",
-                    None,
-                    false,
-                ),
-                cursor: Default::default(),
-                version: 0,
-                task_id: Some(fixture.task.id.clone()),
-                wave_id: Some(fixture.task.wave_id.clone()),
-                cwd: fixture.task.worktree.clone(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            }))
-            .unwrap();
+        let worktree = fixture.task.worktree.to_string_lossy().into_owned();
         let blockers =
             || super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
-        assert!(blockers().is_empty(), "an undriven Flow is history");
-        let driver = crate::ops::flow_run::driver_lock(flow.id()).unwrap();
-        assert!(blockers().iter().any(|reason| reason.contains(flow.id())));
-        drop(driver);
+        fixture.store.sqlite.test_flow(
+            "code",
+            &worktree,
+            &[("implement", Some("failed"))],
+            Some("failed"),
+        );
+        assert!(
+            blockers().is_empty(),
+            "a Flow whose driver exited is history"
+        );
+        let live = fixture
+            .store
+            .sqlite
+            .test_flow("code", &worktree, &[("implement", None)], None);
+        assert!(blockers()
+            .iter()
+            .any(|reason| reason.contains(live.as_str())));
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE execs SET completed_at=started_at,outcome='interrupted' WHERE completed_at IS NULL",
+            [],
+        )
+        .unwrap();
         assert!(blockers().is_empty());
 
         // A reboot proves stale execution exited without settling the Flow.
@@ -4784,7 +4781,6 @@ mod tests {
             .store
             .sqlite
             .test_session("stalled", &crate::session_record::new_artifact_key());
-        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         conn.execute(
             "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
             rusqlite::params![fixture.task.worktree.to_str().unwrap(), session.id],
@@ -4809,10 +4805,13 @@ mod tests {
         assert!(after_boot.is_empty(), "{after_boot:?}");
         assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
         assert_eq!(
-            runtime
-                .block_on(fixture.store.latest_task_flow(&fixture.task.id))
-                .unwrap(),
-            Some(flow)
+            fixture
+                .store
+                .sqlite
+                .task_flows(&fixture.task.id)
+                .unwrap()
+                .len(),
+            2
         );
     }
 

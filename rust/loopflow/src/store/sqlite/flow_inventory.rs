@@ -1,160 +1,317 @@
+//! Flows read back from Execs: a driver and the step Execs it started. Reading
+//! selects nothing and grants neither driver nor process authority.
+
 use std::num::NonZeroU32;
 
-use rusqlite::{params, params_from_iter, types::Value, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::{FlowDetail, FlowFilter, FlowInventoryEntry, FlowPage};
-use crate::engine::flow_graph::{project_cursor, FlowGraph};
-use crate::session::FlowSummaryState;
+use crate::durable::{FlowFilter, FlowInventoryEntry, FlowPage, TaskId};
+use crate::id::{ExecId, WaveId};
+use crate::ops::flow_run::{FlowExecs, FlowStep, FLOW_STEP_COMMAND};
+use crate::session::{FlowSummary, FlowSummaryState};
 use crate::store::{StoreError, StoreResult};
 
-use super::flows::{flow_in, read_flow_summary, FLOW_METADATA_COLUMNS};
+use super::execs::{read_exec, EXEC_SELECT};
 use super::SqliteStore;
 
-// Wave owns bound repository identity. The nullable scalar on an unbound Flow
-// records its launch repository; cwd never becomes read-time identity.
-pub(super) const INVENTORY_FROM: &str = "FROM flow_sessions f INDEXED BY flow_metadata
-    LEFT JOIN tasks t ON t.id=f.task_id LEFT JOIN waves w ON w.id=f.wave_id";
-pub(super) const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),f.ended_at";
-
-fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String, Vec<Value>) {
-    let mut sql = format!("WITH page AS MATERIALIZED (SELECT f.id {INVENTORY_FROM} WHERE 1");
-    let mut values = Vec::new();
-    let mut bind = |value| {
-        values.push(value);
-        format!("?{}", values.len())
-    };
-    for (column, value) in [
-        ("COALESCE(w.repo,f.unbound_repo)", filter.repo.as_deref()),
-        ("f.wave_id", filter.wave_id.as_ref().map(|id| id.as_str())),
-    ] {
-        if let Some(value) = value {
-            sql.push_str(&format!(
-                " AND {column}={}",
-                bind(Value::Text(value.into()))
-            ));
-        }
-    }
-    if let Some(task) = &filter.task_id {
-        let task = bind(Value::Text(task.to_string()));
-        sql.push_str(&format!(
-            " AND f.id IN ({})",
-            super::task_work::flow_ids(&task)
-        ));
-    }
-    if filter.taskless {
-        sql.push_str(" AND f.task_id IS NULL");
-    }
-    if let Some(state) = filter.state {
-        sql.push_str(match state {
-            FlowSummaryState::Current => " AND f.state='current'",
-            FlowSummaryState::Completed => " AND f.state='completed'",
-            FlowSummaryState::Replaced => " AND f.state='replaced'",
-        });
-    }
-    if let Some(search) = &filter.search {
-        let search = bind(Value::Text(search.clone()));
-        // Matches the existing index expression; substring search scans eligible
-        // indexed names, never captured steps. '%' and '_' remain literal.
-        sql.push_str(&format!(" AND (instr(lower(CASE WHEN json_valid(f.invocation_json) THEN CASE WHEN json_type(f.invocation_json,'$.flow')='text' THEN json_extract(f.invocation_json,'$.flow') END END),lower({search}))>0 OR instr(f.id,{search})>0)"));
-    }
-    if let Some(after) = after {
-        sql.push_str(&format!(" AND f.id>{}", bind(Value::Text(after.into()))));
-    }
-    let limit = bind(Value::Integer(i64::from(limit.get()) + 1));
-    sql.push_str(&format!(
-        " ORDER BY f.id LIMIT {limit}) SELECT {FLOW_METADATA_COLUMNS},
-        {INVENTORY_EXTRA} {INVENTORY_FROM} JOIN page ON page.id=f.id ORDER BY f.id"
-    ));
-    (sql, values)
+fn invalid(error: impl std::fmt::Display) -> StoreError {
+    StoreError::InvalidData(error.to_string())
 }
 
-pub(super) fn read_entry(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<StoreResult<FlowInventoryEntry>> {
-    Ok((|| {
-        Ok(FlowInventoryEntry {
-            summary: read_flow_summary(row, 0)?.ok_or(StoreError::NotFound)?,
-            repo: row.get(8)?,
-            ended_at: row.get(9)?,
-        })
-    })())
+/// Step Execs matching `scope` (a condition on `e`), grouped under their
+/// drivers in launch order. A step whose driver left no Exec is not a Flow.
+pub(super) fn flows_in(
+    conn: &Connection,
+    scope: &str,
+    values: &[&dyn rusqlite::ToSql],
+) -> StoreResult<Vec<FlowExecs>> {
+    let steps = conn
+        .prepare(&format!(
+            "{EXEC_SELECT} WHERE e.parent_exec_id IS NOT NULL
+             AND instr(e.command,'{FLOW_STEP_COMMAND}')>0 AND ({scope}) ORDER BY e.rowid"
+        ))?
+        .query_map(values, read_exec)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut flows: Vec<FlowExecs> = Vec::new();
+    for exec in steps {
+        let Some(step) = FlowStep::of_exec(&exec) else {
+            continue;
+        };
+        let parent = exec.parent_exec_id.clone().expect("selected with a parent");
+        if let Some(flow) = flows.iter_mut().find(|flow| flow.driver.id == parent) {
+            flow.steps.push((step, exec));
+            continue;
+        }
+        let driver = conn
+            .query_row(
+                &format!("{EXEC_SELECT} WHERE e.id=?1"),
+                [&parent],
+                read_exec,
+            )
+            .optional()?;
+        if let Some(driver) = driver {
+            flows.push(FlowExecs {
+                driver,
+                steps: vec![(step, exec)],
+            });
+        }
+    }
+    for flow in &mut flows {
+        flow.steps.sort_by_key(|(step, _)| step.seq);
+    }
+    Ok(flows)
+}
+
+/// What the driver's Exec says of the Flow, and the Work its checkout names.
+pub(super) fn entry_in(conn: &Connection, flow: &FlowExecs) -> StoreResult<FlowInventoryEntry> {
+    let driver = &flow.driver;
+    let state = match (driver.outcome.as_deref(), driver.completed_at) {
+        (Some("succeeded"), _) => FlowSummaryState::Completed,
+        (None, None) => FlowSummaryState::Current,
+        _ => FlowSummaryState::Stopped,
+    };
+    let task: Option<String> = match &driver.cwd {
+        Some(cwd) => conn
+            .query_row(
+                "SELECT tw.id FROM tasks tw WHERE tw.worktree!='' AND (?1=rtrim(tw.worktree,'/')
+                    OR instr(?1,rtrim(tw.worktree,'/')||'/')=1)
+                 ORDER BY length(tw.worktree) DESC LIMIT 1",
+                [cwd],
+                |row| row.get(0),
+            )
+            .optional()?,
+        None => None,
+    };
+    let wave: Option<String> = match &task {
+        Some(task) => conn
+            .query_row(
+                "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+                [task],
+                |row| row.get(0),
+            )
+            .optional()?,
+        None => conn
+            .query_row(
+                "SELECT c.wave_id FROM session_events c JOIN execs e ON e.id=c.exec_id
+                 WHERE c.kind='captured' AND e.parent_exec_id=?1 AND c.wave_id IS NOT NULL
+                 ORDER BY c.seq DESC LIMIT 1",
+                [&driver.id],
+                |row| row.get(0),
+            )
+            .optional()?,
+    };
+    Ok(FlowInventoryEntry {
+        summary: FlowSummary {
+            id: driver.id.to_string(),
+            name: flow.name().to_owned(),
+            state,
+            task_id: task
+                .map(|id| TaskId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            wave_id: wave
+                .map(|id| WaveId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            updated_at: driver.completed_at.unwrap_or(flow.latest().1.started_at),
+        },
+        repo: driver.repo.clone(),
+        ended_at: driver.completed_at,
+    })
 }
 
 impl SqliteStore {
+    /// Flows in driver-id order after `after`, at most `limit`.
     pub fn flow_inventory(
         &self,
         filter: &FlowFilter,
         after: Option<&str>,
         limit: NonZeroU32,
     ) -> StoreResult<FlowPage> {
-        let (sql, values) = query(filter, after, limit);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&sql)?;
-        let mut entries = query
-            .query_map(params_from_iter(values), read_entry)?
-            .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
-        let next = if entries.len() > limit.get() as usize {
-            entries.pop();
-            entries.last().map(|entry| entry.summary.id.clone())
-        } else {
-            None
+        let flows = match &filter.task_id {
+            Some(task) => flows_in(
+                &conn,
+                &format!("e.id IN ({})", super::task_work::exec_ids("?1")),
+                &[&task.as_str()],
+            )?,
+            None => flows_in(&conn, "1", &[])?,
         };
+        let search = filter.search.as_deref().map(str::to_lowercase);
+        let mut entries = Vec::new();
+        for flow in &flows {
+            let entry = entry_in(&conn, flow)?;
+            let summary = &entry.summary;
+            if filter
+                .repo
+                .as_ref()
+                .is_some_and(|repo| entry.repo.as_ref() != Some(repo))
+                || filter
+                    .wave_id
+                    .as_ref()
+                    .is_some_and(|wave| summary.wave_id.as_ref() != Some(wave))
+                || (filter.taskless && summary.task_id.is_some())
+                || filter.state.is_some_and(|state| summary.state != state)
+                || search.as_ref().is_some_and(|search| {
+                    !summary.name.to_lowercase().contains(search) && !summary.id.contains(search)
+                })
+                || after.is_some_and(|after| summary.id.as_str() <= after)
+            {
+                continue;
+            }
+            entries.push(entry);
+        }
+        entries.sort_by(|left, right| left.summary.id.cmp(&right.summary.id));
+        let limit = limit.get() as usize;
+        let next = (entries.len() > limit).then(|| entries[limit - 1].summary.id.clone());
+        entries.truncate(limit);
         Ok(FlowPage { entries, next })
     }
 
-    pub fn flow_detail(&self, selector: &str) -> StoreResult<Option<FlowDetail>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let exact: Option<String> = tx
-            .query_row(
-                "SELECT id FROM flow_sessions WHERE id=?1",
-                [selector],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let id = match exact {
-            Some(id) => id,
-            None => {
-                let upper = format!("{selector}\u{10ffff}");
-                let mut query = tx.prepare(
-                    "SELECT id FROM flow_sessions WHERE id>=?1 AND id<?2 ORDER BY id LIMIT 2",
-                )?;
-                let ids = query
-                    .query_map(params![selector, upper], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                match ids.as_slice() {
-                    [] => return Ok(None),
-                    [id] => id.clone(),
-                    _ => {
-                        return Err(StoreError::InvalidData(format!(
-                            "Ambiguous FlowSession prefix {selector:?}"
-                        )))
-                    }
-                }
+    /// One Flow by its driver Exec id or a unique prefix of it.
+    pub(crate) fn flow_execs(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<(FlowExecs, FlowInventoryEntry)>> {
+        let Some(driver) = self.resolve_exec(selector)? else {
+            return Ok(None);
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(flow) = flows_in(&conn, "e.parent_exec_id=?1", &[&driver.id])?.pop() else {
+            return Ok(None);
+        };
+        let entry = entry_in(&conn, &flow)?;
+        Ok(Some((flow, entry)))
+    }
+
+    /// An operation step is work begun for the Task whose checkout it ran in.
+    pub(crate) fn mark_task_started(&self, task: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
+            params![task.as_str(), crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// Flows whose steps ran in `cwd`, oldest first.
+    pub(crate) fn flows_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<FlowExecs>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        flows_in(&conn, "e.cwd=?1", &[&cwd.to_string_lossy()])
+    }
+
+    /// The Exec `driver` started for its `seq`th step launch, newest first.
+    pub(crate) fn flow_step_exec(
+        &self,
+        driver: &ExecId,
+        seq: u32,
+    ) -> StoreResult<Option<crate::exec::Exec>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{EXEC_SELECT} WHERE e.parent_exec_id=?1
+             AND instr(e.command,'{FLOW_STEP_COMMAND}')>0 ORDER BY e.rowid DESC"
+        ))?;
+        for exec in query.query_map(params![driver], read_exec)? {
+            let exec = exec?;
+            if FlowStep::of_exec(&exec).is_some_and(|step| step.seq == seq) {
+                return Ok(Some(exec));
             }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn flow_entry(&self, flow: &FlowExecs) -> StoreResult<FlowInventoryEntry> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        entry_in(&conn, flow)
+    }
+
+    /// The conversation, captured input and its event an Exec opened last.
+    pub(crate) fn exec_input(&self, exec: &ExecId) -> StoreResult<Option<(String, String, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT session_id,receipt_key,seq FROM session_events
+                 WHERE kind='captured' AND exec_id=?1 ORDER BY seq DESC LIMIT 1",
+                params![exec],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?)
+    }
+}
+
+#[cfg(test)]
+impl SqliteStore {
+    /// Record a driver and one step Exec per `(label, outcome)`, as a Flow
+    /// run from `cwd` leaves them.
+    pub(crate) fn test_flow(
+        &self,
+        name: &str,
+        cwd: &str,
+        steps: &[(&str, Option<&str>)],
+        driver_outcome: Option<&str>,
+    ) -> ExecId {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let driver = ExecId::new();
+        let insert = |id: &ExecId,
+                      parent: Option<&ExecId>,
+                      argv: Vec<String>,
+                      outcome: Option<&str>| {
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,completed_at,outcome)
+                 VALUES(?1,?8,?2,?3,?4,?4,?5,?6,?7)",
+                params![
+                    id,
+                    parent,
+                    serde_json::to_string(&argv).unwrap(),
+                    cwd,
+                    crate::store::rows::now_unix(),
+                    outcome.map(|_| crate::store::rows::now_unix()),
+                    outcome,
+                    crate::id::TraceId::new()
+                ],
+            )
+            .unwrap();
         };
-        let entry = tx.query_row(
-            &format!(
-                "SELECT {FLOW_METADATA_COLUMNS},{INVENTORY_EXTRA} {INVENTORY_FROM} WHERE f.id=?1"
-            ),
-            [&id],
-            read_entry,
-        )??;
-        let flow = flow_in(&tx, &id)?.ok_or(StoreError::NotFound)?;
-        let graph = FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
-        let projection = project_cursor(&graph, &flow.cursor);
-        let detail = FlowDetail {
-            entry,
-            graph,
-            current: projection.current,
-            completed: projection.completed,
-            returns: projection.returns,
-            version: flow.version,
-            cwd: flow.cwd,
-            failure: flow.failure,
-        };
-        tx.commit()?;
-        Ok(Some(detail))
+        insert(
+            &driver,
+            None,
+            vec!["lf".into(), "run".into(), name.into()],
+            driver_outcome,
+        );
+        for (index, (label, outcome)) in steps.iter().enumerate() {
+            let step = FlowStep {
+                flow: name.into(),
+                seq: index as u32 + 1,
+                label: (*label).into(),
+                cursor: crate::engine::ExecutionCursor {
+                    index,
+                    ..Default::default()
+                },
+                key: index as u32,
+                iterations: vec![vec![]],
+                skill: None,
+                output: None,
+                session: None,
+            };
+            // A label of several words is an operation step; one word a skill.
+            let mut argv = vec!["lf".to_string()];
+            if label.contains(' ') {
+                argv.extend([
+                    crate::ops::flow_run::FLOW_STEP_COMMAND.into(),
+                    step.arg().unwrap(),
+                ]);
+                argv.extend(label.split(' ').map(str::to_string));
+            } else {
+                argv.extend([
+                    crate::ops::flow_run::FLOW_STEP_ARG.into(),
+                    step.arg().unwrap(),
+                    "skill".into(),
+                    (*label).into(),
+                ]);
+            }
+            insert(&ExecId::new(), Some(&driver), argv, *outcome);
+        }
+        driver
     }
 }
 
@@ -162,214 +319,72 @@ impl SqliteStore {
 mod tests {
     use std::num::NonZeroU32;
 
-    use rusqlite::params;
-
-    use crate::durable::{FlowFilter, FlowSession};
-    use crate::engine::invocation::QueuedInvocation;
-    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
+    use crate::durable::FlowFilter;
     use crate::session::FlowSummaryState;
     use crate::store::sqlite::SqliteStore;
 
-    fn seed(store: &SqliteStore, id: &str, name: &str) {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-            position_version,updated_at,state)
-            VALUES(?1,?2,'/missing',0,0,1,17,'current')",
-            params![
-                id,
-                serde_json::json!({"id":id,"flow":name,"steps":"corrupt"}).to_string()
-            ],
-        )
-        .unwrap();
-    }
-
     #[test]
-    fn flow_inventory_pages_metadata_and_keeps_corrupt_detail() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        for id in ["a", "ab", "b"] {
-            seed(&store, id, "feature%_");
-        }
-        let filter = FlowFilter {
-            search: Some("%_".into()),
-            ..FlowFilter::default()
-        };
-        let size = NonZeroU32::new(2).unwrap();
-        let first = store.flow_inventory(&filter, None, size).unwrap();
-        assert_eq!(
-            first
-                .entries
-                .iter()
-                .map(|e| e.summary.id.as_str())
-                .collect::<Vec<_>>(),
-            ["a", "ab"]
+    fn flows_are_their_driver_and_step_execs() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let running = store.test_flow(
+            "feature",
+            "/repo",
+            &[("design", Some("succeeded")), ("implement", None)],
+            None,
         );
-        assert_eq!(first.next.as_deref().unwrap(), "ab");
-        assert!(first.entries.iter().all(|e| e.repo.is_none()));
-        assert!(store
-            .flow_detail("a")
-            .unwrap_err()
-            .to_string()
-            .contains("unreadable"));
-        assert!(store
-            .flow_detail("")
-            .unwrap_err()
-            .to_string()
-            .contains("Ambiguous"));
-        assert!(store.flow_detail("absent").unwrap().is_none());
-        let second = store
-            .flow_inventory(&filter, first.next.as_deref(), size)
-            .unwrap();
-        assert_eq!(second.entries[0].summary.id, "b");
-        assert!(second.next.is_none());
-        let conn = store.conn.lock().unwrap();
-        let bytes: String = conn
-            .query_row(
-                "SELECT invocation_json FROM flow_sessions WHERE id='a'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&bytes).unwrap()["steps"],
-            "corrupt"
+        let failed = store.test_flow("ship", "/repo", &[("gate", Some("failed"))], Some("failed"));
+        let done = store.test_flow(
+            "code",
+            "/other",
+            &[("implement", Some("succeeded"))],
+            Some("succeeded"),
         );
-    }
 
-    #[test]
-    fn flow_inventory_scopes_terminal_rows_without_loading_capture() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        seed(&store, "a", "feature");
-        seed(&store, "b", "feature");
-        seed(&store, "c", "feature");
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE flow_sessions SET unbound_repo='/repo',state='completed',ended_at=18 WHERE id IN ('a','c')",[]).unwrap();
-        }
-        let filter = FlowFilter {
-            repo: Some("/repo".into()),
-            taskless: true,
-            state: Some(FlowSummaryState::Completed),
-            ..FlowFilter::default()
-        };
-        let first = store
-            .flow_inventory(&filter, None, NonZeroU32::new(1).unwrap())
-            .unwrap();
-        assert_eq!(first.entries[0].summary.id, "a");
-        assert_eq!(first.entries[0].ended_at, Some(18));
-        let second = store
-            .flow_inventory(&filter, first.next.as_deref(), NonZeroU32::new(1).unwrap())
-            .unwrap();
-        assert_eq!(second.entries[0].summary.id, "c");
-        assert!(second.next.is_none());
-    }
-
-    #[test]
-    fn flow_detail_uses_its_capture_without_template_or_checkout() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        let saved = store
-            .create_flow(&FlowSession {
-                invocation: QueuedInvocation::new(
-                    "removed-template",
-                    vec![ConcreteStep::Skill(ConcreteSkill {
-                        skill: Skill::named("removed-skill"),
-                        sources: vec![],
-                        id: None,
-                        human: false,
-                        repeat: None,
-                    })],
-                )
-                .unwrap(),
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                task_id: None,
-                wave_id: None,
-                cwd: dir.path().join("absent"),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            })
-            .unwrap();
-        let detail = store.flow_detail(&saved.id()[..12]).unwrap().unwrap();
-        assert_eq!(detail.entry.summary.id, saved.id());
-        assert_eq!(detail.graph.name, "removed-template");
-        assert_eq!(detail.graph.steps[0].label, "removed-skill");
-        assert_eq!(detail.current, Some(0));
-        assert_eq!(store.flow(saved.id()).unwrap().unwrap(), saved);
-    }
-    #[test]
-    fn flow_inventory_lists_every_task_flow_without_starting_done_work() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        seed(&store, "first", "feature");
-        let wave = "00000000-0000-0000-0000-000000000001";
-        let task = "task_11111111111111111111111111111111";
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'wave','/repo',1)",
-                [wave],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO projects(id,wave_id,external_project_id,created_at,status)
-                VALUES('proj_11111111111111111111111111111111',?1,'old-plan',1,'completed')",
-                [wave],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,work_state,work_terminal_at)
-                VALUES(?1,'proj_11111111111111111111111111111111','old-issue','PROOF-1',1,'done',2)",[task]).unwrap();
-            conn.execute(
-                "UPDATE flow_sessions SET cwd=NULL,task_id=?1,wave_id=?2",
-                params![task, wave],
-            )
-            .unwrap();
-        }
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,updated_at,state,task_id,wave_id)
-                 SELECT 'other','{\"id\":\"other\",\"flow\":\"feature\",\"steps\":\"corrupt\"}',cwd,0,0,1,17,'current',task_id,wave_id FROM flow_sessions WHERE id='first'",
-                [],
-            )
-            .unwrap();
-        let id = store
-            .resolve_task_id("PROOF-1", Some("/repo"))
-            .unwrap()
-            .unwrap();
-        let filter = FlowFilter {
-            task_id: Some(id),
-            repo: Some("/repo".into()),
-            ..FlowFilter::default()
-        };
+        let all = NonZeroU32::new(10).unwrap();
         let page = store
-            .flow_inventory(&filter, None, NonZeroU32::new(10).unwrap())
+            .flow_inventory(&FlowFilter::default(), None, all)
             .unwrap();
-        // Every Flow naming the Task is listed alike; none is selected over another.
-        assert_eq!(
+        assert_eq!(page.entries.len(), 3);
+        let state = |id: &crate::id::ExecId| {
             page.entries
                 .iter()
-                .map(|entry| entry.summary.id.as_str())
+                .find(|entry| entry.summary.id == id.as_str())
+                .unwrap()
+                .summary
+                .state
+        };
+        assert_eq!(state(&running), FlowSummaryState::Current);
+        assert_eq!(state(&failed), FlowSummaryState::Stopped);
+        assert_eq!(state(&done), FlowSummaryState::Completed);
+
+        let (flow, entry) = store.flow_execs(running.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.name, "feature");
+        assert_eq!(
+            flow.steps
+                .iter()
+                .map(|(step, _)| step.label.as_str())
                 .collect::<Vec<_>>(),
-            ["first", "other"]
+            ["design", "implement"]
         );
-        let conn = store.conn.lock().unwrap();
-        let state: (String, Option<i64>) = conn
-            .query_row(
-                "SELECT work_state,started_at FROM tasks WHERE id=?1",
-                [task],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+        let repo = store
+            .flow_inventory(
+                &FlowFilter {
+                    repo: Some("/other".into()),
+                    ..Default::default()
+                },
+                None,
+                all,
             )
             .unwrap();
-        assert_eq!(state, ("done".into(), None));
+        assert_eq!(repo.entries.len(), 1);
+        assert_eq!(repo.entries[0].summary.id, done.as_str());
+        let first = store
+            .flow_inventory(&FlowFilter::default(), None, NonZeroU32::new(2).unwrap())
+            .unwrap();
+        let rest = store
+            .flow_inventory(&FlowFilter::default(), first.next.as_deref(), all)
+            .unwrap();
+        assert_eq!((first.entries.len(), rest.entries.len()), (2, 1));
     }
 }

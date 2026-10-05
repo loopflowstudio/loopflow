@@ -518,19 +518,18 @@ The fixture asserts that this scheduling point was reached. This is controlled
 ordering evidence, not a claim about how long a hosted signal handler paused.
 Other Unix platforms exercise the ordinary interruption path.
 
-Exercise native Flow recovery with real Codex and a local Responses fixture:
+Exercise a deciding step's structured output with real Codex and a local
+Responses fixture:
 
 ```bash
 uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
-  --lf target/debug/lf --launch --flow-driver-loss completed \
-  --output .lf/tmp/native-flow-completed
+  --lf target/debug/lf --launch --flow-decision-retry replace \
+  --output .lf/tmp/native-flow-decision
 ```
 
-Use `--flow-driver-loss running` for a surviving turn during public resume,
-`--flow-driver-loss both` for explicit retry after both driver and engine die,
-`--flow-decision-retry missing|replace` for native structured-output exhaustion
-or successful retry, `--flow-blocked` for keyed feedback continuation, and
-`--public-connect` for a live headless-to-terminal handoff.
+`--flow-decision-retry missing` exhausts the corrections of an invalid answer;
+`replace` proves a failed turn decides nothing. `--public-connect` covers a
+live headless-to-terminal handoff.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.
@@ -575,7 +574,7 @@ cargo test -p loopflow --test task_initialization_tests task_live_unblock
 ```
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
-invocation. A hard-coded step index can silently select a different skill when
+graph. A hard-coded step index can silently select a different skill when
 a nested Flow gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
@@ -730,9 +729,9 @@ toolchain explicitly.
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status and automation must also handle the saved cursor past the last step
-while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
-for that boundary; a fast mechanical Flow can finish while its start command reads status.
+Task status reads a Flow from its Execs and their processes. Run
+`cargo test -p loopflow --lib ops::task_execution::tests` for running, between
+steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
@@ -752,7 +751,7 @@ product contract; its two cross-store promotion/continuation cases were removed.
 
 The adoption case starts with planning and no Task row. Public checkout/run
 reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
-retain the PR identity, and preserve a saved later Flow cursor after source
+retain the PR identity, and leave an earlier Flow's Execs untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
@@ -909,20 +908,16 @@ They check retained review identity/capture and the current Project's custom Flo
 default. Synthetic migration success does not authorize conversion of an installed
 Home or prove configured-provider resumption.
 
-When changing Flow step or prepared-input ownership, include the FlowSession
-store tests and the public Session lifecycle proofs. Review boundaries reserve a
-captured Session event before provider launch; fixtures must start that retained
-input instead of binding a fresh capture. A successful provider completion is
-selected by its exact Session event; an Exec exit alone cannot settle agent work.
+When changing how a Flow step is described or read back, include the step
+argument and Exec inventory tests and the public Session lifecycle proofs. A
+Flow is its driver Exec and step Execs; assert on those Execs and on the Session
+turn a step Exec captured.
 
 ```bash
-cargo test -p loopflow --lib store::sqlite::flows
+cargo test -p loopflow --lib ops::flow_run
+cargo test -p loopflow --lib store::sqlite::flow_inventory
 cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
-
-Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
-a human review preserves its invocation and cursor while preparing its captured input;
-assert those facts instead of equality of the entire versioned Flow record.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;

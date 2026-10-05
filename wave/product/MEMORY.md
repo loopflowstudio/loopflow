@@ -31,33 +31,41 @@ authored id/name fields are unnecessary. This supersedes the sleeping-runner and
 single-capture human-segment proposals preserved at
 `5090f672e:scratch/focus-on-your-own-work.md`.
 
-Design review is approved. The local runtime cut deletes scheduling/enrollment
-with five scheduling columns, Ready/Complete, review launch and tokens, saved
-Flow resume, and Task-worker authority: claims, generations, `__worker`,
-`task restart`, `--retry`, managed flags, `tasks.current_invocation_id` and the
-claim columns. Task/PR checks share delivery reconciliation and per-landing
-locks, preserving CI repair holds. `flow start` launches a fresh detached
-ordinary Flow; one process drives it under a driver lock and a dead driver
-leaves history, never a position to resume. Status shows the latest launched
-Flow as observation. Only live or unresolved execution holds completion,
-cleanup and landing. Builtin Flows carry no human step: `feature` ends at a
-published PR and `ship` lands after the conversational demo. These last choices
-are implementation interpretations awaiting Jack's review, not his decisions.
+Design review is approved. The local runtime cut deleted scheduling, Ready/Complete,
+review launch, saved Flow resume and Task-worker authority (claims, generations,
+`__worker`, `task restart`, `--retry`, managed flags). Builtin Flows carry no human
+step: `feature` ends at a published PR and `ship` lands after the conversational
+demo; those two endpoints await Jack's review. Main's `lf flow end` (#1435) is
+dropped, also awaiting review. The October 4 design with FlowSession is at
+`6f246fda4:scratch/focus-on-your-own-work.md`.
 
-The draft archives feedback and legacy review boundaries as Session
-observations and converts review kinds to Conversation; identity, completion,
-captures and effect receipts remain and grant no navigation authority. Taskless
-detached launch, Task primary selection, Waiting, workflow/loop authoring and
-all-Flow Desktop views remain unimplemented.
+On October 5 Jack reviewed that cut and rejected its front door: it "should have
+been DELETING the task worker APIs and routing more things through the basic
+(e.g. flow -b) apis." His decisions: `-b` prints and blocks, `--mode` is taken
+back; naming a Task with `--task` or running from its worktree are one path with
+one set of checks; a thin Task entry may place the Task and fill defaults, then
+enters `lf run`; launch-time PR preparation is unjustified; "I dont think we
+need the FlowSession datatype", folded into the same PR. Task status
+presentation is "not the current focus".
 
-Merging main `be09439a9` kept boot-time exit evidence and dropped `lf flow end`
-(#1435, LOO-326): a stopped Flow blocks nothing here. That omission awaits
-review. Landing holds only for a pending Session turn or flow-step Exec.
+The branch implements that. `lf task run ISSUE [FLOW]` places, defaults and
+continues as `lf --task ISSUE run FLOW`; `flow start`, its tmux launcher and
+`task create --run` are gone. A Flow is its driver Exec and the step Execs it
+starts: the driver holds graph and cursor in memory, each step's position rides
+on its argv, a decision is the final answer of the turn that step Exec captured,
+and an invalid answer is corrected in the same conversation. No table, cursor,
+lock or resume exists; readers and Desktop read Execs. Choices made without
+Jack are listed in `scratch/questions.md` until he reviews them, notably: steps
+re-resolve skills by name, callers background the blocking command themselves,
+and Flow launch refusals do not apply to single skills or conversations.
 
-Focused migration, launch, projection and crash/effect checks establish local
-behavior only. Preserve main's confirmed-dead completed-provider admission exemption
-and Session fencing outside async waits. No live Home migration or configured
-acceptance follows from these checks.
+Lessons: the claim that `-b` was unbuilt was wrong (main #1356 had removed it);
+check main's history before calling a flag missing. Deleting a record exposed
+its hidden jobs: a Started trigger, steer acknowledgement per node, the S1–S5
+shared note key and command normalization all leaned on the Flow row. Fake-provider
+suites prove decisions, correction, routing and loop passes; a real provider
+step, a driver killed mid-turn, a populated-store migration and Desktop remain
+unproven, as do the Waiting, workflow, loop and Task-primary slices.
 
 Saved pursue retains demo although
 current source does not: templates cannot establish a saved invocation's shape.
@@ -909,44 +917,20 @@ under this heading. Retain these independent constraints:
 
 ### Task observation and Watch (2026-09-23)
 
+The dated worker-evidence, FlowPosition and capture-binding notes are at
+`67cd68157:wave/product/MEMORY.md` under this heading; the October 5 cut
+replaces their mechanism with Exec evidence. What still holds:
+
 - **Incomplete observation caused duplicate implementation.** Desktop launched
   two bound `implement` helpers into LOO-293 while its original worker was still
-  producing output. `ready`, a completed launcher, and a missing `lf ps` row
-  cannot establish idle execution or resolved review work. Recover advancement
-  through idempotent Task controls; ordinary bound Runs remain intentional
-  independent contributions with attribution but no Flow claim.
-- **Use the shared execution reason in every surface.** Task status, Wave
-  conditions, roadmap, and action recommendations now project FlowPosition and
-  exact worker evidence. Running, starting, unknown, blocked, and waiting for review
-  evidence takes precedence over dirty files or a future-launch refusal.
-  Done/Abandoned Work can still retain an unresolved review boundary; preserve
-  its waiting condition without reopening the Task. Runtime `project_id` is the
-  owning Project; the unread duplicate `routing_project_id` is removed from Rust,
-  Swift, and current fixtures.
-- **Watch belongs to Product / Desktop's existing LOO-293.** A provider refresh
-  during this curation confirmed it remains open and already embeds the full
-  accepted draft, assumptions, and newer native-read contract. That supersedes
-  this branch's unresolved-placement/native-contract notes. Keep one connected
+  producing output. A completed launcher or a missing `lf ps` row cannot
+  establish idle execution. Unknown liveness is not idle.
+- **Watch belongs to Product / Desktop's existing LOO-293.** Keep one connected
   stage diagram and labeled all-Run feed, stage/Run filters, Follow live, and
-  completed history together. Watch includes passive native interactive output;
-  terminal attachment, final-only output, or autonomous-only coverage cannot
-  satisfy acceptance. Existing Session controls own review decisions.
-- **Preserve history at its owning transaction.** Exact invocation/stage/attempt
-  bindings must survive FlowPosition replacement and completion. Do not join by
-  skill name, infer completion from the cursor, or reconstruct an old plan from
-  current YAML. Native output requires source/item revisions beyond Run event
-  sequence numbers. UI state and polling remain presentation, never authority.
-- **Keep proof boundaries explicit.** The observation repair has source-binary
-  discovery/prune evidence and isolated status/DTO tests; it does not demonstrate
-  Watch or deployment to the older installed runtime. LOO-293 retains native
-  capture, bounded history/discovery, and configured live/demo-review obligations
-  in its current Linear directive. No duplicate follow-up or completion is
-  warranted. Historical `f56f457a0`/`c3bd1fdb3` show Wave output and stage pills,
-  not confirmation of the exact remembered Task screen.
-  Reconciliation on 2026-09-24 confirmed the PM directive still retains these
-  obligations and newer foundation evidence from other work. This branch's
-  observation repair and prompt cleanup do not validate that concurrent Watch
-  implementation or authorize settlement of LOO-293.
+  completed history together, including passive native interactive output.
+  Join history by exact step identity, never by skill name or current YAML.
+  LOO-293 retains native capture, bounded history and its configured demo;
+  nothing on this branch validates or settles it.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

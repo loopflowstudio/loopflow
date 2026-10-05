@@ -231,7 +231,7 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     session.id = "sql-only-conversation".into();
     session.artifact_key = input.clone();
     session.title = "Before rename".into();
-    store.create_session(session, None).await.unwrap();
+    store.create_session(session).await.unwrap();
     // No invalidation/refresh: this is the same observe call used by the watch tick.
     visible(&mut reader, &store, std::slice::from_ref(&input)).await;
     store
@@ -331,7 +331,7 @@ async fn discovery_cost_matrix() {
         historical.id = format!("historical-{index}");
         historical.artifact_key =
             crate::session_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
-        store.create_session(historical, None).await.unwrap();
+        store.create_session(historical).await.unwrap();
     }
     let mut previous = 0;
     for population in [100, 10_000, 100_000] {

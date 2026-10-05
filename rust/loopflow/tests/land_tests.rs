@@ -2152,11 +2152,18 @@ fi"#;
             .unwrap();
         assert_eq!(state, "merged");
         if flow {
-            // The Flow stopped at its watched landing; the merge resumes nothing.
-            let state: String = conn
-                .query_row("SELECT state FROM flow_sessions", [], |row| row.get(0))
+            // The Flow stopped at its watched landing: its step handed off and
+            // its driver exited. The merge resumes nothing.
+            let (step, driver): (i64, String) = conn
+                .query_row(
+                    "SELECT step.exit_code,driver.outcome FROM execs step
+                     JOIN execs driver ON driver.id=step.parent_exec_id
+                     WHERE instr(step.command,'__flow-step')>0",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
                 .unwrap();
-            assert_eq!(state, "current");
+            assert_eq!((step, driver.as_str()), (75, "failed"));
         }
         assert!(!worktree.exists());
         assert!(!local_branch_exists(&repo, "watched-land"));

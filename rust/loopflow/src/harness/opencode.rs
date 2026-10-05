@@ -104,10 +104,7 @@ impl OpenCodeHarness {
                 ))
             })
             .transpose()?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(
-            owner,
-            config.flow_selection.clone(),
-        )));
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner)));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -1205,7 +1202,7 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
+            output: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: Some("opencode".to_string()),

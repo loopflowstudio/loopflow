@@ -35,9 +35,11 @@ lf flow show FLOW_ID --sessions --json
 lf task interrupt EXP-12
 ```
 
-Each start captures a new invocation. A Flow whose driver stopped keeps its
-cursor, failure and effects as history; nothing resumes it. Inspect it, then
-launch the work that remains.
+Each start is a new Flow: one driver Exec and the step Execs it starts. Its ID
+is the driver Exec's. `--state` selects `current` (the driver has no recorded
+exit), `completed` (it succeeded) or `stopped` (it exited before the last
+step). A stopped Flow's Execs are its history; nothing resumes it. Inspect
+them, then launch the work that remains.
 
 ## lf
 
@@ -68,7 +70,7 @@ Open Loopflow or run its CLI
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
 | `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
-| `--__flow-step` | Execute a skill from this saved Flow boundary, without resolving its definition again Internal. |
+| `--__flow-step` | Run this command as the Flow step its driver describes; recorded on this Exec's argv Internal. |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -1478,14 +1480,14 @@ Launch the immutable provider request retained for a captured input
 
 ## lf __flow-step
 
-Execute one captured Flow boundary in its own process
+Run one Flow operation step in its own process
 
 Internal command; invoked by the owning operation.
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
-| `<version>` | version |
+| `<step>` | The step as its driver describes it; recorded on this Exec's argv |
+| `<command>` | command |
 | `--help / -h` | Print help |
 
 ## lf run
@@ -1508,14 +1510,14 @@ Run or inspect authored flows
 
 ## lf flow list
 
-List authored flows or saved FlowSessions
+List authored flows, or Flows that ran
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--sessions` | List or show saved FlowSessions instead of reusable templates Default: false. |
+| `--sessions` | List or show Flows that ran, from their Execs, instead of reusable templates Default: false. |
 | `--all` | Include every repository and flows with unknown repository evidence Default: false. |
-| `--limit` | FlowSession page size (default 100) |
+| `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |
 | `--search` | Literal name or identity containment |
 | `--state` | state |
@@ -1526,7 +1528,7 @@ List authored flows or saved FlowSessions
 
 ## lf flow show
 
-Inspect an authored flow or a saved FlowSession
+Inspect an authored flow, or one that ran
 
 | Argument | What it does |
 |---|---|

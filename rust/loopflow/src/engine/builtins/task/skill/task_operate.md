@@ -15,7 +15,8 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    with `lf task status <issue> --json`. Read its current brief, design, and
    relevant scratch history in its existing checkout. Separate accepted decisions
    from drafts and superseded plans. Inspect `lf session list --json` and the
-   Task's Flows: each one's captured graph, last cursor, driver and effects. Every
+   Task's Flows with `lf flow show <id> --sessions`: each one's steps, how each
+   ended, whether its driver is alive, and its effects. Every
    conversation and Flow in the checkout is the Task's work; none is privileged.
    If Task identity is missing or ambiguous, ask for it; do not file duplicate work.
 

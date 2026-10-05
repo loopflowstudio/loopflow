@@ -1424,29 +1424,12 @@ esac
             runtime
                 .block_on(fixture.store.create_task(&task, &pr))
                 .unwrap();
-            runtime
-                .block_on(fixture.store.create_flow(crate::durable::FlowSession {
-                    task_id: Some(task.id.clone()),
-                    wave_id: Some(task.wave_id.clone()),
-                    cwd: task.worktree.clone(),
-                    message: None,
-                    model: None,
-                    finished: false,
-                    invocation: crate::durable::test_flow_invocation(
-                        "review",
-                        0,
-                        "review",
-                        Some("review"),
-                        true,
-                    ),
-                    current_attempt: None,
-                    pending_session_id: None,
-                    cursor: Default::default(),
-                    version: 0,
-                    failure: None,
-                    updated_at: timestamp,
-                }))
-                .unwrap();
+            fixture.store.sqlite.test_flow(
+                "review",
+                &task.worktree.to_string_lossy(),
+                &[("review", Some("failed"))],
+                Some("failed"),
+            );
             assert_eq!(
                 crate::ops::task::task_repository(&checkout, None).unwrap(),
                 checkout.canonicalize().unwrap()
@@ -1564,11 +1547,8 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            // The Flow row remains as history; abandonment retires nothing.
-            assert!(runtime
-                .block_on(fixture.store.latest_task_flow(&task.id))
-                .unwrap()
-                .is_some());
+            // The Flow's Execs remain as history; abandonment retires nothing.
+            assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime
                     .block_on(

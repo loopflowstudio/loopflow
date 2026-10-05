@@ -25,7 +25,6 @@ mod ci_incidents;
 mod durable;
 mod execs;
 mod flow_inventory;
-mod flows;
 mod metrics;
 mod planning;
 mod pr_landings;

@@ -1,11 +1,10 @@
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::FlowSession;
-use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::ExecutionCursor;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
@@ -230,50 +229,19 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 1);
 
         if operation == "checkout" {
-            assert!(runtime
-                .block_on(store.latest_task_flow(&task.id))
-                .unwrap()
-                .is_none());
-            runtime
-                .block_on(store.create_flow(FlowSession {
-                    invocation: QueuedInvocation::load(&checkout, "adoption").unwrap(),
-                    cursor: ExecutionCursor {
-                        index: 1,
-                        iteration: 3,
-                        ..Default::default()
-                    },
-                    version: 0,
-                    task_id: Some(task.id.clone()),
-                    wave_id: Some(task.wave_id.clone()),
-                    cwd: checkout.clone(),
-                    message: None,
-                    model: None,
-                    current_attempt: None,
-                    pending_session_id: None,
-                    failure: None,
-                    finished: false,
-                    updated_at: now,
-                }))
-                .unwrap();
+            assert!(support::recorded_flows(home.path()).is_empty());
+            support::record_flow(home.path(), &checkout, "adoption", "implement", "failed");
         }
-        let saved = runtime
-            .block_on(store.latest_task_flow(&task.id))
-            .unwrap()
-            .unwrap();
-        // Catalog changes must not rewrite a captured graph or its cursor.
+        let saved = support::recorded_flows(home.path());
+        assert_eq!(saved.len(), 1);
+        // Neither a catalog change nor another checkout touches a Flow's Execs.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
             "- cmd: sync --plan\n",
         )
         .unwrap();
         invoke("checkout");
-        assert_eq!(
-            runtime
-                .block_on(store.latest_task_flow(&task.id))
-                .unwrap()
-                .unwrap(),
-            saved
-        );
+        assert_eq!(support::recorded_flows(home.path()), saved);
         assert_eq!(
             runtime
                 .block_on(store.active_task_pr(&task.id))
@@ -348,20 +316,14 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
                         .unwrap();
                 }
-                let output = run(repo.path(), &["--task", "FIX-1", "flow", "start", "--json"]);
+                let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);
                 assert!(
                     !output.status.success(),
                     "{condition} allowed a Task Flow launch"
                 );
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(error.contains(expected), "{condition}: {error}");
-                assert_eq!(
-                    runtime
-                        .block_on(store.latest_task_flow(&task.id))
-                        .unwrap()
-                        .unwrap(),
-                    saved
-                );
+                assert_eq!(support::recorded_flows(home.path()), saved);
                 assert_eq!(
                     runtime.block_on(store.get_task(&task.id)).unwrap(),
                     task_before

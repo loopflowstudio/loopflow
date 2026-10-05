@@ -18,7 +18,7 @@ struct DesktopHeadlessTests {
             .appendingPathComponent("tests/fixtures/dto")
         let data = try Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
-        let payload = "{\"work\":\(String(decoding: data, as: UTF8.self))}"
+        let payload = "{\"execution\":{\"work\":\(String(decoding: data, as: UTF8.self))}}"
         let query = RegistryQuery { _, _ in payload }
         let model = PodiumModel(query: query)
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,

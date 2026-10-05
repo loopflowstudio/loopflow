@@ -15,7 +15,6 @@ use crate::store::StoreResult;
 /// establishes this client's origin. Resumed history does not establish it.
 #[derive(Debug, Default)]
 pub(super) struct History {
-    flow_selection: Option<crate::durable::FlowTurnSelection>,
     sequence: u64,
     final_answers: HashMap<String, String>,
     known: HashMap<String, u64>,
@@ -26,13 +25,6 @@ pub(super) struct History {
 }
 
 impl History {
-    pub(super) fn for_flow(selection: Option<crate::durable::FlowTurnSelection>) -> Self {
-        Self {
-            flow_selection: selection,
-            ..Self::default()
-        }
-    }
-
     pub(super) fn request(&mut self, rpc: &Value) {
         if rpc["method"] == "turn/start" && !rpc["id"].is_null() {
             self.sequence += 1;
@@ -154,17 +146,13 @@ impl History {
         for turn in correlated {
             let driver = &self.replies[&turn];
             if let Some(exec) = &driver.exec_id {
-                let start = store.record_session_turn_origin(
+                store.record_session_turn_origin(
                     session,
                     thread,
                     &turn,
                     driver.provider_generation,
                     exec,
                 )?;
-                if let Some(selection) = &self.flow_selection {
-                    store.select_flow_turn(selection, session, driver, start)?;
-                    self.flow_selection = None;
-                }
             }
             self.attributed.insert(turn.clone());
             self.replies.remove(&turn);

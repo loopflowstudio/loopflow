@@ -774,7 +774,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 bound_at: None,
                 kind: crate::session::SessionKind::Conversation,
                 interactive: false,
@@ -788,16 +788,16 @@ mod tests {
             }
         };
         let worker = store
-            .create_session(session(Some(task.id.clone()), None), None)
+            .create_session(session(Some(task.id.clone()), None))
             .await
             .unwrap();
         // Reader fixture: inherited admission is separately proved through public
         // child commands. A causal input reference does not itself assign Work.
         let helper = store
-            .create_session(
-                session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
-                None,
-            )
+            .create_session(session(
+                Some(task.id.clone()),
+                Some(worker.artifact_key.clone()),
+            ))
             .await
             .unwrap();
         assert_eq!(helper.wave_id, Some(wave.id().clone()));
@@ -805,10 +805,7 @@ mod tests {
             helper.work_source,
             Some(crate::session::WorkSource::Inherited)
         );
-        store
-            .create_session(session(None, None), None)
-            .await
-            .unwrap();
+        store.create_session(session(None, None)).await.unwrap();
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
@@ -852,10 +849,10 @@ mod tests {
         );
         for _ in 0..55 {
             store
-                .create_session(
-                    session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
-                    None,
-                )
+                .create_session(session(
+                    Some(task.id.clone()),
+                    Some(worker.artifact_key.clone()),
+                ))
                 .await
                 .unwrap();
         }

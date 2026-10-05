@@ -75,7 +75,8 @@ pub struct AgentSession {
     pub iterations: Option<Vec<Vec<u32>>>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_session_id: Option<String>,
+    /// The Flow whose step captured the current input; derived, never stored.
+    pub flow_id: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
@@ -194,7 +195,7 @@ pub(crate) struct SessionSummary {
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_session_id: Option<String>,
+    pub flow_id: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
@@ -202,30 +203,34 @@ pub(crate) struct SessionSummary {
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,
     pub flow: Option<FlowSummary>,
+    /// Whether this Session's step is the last its Flow launched.
+    pub flow_step_latest: bool,
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
 }
 
-/// Recorded Flow facts; Current says nothing about a live driver or process.
+/// A Flow as its driver Exec records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowSummary {
+    /// The driver Exec.
     pub id: String,
-    pub name: Option<String>,
+    pub name: String,
     pub state: FlowSummaryState,
-    pub current_capture: Option<i64>,
-    pub pending_session: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
+    /// When its latest step started, or its driver exited.
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowSummaryState {
+    /// The driver has no recorded exit.
     Current,
     Completed,
-    Replaced,
+    /// The driver exited before the Flow's last step.
+    Stopped,
 }
 
 /// Read-local admission context. Immutable observations override current-input

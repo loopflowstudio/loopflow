@@ -1111,7 +1111,6 @@ impl CodexHarness {
         // conversation later shares its engine. Pass only explicit launch and
         // freshly resolved lf executable/Home values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
-        let flow_selection = launch.flow_selection.clone();
         // The engine can host another conversation. Only this thread receives
         // its caller/capture provenance; engine defaults must not lend it to a
         // newly admitted sibling.
@@ -1190,9 +1189,7 @@ impl CodexHarness {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
         let writer_events = self.events.clone();
-        let native_history = Arc::new(Mutex::new(super::codex_history::History::for_flow(
-            flow_selection,
-        )));
+        let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {

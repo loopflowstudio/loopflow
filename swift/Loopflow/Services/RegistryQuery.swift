@@ -212,10 +212,17 @@ public struct RegistryQuery: Sendable {
     }
 
     /// All associated Sessions, Flows and Execs, including closed history.
+    /// A Task that was never placed has no execution record to read.
     public func taskWork(task: String, cwd: String?) async throws -> TaskWork {
-        struct Snapshot: Decodable { let work: TaskWork }
+        struct Status: Decodable {
+            struct Execution: Decodable { let work: TaskWork }
+            let execution: Execution?
+        }
         let stdout = try await run(["task", "status", task, "--json"], cwd)
-        return try Self.decode(Snapshot.self, from: stdout).work
+        guard let execution = try Self.decode(Status.self, from: stdout).execution else {
+            throw RegistryQueryError("Task has no placed work yet")
+        }
+        return execution.work
     }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying

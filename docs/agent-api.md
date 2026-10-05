@@ -47,8 +47,8 @@ Task owns the checkout and serial PRs. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
 Exec records an actual lf command process. AgentSession keeps a continuable
-conversation, whether interactive or headless. FlowSession captures one Flow
-and consumes exact boundary results. Provider turns and retries remain history
+conversation, whether interactive or headless. A Flow is one driver Exec and
+the step Execs it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
@@ -102,9 +102,9 @@ in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
-On a repeated captured Flow step, Task Flows seed only steer IDs newer than that
-step's last successful Run inputs. Failed or interrupted attempts acknowledge
-nothing. Each structural step and each new invocation has its own history;
+On a repeated Flow step, Task Flows seed only steer IDs newer than those an
+earlier successful run of that step, under the same driver, already received. Failed or interrupted attempts acknowledge
+nothing. Each structural step and each new Flow has its own history;
 unreceived late comments remain eligible. This records delivery, not proof that
 the model followed the instruction.
 
@@ -123,8 +123,8 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Flow whose driver died keeps its last
-position, failure and effect receipts as history; nothing resumes it. Inspect
+Work survives its provider process. A Flow whose driver died leaves its Execs
+as history; nothing resumes it. Inspect
 `lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a

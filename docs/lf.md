@@ -44,13 +44,12 @@ Flow ends. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow run for a Task is equally its work.
 
-A Flow whose driver died keeps its last position, failure and effect receipts as
-history. No command resumes it. To change direction or recover:
+A Flow whose driver died leaves its Execs as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --sessions --json    # one Flow's history and effects
+lf flow show ID --sessions --json    # one Flow's steps, by its driver Exec ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -194,8 +193,8 @@ lf --only-account codex=work@ run code
 lf account route set codex work@ personal@
 ```
 
-A preference permits fallback; a restriction limits spending. Saved Flows capture
-one selection per provider and carry it through background children. Remote
+A preference permits fallback; a restriction limits spending. A Flow takes
+one selection per provider and carries it through its child steps. Remote
 launches check destination access with the inherited restrictions. A foreground
 credential lease cannot authorize a detached remote process after it expires.
 Missing or expired capacity remains unknown, never zero or unlimited.

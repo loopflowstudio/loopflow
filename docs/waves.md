@@ -375,9 +375,8 @@ lf task run INF-125 incident
 
 Task Work advances through one active remote branch and PR to `main`. Its
 Project's Flow supplies the default; naming a Flow selects any other template.
-Each launch creates a fresh invocation containing the expanded graph and its
-execution state. Source edits and chapter transfers do not change that captured
-graph. Every invocation remains history and none is privileged. A finished Flow
+Each launch starts a fresh Flow: one driver process holding the expanded graph
+and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
 leaves Task Work open until an explicit completion or delivery operation
 settles it.
 
@@ -385,7 +384,7 @@ Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
 preserving the Task's worktree directory.
 
-AgentSessions and FlowSessions own typed nullable Task/Wave ancestry.
+AgentSessions and Execs own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and

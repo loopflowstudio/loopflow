@@ -446,14 +446,10 @@ fn assert_recorded_exit(home: &Path, code: i32) {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
-    let work: (i64, i64) = conn
-        .query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+    let sessions: i64 = conn
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(work, (0, 0));
+    assert_eq!(sessions, 0);
 }
 
 #[tokio::test]
@@ -807,7 +803,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 captured: None,
                 task_id: None,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
@@ -830,7 +826,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 completed_at: None,
                 created_at: 1,
             },
-            None,
             None,
         )
         .unwrap();

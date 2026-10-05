@@ -139,14 +139,14 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
             .unwrap()
             > previous_interrupt
     );
-    assert!(runtime
-        .block_on(task.store.latest_task_flow(&task.task.id))
-        .unwrap()
-        .is_none());
     let cached = task_status(repo.path(), Some("INF-123"))
         .expect("cached status succeeds")
         .execution
         .expect("execution");
+    assert!(
+        cached.work.flows.is_empty(),
+        "an interrupt launches nothing"
+    );
     assert!(matches!(cached.observation, Observation::Cached { .. }));
 
     let log_text = fs::read_to_string(&log).expect("read gh log");

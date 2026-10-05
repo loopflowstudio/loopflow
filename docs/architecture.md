@@ -5,8 +5,9 @@ title: Architecture
 
 # Architecture
 
-Loopflow records commands, preserves agent conversations, and advances captured
-Flows. Exec, AgentSession and FlowSession own those three lifetimes.
+Loopflow records commands, preserves agent conversations, and drives Flows.
+Exec owns a process and AgentSession a conversation; a Flow is one driver Exec
+and the step Execs it starts.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](architecture-reference.md#cutover-status), the remaining work
@@ -108,7 +109,7 @@ task
 
 ops/chapter.rs                deterministic chapter rotation
 ops/task.rs                   Task launch: a fresh Flow in the Task checkout
-lf/commands/flow.rs           Flow driver: one process per invocation
+lf/commands/flow.rs           Flow driver: one process per Flow
 
 execution kernel: engine/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
@@ -166,7 +167,7 @@ user / agent --> lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                    Exec / AgentSession / FlowSession
+                        Exec / AgentSession
                               |
                               v
                   status / roadmap / usage / app
@@ -186,13 +187,13 @@ ledger.
 Repository
   `-- Wave                    enduring objective, memory and cadence
         `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every FlowSession run for it
+              `-- Task        identity, worktree, PR and every Flow run for it
 
 Exec                          one actual lf process; immutable causal parent
 AgentSession                  one conversation; nullable current driver Exec
   `-- history                 provider starts, outcomes, retries and usage
-FlowSession                   captured graph, cursor and return counts
-  `-- history                 mechanical results or exact agent completion refs
+Flow                          one driver Exec; graph and cursor in its memory
+  `-- step Execs              each carries its position on its argv
 ```
 
 | Model | Represents | Primary truth |
@@ -201,7 +202,7 @@ FlowSession                   captured graph, cursor and return counts
 | Flow | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
 | Exec | One actual lf process, its caller and command completion | `execs` |
 | AgentSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
-| FlowSession | One captured Flow's progress, including taskless execution | `flow_sessions` and its subordinate history |
+| Running Flow | One driver process and the steps it starts, including taskless execution | The driver Exec and its child step Execs in `execs` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
 | Project | A Wave's plan, KRs, targets and default Flow | Linear Project and its synchronized `projects` row |
@@ -229,16 +230,16 @@ The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.
 
-Every FlowSession naming a Task, or run in its checkout, is equally its work;
+Every Flow naming a Task, or run in its checkout, is equally its work;
 none is privileged. `task run` always runs a fresh one.
-Taskless and Task-owned Flows use the same captured graph and driver. Loop
-passes are positions in that one FlowSession; template composition compiles into
-the graph. Each agent-backed step references the exact successful AgentSession
-history entry that fulfilled it. Mechanical results stay in FlowSession history;
-each step uses a real child Exec, and mechanical work creates no agent conversation.
-Failed or interrupted work remains visible, and stale results cannot advance
-the current boundary. A FlowSession whose driver died stays as history; nothing
-resumes it, and its caller launches fresh work.
+Taskless and Task-owned Flows use the same driver. It holds the compiled graph
+and cursor in memory; template composition compiles into the graph, and loop
+passes are positions in it. Each step is a real child Exec whose argv carries
+the Flow name, launch sequence and position. A step's result is how its process
+exited; a deciding or routing step also answers through the Session turn its
+Exec captured. Mechanical work creates no agent conversation. A Session reaches
+its Flow through the step Exec that captured its input. A killed driver leaves
+its Execs as history; nothing resumes it, and its caller launches fresh work.
 
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
@@ -249,14 +250,14 @@ mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
-also checks authored work, PRs and FlowSessions; missing history alone cannot
+also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts and the current-state conversion boundary. Exec, AgentSession
-and FlowSession are the execution owners; Run has no separate lifecycle.
+write contracts and the current-state conversion boundary. Exec and AgentSession
+are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
 

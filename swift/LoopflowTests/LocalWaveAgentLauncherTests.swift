@@ -17,13 +17,13 @@ struct LocalWaveAgentLauncherTests {
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
-            "LF_FLOW_STEP": "launching-step",
+            "LF_FLOW_ID": "launching-step",
             "LF_RUN_ID": "launching-run",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
-        #expect(environment["LF_FLOW_STEP"] == nil)
+        #expect(environment["LF_FLOW_ID"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
     }
 

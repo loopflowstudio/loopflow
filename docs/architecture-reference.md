@@ -12,12 +12,12 @@ current-source inventory. [Architecture](architecture.md) introduces the model;
 ## Cutover status
 
 **Implemented model; installed acceptance remains open.** Exec is one actual lf process;
-AgentSession is a continuable interactive or headless conversation; FlowSession
-is one captured Flow invocation consuming exact boundary completions. Run has no
+AgentSession is a continuable interactive or headless conversation; a Flow is
+one driver Exec and the step Execs it starts. Run has no
 separate product lifetime. The SQLite owners, shared driver, CLI readers and
 coordinated Rust/Swift wire types implement this contract.
 
-The implementation has `execs`, `agent_sessions` and `flow_sessions`, with
+The implementation has `execs` and `agent_sessions`, with
 captured input and provider outcomes beneath their Session owners. Jack Heart's
 2026-09-30 compression decision removes historical import, intermediate draft
 schemas and old format readers. The cutover retains current Work and links,
@@ -26,12 +26,12 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` stops owned clients and connects through the same live
 Codex engine, preserving its active turn and other conversations. There is no
-separate Session engine-restart operation. A FlowSession whose driver died stays
-as history; nothing resumes it. `session list` supports
+separate Session engine-restart operation. A Flow whose driver died leaves its
+Execs as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
-observations until enumeration succeeds. `lf flow list/show --sessions` discovers
-saved FlowSessions through metadata and exact captured graphs. Historical `lf mon show` and `lf replay` remain command spellings.
+observations until enumeration succeeds. `lf flow list/show --sessions` reads
+Flows from their driver and step Execs. Historical `lf mon show` and `lf replay` remain command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or
 wire reference does not make Run a target owner. Coordinate migration with
@@ -43,8 +43,8 @@ external consumers before changing those references.
 | --- | --- |
 | One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Public discovery and Rust/Swift wire fixtures cover the current shape; installed startup acceptance remains open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Home, stale-client exclusion and shared-engine preservation across every provider path. |
-| Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
-| One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. The final schema contains no child-pass owner. Runtime progression uses one cursor and return counters. Focused migration and progression proofs cover the cut; configured acceptance remains open. |
+| Flow reads each step's result from its Exec | A step's result is its process exit; a deciding or routing step answers through the Session turn its Exec captured. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
+| One started Flow is one driver Exec and its step Execs | Jack Heart's 2026-10-05 decision: a Flow adds nothing on top of running `lf flow ...` in a Task worktree, and its record is the lf binary's ordinary Exec logging. The schema has no Flow table. The driver holds one cursor and its return counters in memory; each step Exec's argv records its position. Configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
 | Current-state cutover | Three direct migration groups retain current database state. Release conversion must also recover resumable native identities from a frozen filesystem snapshot. Finished history and intermediate branch schemas are discarded. |
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Flows and 100,000 Execs: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Exec search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
@@ -84,7 +84,7 @@ boundary executors remain domain-specific because their settlement rules differ.
                                       |
                         +-------------v------------+
                         | Task Flows               |
-                        | one driver per invocation|
+                        | one driver Exec per Flow  |
                         +-------------+------------+
                                       |
                         +-------------v------------+
@@ -105,7 +105,7 @@ boundary executors remain domain-specific because their settlement rules differ.
 - **Flow composition:** sequence Skill and mechanical Command nodes, route Xor
   branches and follow backward edges. Every step is autonomous.
 - **Durable planning:** preserve Wave, Project, and Task intent across crashes;
-  each Task Flow is a fresh captured invocation driven by one process.
+  each Task Flow is a fresh driver process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
 - **Multi-Home placement:** run the same commands on a selected machine through
   explicit `lf ssh`.
@@ -125,7 +125,7 @@ user / automation -> lf -------- domain APIs ----+
           |                      |
           v                      v
  tracked Work + delivery    execution evidence
- Wave -> Linear Project -> Task          Exec / AgentSession / FlowSession
+ Wave -> Linear Project -> Task          Exec / AgentSession
        stable Work           indexed history + payloads
           |
           v
@@ -134,8 +134,8 @@ user / automation -> lf -------- domain APIs ----+
 exact local races use OS locks; remote execution uses lf ssh
 ```
 
-- **Tracked Work** records purpose, input and convergence; each Flow's position
-  version and selected completion fence its advancement.
+- **Tracked Work** records purpose, input and convergence; each Flow's driver
+  holds its position and advances it.
 - **Execution evidence** keeps command outcomes, provider turns and Flow results distinct.
 - **Delivery** coordinates worktrees, commits, PRs, CI, and merge.
 - **Machine authority** places Work and scopes local credentials, processes,
@@ -150,12 +150,12 @@ These are the accepted product owners; see [cutover status](#cutover-status)
 for the current implementation boundary.
 
 ```text
-Wave --< Linear Project --< Task --< FlowSession
+Wave --< Linear Project --< Task --< Flow (driver Exec)
 
 Exec --< Exec                 one row per actual lf process, causal edges
 AgentSession --> Exec         nullable current driver, with generation fence
 AgentSession --< history      immutable provider outcomes and usage
-FlowSession --< history       mechanical results or agent completion references
+driver Exec --< step Exec     each step's position on its argv; result is its exit
 ```
 
 | Concept | Owns |
@@ -165,10 +165,9 @@ FlowSession --< history       mechanical results or agent completion references
 | Wave | Enduring objective, memory, cadence, budget and metric instruments |
 | Project | Linear status, Tasks, KRs, targets and the default Flow |
 | Task | Worktree, serial PRs and every associated Session, Flow and Exec; no Flow is privileged |
-| Flow | Reusable authored graph of agent/mechanical/router nodes |
+| Flow | Reusable authored graph of agent/mechanical/router nodes; a running one is a driver Exec and its step Execs |
 | Exec | One lf process's immutable causal ancestry and command completion |
 | AgentSession | Conversation identity, title, feedback, native thread and provider history |
-| FlowSession | Captured graph, cursor, return counts, position version and completion |
 | Home | Store, payloads, credentials and exact local process authority |
 | Placement | Where Work executes; no authority over merely observed processes |
 | Steer | Ordered authored correction to Work |
@@ -183,8 +182,7 @@ attempt object. History entries have stable references, not independent lifecycl
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `execs` | ID, immutable parent Exec, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, bind and rename; historical feedback/completion retained |
-| `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, position version, selected conversation/completion reference and status; capture, checkpoint, settle |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, bind and rename; historical feedback/completion retained |
 | `tasks` | Project, issue, durable disposition, worktree/delivery facts and set-once `started_at` |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
 | `waves` | Stable repository identity; authored objective/memory/instruments stay in repository files |
@@ -239,20 +237,21 @@ when that driver owns its provider engine. Task/Wave conversations, primary
 Sessions, Asks and Flow reviews remain available. A stopped turn or missing
 process never completes a conversation, and retirement never settles a Flow.
 Completed Sessions retain their history but contribute no current rows or counts.
-Terminal Tasks cannot acquire current review obligations from retained Flow cursors;
+Terminal Tasks cannot acquire current review obligations;
 independent unresolved Asks remain discoverable.
 
 AgentSession history records provider starts, successful/failed/interrupted
 outcomes, retries, durations and usage, correlated with driving Exec and native
 turn/receipt. Repeated receipts are idempotent. Missing measurements differ from
 zero; cumulative samples are not added together. Later continuation never rewrites
-an earlier completion already consumed by a Flow. Provider completion and Exec
+an earlier completion a Flow already read. Provider completion and Exec
 completion are distinct: subsequent command work may fail after the agent succeeds.
 
 ### Exec lifetime and causality
 
 One actual lf process gets one Exec, including nested direct and agent-issued
-commands. In-process wrappers and Flow steps reuse it and cannot settle it early.
+commands. In-process wrappers reuse it and cannot settle it early; each Flow
+step is a child process with its own Exec.
 The incoming `via_agent` bit describes the caller, not whether the command later
 launches an agent. Agent-issued children resolve stable Session/provider-generation
 provenance to the current matching driver once, at admission. Delayed children
@@ -271,15 +270,17 @@ and conversation rows before provider launch, even when earlier observation fail
 
 ### Flow outcomes and authority
 
-A FlowSession is the existing invocation owner evolved, not a parallel cursor.
-Task and taskless execution share it. A Task observes every AgentSession,
-FlowSession and Exec associated with its checkout, plus explicitly bound work.
+A Flow is one driver Exec, the `lf run <flow>`, `lf <flow>` or
+`lf task run ISSUE [FLOW]` process, and the step Execs it starts as child
+processes. Its ID is the driver Exec's. Task and taskless execution share the
+driver. A Task observes every AgentSession, Flow and Exec associated with its
+checkout, plus explicitly bound work.
 The shared Rust association reader includes checkout descendants at path component
 boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
 Desktop navigation uses the same membership as Task status.
 
-No FlowSession is privileged: every one naming the Task, or run in its checkout,
+No Flow is privileged: every one naming the Task, or run in its checkout,
 is equally its work. `task status`'s `work` contains all Sessions, Flows and
 Execs, including headless and closed history. Its `execution` and Task Flow
 record observe the most recently launched Flow only: `none`, `latest` or
@@ -293,34 +294,43 @@ process is never blocked by its own caller lineage or by the Flow whose step it
 is. An Exec or provider turn that began before the machine’s last boot has
 exited; live or unknown execution since then still blocks. Passive membership
 grants no control.
-Template composition compiles into the graph.
-One started Flow is one FlowSession; loop passes are node/iteration positions and
-lenses over its history. They have no separate lifecycle. Captured
-definitions survive source deletion or edits.
+Template composition compiles into the graph, which the driver holds in memory
+with its cursor. Loop passes are node/iteration positions and lenses over the
+step Execs. They have no separate lifecycle. A past Flow whose YAML changed is
+drawn from the sequence its step Execs recorded.
 
-A boundary is the Session, node and iteration tuple. It may fail or be interrupted
-several times before succeeding. Preserve each outcome in its owning history.
-Agent steps consume an exact successful AgentSession history entry; mechanical
-steps retain a correlated start/result in FlowSession history under their own
-child `lf` Exec. The driver can fail after an earlier step succeeded; the step's
-result stays intact. Mechanical steps create no AgentSession.
+The driver tells each step what it is through a hidden argument:
 
-One process drives an invocation while holding its per-invocation driver lock.
-If it dies, the row keeps its last cursor, failure, events and effect receipts
-as history. Nothing resumes it. The caller, normally the Task conversation,
-inspects `lf flow show ID --sessions --json` or `lf task status`, then launches
-fresh work. Unknown liveness stays unknown.
+```text
+lf --batch ... --__flow-step '{...}' skill <name> [message]    # agent step
+lf __flow-step '{...}' <command> <args>                         # operation step
+```
 
-Settlement validates the FlowSession identity, position version, boundary and
-selected completion. Record completion and consumption atomically when they share
-the store. Old successes, stale drivers and helper conversations cannot advance
-the current boundary. Provider exit never chooses a navigation edge, and a
-conversation driver handoff grants no Flow authority.
+That JSON, on the step Exec's recorded argv, carries the Flow name, a launch
+sequence number, the step label, the cursor (index, selected XOR paths, per-edge
+return counts), the graph node key and per-edge iterations, and for a deciding
+or routing step the structured answer required. It is the only record of
+position. Nothing reads it back to resume.
+
+A step's result is how its process exited. For a deciding or routing step the
+driver reads the final answer of the Session turn that step Exec captured. An
+invalid structured answer is corrected in the same conversation: at most two
+corrective turns, then the Flow fails. An operation step that hands its effect
+to a watcher, such as a landing still being watched, exits with status 75; the
+Flow stops there, and neither failed. Mechanical steps create no AgentSession.
+A conversation driver handoff grants no Flow authority.
+
+A Flow is `current` while its driver has no recorded exit, `completed` when the
+driver succeeded and `stopped` when it exited before the last step. A killed
+driver leaves dead Execs as history. Nothing restarts or resumes it. The caller,
+normally the Task conversation, inspects `lf flow show ID --sessions --json` or
+`lf task status`, then launches fresh work. Unknown liveness stays unknown.
 
 ### Attribution, binding and Started
 
 Task implies Wave. Constructors fill omitted ancestors and reject disagreements.
-A Flow-owned conversation shares the FlowSession's nullable Task. `work_source`
+A Session links to its Flow through the Exec that captured its input, whose
+parent is the driver, and shares that Flow's nullable Task. `work_source`
 is declared, checkout, inherited or bound when known. Historical unknown membership
 stays Unknown; absence of evidence does not become Independent.
 
@@ -339,11 +349,11 @@ post-hoc attribution from the same history; the
 Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
-`tasks.started_at` is set once when actual agent work or a mechanical Flow boundary
-first belongs to the Task, including first bind. General command observation
+`tasks.started_at` is set once when actual agent work first belongs to the Task,
+including first bind, or an operation step Exec runs in its checkout. General command observation
 never starts a Task. Current-state conversion preserves existing Started
 timestamps. No later launch or bind moves or clears the timestamp. Chapter retirement also checks authored work, PRs and
-FlowSessions: a Task with any FlowSession has begun. Absent execution evidence alone cannot prove untouched backlog.
+Flows: a Task with any Flow has begun. Absent execution evidence alone cannot prove untouched backlog.
 
 ### Readers and conversion
 
@@ -364,7 +374,7 @@ name across the repository. Planned Projects express future plans; Completed
 Projects retain history. Project `flow:` is required and supplies new Tasks' default.
 There is no Chapter row, packet or local switch. Rotation uses an explicit target
 and stable Project identities, converges after partial mutations, preserves active
-Task identity/worktree/PR/FlowSession, and refuses unrelated competing plans.
+Task identity/worktree/PR/execution, and refuses unrelated competing plans.
 A second Home adopts the same state through ordinary synchronization.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;
@@ -404,18 +414,18 @@ provider, and literal subprocess edge must appear exactly once.
 | --- | --- | --- | --- | --- | --- | --- |
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf home sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
-| **Flow / Flow invocation** — template and one execution | Template expansion captures all Skill content and Xor paths; invocation transactions own cursor settlement, fenced by position version. | `Flow`, `FlowSession`, typed node ID | `.lf/flows/`; `flow_sessions`, `flow_events` | One CLI driver per invocation, holding its driver lock; `lf __flow-step` owns each mechanical effect | `lf flow`, `lf run` (flow-first definition execution), `lf --task flow start` | — |
+| **Flow** — template and one execution | The driver process compiles the template, including Xor paths, and holds the graph and cursor in memory. Each step Exec's argv records its position; a step's result is its process exit. | `Flow`, `FlowStep`, typed node ID | `.lf/flows/`; no table of its own: the driver Exec and its child step Execs are Exec rows | One CLI driver Exec per Flow; `lf __flow-step` owns each mechanical effect | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Directory discovery reconciles names and parents without replacing IDs. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
 | **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
-| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow run for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf --task flow start` launches a fresh detached Flow driver; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
+| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow run for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one recorded intent to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one check at a time; an incident without a recorded response admits one repair. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The process holding the claim: `lf pr reconcile` to observe and settle, `lf ci watch` to repair | `lf arm`, `lf land`, `lf pr reconcile`, `lf ci watch`, `lf pr checks` | `provider:github`, model provider for `ci-fix`, `exec:git`, `exec:gh` |
 | **PM projection** — locally readable planning facts | Linear remains authoritative. Repository/provider-scoped Project and issue facts serve both exact Task lookup and Wave views. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmTaskRecord`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Foreground PM sync and Task lookup | `lf repo`, `lf refresh`, `lf task status` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its Runs | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task Runs refresh comments into their starting context | `lf comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
 | **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
-| **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
+| **Session history projections** — captured events and exact provider evidence | AgentSession owns provider outcomes and Exec owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Exec** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ExecId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/exec.rs) | `execs` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
 | **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Home-local Exec receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `exec:/bin/ps`, `exec:ps`, `exec:sysctl`, `exec:lsof`, `exec:kill`, `exec:which` |
@@ -449,7 +459,7 @@ kernel locks                 live local exclusion authority
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Planning | `waves`, `projects`, `project_events`, `tasks`, `task_issue_identities`, `task_deletions`, `task_events` | Linear Project statuses, Wave plans, Work identity, corrections, historical evidence |
-| Execution | `flow_sessions`, `flow_events`, `agent_sessions`, `session_events` | Saved execution, selected captures and native completions, conversations and turn receipts |
+| Execution | `agent_sessions`, `session_events` | Conversations, selected captures, native completions and turn receipts |
 | CLI processes | `execs` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Home placement |
@@ -503,7 +513,7 @@ interactive shell / automation / Loopflow.app
        v          v
  SQLite       AgentSession history
 
-Task CLI -> fresh detached FlowSession -> one driver under its lock
+Task CLI -> fresh Flow -> one driver Exec starting each step Exec
 Wave operation -> finite planning AgentSession
 Task/Wave-bound helpers -------------> shared conversation admission
 ```
@@ -512,7 +522,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | --- | --- | --- |
 | `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Home |
 | `lf wave`, `repo`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
-| `lf session` | Sessions and explicit resolution | Current Home AgentSession and FlowSession state |
+| `lf session` | Sessions and explicit resolution | Current Home AgentSession state |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf monitor`, `usage`, `ps`, `top`, `mon prune`, `doctor` | Execution and process observation | Current Home only |
 | `lf home`, `lf wave place` | Home identity and Work placement | Current Home unless routed explicitly |
@@ -543,10 +553,11 @@ Session data; its historical name does not make it disposable Run history.
    uncertain publication/spawn evidence never permits a blind duplicate launch.
 4. Start or reconnect the native engine. Record its identity and endpoint, distinct
    from the client's process and the conversation's driver.
-5. Append correlated provider outcomes and usage; retain missingness. Settle a
-   selected Flow completion only at its driver's cursor version.
+5. Append correlated provider outcomes and usage; retain missingness. A Flow's
+   driver reads a deciding or routing step's answer from the turn that step's
+   Exec captured.
 6. Settle the actual command's Exec when the process completes, independently of
-   whether its conversation or parked Flow remains open.
+   whether its conversation remains open.
 
 Payloads may remain large immutable files. SQLite owns identity, attribution,
 current control and searchable history. Current capture payloads may use files; ordinary readers select their exact
@@ -556,26 +567,28 @@ The retained operational process evidence is not a new lifecycle object.
 ## Tracked Work and Task Flows
 
 ```text
-flow start -> capture a fresh FlowSession -> one driver executes its nodes
-                                          -> complete, fail, or stop as history
+lf task run ISSUE [FLOW] -> place the worktree, default to the Project's Flow
+                         -> lf --task ISSUE run FLOW: one driver Exec
+                         -> step Execs, one child process each
+                         -> current, completed or stopped
 ```
 
-Every FlowSession naming a Task is equally its work; none is selected over
-another. One process drives a Flow under its kernel driver lock, and cursor
-writes are fenced by `position_version`, so a late result cannot advance a
-position that has moved. Successful native history and its consumption are
-retained; failed turns cannot donate navigation to a successful retry.
+Every Flow naming a Task is equally its work; none is selected over
+another. `task run` blocks and prints. The driver holds the cursor in memory and
+advances it from each step's exit; the position a step ran at is on that step
+Exec's argv.
 
-A driver that dies leaves its cursor, failure, events and effect receipts.
-Nothing resumes it. Missing process evidence stays uncertain. The caller
-inspects that history before launching fresh work, which captures another
-FlowSession.
+A driver that dies leaves dead Execs as history. Nothing restarts or resumes
+it. Liveness is Exec process evidence, and missing evidence stays uncertain.
+Only live or unresolved execution, a live Exec or an unresolved provider turn,
+holds Task completion, cleanup and landing. The caller inspects that history
+before launching fresh work, which starts another Flow.
 
 Independent helpers may carry the same Task and independent Git/PR
 operations. Binding to done Work assigns a conversation without reopening it.
 Legacy review boundaries remain readable history when their Work is terminal.
 
-Chapter rotation preserves Task, FlowSession, AgentSession, PR and worktree
+Chapter rotation preserves Task, AgentSession, PR and worktree
 identity when moving started unfinished Tasks. Linear status changes converge
 through fresh provider reads; there is no atomic repository-wide Chapter switch.
 
@@ -627,30 +640,29 @@ lf task run INF-124 incident  # explicit override
 lf flow example                     # with or without Task attribution
 ```
 
-FlowSession captures the compiled graph, every Skill/router/Xor alternative,
-cursor and return counts. Definition changes affect new Sessions, never saved
-execution. Backward edges stay finite graph structure; future loop passes are
+The driver compiles the graph, every router and Xor alternative, and holds it
+with the cursor and return counts in memory. Definition changes affect new
+Flows. A past Flow whose YAML changed is drawn from the sequence its step Execs
+recorded. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
-Taking an Iterate edge updates the cursor and return counters in the same
-FlowSession. Its node and iteration tuple identify the pass in AgentSession and
-Flow history, including overlapping backward edges. Retry retains that position;
-another Iterate selects the next pass. Neither loop passes nor authored subflows
-create FlowSessions or lifecycles.
+Taking an Iterate edge updates the driver's cursor and return counters. The
+node key and per-edge iterations on each step Exec's argv identify the pass,
+including overlapping backward edges. Neither loop passes nor authored subflows
+create Flows or lifecycles.
 
-Exact completion and continuation settle in the existing version transaction.
 Task and taskless execution use one driver and need no synthetic
-planning records. The direct ownership migration creates this final schema;
-there are no intermediate child-pass owners or archives. Configured acceptance
+planning records. The draft migration archives each earlier Flow row's name,
+state and last cursor as a `legacy_flow` observation on the Sessions it opened,
+then drops the Flow tables and the Session's Flow column. Configured acceptance
 and the machine's current-state cutover remain separate from schema verification.
 
-A decision returns Advance, Iterate or Blocked from its selected successful
-agent completion. Blocked records its reason and stops at the current position.
-Only Advance and Iterate move the cursor. Explicit retry retains the pass and
-can supply new direction. Failure or interruption cannot submit a verdict.
-Review definitions and feedback survive source deletion, restart and repeated completion. There is no alternate
-file-backed cursor. Recovery of an uncertain mechanical effect still requires
-inspection; cursor settlement alone cannot establish exactly-once external effects.
+A decision returns Advance, Iterate or Blocked in the final answer of the turn
+its step Exec captured. Blocked records its reason and stops at the current
+position. Only Advance and Iterate move the cursor. Failure or interruption
+cannot submit a verdict. There is no file-backed cursor. Recovery of an
+uncertain mechanical effect still requires inspection; cursor movement alone
+cannot establish exactly-once external effects.
 
 Finite Wave planning uses ordinary attributed agent conversations. Historical
 Wave continuations remain preservation evidence and confer no new execution or
@@ -859,8 +871,8 @@ Intentional copies stay read projections:
 | `tests/fixtures/migrations/` | Ordinal-free migration drafts and the Python canonicalizer | Rust build/runtime and Python release tests reject ordering, body-byte, checksum, and graph-error drift. |
 <!-- architecture-projections:end -->
 
-`lf wave status` and `lf roadmap` derive Task conditions from Work, invocation and
-PR facts. AgentSession and FlowSession own ancestry; immutable history keeps
+`lf wave status` and `lf roadmap` derive Task conditions from Work, Exec and
+PR facts. AgentSession and Exec own ancestry; immutable history keeps
 earlier attribution. The transitional joins are listed in the cutover status. No projection acquires launch, Work-mutation,
 credential or signal authority. UI grouping is cached presentation, not another
 attribution store.
@@ -869,7 +881,7 @@ attribution store.
 
 | Area | Safe extension | Architectural constraint |
 | --- | --- | --- |
-| Execution queries | Add an index for a measured Exec, AgentSession or FlowSession query | Filter before payload IO; identity/ancestry come from the owning row, never fallback files |
+| Execution queries | Add an index for a measured Exec or AgentSession query | Filter before payload IO; identity/ancestry come from the owning row, never fallback files |
 | Multi-Home views | Fan out read-only commands through `lf ssh` | Do not centralize Home-local execution ownership or silently mix local and remote scope |
 | Process control | Publish birth-validated ownership at the launcher spawn seam | No PID/tmux/Work/telemetry inference |
 | Planning input | Add a naturally keyed fact or provider observation | Do not create a global input revision protocol |
@@ -903,7 +915,7 @@ model.
 <!-- architecture-vocabulary:start -->
 | Retired term | Allowed scopes | Current language |
 | --- | --- | --- |
-| `Project Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; FlowSession owns captured progression. |
+| `Project Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `release/` | Stable Project/Task **Work**; AgentSession owns the conversation and native history; a Flow is a driver Exec and its step Execs. |
 | `session context`, `LF_SESSION` | — | Typed Work ancestry and Exec/AgentSession provenance; transitional launch environment names are listed in cutover status. |
 | `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, synchronous questions, and review FlowSteps. |
 | `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
@@ -918,12 +930,12 @@ their deletion is finished.
 | --- | --- |
 | Wave-scoped Chapter / `wave_chapters` | Linear Project status; Chapter is the shared In Progress name, with no stored object |
 | Recommended Flow / `flows.recommended` | Project's `flow` template selection |
-| `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | FlowSession: captured graph and execution state together |
-| `FlowRun`, `flows/<id>/position.json` | FlowSession |
-| Subject selector list on a Run | Typed AgentSession/FlowSession ancestry and immutable event attribution |
+| `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | The Flow driver's in-memory graph and cursor; each step Exec's argv records its position |
+| `FlowRun`, `flows/<id>/position.json` | The Flow's driver Exec and step Execs |
+| Subject selector list on a Run | Typed AgentSession/Exec ancestry and immutable event attribution |
 | Four Session projections, Ask files, composite boundary Session IDs | `agent_sessions`, keyed by stable Session ID, with driver Exec and native history |
 | Session name/resolution and provider attachment sidecars | AgentSession attributes, native identity and exact process evidence |
-| Step occurrence / path-string node key | Invocation ID, local node ID, captured iteration tuple |
+| Step occurrence / path-string node key | Driver Exec ID, local node key, iteration tuple on the step Exec's argv |
 
 Canonical migrations, migration fixtures, and release notes retain historical
 names because changing shipped evidence would rewrite history. Operational docs
@@ -940,7 +952,7 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
 - An agent launch needs no planning parent, but requires writable admission and
   immutable captured input before provider side effects.
 - Exec is an actual lf process. AgentSession history owns native outcomes and
-  usage; FlowSession owns captured progression and mechanical boundary results.
+  usage; a Flow is a driver Exec and its step Execs, whose exits are its results.
 - Command outcome, native completion, current liveness and Work disposition are
   separate facts. Missing terminal evidence stays unknown.
 - Causal parentage and Task attribution confer neither process control nor Flow

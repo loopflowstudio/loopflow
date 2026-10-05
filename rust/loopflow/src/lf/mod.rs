@@ -140,7 +140,7 @@ pub struct Cli {
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 
-    /// Execute a skill from this saved Flow boundary, without resolving its definition again.
+    /// Run this command as the Flow step its driver describes; recorded on this Exec's argv.
     #[arg(long = "__flow-step", hide = true)]
     pub flow_step: Option<String>,
 }
@@ -443,9 +443,14 @@ pub enum Commands {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
-    /// Execute one captured Flow boundary in its own process.
+    /// Run one Flow operation step in its own process.
     #[command(name = "__flow-step", hide = true)]
-    FlowStep { id: String, version: u64 },
+    FlowStep {
+        /// The step as its driver describes it; recorded on this Exec's argv.
+        step: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
     /// Run a definition, preferring a flow over a same-named skill
     Run {
         name: String,
@@ -475,14 +480,14 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// List authored flows or saved FlowSessions
+    /// List authored flows, or Flows that ran
     List {
         #[arg(long)]
         json: bool,
         #[command(flatten)]
         inventory: commands::flow_inventory::FlowInventoryArgs,
     },
-    /// Inspect an authored flow or a saved FlowSession
+    /// Inspect an authored flow, or one that ran
     Show {
         name: String,
         #[arg(long)]

@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::engine::transitions::{FlowDecision, FlowVerdict};
 use crate::engine::{ConcreteStep, SkillOutcome};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FlowOutput {
     Decision,
     Route(Vec<String>),

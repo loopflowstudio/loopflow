@@ -238,7 +238,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "saved FlowSession filters require --sessions"
+                    "filters over Flows that ran require --sessions"
                 );
                 crate::lf::commands::flow::list(&repo, *json)?;
             }

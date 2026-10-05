@@ -27,8 +27,8 @@ A Task owns one change, its checkout and PRs. A Wave keeps the objective
 and memory; its current Linear Project holds the plan and default Flow.
 
 Exec records an actual lf command process. AgentSession keeps the conversation,
-including headless work. FlowSession preserves a captured Flow and consumes its
-exact boundary results. A conversation can outlive its command. A Flow whose
+including headless work. A running Flow is one driver Exec and the step Execs
+it starts. A conversation can outlive its command. A Flow whose
 command stopped stays as history; fresh work is launched explicitly.
 
 Read the [contract and cutover status](architecture-reference.md#cutover-status)

@@ -345,7 +345,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
@@ -1294,10 +1294,14 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
     // Only a Flow still being driven needs the checkout; a stopped one is history.
     if store
         .sqlite
-        .landing_unfinished_flows(&landing.id)
+        .flows_at(&landing.worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
-        .any(|flow| crate::ops::flow_run::driver_live(flow))
+        .any(|flow| {
+            flow.driver.completed_at.is_none()
+                && crate::journal::exec_process_evidence(&store.sqlite, flow.id())
+                    != crate::journal::ProcessIdentityEvidence::Dead
+        })
     {
         eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());

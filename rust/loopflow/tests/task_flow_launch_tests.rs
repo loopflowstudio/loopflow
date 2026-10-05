@@ -23,17 +23,6 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
-fn flows(home: &Path) -> Vec<(String, String)> {
-    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    let mut query = db
-        .prepare("SELECT id,state FROM flow_sessions ORDER BY rowid")
-        .unwrap();
-    let rows = query
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap();
-    rows.collect::<rusqlite::Result<_>>().unwrap()
-}
-
 /// The three ways to name a Task for a Flow: the Task entry, `--task`, and its
 /// worktree. All block in the foreground and reach the same checks.
 const LAUNCHES: [&[&str]; 3] = [
@@ -119,11 +108,14 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(error.contains(expected), "{condition} {launch:?}: {error}");
             }
-            assert!(flows(home.path()).is_empty(), "{condition} launched a Flow");
+            assert!(
+                support::recorded_flows(home.path()).is_empty(),
+                "{condition} launched a Flow"
+            );
             continue;
         }
         // Each launch has finished when its command returns, and is its own
-        // invocation; none continues another.
+        // Flow; none continues another.
         for (launched, launch) in LAUNCHES.iter().enumerate() {
             let output = run(launch);
             assert!(
@@ -131,10 +123,18 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "{launch:?}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let flows = flows(home.path());
+            let flows = support::recorded_flows(home.path());
             assert_eq!(flows.len(), launched + 1, "{launch:?}");
-            assert!(flows.iter().all(|(_, state)| state == "completed"));
+            assert!(flows
+                .iter()
+                .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
         }
+        // However the Task was named, the Flow left the same Execs.
+        let recorded = support::recorded_flows(home.path());
+        assert_eq!(recorded[0].1.len(), 1);
+        assert_eq!(recorded[0].1[0][0], "__flow-step");
+        assert_eq!(recorded[0].1[0][2..], ["task", "sync", "--plan"]);
+        assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // With no Flow named, the entry runs the Project's.
         let output = run(&["-b", "task", "run", "INF-123"]);
         assert!(
@@ -142,18 +142,28 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let (bound, effects, default): (i64, i64, String) = db
-            .query_row(
-                "SELECT (SELECT count(*) FROM flow_sessions WHERE task_id=?1),
-                    (SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed'),
-                    (SELECT json_extract(invocation_json,'$.flow') FROM flow_sessions ORDER BY rowid DESC LIMIT 1)",
-                [registered.task.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!((bound, effects), (4, 4), "each Flow ran its own operation");
-        assert_eq!(default, "feature");
+        let recorded = support::recorded_flows(home.path());
+        assert_eq!(recorded.len(), 4);
+        assert_eq!(support::flow_step(&recorded[3].1[0])["flow"], "feature");
+        let status = run(&["task", "status", "INF-123", "--json"]);
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(
+            status["execution"]["work"]["flows"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(status["execution"]["work"]["flows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|flow| flow["state"] == "completed"));
         let task = runtime
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
@@ -183,6 +193,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "{removed:?}"
             );
         }
-        assert_eq!(flows(home.path()).len(), 4);
+        assert_eq!(support::recorded_flows(home.path()).len(), 4);
     }
 }

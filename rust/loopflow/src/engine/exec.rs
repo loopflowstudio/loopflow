@@ -160,7 +160,7 @@ pub(crate) fn preview_exec_prompt(
     let launch = AgentConfig {
         chrome: false,
         session_driver: None,
-        flow_selection: None,
+        output: None,
         system_prompt,
         task_prompt,
         agent: Some(agent),

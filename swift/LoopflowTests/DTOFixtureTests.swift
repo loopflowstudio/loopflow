@@ -12,10 +12,28 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("task_work.json")
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
         #expect(work.sessions.count == 2)
-        #expect(work.sessions[1].kind == "flow_review")
-        #expect(work.flows[0].pendingSession == work.sessions[1].id)
+        #expect(work.sessions[0].flowId == nil)
+        #expect(work.sessions[1].flowId == work.flows[0].id)
+        #expect(work.flows[0].name == "feature")
+        #expect(work.flows[0].state == .current)
         #expect(!work.execs.isEmpty)
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+    }
+
+    @Test("A Flow whose driver exited early reads as stopped and requires its name")
+    func flowInventoryFixture() throws {
+        struct Page: Decodable { let entries: [TaskFlowMember] }
+        let data = try loadFixtureData("flow_page.json")
+        let flow = try #require(try JSONDecoder().decode(Page.self, from: data).entries.first)
+        #expect(flow.state == .stopped)
+        #expect(flow.endedAt == 18)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var entry = try #require((wire["entries"] as? [[String: Any]])?.first)
+        entry.removeValue(forKey: "name")
+        wire["entries"] = [entry]
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Page.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test("Task planning retains the provider branch before execution exists")

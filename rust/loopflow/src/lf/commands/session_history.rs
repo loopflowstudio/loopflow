@@ -5,8 +5,8 @@ use std::io::Read;
 use anyhow::{anyhow, Result};
 
 use crate::lf::commands::WorkFilter;
-pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
-pub use crate::session_record::{SessionHistory, SessionUsage};
+pub use crate::session_record::active::{ActiveSessionsSnapshot, DiscoveryState};
+pub use crate::session_record::SessionHistory;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_SESSIONS: usize = 50;

@@ -32,7 +32,7 @@ fields name Trace/Exec while their released serialized receipt names remain.
 
 ## Delete — do not maintain
 
-Remove `.github/workflows/capture-exclusion.yml`, `scripts/test_capture_exclusion.py`
+Removed `.github/workflows/capture-exclusion.yml`, `scripts/test_capture_exclusion.py`
 and `tests/e2e/capture_exclusion.{py,Dockerfile}` with their TESTING.md instructions.
 Their negative evidence survives at 6fcdbe9da0b47ef95f1f92ebdb259401a327cd46; they are not runtime acceptance.
 Delete obsolete commands/identity names in current help, tools and docs. Keep
@@ -79,8 +79,13 @@ the saved pursuit's following steps.
 Review findings fixed: stale mutation-selector help; Wave DTO `runs` field still
 misnamed its Session history; scorecard and capture-analysis flags/labels still
 exposed the retired object. One physical root and existing SQLite fences remain.
-The first review fixture exited its provider before readiness; the fixture now
-holds its own stdin until publication, without changing production timing.
+Compression removed unused history-command DTO exports and corrected the remaining
+retired monitor example. Required DTO exports stay at the public command boundary:
+Session storage is private. The preservation fixture drops a redundant history
+read/connection and verifies the review's recorded completion time. Its provider
+launch log precedes resumability; completion now waits through the public operation's
+Session lock before stopping that client. The failed early-exit run remains evidence
+of fixture ordering, not a reason to change production timing.
 
 ## Adjacent evidence
 
@@ -90,4 +95,6 @@ settlements. Upstream #1441 removes the retired UI receipt prerequisite and repa
 CLI smoke. Preserve its actual headless/public checks and release schedule.
 Configured installation/provider/Desktop acceptance remains separate from fixtures.
 
-Check (October 5): `capture_history.py --released-archive <verified-v0.13.3-archive> --candidate target/debug/lf` passed; focused Rust rename/replacement, review-feedback/stale-provider, SIGINT, nested Task/Exec, telemetry and Wave DTO cases passed (6); Python tooling passed (16, check-cost recheck 4); headless Desktop build + DTO/Registry filters passed (38 tests reported, display proof skipped); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and `git diff --check` passed; full affected gate and isolated installation checks remain gate/CI-owned.
+Prior implementation checks remain at `c2f464b5a4333b50dd67823585d236b63115223d:scratch/finish-removing-the-retired-run.md`; their focused runtime and headless Desktop evidence remains applicable, with the same acceptance limits.
+
+Check (October 5, compression): `cargo test -p loopflow --test dto_fixtures --test active_runs_watch` passed (19); `uv run python tests/e2e/capture_history.py --released-archive /tmp/loo370-release-fixture/lf-aarch64-apple-darwin.tar.gz --candidate target/debug/lf` passed after the fixture-ordering repair; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Ruff and `git diff --check` passed; full affected gate and isolated installation checks remain gate/CI-owned.

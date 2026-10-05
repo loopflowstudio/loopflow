@@ -21,7 +21,8 @@ PR #1444 moves their unchanged assertions to `scripts/test_task_installation.py`
 under disposable OS accounts. Gate must reuse that repair after integration or
 leave these checks to isolated CI; do not delete or weaken them.
 
-Context query (October 5): local memory 15,956/16,000 tokens and scratch
-1,663/12,000 fit; the provider-owned assembled Task goal is 16,915/16,000
-(915 over, excerpted). Supplied directives/steers were read; no local design
-edit can shorten that source. Provider direction and budget limits remain intact.
+Context query (October 5, compression): local memory 15,956/16,000 tokens and
+scratch fit. The stored Task launch message is 16,938/16,000 (938 over, excerpted),
+including generated workspace metadata. The supplied source and omitted workspace
+entries were inspected. Local note edits cannot shorten that assembled source;
+rewriting provider direction or raising its limit is outside this cleanup.

@@ -576,7 +576,7 @@ Session/Exec caller provenance supplies ancestry and mutation authority.
   and replay select retained captures.
 
 Production source against `8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3`:
-Rust **+543 / −657**, Swift **+64 / −64**, Python package **+0 / −0**,
+Rust **+545 / −659**, Swift **+64 / −64**, Python package **+0 / −0**,
 scripts **+97 / −81** (net **−98** lines). Physical-line comparison includes
 comments/blanks, excludes tests/fixtures, SQL, builtin prose and generated output;
 Rust test-only attributed items are removed using its syntax tree. Rename pairs

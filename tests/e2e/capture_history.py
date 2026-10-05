@@ -105,7 +105,6 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
             "SELECT s.id,e.receipt_key,s.provider_thread FROM agent_sessions s "
             "JOIN session_events e ON e.seq=s.current_capture"
         ).fetchone()
-        history = db.execute("SELECT * FROM session_events ORDER BY seq").fetchall()
     assert native, "released CLI must record a native conversation"
     retained = _captures(home)
     assert any(name.endswith("manifest.json") for name in retained)
@@ -182,7 +181,6 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
             ).fetchall()
             == history
         )
-    with sqlite3.connect(database) as db:
         assert (
             db.execute("SELECT ready_summary FROM agent_sessions WHERE id=?", (review,)).fetchone()[
                 0
@@ -208,7 +206,10 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
                     log.seek(0)
                     raise AssertionError(log.read())
                 time.sleep(0.02)
-            opened.communicate("done\n", timeout=60)
+            # Completion waits for launch publication under the Session lock,
+            # then stops its client. A provider's launch log precedes readiness.
+            _command(candidate, env, repo, "session", "complete", review)
+            opened.communicate(timeout=60)
             log.seek(0)
             assert opened.returncode == 0, log.read()
         finally:
@@ -216,19 +217,17 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
                 opened.kill()
                 opened.wait()
     provider.write_text(provider_source.replace("__WAIT__", "False"))
-    _command(candidate, env, repo, "session", "complete", review)
     _command(candidate, env, repo, "flow", "resume", flow)
     with sqlite3.connect(database) as db:
         assert (
             db.execute("SELECT state FROM flow_sessions WHERE id=?", (flow,)).fetchone()[0]
             == "completed"
         )
-        assert (
-            db.execute(
-                "SELECT ready_summary,completed_at FROM agent_sessions WHERE id=?", (review,)
-            ).fetchone()[0]
-            == "Keep this released feedback"
-        )
+        feedback, completed = db.execute(
+            "SELECT ready_summary,completed_at FROM agent_sessions WHERE id=?", (review,)
+        ).fetchone()
+        assert feedback == "Keep this released feedback"
+        assert completed is not None
     # A provider-issued nested direct invocation gets its own Session and the
     # parent's exact Exec, without conflating either with the capture key.
     (home / "tool-command.json").write_text(

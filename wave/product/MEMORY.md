@@ -1076,8 +1076,7 @@ and [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-
 - **`loopflow-dev.py` builds from the worktree it runs in.** Repository
   discovery collapses linked worktrees to the canonical main checkout.
 - **Interactive provider clients resume natively.** Reuse `SessionRecord` and
-  `lf session open`; do not restore lfd terminal attachment, a tmux presentation
-  path, or Ask-specific Swift plumbing.
+  `lf session open`; do not restore lfd attachment or a tmux presentation path.
 - Review for invented fields that duplicate existing ones (e.g. `RunStatus`).
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set

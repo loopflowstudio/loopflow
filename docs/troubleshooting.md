@@ -84,11 +84,11 @@ launch fresh work for the same Task:
 lf session connect <session-id>
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
-lf --task INF-123 flow start
-lf --task INF-123 flow start --reason "provider credentials repaired"
+lf task run INF-123
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`flow start` launches a fresh Flow in the Task checkout with its Steers and
+`task run` runs a fresh Flow in the Task checkout with its Steers and
 active PR. It never continues an earlier Flow; a stopped one keeps its last
 position, failure and effect receipts as history. Unknown liveness stays
 unknown. A Task Steer is a Linear Task comment; the running Flow receives new
@@ -116,7 +116,7 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, launch the Task or Project operation again:
 
 ```bash
-lf --task INF-123 flow start --reason "provider credentials repaired"
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
 Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`

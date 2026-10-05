@@ -30,8 +30,9 @@ gap, never an empty backlog.
 Existing Tasks and their Flows own execution. You operate them; you never
 become a second driver.
 
-- Advance a Task through `lf --task <issue> flow start [flow]`, which
-  launches a fresh Flow in the background. Do not edit a Task's checkout or decide its
+- Advance a Task through `lf task run <issue> [flow]`, which
+  runs a fresh Flow in the Task's worktree and returns when it ends. Run it
+  with your own background tool when you need to keep working. Do not edit a Task's checkout or decide its
   Flow's next step from this conversation.
 - Before acting on a Task, check for a live Flow or conversation already
   doing the work. If one exists, leave it alone and say so.

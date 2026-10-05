@@ -1433,7 +1433,7 @@ mod tests {
         }
     }
 
-    /// A fresh Task Flow at `cursor`, as `lf flow start` starts one.
+    /// A fresh Task Flow at `cursor`, as `lf task run` starts one.
     fn task_flow(
         task: &Task,
         invocation: crate::engine::invocation::QueuedInvocation,

@@ -147,7 +147,7 @@ fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     } else {
         action(
             TaskAction::Resume,
-            "launch the next work with `lf flow start`; inspect earlier Flows and independent Sessions first",
+            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
         )
     }
 }

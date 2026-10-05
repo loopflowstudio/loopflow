@@ -853,12 +853,7 @@ fn read_task_draft() -> anyhow::Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Result<()> {
-    let agent = cli.model.as_deref();
-    let _skill_options = EnvGuard::set(
-        loopflow::lf::TASK_FLOW_OPTIONS_ENV,
-        serde_json::to_string(&cli.step_args())?,
-    );
+fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
@@ -918,48 +913,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             )?;
             print_task(&task, *json)
         }
+        TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Create {
             wave,
             title,
             notes,
-            run,
-            name,
-            flow,
-            stack_on,
             json,
         } => {
             let report = match notes {
                 Some(notes) => Some(notes.clone()),
                 None => piped_task_report()?,
             };
-            let result = loopflow::ops::task::task_create(
-                repo,
-                wave.as_deref(),
-                title.clone(),
-                report,
-                run.then(|| loopflow::ops::task::TaskExecOptions {
-                    wave: None,
-                    reason: None,
-                    agent: agent.map(str::to_string),
-                    name: name.clone(),
-                    flow: flow.clone(),
-                    stack_on: stack_on.clone(),
-                    directive: None,
-                }),
-            )?;
-            match result {
-                loopflow::ops::task::TaskCreateResult::Started(task) => {
-                    print_task_snapshot(&task, *json)
-                }
-                loopflow::ops::task::TaskCreateResult::Created(issue) => {
-                    if *json {
-                        println!("{}", serde_json::to_string_pretty(&issue)?);
-                    } else {
-                        println!("{} · {}", issue.identifier, issue.name);
-                    }
-                    Ok(())
-                }
+            let issue =
+                loopflow::ops::task::task_create(repo, wave.as_deref(), title.clone(), report)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&issue)?);
+            } else {
+                println!("{} · {}", issue.identifier, issue.name);
             }
+            Ok(())
         }
         TaskCommand::Status { issue, json } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
@@ -1489,14 +1461,42 @@ fn dispatch(
             &loopflow::lf::commands::ops::resolve_worktree(name)?,
         )?);
     }
-    if let Some(task) = cli.task.as_ref().filter(|_| {
-        !matches!(
-            cli.command,
-            Some(Commands::Flow {
-                cmd: FlowCommand::Start { .. }
-            })
-        )
-    }) {
+    // `lf task run` places the Task and fills its defaults; from here it is
+    // `lf --task ISSUE run FLOW`.
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Run {
+                issue,
+                flow,
+                name,
+                stack_on,
+                directive,
+                reason,
+            },
+    }) = &cli.command
+    {
+        let directory = loopflow::repo::working_directory()?;
+        let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
+        let (task, flow) = loopflow::ops::task::task_place(
+            &repo,
+            issue,
+            loopflow::ops::task::TaskExecOptions {
+                wave: cli.wave.clone(),
+                reason: reason.clone(),
+                agent: cli.model.clone(),
+                name: name.clone(),
+                flow: flow.clone(),
+                stack_on: stack_on.clone(),
+                directive: directive.clone(),
+            },
+        )?;
+        cli.task = Some(task.plan.identifier);
+        cli.command = Some(Commands::Run {
+            name: flow,
+            args: Vec::new(),
+        });
+    }
+    if let Some(task) = cli.task.as_ref() {
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
         let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
@@ -1712,11 +1712,11 @@ fn execute_command(
                 | TaskCommand::File { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
-        }) => run_task_command(&std::env::current_dir()?, cmd, cli),
+        }) => run_task_command(&std::env::current_dir()?, cmd),
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
-            with_runtime(&repo, args, || run_task_command(&repo, cmd, cli))
+            with_runtime(&repo, args, || run_task_command(&repo, cmd))
         }
         Some(Commands::Context {
             json,
@@ -1801,55 +1801,6 @@ fn execute_command(
             account_selection,
             lf_args,
         ),
-        Some(Commands::Flow {
-            cmd:
-                FlowCommand::Start {
-                    template,
-                    name,
-                    stack_on,
-                    directive,
-                    reason,
-                    json,
-                },
-        }) => {
-            let directory = loopflow::repo::working_directory()?;
-            let implicit = loopflow::lf::commands::run::implicit_binding(cli)?;
-            let task = cli
-                .task
-                .clone()
-                .or_else(|| {
-                    binding
-                        .or(implicit.as_ref())
-                        .and_then(|binding| match &binding.work {
-                            loopflow::durable::WorkRef::Task(id) => Some(id.to_string()),
-                            _ => None,
-                        })
-                })
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "flow start needs a Task; pass --task <issue> or enter its checkout"
-                    )
-                })?;
-            let repo = loopflow::ops::task::task_repository(&directory, Some(&task))?;
-            let _skill_options = EnvGuard::set(
-                loopflow::lf::TASK_FLOW_OPTIONS_ENV,
-                serde_json::to_string(&cli.step_args())?,
-            );
-            let snapshot = loopflow::ops::task::task_run(
-                &repo,
-                &task,
-                loopflow::ops::task::TaskExecOptions {
-                    wave: cli.wave.clone(),
-                    reason: reason.clone(),
-                    agent: cli.model.clone(),
-                    name: name.clone(),
-                    flow: template.clone(),
-                    stack_on: stack_on.clone(),
-                    directive: directive.clone(),
-                },
-            )?;
-            print_task_snapshot(&snapshot, *json)
-        }
         Some(Commands::Flow { cmd }) => match cmd {
             FlowCommand::List { json, inventory } if inventory.sessions => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)

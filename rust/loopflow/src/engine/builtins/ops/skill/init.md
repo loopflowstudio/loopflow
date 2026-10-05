@@ -220,7 +220,7 @@ Require its exact issue identifier. If Linear is connected and the Task belongs
 to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
-lf --task <ISSUE-ID> flow start
+lf task run <ISSUE-ID>
 lf task status <ISSUE-ID> --json
 ```
 
@@ -302,7 +302,7 @@ Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
 Next         lf --wave designer wave/operate
-Also         lf roadmap --wave designer | lf --task DES-123 flow start | lf debug -c
+Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and

@@ -140,7 +140,7 @@ flow: feature
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf --task <task> flow start` uses that Flow unless a template argument selects another. Existing
+`lf task run <task>` uses that Flow unless a template argument selects another. Existing
 Projects observed before the status-model upgrade retain their identity and
 custom default Flow. The first explicit `lf refresh` or chapter rotation
 converts their old `recommended:` line to `flow:` and marks the recorded current
@@ -364,13 +364,13 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task create --run --wave <wave> --title "add retry to token refresh"
-pbpaste | lf task create --run --wave incidents
+lf task create --wave <wave> --title "add retry to token refresh"
+pbpaste | lf task create --wave incidents
 lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
-lf --task INF-123 flow start
-lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent merges
-lf --task INF-125 flow start incident
+lf task run INF-123
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
+lf task run INF-125 incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its

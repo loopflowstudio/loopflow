@@ -154,31 +154,6 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> anyhow::Result<()> {
-    for root in &boundary.writable_roots {
-        let probe = root.join(format!(
-            ".loopflow-write-probe-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let result = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&probe)
-            .and_then(|file| {
-                file.sync_data()?;
-                std::fs::remove_file(&probe)
-            });
-        if let Err(error) = result {
-            let _ = std::fs::remove_file(&probe);
-            return Err(anyhow::anyhow!(format!(
-                "Agent execution unavailable: required writable authority for {} is unavailable: {error}. Use an execution profile with access to linked Git metadata and the Loopflow control store",
-                root.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,

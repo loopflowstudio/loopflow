@@ -33,7 +33,7 @@ A Wave directing a task is the internal case:
 ```bash
 lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
-lf --task INF-123 flow start                                  # start built-in Task automation
+lf task run INF-123                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf wait INF-123 --until terminal                # block until it settles
@@ -62,10 +62,10 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf --task INF-123 flow start                    # run an existing Linear issue
-lf task create --run --wave <wave> --title "add passkeys" # create the issue, then run it
-pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
-lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent PR merges
+lf -b task run INF-123                 # place an existing Linear issue, run its Flow, return when it ends
+lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
+pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -126,8 +126,8 @@ process to interrupt, resume, wait for, or attach to.
 Work survives its provider process. A Flow whose driver died keeps its last
 position, failure and effect receipts as history; nothing resumes it. Inspect
 `lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
-fresh work with `lf --task INF-123 flow start`. The Task keeps its durable
-direction, worktree and PR. `flow start` never reopens terminal Work; create a
+fresh work with `lf task run INF-123`. The Task keeps its durable
+direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
 
 Automated Task commit, PR, and completion commands also re-check current PM

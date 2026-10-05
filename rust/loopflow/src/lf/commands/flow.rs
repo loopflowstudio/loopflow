@@ -30,6 +30,16 @@ pub fn run(
     let binding = binding.or(checkout.as_ref());
     let items = compile_flow(flow, repo)?;
     require_autonomous_steps(&items)?;
+    if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                crate::ops::task::require_task_flow_launch(&open_flow_store().await?, task)
+                    .await
+                    .map_err(anyhow::Error::from)
+            })?;
+    }
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))

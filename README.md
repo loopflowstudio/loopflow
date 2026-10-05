@@ -105,11 +105,11 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
-lf --task INF-123 flow start                      # launch a fresh Flow in the background
+lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
 lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf --task INF-123 flow start --reason "reconcile all scratch first" # publish direction, then launch fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf arm -c                                          # request exact-head auto-merge and return
@@ -120,7 +120,7 @@ lf ci watch                                          # watch PR checks; start a 
 
 Task comments in Linear also reach the Task's running Flow. Steering never starts
 an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `flow start` never continues it, so inspect `lf task status` first.
+history: `task run` never continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -169,7 +169,7 @@ ones. `--all` means all repositories.
 `lf resume` is short for `lf session resume`. It selects the latest human message
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
-order. A Flow is never resumed; `lf --task ISSUE flow start` launches a fresh one.
+order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 

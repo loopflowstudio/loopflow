@@ -187,7 +187,7 @@ BRIEF
 When execution is intended, start the captured Task or reuse an existing one:
 
 ```bash
-lf --task <existing-issue> flow start <chosen-flow>
+lf task run <existing-issue> <chosen-flow>
 ```
 
 Stdin becomes the durable Task description; `--directive` supplies worker
@@ -236,7 +236,7 @@ its maturity, and open questions. Do not invent ownership.
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf --task <issue> flow start <chosen-flow>
+lf task run <issue> <chosen-flow>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs
@@ -279,20 +279,21 @@ For one bounded contribution use `lf --task <issue> research "<question>"` or
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's
 `--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
 Process ancestry supplies no Work attribution. Every attributed contribution
-is equally the Task's work; none claims exclusive ownership. `flow start` sets
-the same declaration and launches an ordinary Flow in the Task checkout.
+is equally the Task's work; none claims exclusive ownership. `task run` places
+the Task, then is the same command as `lf --task <issue> run <flow>`.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-Use `lf --task <issue> flow start <chosen-flow>` for background pursuit. Dependent
+`lf task run <issue> <chosen-flow>` returns when its Flow ends; run it with
+your own background tool for pursuit you will not wait on. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, `lf task interrupt <issue>` its live
 execution, update the Task, and wait for required contributions. Then launch
-fresh work with `lf --task <issue> flow start <flow> --reason "<changed direction>"`.
+fresh work with `lf task run <issue> <flow> --reason "<changed direction>"`.
 The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
 Reconcile prior scratch against the new evidence rather than treating it as
 approved design.

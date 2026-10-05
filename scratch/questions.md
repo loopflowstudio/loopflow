@@ -4,13 +4,23 @@ For [the design](focus-on-your-own-work.md). None blocks the next pass; each
 has a default the pass follows. Defaults are the agent's, not Jack Heart's.
 Earlier interpretations are at `6f246fda4:scratch/questions.md`.
 
+## Answered by Jack
+
+- **Who backgrounds, now that `-b` blocks?** Jack (October 5): "cant you just
+  background with &". The caller does: `lf --task X -b <flow> &`. No detached
+  launch mode. Agent's reading of the consequences: delete `task create
+  --run/--flow`; Desktop already spawns a child process and reads Execs for
+  the result. Jack: "like llms know how to background things" — skills name
+  the plain command and do not teach backgrounding.
+
+- **Task helpers.** Jack (October 5), on deleting `task create --run`: "Im
+  fine with this. i am fine with task helpers that sit on top of the lf
+  system, but i dont want to introduce parallel paths or drivers." The test
+  for any Task command: it may prepare, then it enters the ordinary path; it
+  never owns a second launcher, driver or record.
+
 ## Asked of Jack, unanswered
 
-- **Who backgrounds, now that `-b` blocks?** `task create --run/--flow`,
-  Desktop Start and the operator skills relied on `flow start` returning at
-  once. Default: delete `task create --run/--flow`; skills tell the agent to
-  background the command with its own tool; Desktop owns the child process as
-  it owns terminals.
 - **Planning refusal** (terminal, moved or removed Task). Default: apply once
   at Task resolution, for every launch that resolves to a Task.
 - **`task automate`/`automation`, `task interrupt`, `task wait`:** worker APIs

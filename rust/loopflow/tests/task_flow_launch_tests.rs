@@ -3,7 +3,6 @@ mod support;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use loopflow_test_support::TestRepo;
 
@@ -19,7 +18,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .current_dir(repo)
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("LF_TEST_FLOW_LOG", home.join("flow.log"));
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("HTTP_PROXY", "http://127.0.0.1:1");
     command
 }
 
@@ -34,16 +34,22 @@ fn flows(home: &Path) -> Vec<(String, String)> {
     rows.collect::<rusqlite::Result<_>>().unwrap()
 }
 
+/// The three ways to name a Task for a Flow: the Task entry, `--task`, and its
+/// worktree. All block in the foreground and reach the same checks.
+const LAUNCHES: [&[&str]; 3] = [
+    &["-b", "task", "run", "INF-123", "proof"],
+    &["-b", "--task", "INF-123", "run", "proof"],
+    &["-b", "run", "proof"],
+];
+
 #[test]
-fn flow_start_launches_a_fresh_flow_and_refuses_invalid_planning() {
+fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
     for condition in ["valid", "invalid", "removed", "terminal", "moved"] {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
         repo.create_branch("launch-proof");
         let home = tempfile::tempdir().unwrap();
-        // A local process stands in for tmux; the real Flow driver and op execute.
         let _env = support::EnvGuard::new(&[
-            ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >>\"$LF_TEST_FLOW_LOG\" 2>&1 &\nfi\nexit 0\n"),
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
         ]);
@@ -54,11 +60,14 @@ fn flow_start_launches_a_fresh_flow_and_refuses_invalid_planning() {
             &repo.head_sha(),
         );
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-        fs::write(
-            repo.path().join(".lf/flows/proof.yaml"),
-            "- cmd: task sync --plan\n",
-        )
-        .unwrap();
+        // `feature` is the fixture Project's Flow.
+        for flow in ["proof", "feature"] {
+            fs::write(
+                repo.path().join(format!(".lf/flows/{flow}.yaml")),
+                "- cmd: task sync --plan\n",
+            )
+            .unwrap();
+        }
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
         let mut record = runtime
@@ -97,64 +106,54 @@ fn flow_start_launches_a_fresh_flow_and_refuses_invalid_planning() {
                 ))
                 .unwrap();
         }
-        let start = || {
-            command(
-                repo.path(),
-                home.path(),
-                &["--task", "INF-123", "flow", "start", "proof", "--json"],
-            )
-            .env("HTTPS_PROXY", "http://127.0.0.1:1")
-            .env("HTTP_PROXY", "http://127.0.0.1:1")
-            .output()
-            .unwrap()
-        };
-        let log = || fs::read_to_string(home.path().join("flow.log")).unwrap_or_default();
+        let run = |args: &[&str]| command(repo.path(), home.path(), args).output().unwrap();
         if condition != "valid" {
-            let output = start();
-            assert!(!output.status.success(), "{condition} admitted a launch");
-            let error = String::from_utf8_lossy(&output.stderr);
             let expected = match condition {
                 "terminal" => "terminal",
                 "moved" => "no longer matches",
                 _ => "planning",
             };
-            assert!(error.contains(expected), "{condition}: {error}");
+            for launch in LAUNCHES {
+                let output = run(launch);
+                assert!(!output.status.success(), "{condition} admitted {launch:?}");
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+            }
             assert!(flows(home.path()).is_empty(), "{condition} launched a Flow");
             continue;
         }
-        // Each start is its own invocation; the first is never continued.
-        for launched in 1..=2 {
-            let output = start();
+        // Each launch has finished when its command returns, and is its own
+        // invocation; none continues another.
+        for (launched, launch) in LAUNCHES.iter().enumerate() {
+            let output = run(launch);
             assert!(
                 output.status.success(),
-                "{} flow: {}",
-                String::from_utf8_lossy(&output.stderr),
-                log()
+                "{launch:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
             );
-            let deadline = Instant::now() + Duration::from_secs(30);
-            loop {
-                let flows = flows(home.path());
-                if flows.len() == launched && flows.iter().all(|(_, state)| state == "completed") {
-                    break;
-                }
-                assert!(
-                    flows.len() <= launched && Instant::now() < deadline,
-                    "launch {launched} did not complete: {flows:?}\n{}",
-                    log()
-                );
-                std::thread::sleep(Duration::from_millis(50));
-            }
+            let flows = flows(home.path());
+            assert_eq!(flows.len(), launched + 1, "{launch:?}");
+            assert!(flows.iter().all(|(_, state)| state == "completed"));
         }
+        // With no Flow named, the entry runs the Project's.
+        let output = run(&["-b", "task", "run", "INF-123"]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let (bound, effects): (i64, i64) = db
+        let (bound, effects, default): (i64, i64, String) = db
             .query_row(
                 "SELECT (SELECT count(*) FROM flow_sessions WHERE task_id=?1),
-                    (SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed')",
+                    (SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed'),
+                    (SELECT json_extract(invocation_json,'$.flow') FROM flow_sessions ORDER BY rowid DESC LIMIT 1)",
                 [registered.task.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!((bound, effects), (2, 2), "each Flow ran its own operation");
+        assert_eq!((bound, effects), (4, 4), "each Flow ran its own operation");
+        assert_eq!(default, "feature");
         let task = runtime
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
@@ -168,10 +167,11 @@ fn flow_start_launches_a_fresh_flow_and_refuses_invalid_planning() {
                 .id,
             registered.pr.id
         );
-        // No command restarts or resumes a launched Flow.
+        // The worker's entry points are gone; nothing restarts a Flow.
         for removed in [
+            vec!["--task", "INF-123", "flow", "start", "proof"],
             vec!["task", "restart", "INF-123"],
-            vec!["--task", "INF-123", "flow", "start", "--retry"],
+            vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
             assert!(
@@ -183,6 +183,6 @@ fn flow_start_launches_a_fresh_flow_and_refuses_invalid_planning() {
                 "{removed:?}"
             );
         }
-        assert_eq!(flows(home.path()).len(), 2);
+        assert_eq!(flows(home.path()).len(), 4);
     }
 }

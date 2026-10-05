@@ -3,8 +3,6 @@ pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
 /// The caller's prompt and provider flags for the Task Flow it launches.
 #[doc(hidden)]
-pub const TASK_FLOW_OPTIONS_ENV: &str = "LF_TASK_FLOW_OPTIONS";
-
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -477,24 +475,6 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// Launch a fresh Flow for a Task in the background
-    Start {
-        /// Flow to launch; the Project's default when omitted
-        template: Option<String>,
-        #[arg(long)]
-        name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
-        stack_on: Option<String>,
-        #[arg(long)]
-        directive: Option<String>,
-        /// Direction for this launch, published to the Task
-        #[arg(long)]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-
     /// List authored flows or saved FlowSessions
     List {
         #[arg(long)]
@@ -760,7 +740,23 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// File a Task in the current chapter; optionally prepare and run it
+    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+    Run {
+        issue: String,
+        /// Flow to run; the Project's default when omitted
+        flow: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        /// Direction for this run, published to the Task
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// File a Task in the current chapter
     Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
@@ -771,21 +767,10 @@ pub enum TaskCommand {
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Validate placement and execution before filing, then run the Task
-        #[arg(long)]
-        run: bool,
-        #[arg(long, requires = "run")]
-        name: Option<String>,
-        /// Flow to launch for this Task; defaults to the chapter recommendation
-        #[arg(long, value_name = "FLOW", requires = "run")]
-        flow: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK", requires = "run")]
-        stack_on: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show durable Task facts and current worker evidence
+    /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
         issue: Option<String>,
@@ -915,6 +900,7 @@ impl TaskCommand {
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
+            | Self::Run { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
@@ -2209,31 +2195,23 @@ mod tests {
             Some(Commands::External(_))
         ));
         assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
-        assert!(Cli::try_parse_from([
-            "lf",
-            "task",
-            "create",
-            "--run",
-            "--directive",
-            "duplicate description"
-        ])
-        .is_err());
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "create",
-            "--run",
-            "--title",
-            "New task",
-            "--notes",
-            "Full report",
-            "--name",
-            "placed",
-        ])
-        .unwrap();
+        assert!(Cli::try_parse_from(["lf", "task", "create", "--run"]).is_err());
         assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Create { run: true, title: Some(title), notes: Some(notes), .. } }) if title == "New task" && notes == "Full report")
+            Cli::try_parse_from(["lf", "flow", "start", "proof"]).is_ok_and(|cli| !matches!(
+                cli.command,
+                Some(Commands::Flow {
+                    cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
+                })
+            ))
         );
+        let cli = Cli::try_parse_from(["lf", "-b", "task", "run", "INF-123", "proof"]).unwrap();
+        assert!(cli.batch);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { issue, flow: Some(flow), .. }
+            }) if issue == "INF-123" && flow == "proof"
+        ));
     }
 
     #[test]
@@ -2407,30 +2385,12 @@ mod tests {
     #[test]
     fn navigation_belongs_to_flow_decisions() {
         for args in [
-            vec![
-                "lf",
-                "--task",
-                "LOO-1",
-                "flow",
-                "start",
-                "--session",
-                "review",
-            ],
-            vec![
-                "lf",
-                "--task",
-                "LOO-1",
-                "flow",
-                "start",
-                "--summary",
-                "approved",
-            ],
+            vec!["lf", "task", "run", "LOO-1", "--session", "review"],
             vec!["lf", "session", "advance", "review", "approved"],
             vec!["lf", "session", "iterate", "review", "revise"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "--task", "LOO-1", "flow", "start"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_err());
     }
 

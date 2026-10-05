@@ -63,7 +63,7 @@ impl LatestTaskFlow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFlowControlKind {
-    /// `lf --task ISSUE flow start [FLOW]`
+    /// `lf task run ISSUE [FLOW]`
     Start,
 }
 

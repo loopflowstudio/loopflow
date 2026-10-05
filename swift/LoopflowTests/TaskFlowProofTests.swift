@@ -405,7 +405,7 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "choosing a preview mutates nothing")
         try find("task-flow-start").button().tap()
         for _ in 0..<20 where await source.controls.isEmpty { try await settle(window) }
-        #expect(await source.controls == [["--task", "W2-156", "flow", "start", "build"]])
+        #expect(await source.controls == [["-b", "task", "run", "W2-156", "build"]])
 
         // A launched Flow stopped at review: the saved position, not the catalogue.
         model.select(.task(id: "issue-review"))
@@ -438,7 +438,7 @@ struct TaskFlowProofTests {
         try find("task-flow-start").button().tap()
         for _ in 0..<20 where (try? find("task-flow-error")) == nil { try await settle(window) }
         #expect(try text("task-flow-error") == "Task flow \"build\" was refused by the fixture")
-        #expect(await source.controls.last == ["--task", "W2-131", "flow", "start", "build"])
+        #expect(await source.controls.last == ["-b", "task", "run", "W2-131", "build"])
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stopped here")
 
         // Execution advances through the shared read; the graph follows it.
@@ -540,7 +540,7 @@ struct TaskFlowProofTests {
     }
 }
 
-/// Shared reads plus recorded controls. Only `flow start` counts as a control;
+/// Shared reads plus recorded controls. Only `task run` counts as a control;
 /// anything else unexpected fails loudly.
 private actor FlowSource {
     private var roadmap: [String: Any]
@@ -611,10 +611,10 @@ private actor FlowSource {
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return catalog
-        case ("--task", _) where args.dropFirst(2).starts(with: ["flow", "start"]):
+        case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)
-            // W2-131 already has a Flow; the fixture refuses a second launch.
-            if args[1] == "W2-131" { throw RegistryQueryError("Task flow \"build\" was refused by the fixture") }
+            // The fixture refuses W2-131's launch.
+            if args[3] == "W2-131" { throw RegistryQueryError("Task flow \"build\" was refused by the fixture") }
             return ""
         default:
             throw RegistryQueryError("Unexpected Flow proof operation: \(args)")

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use crate::durable::{render_steers, Steer, TaskId, WorkRef};
-use crate::engine::process::{execution_context, pin_control_binary, start_lf_session_with_env};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -279,71 +278,6 @@ fn require_wave_match(actual: &Wave, requested: &Wave, subject: &str) -> OpsResu
 
 fn run_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
-}
-
-#[derive(Debug)]
-pub(crate) struct TaskFlowExec {
-    pub task_id: TaskId,
-    pub wave_id: WaveId,
-    pub cwd: PathBuf,
-    pub session: String,
-    pub flow: String,
-}
-
-/// Start `lf --task <task> run <flow>` detached in the Task checkout, with the
-/// caller's prompt and provider options.
-pub(crate) async fn exec_task_flow(request: TaskFlowExec) -> OpsResult<()> {
-    let execution = execution_context()
-        .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
-    let control_bin = pin_control_binary(&execution.lf_bin)
-        .to_string_lossy()
-        .to_string();
-    let options: Vec<String> = std::env::var(crate::lf::TASK_FLOW_OPTIONS_ENV)
-        .ok()
-        .map(|value| serde_json::from_str(&value))
-        .transpose()
-        .map_err(run_error)?
-        .unwrap_or_default();
-    let mut argv = vec![control_bin.clone()];
-    argv.extend(options);
-    argv.extend([
-        "--task".to_string(),
-        request.task_id.to_string(),
-        "run".to_string(),
-        request.flow,
-    ]);
-    let mut environment = vec![
-        (
-            crate::work::wave::context::WAVE_ID_ENV.to_string(),
-            request.wave_id.as_str().to_string(),
-        ),
-        ("LF_BIN".to_string(), control_bin),
-        (
-            "LF_HOME".to_string(),
-            execution.lf_home.to_string_lossy().to_string(),
-        ),
-    ];
-    if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
-        .filter(|value| !value.is_empty())
-    {
-        environment.push((
-            crate::machine_install::INSTALL_SWITCH_ENV.to_string(),
-            switch_id.to_string_lossy().into_owned(),
-        ));
-    }
-    environment.push((
-        crate::engine::config::USER_NAME_ENV.to_string(),
-        crate::engine::config::participant_name()
-            .map_err(run_error)?
-            .unwrap_or_default(),
-    ));
-    let environment = environment
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    start_lf_session_with_env(&request.session, &request.cwd, &argv, &environment)
-        .await
-        .map_err(|error| OpsError::Message(format!("failed to launch Task Flow: {error}")))
 }
 
 #[cfg(test)]

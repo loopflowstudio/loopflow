@@ -32,19 +32,7 @@ struct LocalWaveAgentLauncherTests {
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "--task", "W2-131", "flow", "start",
-        ])
-        #expect(LocalWaveAgentLauncher.taskCreateCommand(
-            lfPath: lf,
-            title: "Refine LOOPFLOW.md 5e41e69b",
-            wave: "context-lab",
-            directive: "Refine text for LOOPFLOW.md."
-        ) == [
-            lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
-            "--notes", "Refine text for LOOPFLOW.md.",
-            "--json",
-        ])
+        #expect(LocalWaveAgentLauncher.taskRunArguments(issue: "W2-131") == ["-b", "task", "run", "W2-131"])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
@@ -60,23 +48,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(command == [lf, "pr", "open"])
         #expect(!command.contains { $0.contains("github.com") })
         #expect(!command.contains { $0.hasPrefix("http") })
-    }
-
-    @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskCreateReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskCreateReceipt("""
-        {
-          "issue_identifier": "W2-201",
-          "project": "auditability",
-          "wave": "product"
-        }
-        """)
-
-        #expect(receipt == TaskCreateReceipt(
-            issueIdentifier: "W2-201",
-            project: "auditability",
-            wave: "product"
-        ))
     }
 
     @Test("Prepared checkout receipts retain the owning Home and require its evidence")

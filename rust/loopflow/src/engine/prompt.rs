@@ -2097,7 +2097,7 @@ mod tests {
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "repo/operate" | "wave/operate");
-            assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
+            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
             for procedure in ["lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),

@@ -34,7 +34,6 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
 | `LF_FLOW_STEP` | Flow driver | `ops::flow_run::token` | Fences a step to one Flow position; validated against the captured Flow's position version. |
-| `LF_TASK_FLOW_OPTIONS` | `lf` Task and `flow start` commands | The detached Task Flow launch, once | Carries the caller's prompt and provider flags to the Flow it launches. |
 | `LF_HUMAN_SESSION`, `LF_HUMAN_SESSION_RUN` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | `lf runs` | Records which account a provider child used. |

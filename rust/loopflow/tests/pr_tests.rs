@@ -1432,6 +1432,62 @@ fn observed_merge_does_not_complete_a_task_from_status() {
     assert_eq!(prs[0].phase(), PrPhase::Merged);
 }
 
+/// A Flow launch no longer reconciles the Task's PR first. Work a Flow commits
+/// after that PR merged reaches publication, which names the settled PR and
+/// the command that opens its successor.
+#[test]
+fn publishing_after_the_pr_merged_names_the_next_step() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        presentation: Some(reviewer_copy(&head)),
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head),
+        }),
+        merge: None,
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("record the published PR");
+    task_status(repo.path(), Some("INF-123")).expect("observe the merge");
+    repo.create_file("later.txt", "committed after the merge\n");
+    repo.stage_all();
+    repo.commit("Work a Flow committed after the merge");
+    let committed = repo.head_sha();
+
+    let error = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            draft: false,
+            title: Some("later work".to_string()),
+            body: Some("body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("a merged PR cannot take another head");
+    let message = error.to_string();
+    assert!(message.contains("pull request #912 merged"), "{message}");
+    assert!(message.contains("lf pr next"), "{message}");
+    assert_eq!(repo.head_sha(), committed, "the Flow's commit is untouched");
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.task.id))
+        .expect("read Task PRs");
+    assert_eq!(prs.len(), 1, "publication opened no successor on its own");
+}
+
 #[test]
 fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
     let home = tempfile::TempDir::new().expect("temp home");

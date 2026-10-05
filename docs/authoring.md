@@ -145,7 +145,7 @@ execution interpret backward edges through the same transition rules.
 
 ```bash
 lf feature
-lf --task DES-123 flow start feature
+lf task run DES-123 feature
 ```
 
 A loop is a backward edge in that Flow. It returns from a deciding step to an

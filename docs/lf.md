@@ -31,15 +31,17 @@ repair or preserve them. Use a fresh directory when its schema changes.
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf --task EXP-12 flow start          # launch the Project's default Flow, fresh
-lf --task EXP-12 flow start incident # launch a chosen Flow
-lf --task EXP-12 flow start --reason "take the smaller approach"
+lf -b task run EXP-12       # place the Task, run the Project's default Flow
+lf -b task run EXP-12 incident # run a chosen Flow
+lf task run EXP-12 --reason "take the smaller approach"
 ```
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
-it cannot override a Task's owning Wave. `flow start` always launches a fresh
-Flow, detached in the background, in the Task checkout. It never continues an
-earlier one. `--reason` publishes direction to the Task before launching. Every
+it cannot override a Task's owning Wave. `task run` places the Task's
+worktree, defaults to its Project's Flow, then runs like
+`lf --task ISSUE run FLOW`: it prints the Flow's output and returns when the
+Flow ends. Background it yourself when you will not wait. It never continues
+an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow run for a Task is equally its work.
 
 A Flow whose driver died keeps its last position, failure and effect receipts as
@@ -49,7 +51,7 @@ history. No command resumes it. To change direction or recover:
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
 lf flow show ID --sessions --json    # one Flow's history and effects
-lf --task EXP-12 flow start          # launch fresh work
+lf -b task run EXP-12       # run fresh work
 ```
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
@@ -70,7 +72,7 @@ lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
 lf checkout EXP-12                  # prepare its checkout without execution
-lf --task EXP-12 flow start
+lf task run EXP-12
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```

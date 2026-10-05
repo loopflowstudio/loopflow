@@ -428,16 +428,13 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let crate::ops::task::TaskCreateResult::Created(created) = crate::ops::task::task_create(
+        let created = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Continue training".into()),
             Some("Retain the issue".into()),
-            None,
         )
-        .unwrap() else {
-            panic!("backlog creation unexpectedly launched work")
-        };
+        .unwrap();
         crate::ops::task::task_edit(
             &repo,
             &created.identifier,
@@ -485,7 +482,6 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
                 Some("product"),
                 Some("Future work".into()),
                 Some("Full directive".into()),
-                None,
             )
         };
         {
@@ -502,9 +498,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
                 1
             );
         }
-        let crate::ops::task::TaskCreateResult::Created(first) = create().unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+        let first = create().unwrap();
         let edit = || {
             crate::ops::task::task_edit(
                 &repo,
@@ -526,9 +520,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
             assert!(error.contains("Retry the same Task command"), "{error}");
         }
         edit().unwrap();
-        let crate::ops::task::TaskCreateResult::Created(retry) = create().unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+        let retry = create().unwrap();
         assert_eq!(first.id, retry.id);
         assert_eq!(first.name, "Future work");
         assert_eq!(retry.name, "Edited future work");
@@ -540,7 +532,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
             .unwrap();
         assert!(retry.description.ends_with(marker));
         let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![*retry]);
+        assert_eq!(snapshot.items, vec![retry]);
     });
     assert_eq!(
         runtime.block_on(async { state.lock().await.issues.len() }),
@@ -638,7 +630,6 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             Some("product"),
             Some("Future work".into()),
             Some("Preserve this issue's outcome".into()),
-            None,
         )
         .unwrap();
     });
@@ -898,16 +889,13 @@ fi
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
+        let item = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
-            None,
-        )
-        .unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+)
+        .unwrap();
         let task = registered.then(|| {
             for args in [
                 vec!["add", "."],
@@ -1380,16 +1368,13 @@ esac
         let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
         let (url, server) = runtime.block_on(serve(state.clone()));
         PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-            let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
+            let item = crate::ops::task::task_create(
                 &repo,
                 Some("product"),
                 Some("Cancel me".into()),
                 Some("Keep history".into()),
-                None,
             )
-            .unwrap() else {
-                panic!("planning issue")
-            };
+            .unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
             let project = runtime
                 .block_on(fixture.store.list_projects(Some(wave.id())))
@@ -1641,7 +1626,6 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             Some("product"),
             Some("Eligible work".into()),
             Some("Cancel only repository work".into()),
-            None,
         )
         .unwrap();
         for plan in [true, false] {
@@ -1748,7 +1732,6 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             Some("product"),
             Some("Planning work".into()),
             Some("Retain evidence".into()),
-            None,
         )
         .unwrap();
         assert!(crate::ops::task::task_sweep(&repo, true)

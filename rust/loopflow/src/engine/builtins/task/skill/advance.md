@@ -21,7 +21,7 @@ starts nothing.
 Read `lf task status <issue> --json`. Leave a Flow with a live driver running.
 A stopped or failed Flow is history: inspect what it finished and the effects it
 recorded; historical review boundaries remain evidence. Launch fresh work with
-`lf --task <issue> flow start <flow>` only when the current request identifies the
+`lf task run <issue> <flow>` only when the current request identifies the
 next work—for example, implementation after an accepted design. A blocker needs
 its stated recovery first, completed work is not repeated, and a finished Flow
 alone is not a request to run it again.

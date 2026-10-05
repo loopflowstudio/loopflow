@@ -86,8 +86,8 @@ have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
-`lf --task ISSUE flow start` launches a fresh detached `lf --task ISSUE run FLOW`
-in that checkout. `lf --task ... <skill>` goes directly through execution with
+`lf task run ISSUE` places the Task and fills its defaults, then is
+`lf --task ISSUE run FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
 Task attribution and never moves a Flow's position.
 
 ## Dependency direction

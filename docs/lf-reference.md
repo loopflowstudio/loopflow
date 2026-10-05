@@ -14,8 +14,8 @@ are internal process boundaries and are marked below.
 
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
-owning Wave. `flow start` launches a fresh Flow for the Task in the
-background; every Flow naming a Task is equally its work.
+owning Wave. `task run` places a Task's worktree and then runs like
+`lf --task ISSUE run FLOW`; every Flow naming a Task is equally its work.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
 limits this launch and its children. A Flow retains its provider selections;
@@ -30,7 +30,7 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 ## Flow decisions and recovery
 
 ```bash
-lf --task EXP-12 flow start pursue
+lf task run EXP-12 pursue
 lf flow show FLOW_ID --sessions --json
 lf task interrupt EXP-12
 ```
@@ -1237,25 +1237,35 @@ Ensure tracked Task Work and its worktree without launching a Flow
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf task run
+
+Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<flow>` | Flow to run; the Project's default when omitted |
+| `--name` | name |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--directive` | directive |
+| `--reason` | Direction for this run, published to the Task |
+| `--help / -h` | Print help |
+
 ## lf task create
 
-File a Task in the current chapter; optionally prepare and run it
+File a Task in the current chapter
 
 | Argument | What it does |
 |---|---|
 | `--wave` | Wave name; defaults to the bound Wave |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
-| `--run` | Validate placement and execution before filing, then run the Task Default: false. |
-| `--name` | name |
-| `--flow` | Flow to launch for this Task; defaults to the chapter recommendation |
-| `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task status
 
-Show durable Task facts and current worker evidence
+Show durable Task facts and its recorded work
 
 | Argument | What it does |
 |---|---|
@@ -1494,20 +1504,6 @@ Run or inspect authored flows
 
 | Argument | What it does |
 |---|---|
-| `--help / -h` | Print help |
-
-## lf flow start
-
-Launch a fresh Flow for a Task in the background
-
-| Argument | What it does |
-|---|---|
-| `<template>` | Flow to launch; the Project's default when omitted |
-| `--name` | name |
-| `--stack-on` | Fork this Task's worktree from another Task's active PR |
-| `--directive` | directive |
-| `--reason` | Direction for this launch, published to the Task |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow list

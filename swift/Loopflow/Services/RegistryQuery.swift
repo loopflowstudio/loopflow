@@ -25,6 +25,11 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+/// Starts an `lf` argv that runs as long as its work does and returns once it
+/// is under way, throwing an immediate refusal. A transport without one waits
+/// for the command through its `RegistryRunner`.
+public typealias RegistryStarter = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> Void
+
 /// Entry emitted by `lf list --json`.
 public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
     public let name: String
@@ -39,6 +44,7 @@ public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let observe: @Sendable () async throws -> ActiveSessionsObservation
+    private let start: RegistryStarter?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
@@ -47,17 +53,19 @@ public struct RegistryQuery: Sendable {
         watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
             throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
+        start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveSessions
+        self.start = start
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
+        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe, start: start) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -184,12 +192,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    /// Launch a fresh Flow for the Task, preparing it when needed. Without
+    /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust runs the Project default.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
-        var args = ["--task", issue, "flow", "start"]
+        var args = ["-b", "task", "run", issue]
         if let flow { args.append(flow) }
-        _ = try await run(args, cwd)
+        if let start {
+            try await start(args, cwd)
+        } else {
+            _ = try await run(args, cwd)
+        }
     }
 
     /// One planning Task's complete comment thread. Read-only; works before

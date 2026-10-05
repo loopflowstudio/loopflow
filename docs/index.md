@@ -19,7 +19,7 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf --task INF-123 flow start
+lf task run INF-123
 ```
 
 A Skill supplies instructions; a Flow composes skills and mechanical operations.

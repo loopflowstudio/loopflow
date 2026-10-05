@@ -40,8 +40,9 @@ exit when blocked or landed. An already satisfied Task needs no new execution.
    stop if the Task's outcome is already satisfied. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** `lf --task <issue> flow start [flow]` launches a
-   fresh Flow in the background; it never continues an earlier one. Check installed
+3. **Advance the work.** `lf task run <issue> [flow]` runs a
+   fresh Flow in the Task's worktree and returns when it ends; it never continues
+   an earlier one. Run it with your own background tool to keep working. Check installed
    help first. Leave a live driver running. After a stopped or failed Flow,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session

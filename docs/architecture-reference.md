@@ -622,8 +622,8 @@ to Loopflow without separate UI evidence.
 ## Flow execution
 
 ```bash
-lf --task INF-123 flow start                  # Project's Flow
-lf --task INF-124 flow start incident  # explicit override
+lf task run INF-123                  # Project's Flow
+lf task run INF-124 incident  # explicit override
 lf flow example                     # with or without Task attribution
 ```
 
@@ -683,8 +683,8 @@ Task row ----> managed worktree ----> commits
    or reuses Task Work, its worktree, and its serial PR identity. It starts no
    agent work.
 2. Independent `lf --task ...` conversations may work in that substrate directly.
-   `lf flow start` selects a Flow when none is active and ensures its exact
-   invocation has one worker through the same execution components.
+   `lf task run` places the Task, defaults its Flow, then runs it through the
+   same `lf run` path as any other launch.
 3. `lf commit` snapshots the worktree. `lf pr publish` creates or refreshes the
    current PR without opening a browser.
 4. `lf submit` leaves the exact-head merge click to a person. `lf arm`

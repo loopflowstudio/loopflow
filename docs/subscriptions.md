@@ -282,7 +282,7 @@ Choose both providers once for a Flow or Task:
 
 ```bash
 lf --only-account claude=personal@ --only-account codex=work@ flow code
-lf --account claude=personal@ --account codex=work@ --task LOO-123 flow start
+lf --account claude=personal@ --account codex=work@ task run LOO-123
 ```
 
 Flow invocations save these choices and restore them for autonomous steps,

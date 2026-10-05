@@ -73,18 +73,19 @@ is an approval prerequisite. A Task's Flows carry its autonomous work; do not
 perform a Flow's steps here. Preserve Flow history, conversation reviews,
 worktrees, placement and execution history.
 
-- Start selected work with `lf --task <issue-id> flow start`; use the
-  current Project's Flow unless an explicit choice is warranted. Each start
-  launches a fresh Flow; leave a live one running instead of duplicating it.
+- Start selected work with `lf task run <issue-id>`; use the
+  current Project's Flow unless an explicit choice is warranted. Each run
+  is a fresh Flow and returns when it ends; background it with your own tool.
+  Leave a live one running instead of duplicating it.
 - Inspect `lf task status` and existing logs before recovery. Resolve
   impediments; discuss missing judgment in the ongoing Wave chat when present.
   Headless operation stops with the reason when it cannot proceed. After a
   failure, inspect its effects and launch fresh work with
-  `lf --task <issue> flow start <flow> --reason "<what changed>"` only when new
+  `lf task run <issue> <flow> --reason "<what changed>"` only when new
   evidence warrants it. Unknown liveness is not idle. Preserve historical review
   evidence; discuss feedback and next work in the ongoing Task conversation.
-- Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
-  when execution is intended. Give work an observable outcome.
+- Read existing Tasks before `lf task create --wave <wave>`. Give work an
+  observable outcome.
 - Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object

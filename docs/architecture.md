@@ -230,7 +230,7 @@ A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.
 
 Every FlowSession naming a Task, or run in its checkout, is equally its work;
-none is privileged. `flow start` always launches a fresh one.
+none is privileged. `task run` always runs a fresh one.
 Taskless and Task-owned Flows use the same captured graph and driver. Loop
 passes are positions in that one FlowSession; template composition compiles into
 the graph. Each agent-backed step references the exact successful AgentSession
@@ -293,12 +293,13 @@ Task Flow, piecemeal helper AgentSessions, or another system.
 
 ```bash
 lf --wave product wave/operate        # one finite planning pass
-lf --task INF-123 flow start
+lf task run INF-123
 lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 
-`flow start` launches a fresh Flow, detached in the Task checkout; it never
+`task run` places the Task, then runs a fresh Flow in its checkout exactly as
+`lf --task ISSUE run FLOW` does, returning when the Flow ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
 questions and helpers use attributed AgentSessions without gaining Flow

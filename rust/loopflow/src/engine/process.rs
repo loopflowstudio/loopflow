@@ -356,7 +356,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::exec::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
-    crate::lf::TASK_FLOW_OPTIONS_ENV,
     crate::machine_install::INSTALL_SWITCH_ENV,
     crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
     "LF_TERMINAL_ID",
@@ -393,19 +392,6 @@ fn forwarded_authority_env_names() -> Vec<String> {
         names.extend(forwarded.split_whitespace().map(str::to_string));
     }
     names
-}
-
-pub(crate) fn tmux_session_slug(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

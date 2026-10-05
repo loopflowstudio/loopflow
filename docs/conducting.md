@@ -142,7 +142,7 @@ chat. Review happens in the Task conversation; Flows hold autonomous steps only.
 Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
 A Flow whose driver died stays as history. Nothing resumes it. Read
-`lf task status <task>`, then launch fresh work with `lf --task <task> flow start`.
+`lf task status <task>`, then launch fresh work with `lf task run <task>`.
 
 ## Inspect and resume
 

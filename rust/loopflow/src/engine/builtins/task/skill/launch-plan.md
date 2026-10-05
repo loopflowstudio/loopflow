@@ -35,13 +35,15 @@ For each remaining independently shippable outcome, choose one of two actions:
 - If it can safely start against the current contract, create and launch it now
   when no local artifact needs staging:
   ```bash
-  lf task create --run --wave <wave> --title "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+  lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
+  lf task run <issue> <chosen-flow>
   ```
-  Stdin files the Task description; `--directive` supplies worker direction,
-  not that durable brief. Use `--stack-on <current-task>` when it must build
-  on this Task's branch.
+  Stdin files the Task description; `--directive` on `task run` supplies
+  direction, not that durable brief. Use `--stack-on <current-task>` when it
+  must build on this Task's branch. `task run` returns when its Flow ends; run
+  it with your own background tool to keep planning.
 - If it depends on decisions this core has not settled, leave it in the design
   as a named follow-up. Create it after this PR settles; do not invent durable
   staging state inside Loopflow.
@@ -111,7 +113,7 @@ its maturity, and open questions. Do not invent ownership.
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf --task <issue> flow start <chosen-flow>
+lf task run <issue> <chosen-flow>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs

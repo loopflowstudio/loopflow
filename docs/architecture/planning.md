@@ -5,7 +5,7 @@ lf --wave product wave/operate
 lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
-lf --task INF-124 flow start
+lf task run INF-124
 lf repo new-chapter 2026-10 --dry-run
 ```
 
@@ -123,7 +123,7 @@ or process.
 
 Every FlowSession naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `flow start` captures a fresh FlowSession; the Project's Flow
+driver. Each `task run` captures a fresh FlowSession; the Project's Flow
 supplies the default and naming a Flow selects another. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
@@ -161,7 +161,7 @@ or resumes a stopped Flow.
 lf task status INF-124
 lf flow show FLOW_SESSION --sessions --json
 lf task interrupt INF-124
-lf --task INF-124 flow start --reason "take the smaller approach"
+lf task run INF-124 --reason "take the smaller approach"
 ```
 
 A FlowSession whose driver died keeps its last cursor, failure, events and effect
@@ -170,10 +170,11 @@ belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
-`flow start` always launches a fresh ordinary Flow, detached in the Task
-checkout, with the caller's prompt and provider options. `--reason` publishes
-direction to the Task first. To change direction, interrupt, inspect, then
-launch.
+`task run` places the Task, then runs a fresh ordinary Flow in its checkout:
+the same command, checks and records as `lf --task ISSUE run FLOW` or a run
+from the worktree. It blocks until the Flow ends; a caller that will not wait
+backgrounds it. `--reason` publishes direction to the Task first. To change
+direction, interrupt, inspect, then run.
 
 Task status and roadmap `execution` observe the Task's most recently launched
 Flow: `none`, `latest` or `finished`. Its only control is `start`, available

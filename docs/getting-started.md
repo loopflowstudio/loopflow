@@ -100,7 +100,8 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task create --run --wave <wave> --title "add OAuth login"
+lf task create --wave <wave> --title "add OAuth login"
+lf -b task run <issue-id> &
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
 lf wait <issue-id> --until terminal

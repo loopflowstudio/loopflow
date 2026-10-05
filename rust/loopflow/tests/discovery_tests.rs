@@ -97,7 +97,12 @@ fn discover_builtin_skills() {
 #[test]
 fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
     let skill_names = builtin_skill_names();
-    assert!(skill_names.contains(&"wave/operate"));
+    for scope in ["repo", "wave", "task"] {
+        for role in ["operate", "session"] {
+            let name = format!("{scope}/{role}");
+            assert!(skill_names.contains(&name.as_str()), "{name}");
+        }
+    }
     assert!(!skill_names.iter().any(|name| name.starts_with("project/")));
     assert!(skill_names.contains(&"implement"));
     assert!(skill_names.iter().all(|name| !name.contains('_')));

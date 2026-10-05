@@ -5,6 +5,32 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Live Home reconciliation (2026-10-05)
+
+Jack Heart requested cleaning the installed workspace before inventing product
+changes (LOO-380). Installed Desktop and CLI are both 0.13.3 on one Home and
+contain #1418/1419/1427/1435/1436. Supported operations sufficed for most of it:
+
+- A Done Task that planning still calls open has a stuck `complete_task`
+  writeback; `lf task complete <issue> --summary …` retries it. Its Linear
+  completion date becomes the retry date, so recency windows overstate it.
+- A locally abandoned Task that planning still calls open: `lf task abandon`
+  retries the Linear cancel. Used only where Jack's own thread comment recorded
+  the abandonment (LOO-309, LOO-329).
+- `lf flow end <invocation>` retires a stopped Flow without completing its
+  Task (LOO-375 after #1427 merged; LOO-312 whose checkout and branch are gone).
+  On 0.13.3 it refuses a Flow still carrying a dead worker's claim (LOO-343's
+  `ship`); LOO-353's claim removal dissolves that case.
+- The sidebar now drops locally done/abandoned Work even when planning lags;
+  the Wave plan keeps listing what planning calls open. Unshipped: stacked
+  behind LOO-353's review.
+
+Left for their owners: LOO-367's failed loop-decide waits on the LOO-353
+handoff; Intelligence's chapter Project reads `backlog` in Linear, so its Tasks
+are unavailable (LOO-366 territory); about thirty `ship` test Waves in temp
+directories sit in the live registry with no installed removal command. No
+rendered check of the installed app was possible headless.
+
 ## Task conversation correction (2026-10-04)
 
 Jack Heart requested one ongoing Task conversation for interactive design/review,
@@ -314,26 +340,12 @@ Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
 authority or making operation a prerequisite for independent Tasks.
 
-The direct finite passes used installed reads on September 28 local time
-(September 29 UTC). The repository roster crossed the invocation's Product
-attribution, but chapter/Task reads were unavailable. That was incomplete
-planning evidence, not an empty backlog or permission to rotate a chapter.
-The cross-Wave judgment reconciled Product usability, Intelligence's reusable
-instructions and Infrastructure's execution boundaries; Jack's accepted direction
-was returned to this local memory. It did not demonstrate a launched VSM Flow
-or a planning write.
-
 The [committed design](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation.md)
 and [evidence record](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation-evidence.md)
 preserve the source decisions, scenario simulations and verification limits.
-Private-Home checks covered catalog/export pruning with personal overrides,
-Flow endpoints and review returns, assembled prompts, alignment and docs;
-formatting and all-target Clippy passed. Compression's focused proof passed
-26 Rust and four Python checks. These are recorded branch checks, not new
-configured acceptance. Five-step VSM scope/evidence handoff and the incident
-handoff still need configured proof. Installed adoption, live planning changes
-and delivery are not established by this consolidation; no prompting-outcome
-KR or external-product progress is earned by source checks alone.
+Branch checks only: five-step VSM handoff, the incident handoff, installed
+adoption and any planning write remain unproven (detail at
+`1a0e546e6:wave/product/MEMORY.md`).
 
 ## Named participants and review feedback (curated 2026-09-25)
 
@@ -369,17 +381,9 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   Recorded scope retained Session code and background tmux process wrappers.
   Fixture renders do not prove tab/window interaction or native recovery.
 
-The prior name-attribution gate passed 799 affected Rust tests, 229 Python tests,
-78 website checks (three skips), 112 focused Swift tests, static checks and the
-Mac build. A full Swift package run stopped completing and was terminated;
-focused stream checks passed later, but full-package and native-rendering proof
-remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
-not a live Task write or the review-bearing design Flow. Native review resume
-still needs anonymous → named → corrected → unknown participant acceptance on
-a differently named Home, preserving historical authors and review authority.
-LOO-297's attempted read failed on missing Linear credentials; local Task absence
-did not establish remote absence. Any sentence repair requires a fresh authorized
-issue read. No Task was filed or changed by these records.
+Full Swift package and native-rendering proof remain absent. Native review
+resume still needs anonymous → named → corrected → unknown participant acceptance
+on a differently named Home. Gate counts are at `1a0e546e6:wave/product/MEMORY.md`.
 
 ## PR authorship and retired UX research (2026-09-25)
 
@@ -1065,14 +1069,6 @@ geometry, long-output measurements, and visual proof,
 comparison. This branch does not establish any Project's week/month evidence
 window; definitions and KRs remain unchanged. No open Task had enough evidence
 to close during this reconciliation.
-
-## Historical remote client
-
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
 
 ## Learnings
 

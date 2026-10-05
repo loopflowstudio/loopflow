@@ -94,7 +94,14 @@ step reads or writes it.
     then in between are human sessions, and the edges are lf flows". Then: "I
     think maybe the flowsession is *that*".
 
-Open, and blocking the next pass: which thing FlowSession names.
+11. "i think maybe we call that like a TaskWorkflow or something ? might need
+    to think about ones that dont end in land, multi-PR tasks or 0-PR tasks.
+    (I am pretty confident we want 0 PR tasks; not sure we need multi-PR
+    tasks)".
+
+Agent's resolution, unconfirmed by Jack: the outer thing is TaskWorkflow and
+is not built in this PR; one `lf` flow run gets an append-only driver record
+named FlowExec.
 
 The consolidated model is in [the design](focus-on-your-own-work.md#flow-model--decided-october-5-governs-the-rest-of-this-document).
 Open: whether takeover is built in this PR or only designed for.

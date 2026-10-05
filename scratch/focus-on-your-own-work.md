@@ -9,69 +9,54 @@ reviewed evidence and Jack's exact words are in
 plan is at `67cd68157:scratch/focus-on-your-own-work.md`; the FlowSession
 architecture it removed is at `6f246fda4:scratch/focus-on-your-own-work.md`.
 
-## Flow model — decided October 5, governs the rest of this document
-
-**Not settled; do not implement from this section yet.** After it was written
-Jack said of the outer workflow (start node, land node, human sessions
-between, edges are `lf` flows): "I think maybe the flowsession is *that*". On
-that reading FlowSession is the mutable, takeover-able outer run, and one
-`lf` flow run is a process with a driver-kept, append-only record (Jack
-earlier: "something more similar to an Exec but specifically for Flows"). The
-text below assumed FlowSession was the record of one `lf` flow run. Awaiting
-Jack's confirmation; the rules on uniform tracking, driver-maintained state
-and oblivious steps hold under both readings.
+## Flow model — October 5, governs the rest of this document
 
 Jack Heart's statements are quoted in [questions.md](questions.md) under
-"Step invocation". Where any section below still describes a Flow as only its
-driver Exec and step Execs, or steps carrying a `FlowStep` payload, this
-section replaces it.
+"Step invocation". Where a later section describes steps carrying a
+`FlowStep` payload or Flows found by searching command text, this replaces it.
 
-Three records, as for conversations:
+Two different things were both being called a Flow:
 
-- **Exec:** one `lf` process. Immutable fact.
-- **AgentSession:** one conversation.
-- **FlowSession:** one run of a Flow. It has its own id and is mutable. Jack:
-  "maybe we still want FlowSession. And then the FlowSession is mutable, but
-  the Flow exec is not." It is not 1:1 with a process, "in the same way that a
-  simple interactive skill session is not 1:1 with its launching process".
+| | TaskWorkflow (outer, not built here) | One `lf` flow run (inner, this PR) |
+| --- | --- | --- |
+| Shape | a start node, conversation stages, an end; edges are `lf` flows | implement, compress, decide, publish |
+| Lifetime | the Task's; many processes and conversations | one driver process |
+| Record | mutable, own identity, replace/take over like a Session | **FlowExec**: append-only, written by its driver |
 
-FlowSession holds the Flow's name, the graph as compiled at launch, the
-current position, a step log (each step's child Exec, graph key, iteration and
-result) and the Flow's own outcome (running, completed, blocked, stopped,
-handed off). Driver Execs link to it; none is its identity.
+**This PR builds the inner one only.**
 
-Rules:
-
-- **Uniform.** Every Flow run has one, ad hoc or started by `lf task run`.
-  None is primary for a Task; no Task column points at one. Membership is the
-  driver's directory. A primary Flow may return later as a layer on top.
-- **The driver maintains it.** Queryable, scalable, performant state is the
-  Flow process's job. Clients (`lf flow list/show`, `task status`, Desktop)
-  read it and work for any Flow.
-- **Read-only to everyone else for now.** No API changes a running Flow; the
-  control is ending its driver. A record that says running while its driver
-  is dead is presented as stopped, never stored as a contradiction.
-- **Steps are oblivious.** The driver starts each step as the plain command, a
-  child process: `lf -b skill <name> [message]` or the operation's own
+- **FlowExec.** One row per Flow run, keyed by its driver Exec: Flow name and
+  the graph as compiled at launch. One step row per step the driver starts:
+  child Exec, graph key, iteration. Jack: "something more similar to an Exec
+  but specifically for Flows"; "the FlowSession is mutable, but the Flow exec
+  is not". Running, finished and each step's result are read from the Execs,
+  never stored twice. The name FlowExec is the agent's choice.
+- **Uniform.** Every Flow run gets one, ad hoc or started by `lf task run`.
+  None is primary for a Task; no Task column points at one; membership is the
+  driver's directory.
+- **The driver maintains it;** clients (`lf flow list/show`, `task status`,
+  Desktop) read it and work for any Flow. No API changes a running Flow; the
+  control is ending its driver.
+- **Steps are oblivious.** The driver starts each step as the plain command,
+  a child process: `lf -b skill <name> [message]` or the operation's own
   command. No `FlowStep` payload, `--__flow-step`, `__flow-step` command or
-  position variable. A step never reads or writes the FlowSession. A deciding
-  or routing step gets its answer contract in its message; the driver
-  validates it and corrects it by resuming the same conversation.
-- **Gone for good:** worker claims and generations, automatic recovery, the
-  pending-review pointer, the `replaced` state, steps reading a cursor row.
+  position variable. A step never reads or writes FlowExec. A deciding or
+  routing step gets its answer contract in its message; the driver validates
+  it and corrects it by resuming the same conversation.
+- **Gone:** FlowSession as the record of an `lf` flow run, worker claims and
+  generations, automatic recovery, resume, the pending-review pointer, the
+  `replaced` state, steps reading a cursor.
 
-Designed for, not built in this pass: Jack, "in the same way the session api
-lets you replace / take over any lf skill, the flow session api would let you
-replace / take over any running flow". The record therefore keeps enough
-position for another driver to continue, and the driver link is replaceable.
-Whether takeover is built in this PR is unanswered.
-
-Implementation: reshape the FlowSession code that existed before `68c1ffc55`
-(`store/sqlite/flows.rs`, `store/flows.rs`, the DTOs and Swift decoders at
-`88942accf`) rather than writing a new record beside the Exec-derived readers.
-The one draft migration reshapes `flow_sessions` and `flow_events` instead of
-dropping them: remove claim, generation, pending-session and review columns
-and the Task pointer; keep every row as history.
+**TaskWorkflow, for a later Task.** Jack: "i think maybe we call that like a
+TaskWorkflow or something ? might need to think about ones that dont end in
+land, multi-PR tasks or 0-PR tasks. (I am pretty confident we want 0 PR
+tasks; not sure we need multi-PR tasks)". It is the layer where a Task's
+standard protocol and takeover would live, and it supersedes the "workflow
+files carry no runtime record" line under Later slices as an open question.
+Agent's notes for that design: the end node is the Task being complete, with
+landing as one edge that may be absent (0 PRs) or repeated (several PRs)
+without the workflow counting PRs; a watched landing that outlives its
+`lf` process is an outer concern.
 
 ## Outcome
 

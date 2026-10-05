@@ -78,7 +78,7 @@ repetition.
 
 Export-check trap: a dev build with no explicit `LF_HOME` re-execs the
 installed `lf`, so a bare `HOME=<tmp>` sync writes the installed text. Use
-`env -i PATH=/usr/bin:/bin HOME=$H LF_HOME=$H/.lf target/debug/lf home
+`env -i PATH=/usr/bin:/bin HOME=<tmp> LF_HOME=<tmp>/.lf target/debug/lf home
 sync-skills --yes`.
 
 ## Remaining
@@ -105,7 +105,7 @@ sync-skills --yes`.
   "refresh planning" and names no command; `flow start` on a Task whose PR
   already merged (LOO-368) is unsettled.
 
-Check result (compress, 2026-10-05): prose-only reduction after the demo
-commit; `cargo test -p loopflow --lib -- engine::prompt engine::builtins` and
-`--test golden_prompt --test documented_commands`: see the commit. Gate owns
-the full plan.
+Check result (compress, 2026-10-05): prose reduction after the demo commit;
+`cargo test -p loopflow --lib -- engine::prompt engine::builtins` (90 passed)
+and `--test golden_prompt --test documented_commands` pass. Gate owns the full
+plan.

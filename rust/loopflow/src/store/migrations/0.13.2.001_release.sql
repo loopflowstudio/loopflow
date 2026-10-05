@@ -1,3 +1,4 @@
+-- draft: shared_provider_homes
 -- Conversations pinned before shared provider homes live in their account's
 -- own home, so existing rows are isolated. Every new pin states its mode.
 ALTER TABLE provider_session_accounts ADD COLUMN isolated INTEGER NOT NULL DEFAULT 1

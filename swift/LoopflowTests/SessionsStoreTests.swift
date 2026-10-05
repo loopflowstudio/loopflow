@@ -149,69 +149,17 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.state == .elsewhere)
     }
 
-    @Test("Completing an interactive Session removes it from Sessions")
-    func completionRemovesInteractiveSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "native"] {
-                    return "Session native completed"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
-        ]))
 
-        let completed = await store.complete("native")
-
-        #expect(completed)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "native"],
-        ])
-    }
-
-    @Test("A ready review stays visible until completion")
-    func readyDoesNotDisappear() throws {
+    @Test("Retained review feedback stays visible")
+    func retainedFeedbackDoesNotDisappear() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
-        store.reconcile(try records([session(id: "review", state: "ready")]))
+        store.reconcile(try records([session(id: "review", state: "waiting")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.record.state == .ready)
+        #expect(store.sessions.first?.record.state == .waiting)
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
-    @Test("Completing a review removes its Session")
-    func resolutionNamesTheSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "review"] {
-                    return "Review feedback returned"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([session(id: "review", state: "ready")]))
-
-        let decided = await store.complete("review")
-
-        #expect(decided)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "review"],
-        ])
-    }
 
     @Test("Session actions use the main repository for a linked worktree")
     func sessionStoreUsesMainRepository() throws {
@@ -262,7 +210,7 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "detail": "review-design",
       "cwd": "/tmp/repo.\(id)",
       "state": "\(state)",
-      "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
+      "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
       "title_source": "generated", "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "terminal_ids": [],

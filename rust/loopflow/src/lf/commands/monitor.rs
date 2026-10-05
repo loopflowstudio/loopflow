@@ -420,14 +420,6 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     "Conversation completion is recorded".to_string(),
                     format!("lf session history {}", session.id),
                 ),
-                SessionState::Ready => (
-                    "waiting",
-                    session
-                        .ready_summary
-                        .clone()
-                        .unwrap_or_else(|| "Review is ready".into()),
-                    format!("lf session connect {}", session.id),
-                ),
                 _ if live => (
                     "active",
                     "Matching provider process observed".into(),

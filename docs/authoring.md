@@ -73,23 +73,10 @@ Skills that need another Work's perspective launch it directly with
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Run a step interactively with `human: true`. Give it an `id` stable within
-its expanded Flow so the conversation can be reopened:
-
-```yaml
-- kickoff
-- step:
-    id: review_design
-    name: review-design
-    human: true
-```
-
-The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf ready "feedback and remaining work"`; the human ends
-the review with `lf session complete <session-id>`. The Flow carries that
-feedback to its next step. Provider exit or readiness alone leaves it waiting.
-Human steps have no navigation verdict or backward edge. Put a deciding step
-after the review when its feedback should choose between continuing and more work.
+Keep design and review in the Task conversation. Save agreed feedback and
+remaining work there; Session completion controls are retired. Inspect the exact
+invocation and its effects before selecting further work. Historical captures
+with human steps retain their evidence; they are not approval to replay work.
 
 Mechanical git/PR operations ride along as `cmd:` steps:
 
@@ -118,17 +105,10 @@ useful action with its proof. Link related notes. Update the relevant account
 and mark superseded conclusions while preserving useful evidence. Notes remain
 available across steps, regardless of which skill wrote them or runs next.
 
-A review's ready summary points to that material:
-
-```sh
-lf ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
-```
-
-Loop-decide starts at those paths, then reconciles the current design and other
-relevant scratch evidence. A note recommends work; the deciding occurrence
-records navigation through the Flow protocol. There is no required handoff
-filename or control file. Recursive scratch Markdown is assembled into fresh
-conversation context; a running agent can reread files updated since its launch.
+Discuss the review's note paths and takeaway in the ongoing conversation. A note
+recommends work; the caller selects the next action after inspecting its evidence.
+There is no required handoff filename or control file. Recursive scratch Markdown
+is assembled into fresh context; a running agent can reread updated files.
 
 ### Branching (xor)
 

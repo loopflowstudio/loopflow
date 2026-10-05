@@ -10,24 +10,16 @@ never select a different Task merely because it is the only waiting session.
 
 ## A review is ready
 
-When the User asks to finish a review, save the agreed design and feedback first.
-Mark the exact Session ready with its feedback and remaining work, then run:
-
-```sh
-lf session complete <session-id>
-```
-
-Completion returns feedback to the next Flow step. A following loop-decide
-interprets it and chooses Advance or Iterate through an authored edge. If the
-User requests design revisions, clarify and save them before completing review.
-Readiness alone leaves the conversation waiting. An unbound interactive conversation
-does not become a Task by being closed.
+When the User asks to finish a review, save the agreed design, feedback and
+remaining work. Continue the discussion in the same conversation. Feedback is
+not a command to close a Session or restart a saved Flow. Inspect work and effect
+history before launching explicitly selected next work; ambiguous feedback
+starts nothing.
 
 ## An existing Task needs to continue
 
 Read `lf task status <issue> --json`, then use `lf --task <issue> flow start`.
-It continues the saved Flow or reports the current driver. An interactive review
-waits for its Session's completion. A blocker needs its stated recovery,
+It continues the saved Flow or reports the current driver. Historical review boundaries remain evidence for the caller. A blocker needs its stated recovery,
 and completed work is not restarted. If there is no active Flow, select one using
 `lf --task <issue> flow start <flow>` only when the current request identifies the
 next work—for example, implementation after an accepted design. A finished Flow

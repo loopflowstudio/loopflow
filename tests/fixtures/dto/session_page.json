@@ -32,12 +32,6 @@
           "label": "Open here",
           "help": "Open this Session in a terminal",
           "unavailable_reason": null
-        },
-        {
-          "kind": "complete",
-          "label": "Complete",
-          "help": "Complete the review and return feedback to the next Flow step",
-          "unavailable_reason": "The session agent has not marked this ready"
         }
       ],
       "flow_membership": {

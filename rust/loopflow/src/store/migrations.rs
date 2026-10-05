@@ -1909,9 +1909,32 @@ mod tests {
               automation_checked_at,automation_detail)
             VALUES('t','p','linear-t','LOO-1',1,'/repo/task',0,'old-exec','old-position',3,20,'stopped');
             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('t','{"kind":"started"}',17);
+            INSERT INTO agent_sessions(id,title,title_source,created_at,ready_summary,completed_at,input_published,cwd)
+            VALUES('review','Review','human',3,'Retained exact feedback',NULL,0,'/repo/task'),
+                  ('closed','Closed','human',4,'Historical result',7,0,'/repo/task');
         "#).unwrap();
         conn.execute_batch(&current_draft_sql("task_flow_observations"))
             .unwrap();
+        let feedback: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT json_extract(e.payload,'$.summary'),s.completed_at FROM agent_sessions s
+             JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_review_feedback'
+             WHERE s.id='review'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(feedback, ("Retained exact feedback".into(), None));
+        assert_eq!(
+            conn.query_row(
+                "SELECT completed_at FROM agent_sessions WHERE id='closed'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            7
+        );
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('agent_sessions') WHERE name='ready_summary'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
         let retained: (String, bool, String) = conn.query_row(
             "SELECT worktree,automation_enabled,kind_json FROM tasks JOIN task_events ON tasks.id=task_events.task_id WHERE tasks.id='t'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),

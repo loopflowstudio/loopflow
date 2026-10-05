@@ -730,23 +730,17 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 }
                 _ => None,
             };
-            let feedback = if let Some(task_id) = managed_task {
+            if let Some(task_id) = managed_task {
                 let task = self
                     .store
                     .get_task(task_id)
                     .await?
                     .context("Task disappeared")?;
                 crate::controller::task::park_at_review(&self.store, &task, &flow).await?;
-                None
             } else {
-                crate::ops::flow_session::reserve(&self.store, &flow).await?
-            };
-            return Ok(match feedback {
-                Some(feedback) => SkillOutcome::Completed {
-                    feedback: Some(feedback),
-                },
-                None => SkillOutcome::Waiting,
-            });
+                crate::ops::flow_session::reserve(&self.store, &flow).await?;
+            }
+            return Ok(SkillOutcome::Waiting);
         }
         let mut flow = flow;
         if let Some(progress) = ctx.progress {

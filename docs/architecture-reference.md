@@ -184,7 +184,7 @@ attempt object. History entries have stable references, not independent lifecycl
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `execs` | ID, immutable parent Exec, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, bind, rename, ready, complete |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, bind and rename; historical feedback/completion retained |
 | `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, claim/version/generation, selected conversation/completion reference, pending review and status; capture, claim, checkpoint, settle, recover |
 | `tasks` | Project, issue, durable disposition, worktree/delivery facts, managed FlowSession selection and set-once `started_at` |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
@@ -606,8 +606,6 @@ lf session list --interactive false --task INF-123 --json
 lf session connect SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123
-lf ready "Ready for review"
-lf session complete SESSION
 ```
 
 Every conversation has one AgentSession regardless of launch surface. Connect

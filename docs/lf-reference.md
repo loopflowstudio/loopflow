@@ -491,15 +491,6 @@ Give a primary Session's scope a fresh conversation
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf session complete
-
-Complete a review or interactive session
-
-| Argument | What it does |
-|---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
-| `--help / -h` | Print help |
-
 ## lf session rename
 
 Rename a Session; a human name is never replaced by a suggestion
@@ -522,15 +513,6 @@ Assign a Task to a Session that has none; the Task never changes after
 | `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
 | `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
 | `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf session ready
-
-Mark the active session ready for your review
-
-| Argument | What it does |
-|---|---|
-| `<summary>` | summary |
 | `--help / -h` | Print help |
 
 ## lf session serve-flow

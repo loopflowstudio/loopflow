@@ -82,7 +82,6 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session connect <session-id>
-lf session complete <session-id>       # return saved review feedback
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
 lf --task INF-123 flow start

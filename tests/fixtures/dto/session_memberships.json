@@ -31,12 +31,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
     "flow_membership": {
@@ -91,12 +85,6 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
         "unavailable_reason": null
       }
     ],
@@ -165,12 +153,6 @@
         "label": "Move here",
         "help": "Stop the other client and resume here; unsent text there is lost",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -217,12 +199,6 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
         "unavailable_reason": null
       }
     ],
@@ -271,12 +247,6 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
         "unavailable_reason": null
       }
     ],
@@ -336,12 +306,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -397,12 +361,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
     "flow_membership": {

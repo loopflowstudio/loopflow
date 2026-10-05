@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
+use crate::ops::human_session::{OpenMode, SessionState};
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -14,10 +14,6 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
         | SessionCommand::Resume { .. }
         | SessionCommand::ServeConversation { .. }
         | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
-        SessionCommand::Complete { id } => {
-            let store = runtime.block_on(open_shared_store())?;
-            runtime.block_on(crate::ops::human_session::completion_worktree(&store, id))?
-        }
         _ => None,
     };
     let Some(worktree) = worktree else {
@@ -135,7 +131,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let session = crate::ops::human_session::primary::replace(&store, id).await?;
             report_primary(&session, *json)
         }
-        SessionCommand::Complete { id } => complete(id).await,
         SessionCommand::Rename {
             id,
             name,
@@ -171,13 +166,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     session.work_path.as_deref().unwrap_or(task)
                 );
             }
-            Ok(())
-        }
-        SessionCommand::Ready { summary } => {
-            let text = required_text(summary, "ready summary")?;
-            let store = open_shared_store().await?;
-            crate::ops::human_session::mark_ready(&store, &text).await?;
-            println!("Session is ready for your review.");
             Ok(())
         }
         SessionCommand::ServeFlow {
@@ -264,7 +252,6 @@ async fn list(
                     SessionState::Unknown => "unknown",
                     SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
-                    SessionState::Ready => "ready",
                     SessionState::Closed => "closed",
                     SessionState::Interrupted => "interrupted",
                 },
@@ -305,19 +292,6 @@ fn report_primary(
             session.work_path.as_deref().unwrap_or("this repository"),
             session.id
         );
-    }
-    Ok(())
-}
-
-async fn complete(id: &str) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::complete(&store, id).await?;
-    match session.kind {
-        SessionKind::Conversation => println!(
-            "Session {} completed; its provider history remains resumable.",
-            session.id
-        ),
-        SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
     }
     Ok(())
 }

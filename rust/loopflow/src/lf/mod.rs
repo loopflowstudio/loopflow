@@ -614,11 +614,6 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Complete a review or interactive session
-    Complete {
-        /// Session ID, one of its Run IDs, or the provider's own conversation ID
-        id: String,
-    },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
         /// Session ID, one of its Run IDs, or the provider's own conversation ID
@@ -643,11 +638,6 @@ pub enum SessionCommand {
         dry_run: bool,
         #[arg(long)]
         json: bool,
-    },
-    /// Mark the active session ready for your review
-    Ready {
-        #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
-        summary: Vec<String>,
     },
     /// Run the exact review skill in its durable terminal
     #[command(name = "serve-flow", hide = true)]
@@ -2494,25 +2484,17 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "--task", "LOO-1", "flow", "start"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_err());
     }
 
     #[test]
-    fn cli_preserves_review_completion_and_rejects_ask() {
+    fn cli_rejects_review_handshake_and_preserves_native_open() {
         assert!(Cli::try_parse_from(["lf", "session", "ask", "Help"]).is_err());
-        let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
-            .expect("parse session readiness");
-        assert!(matches!(
-            ready.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Ready { summary }
-            }) if summary == ["Ready for review"]
-        ));
-
         for args in [
-            vec!["lf", "session", "ready"],
-            vec!["lf", "session", "advance", "task_flow"],
-            vec!["lf", "session", "iterate", "task_flow"],
+            vec!["lf", "session", "ready", "Ready for review"],
+            vec!["lf", "session", "complete", "review"],
+            vec!["lf", "session", "advance", "review"],
+            vec!["lf", "session", "iterate", "review"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
@@ -2552,15 +2534,6 @@ mod tests {
             }) if id == "run_123" && name == ["Release", "notes"]
         ));
         assert!(Cli::try_parse_from(["lf", "session", "rename", "run_123"]).is_err());
-
-        let complete = Cli::try_parse_from(["lf", "session", "complete", "run_123"])
-            .expect("parse interactive completion");
-        assert!(matches!(
-            complete.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Complete { id }
-            }) if id == "run_123"
-        ));
     }
 
     #[test]

@@ -5,7 +5,6 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     case unknown
     case waiting
     case active
-    case ready
     case closed
     case interrupted
 }
@@ -30,7 +29,6 @@ public enum SessionKind: String, Codable, Sendable, Hashable {
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
     case open
     case moveHere = "move_here"
-    case complete
 }
 
 /// Who chose a Session's title. Rust never lets a generated suggestion
@@ -190,11 +188,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public var offersParticipation: Bool {
         guard state != .closed, kind == .flow,
               case .step(_, _, _, _, _, .current) = flowMembership else { return false }
-        return actions.contains { ($0.kind == .open || $0.kind == .moveHere || $0.kind == .complete) && $0.unavailableReason == nil }
+        return actions.contains { ($0.kind == .open || $0.kind == .moveHere) && $0.unavailableReason == nil }
     }
 
     public var participationLabel: String {
-        if state == .ready { return "Ready to complete" }
         if offersParticipation { return state == .active ? "Available · discussing" : "Available · preparing" }
         if kind == .flow { return "Needs recovery" }
         return state == .active ? "Active" : "Conversation"

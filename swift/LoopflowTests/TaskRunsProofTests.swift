@@ -46,8 +46,8 @@ struct TaskRunsProofTests {
         var design = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("design", title: "review-design", work: work)
         )) as? [String: Any])
-        design["state"] = "ready"
-        design["actions"] = sessionActionFixture(kind: "conversation", state: "ready")
+        design["state"] = "waiting"
+        design["actions"] = sessionActionFixture(kind: "conversation", state: "waiting")
         design["terminal_ids"] = [shells[0]]
         design["open_argv"] = ["must-not-launch"]
         design["provider"] = "claude"

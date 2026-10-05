@@ -393,7 +393,7 @@ struct WorkSurfaceView: View {
         switch state {
         case .unknown: .neutral
         case .active: .running
-        case .waiting, .ready: .human
+        case .waiting: .human
         case .closed, .interrupted: .stopped
         }
     }

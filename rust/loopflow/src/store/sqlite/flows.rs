@@ -36,7 +36,7 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
             AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
             AND done.kind='completed' WHERE start.seq=f.selected_start),
     f.pending_session_id,
-    (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=f.pending_session_id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),
     f.worker_generation, f.claim_json, f.failure_json, f.state, (SELECT receipt_key FROM session_events WHERE seq=f.current_capture)
     FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
 
@@ -1425,61 +1425,6 @@ impl SqliteStore {
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
-    }
-
-    /// The human completed the Task's review: its feedback becomes the next
-    /// step's direction, or the Flow's closing summary when the review was last.
-    pub fn complete_task_review(
-        &self,
-        task_id: &TaskId,
-        expected: &FlowSession,
-        summary: &str,
-    ) -> StoreResult<()> {
-        if expected.task_id.as_ref() != Some(task_id)
-            || !expected.is_human()
-            || expected.claim.is_some()
-            || expected.failure.is_some()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task review completion requires its exact unclaimed position".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = task_flow_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if current != *expected {
-            return Err(StoreError::InvalidAuthority(
-                "Task review position changed before completion".to_string(),
-            ));
-        }
-        super::sessions::complete_review_in(&tx, expected)?;
-        let mut next = expected.cursor.clone();
-        next.leaf_mut().progress.direction = Some(summary.to_string());
-        let finished = next
-            .finish(&expected.invocation.steps)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        if finished {
-            end_flow_in(&tx, expected.id(), expected.version, None, summary)?;
-        } else {
-            write_cursor_in(
-                &tx,
-                (expected.id(), expected.version),
-                &next,
-                None,
-                true,
-                None,
-                true,
-            )?;
-            report_to_task_in(
-                &tx,
-                expected.id(),
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
     }
 
     pub fn claim_task_worker(

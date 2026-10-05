@@ -161,7 +161,6 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
-    var resolutionError: String?
 
     var id: String { record.id }
 
@@ -181,7 +180,6 @@ struct SessionItem: Identifiable, Equatable {
 @MainActor
 final class SessionsStore: ObservableObject {
     @Published private(set) var sessions: [SessionItem] = []
-    var onResolved: ((String) -> Void)?
 
     let surfaces: GhosttySurfacePool
 
@@ -291,23 +289,9 @@ final class SessionsStore: ObservableObject {
         }
     }
 
-    func complete(_ id: String) async -> Bool {
-        guard let index = _index(id) else { return false }
-        sessions[index].resolutionError = nil
-        do {
-            try await query.completeSession(id: id, cwd: repoPath)
-            sessions.removeAll { $0.id == id }
-            onResolved?(id)
-            return true
-        } catch {
-            guard let latest = _index(id) else { return false }
-            sessions[latest].resolutionError = error.localizedDescription
-            return false
-        }
-    }
 
-    /// Frees the retained terminal surface for a Session whose provider client
-    /// this window explicitly completed. Filtered absence never grants release.
+
+    /// Release a surface only after its Session is confirmed absent.
     func releaseSurface(_ id: String) {
         surfaces.release(.session(id))
     }
@@ -424,7 +408,6 @@ struct SessionsContentView: View {
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
     @State private var launchErrorTitle = "Could not start conversation"
-    @State private var completing: String?
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
@@ -456,7 +439,6 @@ struct SessionsContentView: View {
         self.query = query
         worktreeLayout = workspaces.layout(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath))
         let store = workspaces.workspace(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
-        store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: repoPath) }
         _store = ObservedObject(wrappedValue: store)
     }
 
@@ -518,7 +500,6 @@ struct SessionsContentView: View {
                                     Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
                                         .accessibilityIdentifier("workspace-restore")
                                 }
-                                if usesWorktreeLayout || taskPath != nil { completionControls }
                             }
                         }
                         ZStack {
@@ -1071,55 +1052,6 @@ struct SessionsContentView: View {
         }
     }
 
-    /// Complete, as text at the toolbar's right end, only for a Session whose
-    /// shared actions accept it. A rejected completion stays beside it.
-    @ViewBuilder
-    private var completionControls: some View {
-        let items = focusedPaneSessions
-        let completable = items.filter { $0.record.action(.complete) != nil && $0.surface != nil }
-        ForEach(items) { item in
-            if let error = item.resolutionError {
-                Text(error)
-                    .font(Typography.meta)
-                    .foregroundStyle(WorkspaceTone.blocked.ink)
-                    .lineLimit(1)
-                    .help(error)
-            }
-        }
-        ForEach(completable) { item in
-            if let action = item.record.action(.complete) {
-                completionButton(item, action: action, several: completable.count > 1)
-            }
-        }
-    }
-
-    private func completionButton(_ item: SessionItem, action: SessionAction, several: Bool) -> some View {
-        Button {
-            completing = item.id
-            Task { @MainActor in
-                defer { completing = nil }
-                guard await store.complete(item.id) else { return }
-                workspaces.removeSessions([item.id])
-                store.releaseSurface(item.id)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                if completing == item.id { ProgressView().controlSize(.mini) }
-                Text(several ? "\(action.label) · \(item.record.title)" : action.label)
-                    .font(Typography.text)
-            }
-            .foregroundStyle(palette.accentInk)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .disabled(completing != nil || action.unavailableReason != nil)
-        .help(action.unavailableReason ?? action.help)
-        .accessibilityLabel(several ? "Complete session: \(item.record.title)" : "Complete session")
-        .accessibilityHint(action.unavailableReason ?? action.help)
-        .accessibilityIdentifier("session-action-complete")
-    }
-
     private func _destroySurface(in pane: PaneState) {
         switch pane.content {
         case .empty, .monitor:
@@ -1547,7 +1479,7 @@ private struct SessionPaneView: View {
         switch state {
         case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
-        case .waiting, .ready: return TerminalPalette.stateDot(.human)
+        case .waiting: return TerminalPalette.stateDot(.human)
         case .closed, .interrupted: return TerminalPalette.stateDot(.stopped)
         }
     }

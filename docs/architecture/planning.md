@@ -180,19 +180,17 @@ their claim and background placement are driver mechanics.
 A live claimed worker cannot be replaced because a status read timed out. Missing
 process evidence is uncertainty, and causal ancestry grants no signal authority.
 
-## Task reviews
+## Task conversations
 
 ```bash
 lf session list --json
 lf session connect SESSION --json
-lf ready "Feedback and remaining work"
-lf session complete SESSION
 ```
 
-A Flow review opens its captured Skill and retains exact Flow membership. Ready
-saves feedback; Complete persists it before provider teardown and successor
-launch. The following step receives the feedback; a later decision chooses
-navigation. Pane close, provider exit and readiness do not complete a review.
+Discuss design and review feedback in the ongoing Task conversation. Historical
+review feedback remains Session evidence. No Ready/Complete operation closes the
+conversation or releases a saved Flow. The caller inspects outcomes and effects
+before selecting further work; pane closure and provider exit grant no authority.
 
 Saved handoffs retain executable, Home and database together. Renaming, binding
 and driver replacement retain conversation identity and feedback. Desktop reads

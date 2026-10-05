@@ -3,7 +3,6 @@ import XCTest
 final class SessionsInteractionTests: XCTestCase {
     private enum Fixture: String, CaseIterable {
         case interactive
-        case ask
         case flow
 
         var id: String { "ui-\(rawValue)" }
@@ -14,7 +13,7 @@ final class SessionsInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testEverySessionKindOpensWithOnlyItsResolutionActions() {
+    func testEverySessionKindOpensWithoutCompletionControls() {
         for fixture in Fixture.allCases {
             var launch = WaveSurfaceLaunch()
             launch.mode = "session-fixtures"
@@ -54,17 +53,10 @@ final class SessionsInteractionTests: XCTestCase {
             let complete = element(app, id: "session-action-complete")
             let approve = element(app, id: "session-action-advance")
             let iterate = element(app, id: "session-action-iterate")
-            XCTAssertTrue(complete.waitForExistence(timeout: 4))
-            XCTAssertTrue(complete.isEnabled)
+            XCTAssertFalse(complete.exists)
             XCTAssertFalse(approve.exists)
             XCTAssertFalse(iterate.exists)
-            complete.click()
-
-            XCTAssertTrue(waitForAbsence(app, id: "session-row-\(fixture.id)"))
-            XCTAssertTrue(
-                element(app, id: "sessions-empty-new-shell").waitForExistence(timeout: 8)
-            )
-            XCTAssertFalse(pane.exists)
+            XCTAssertTrue(pane.exists)
             app.terminate()
         }
     }

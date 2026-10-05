@@ -1005,7 +1005,7 @@ fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
 }
 
 #[tokio::test]
-async fn monitor_separates_waiting_finished_and_missing_observations() {
+async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -1018,7 +1018,7 @@ async fn monitor_separates_waiting_finished_and_missing_observations() {
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
         .execute(
-            "UPDATE agent_sessions SET ready_summary='Review the API' WHERE id='waiting'",
+            r#"INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('waiting','observed','legacy_review_feedback',1,'{"type":"legacy_review_feedback","summary":"Review the API"}')"#,
             [],
         )
         .unwrap();
@@ -1037,9 +1037,9 @@ async fn monitor_separates_waiting_finished_and_missing_observations() {
     for (id, state, reason, action) in [
         (
             "waiting",
-            "waiting",
-            "Review the API",
-            "lf session connect waiting",
+            "unknown",
+            "No current provider observation",
+            "lf session history waiting",
         ),
         (
             "finished",

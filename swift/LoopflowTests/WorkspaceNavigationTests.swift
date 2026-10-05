@@ -84,7 +84,7 @@ struct WorkspaceNavigationTests {
             row["id"] = id
             row["interactive"] = id != "background"
             row["attention"] = NSNull()
-            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : id == "review" ? "ready" : "waiting"
+            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : "waiting"
             row["kind"] = id == "review" ? "flow" : "conversation"
             return row
         }
@@ -259,7 +259,8 @@ struct WorkspaceNavigationTests {
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
 
         // Zero orphans hides the section entirely.
-        model.sessionResolved("demo", repo: "/src/loopflow")
+        await source.replaceSessions(String(decoding: try JSONEncoder().encode([attached]), as: UTF8.self))
+        await model.refreshSessions()
         #expect(model.workspace.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
@@ -312,7 +313,8 @@ struct WorkspaceNavigationTests {
 
     @Test("The sidebar holds started work; inspection, a prepared checkout or a Session gap never changes it")
     func startedWorkingSet() async throws {
-        let model = try model()
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         func sidebar() -> [String] {
             model.workspace.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
@@ -323,8 +325,9 @@ struct WorkspaceNavigationTests {
         #expect(sidebar() == ["issue-review"])
         model.select(.task(id: "issue-available"))
         #expect(sidebar() == ["issue-review"])
-        // Started work survives its Session resolving and any process exit.
-        model.sessionResolved("human", repo: "/src/loopflow")
+        // Started work survives an inventory gap.
+        await source.replaceSessions("[]")
+        await model.refreshSessions()
         #expect(sidebar() == ["issue-review"])
         // All planned Tasks remain reachable in the Wave plan.
         #expect(model.workspace.waves[0].tasks.count == 4)
@@ -471,9 +474,8 @@ struct WorkspaceNavigationTests {
         #expect(model.sessions.errorMessage == "offline")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         model.setRepoPath("/src/context")
-        model.sessionResolved("human", repo: "/src/loopflow")
         model.setRepoPath("/src/loopflow")
-        #expect(model.sessions.value == [])
+        #expect(model.sessions.value?.map(\.id) == ["human"])
         #expect(model.sessions.errorMessage == "offline")
     }
 
@@ -502,20 +504,6 @@ struct WorkspaceNavigationTests {
         #expect(model.workspace.unmatchedSessions.map(\.id) == ["human"])
     }
 
-    @Test("Completing a Session removes its link without completing its Task")
-    func resolutionKeepsTask() async throws {
-        let model = try model()
-        await model.refresh()
-        model.select(.task(id: "issue-review"))
-        model.navigation.selectedSessionId = "human"
-        model.sessionResolved("human", repo: "/src/context")
-        #expect(model.workspace.subject(for: "human") == model.selection)
-        model.sessionResolved("human", repo: "/src/loopflow")
-        #expect(model.workspace.subject(for: "human") == nil)
-        #expect(model.task(id: "issue-review")?.task.task.completed == false)
-        #expect(model.selection == .task(id: "issue-review"))
-        #expect(model.navigation.selectedSessionId == nil)
-    }
 
     @Test("Task details expose directive and current chapter proof from the same snapshot")
     func inspectorShowsPlanning() async throws {
@@ -837,11 +825,12 @@ private actor PlanningGate {
 
 private actor ReadingSource {
     var roadmap: String
-    let sessions: String
+    var sessions: String
     var failed = false
     init(roadmap: String, sessions: String) { self.roadmap = roadmap; self.sessions = sessions }
     func fail() { failed = true }
     func replaceRoadmap(_ value: String) { roadmap = value }
+    func replaceSessions(_ value: String) { sessions = value }
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {

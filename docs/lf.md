@@ -95,7 +95,6 @@ lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
-lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```

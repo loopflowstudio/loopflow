@@ -206,21 +206,6 @@ impl Store {
         .await
     }
 
-    pub async fn complete_task_review(
-        &self,
-        task_id: &TaskId,
-        expected: &FlowSession,
-        summary: &str,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_review(&task_id, &expected, &summary)
-        })
-        .await
-    }
-
     pub async fn claim_task_worker(
         &self,
         task_id: &TaskId,

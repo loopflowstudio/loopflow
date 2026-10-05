@@ -125,8 +125,8 @@ includes background conversations; `lf session list --interactive all --history`
 inspects the full history. Filtering preserves retained terminals and drafts.
 Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
 Sessions; choose a name to open it directly.
-**Available** means the conversation can be joined; **Ready to complete** means
-its agent has recorded a summary. Failed provider starts offer recovery.
+**Available** means the conversation can be joined. Historical feedback remains
+readable without granting completion authority. Failed provider starts offer recovery.
 
 Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
 Repository conversations and Sessions with unavailable ancestry stay reachable
@@ -163,9 +163,7 @@ rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Home and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
-the Task's read-only worktree location, **Complete** for the focused pane's
-conversation when its shared actions allow it, and the Activity and Monitor
-glyphs.
+the Task's read-only worktree location and the Activity and Monitor glyphs.
 
 A single pane has no header. With two or more, each pane carries a 24pt strip:
 a state dot and the conversation's name (or the shell's title). Hovering the
@@ -240,21 +238,17 @@ terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
 include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
-headlessly. Closing their client preserves the Session until Complete.
+headlessly. Closing their client preserves the Session and its history.
 
 Selecting a Session active in another client opens a pane that explains the situation; nothing is
 stopped until its explicit **Move here**, which stops the other client and
 resumes the Session in that pane. Unsent text typed in the other client is
 lost, and the pane says so before you commit.
 
-**Complete**, at the toolbar's right end, stops an interactive provider client and removes
-its Session from the queue while retaining provider-native history. If completion
-is rejected, its error stays visible in the toolbar through refresh and the terminal remains usable;
-retry Complete after addressing the error. Undo does
-not restore a completed Session's pane, even if you hid it before completion. Closing a
-pane only hides the view: the terminal and its provider client keep running
-and reopen exactly as left. Flow reviews expose Complete after their agent marks Ready. Complete returns the feedback to the following decision step, which chooses Advance or Iterate.
-Rejected completion preserves the terminal and keeps its error visible through refresh.
+Discuss review feedback in the ongoing conversation. Closing a pane only hides
+the view: the terminal and its provider client keep running and reopen as left.
+Session completion controls are retired; historical completion timestamps and
+feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
@@ -297,8 +291,8 @@ workspace. Hiding a worktree retains its processes. Closing a shell ends that sh
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
-Selecting their Session focuses the existing shell. **Complete** ends the attached
-Session while keeping that shell available; rejected completion stays visible.
+Selecting their Session focuses the existing shell; selection leaves both the
+conversation and shell running.
 External clients require explicit **Move here**. Terminals and their command titles survive Work list and detail
 navigation and repository switches within a window. Native surfaces belong to
 that window and are never mounted twice.

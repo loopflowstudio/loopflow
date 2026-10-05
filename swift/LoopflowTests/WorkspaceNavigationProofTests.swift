@@ -675,146 +675,7 @@ struct WorkspaceNavigationProofTests {
         }
     }
 
-    @Test("Shell-attached Sessions can complete without closing their terminal", .serialized,
-          arguments: [false, true])
-    func shellSessionCompletion(rejected: Bool) async throws {
-        _ = NSApplication.shared
-        GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
-        workspace.multiplexer.newShell()
-        let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
-        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
-        terminal.workingDirectory = "/tmp"
-        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
-        terminal.createSurface(manager: GhosttyManager.shared)
-        defer { registry.surfaces.release(.shell(pane)) }
-        let surface = try #require(terminal.surface)
-        let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
-            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(),
-             "title": id, "detail": "Local PTY", "cwd": "/tmp",
-             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane],
-             "open_argv": ["unused"]] as [String: Any]
-        }), as: UTF8.self)
-        let query = RegistryQuery { args, _ in
-            switch args.first {
-            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
-            case "session" where args.dropFirst().first == "complete":
-                if rejected { throw RegistryQueryError("Completion rejected") }
-                return "Session completed"
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            default: throw RegistryQueryError("Unexpected operation in shell completion proof")
-            }
-        }
-        let model = PodiumModel(query: query, repoPath: "/tmp")
-        await model.refreshSessions()
-        model.navigation.content = .terminals
-        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: view)
-        window.contentView = host
-        host.frame = window.contentLayoutRect
-        defer { window.contentView = nil }
-        try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
-        try await settle(window)
-        if rejected {
-            // An ordinary inventory refresh must not erase a rejected action.
-            let store = workspace.sessionStore(repoPath: "/tmp", query: query)
-            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
-            #expect(store.sessions.first?.state == .live)
-            #expect(store.sessions.first?.resolutionError == "Completion rejected")
-            try await settle(window)
-            #expect(model.sessions.value?.map(\.id) == ["shell-conversation", "second-conversation"])
-            #expect(throws: Never.self) { try view.inspect().find(text: "Completion rejected") }
-            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
-        } else {
-            #expect(model.sessions.value?.map(\.id) == ["second-conversation"])
-            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
-            try await settle(window)
-            #expect(model.sessions.value?.isEmpty == true)
-            // A later conversation in the same retained shell must still be completable.
-            await model.refreshSessions()
-            try await settle(window)
-            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
-        }
-        #expect(terminal.surface == surface)
-        #expect(workspace.multiplexer.layout.pane(for: pane)?.content == .shell)
-        let reply = "shell-after-completion"
-        let input = reply + "\n"
-        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
-        let deadline = ContinuousClock.now + .seconds(3)
-        while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
-    }
 
-    @Test("Rejected Flow completion retains its terminal and remains visible after polling")
-    func rejectedFlowCompletionRetainsTerminal() async throws {
-        _ = NSApplication.shared
-        GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
-        let workspace = registry.workspace(for: fixtureWorkspace("/tmp"))
-        workspace.multiplexer.load(sessionId: "review-decision")
-        let terminal = registry.surfaces.view(for: .session("review-decision"))
-        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
-        terminal.workingDirectory = "/tmp"
-        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
-        terminal.createSurface(manager: GhosttyManager.shared)
-        defer { registry.surfaces.release(.session("review-decision")) }
-        let surface = try #require(terminal.surface)
-        let records = """
-        [{"id":"review-decision", "run_id": "review-decision", "interactive": true,"kind":"flow","work":null,"work_path":null,
-          "title":"Review decision","detail":"Human review","cwd":"/tmp",
-          "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],
-          "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
-        """
-        let query = RegistryQuery { args, _ in
-            switch args.first {
-            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
-            case "session": throw RegistryQueryError("Decision rejected")
-            default: throw RegistryQueryError("Unexpected read in decision proof")
-            }
-        }
-        let model = PodiumModel(query: query, repoPath: "/tmp")
-        await model.refreshSessions()
-        model.navigation.content = .terminals
-        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: view)
-        defer { window.contentView = nil }
-        try await settle(window)
-        let store = workspace.sessionStore(repoPath: "/tmp", query: query)
-        for _ in 0..<2 {
-            let accepted = await store.complete("review-decision")
-            #expect(!accepted)
-            #expect(store.sessions.first?.state == .live)
-            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
-            try await settle(window)
-            #expect(store.sessions.first?.state == .live)
-            #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
-            for id in ["session-action-complete"] {
-                #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: id).button().isDisabled())
-            }
-            #expect(model.sessions.value?.map(\.id) == ["review-decision"])
-            #expect(terminal.surface == surface)
-        }
-        let input = "review-still-responds\n"
-        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
-        let deadline = ContinuousClock.now + .seconds(3)
-        while _terminalText(surface).components(separatedBy: "review-still-responds").count < 3,
-              ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(_terminalText(surface).components(separatedBy: "review-still-responds").count == 3)
-    }
 
     @Test("A hidden retained terminal relinquishes focus and keeps its unfinished PTY input")
     func hiddenTerminalPreservesDraft() async throws {
@@ -898,9 +759,8 @@ struct WorkspaceNavigationProofTests {
         #expect(window.firstResponder === terminal)
     }
 
-    @Test("The workspace retains navigation and reconciles completion in its originating repository",
-          .serialized, arguments: [false, true])
-    func workspaceRetainsNativeSplit(switchBeforeCompletion: Bool) async throws {
+    @Test("The workspace retains native navigation without completion controls")
+    func workspaceRetainsNativeSplit() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
@@ -920,17 +780,12 @@ struct WorkspaceNavigationProofTests {
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
           "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
-        let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
-        defer { completionResponse.finish() }
         let query = RegistryQuery { args, cwd in
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
-            case "session" where args == ["session", "complete", "navigation-split"]:
-                for await _ in completionResponses { break }
-                return "Session completed"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
@@ -1013,7 +868,7 @@ struct WorkspaceNavigationProofTests {
             }
             if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
                 let path = URL(fileURLWithPath: directory)
-                    .appendingPathComponent("\(presentation.rawValue)-\(switchBeforeCompletion).png")
+                    .appendingPathComponent("\(presentation.rawValue).png")
                 _ = try SnapshotService().snapshotWindow(window, to: path)
             }
             #expect(terminals[0].surface == sessionSurface)
@@ -1030,7 +885,7 @@ struct WorkspaceNavigationProofTests {
             model.select(.wave(id: "wave-1"))
             try await settle(window)
             _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory)
-                .appendingPathComponent("wave-\(switchBeforeCompletion).png"))
+                .appendingPathComponent("wave.png"))
             model.select(.task(id: "issue-review"))
             model.navigation.content = .terminals
             try await settle(window)
@@ -1068,70 +923,14 @@ struct WorkspaceNavigationProofTests {
         #expect(_terminalText(sessionSurface).components(separatedBy: draft).count == 3)
         #expect(_terminalText(shellSurface).components(separatedBy: companion).count == 3)
 
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
-        try await settle(window)
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
+        }
         #expect(terminals[0].surface == sessionSurface)
-        let otherWorkspace = registry.workspace(for: fixtureWorkspace("/src/context"))
-        if switchBeforeCompletion {
-            model.setRepoPath("/src/context")
-            await model.refreshSessions()
-            model.select(.wave(id: "wave-2"))
-            otherWorkspace.multiplexer.load(sessionId: "context-session")
-            host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)
-                .id("/src/context")
-            try await settle(window)
-            #expect(terminals.allSatisfy { $0.window == nil })
-        }
-        let otherLayout = otherWorkspace.multiplexer.layout
-        let otherFocus = otherWorkspace.multiplexer.focusedPaneId
-        completionResponse.yield(())
-        completionResponse.finish()
-        let completionDeadline = ContinuousClock.now + .seconds(3)
-        while terminals[0].surface != nil, ContinuousClock.now < completionDeadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        try await settle(window)
-        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
-        #expect(terminals[0].surface == nil)
         #expect(terminals[1].surface == shellSurface)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
-        #expect(workspace.multiplexer.focusedPaneId == shellPane)
-        // Completing a Session is not an undoable Close view operation.
-        workspace.multiplexer.undoClose()
-        try await settle(window)
-        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
-        #expect(workspace.multiplexer.focusedPaneId == shellPane)
-        if switchBeforeCompletion {
-            #expect(model.repoPath == "/src/context")
-            #expect(model.selection == .wave(id: "wave-2"))
-            #expect(model.sessions.value?.map(\.id) == ["context-session"])
-            #expect(otherWorkspace.multiplexer.layout == otherLayout)
-            #expect(otherWorkspace.multiplexer.focusedPaneId == otherFocus)
-            model.setRepoPath("/src/loopflow")
-            host.rootView = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
-                .id("/src/loopflow")
-            try await settle(window)
-        }
-        #expect(model.sessions.value?.isEmpty == true)
-        #expect(model.selection == .task(id: "issue-review"))
+        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") != nil)
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
-        model.select(.task(id: "issue-review"))
-        try await settle(window)
-        #expect(model.workspace.subject(for: "human") == nil)
-        model.navigation.content = .terminals
-        try await settle(window)
-        #expect(window.firstResponder === terminals[1])
-        try #require(terminals[1].surface == shellSurface)
-        let afterCompletion = "companion-after-completion"
-        let input = afterCompletion + "\n"
-        input.withCString { ghostty_surface_text(shellSurface, $0, UInt(input.utf8.count)) }
-        let replyDeadline = ContinuousClock.now + .seconds(3)
-        while _terminalText(shellSurface).components(separatedBy: afterCompletion).count < 3,
-              ContinuousClock.now < replyDeadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(_terminalText(shellSurface).components(separatedBy: afterCompletion).count == 3)
+
     }
 
     private func _terminalText(_ surface: ghostty_surface_t, viewport: Bool = false) -> String {

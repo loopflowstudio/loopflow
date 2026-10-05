@@ -31,15 +31,17 @@ authored id/name fields are unnecessary. This supersedes the sleeping-runner and
 single-capture human-segment proposals preserved at
 `5090f672e:scratch/focus-on-your-own-work.md`.
 
-Design review is approved; the complete runtime cut remains. Local source now
-removes automatic saved-Flow scheduling/enrollment and five scheduling columns.
-Task/PR delivery checks share one reconciliation owner with per-landing locks;
-CI repair retains its existing hold policy. The crash fixture proves inspection
-does not restart an ordinary Flow around a surviving effect receipt, not removal
-of Task-worker claims, saved resume or review settlement, which still exist.
-Preserve main's confirmed-dead completed-provider admission exemption and Session
-fencing outside async runtime waits while deleting those controllers. No live
-Home migration or configured acceptance follows from these local checks.
+Design review is approved; the full runtime cut remains. Scheduling/enrollment
+and five scheduling columns are deleted; Task/PR checks share delivery reconciliation
+and per-landing locks, preserving CI repair holds. Ready/Complete CLI/store/Desktop
+controls and review-completion restart are now deleted. The draft archives feedback
+in Session observations before dropping its live column; historical feedback and
+completion remain readable without readiness or navigation authority. Task-worker
+claims, managed selection, saved resume and new review launch still exist.
+Focused migration, projection, CLI, Desktop and crash/effect checks establish local
+behavior only. Preserve main's confirmed-dead completed-provider admission exemption
+and Session fencing outside async waits. No live Home migration or configured
+acceptance follows from these checks.
 
 Saved pursue retains demo although
 current source does not: templates cannot establish a saved invocation's shape.

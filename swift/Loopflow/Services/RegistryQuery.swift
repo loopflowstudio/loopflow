@@ -321,13 +321,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete an interactive conversation or Flow review.
-    public func completeSession(
-        id: String,
-        cwd: String? = nil
-    ) async throws {
-        _ = try await run(["session", "complete", id], cwd)
-    }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.

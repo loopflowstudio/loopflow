@@ -350,7 +350,7 @@ struct DTOFixtureTests {
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
-        #expect(session.action(.complete)?.unavailableReason == "The session agent has not marked this ready")
+        #expect(session.actions.map(\.kind) == [.open])
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -421,16 +421,16 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Flow Session fixture preserves readiness and its open command")
+    @Test("Historical Flow Session feedback survives without completion controls")
     func flowSessionFixtureRoundTrips() throws {
         let session = try JSONDecoder().decode(
             SessionRecord.self,
             from: loadFixtureData("session.json")
         )
 
-        #expect(session.state == .ready)
+        #expect(session.state == .waiting)
         #expect(session.titleSource == .generated)
-        #expect(session.actions.map(\.kind) == [.open, .complete])
+        #expect(session.actions.map(\.kind) == [.open])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [

@@ -1039,22 +1039,6 @@ final class PodiumModel {
         }
     }
 
-    func sessionResolved(_ id: String, repo: String) {
-        // A pre-resolution read must not resurrect the completed human boundary.
-        // Resolution may finish after the human has switched repositories.
-        sessionsGeneration &+= 1
-        if navigationByRepo[repo]?.selectedSessionId == id {
-            navigationByRepo[repo]?.selectedSessionId = nil
-        }
-        switch sessionReadings[repo] {
-        case .available(let records):
-            sessionReadings[repo] = .available(records.filter { $0.id != id })
-        case .unavailable(let records, let reason):
-            sessionReadings[repo] = .unavailable(lastGood: records?.filter { $0.id != id }, reason: reason)
-        case .loading, nil:
-            break
-        }
-    }
 
     func wave(id: String) -> WaveRoadmap? {
         roadmap.value?.waves.first { $0.wave.id == id }

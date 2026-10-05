@@ -8,7 +8,7 @@ private enum SessionFixtureKind: String {
     var id: String { "ui-\(rawValue)" }
 
     var record: String {
-        let state = self == .interactive ? "active" : "ready"
+        let state = self == .interactive ? "active" : "waiting"
         let summary = self == .interactive ? "null" : #""Ready for review""#
         let work = self == .flow
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
@@ -18,8 +18,8 @@ private enum SessionFixtureKind: String {
             : #"{"kind":"independent"}"#
         let actions: String
         switch self {
-        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Stop the provider and remove this Session; native history remains resumable","unavailable_reason":null}]"#
-        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null},{"kind":"complete","label":"Complete","help":"Complete the review and return feedback to the next Flow step","unavailable_reason":null}]"#
+        case .interactive: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":"This Session is active in another terminal; use Move here to transfer it"},{"kind":"move_here","label":"Move here","help":"Stop the other client and resume here; unsent text there is lost","unavailable_reason":null}]"#
+        case .flow: actions = #"[{"kind":"open","label":"Open here","help":"Open this Session in a terminal","unavailable_reason":null}]"#
         }
         return """
         {
@@ -42,7 +42,6 @@ private enum SessionFixtureKind: String {
 
 private actor SessionFixtureStore {
     private let kind: SessionFixtureKind
-    private var unresolved = true
 
     init(kind: SessionFixtureKind) {
         self.kind = kind
@@ -50,15 +49,10 @@ private actor SessionFixtureStore {
 
     func run(_ args: [String]) throws -> String {
         if args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"] {
-            return #"{"entries":\#(unresolved ? "[\(kind.record)]" : "[]"),"next":null}"#
+            return #"{"entries":\#("[\(kind.record)]"),"next":null}"#
         }
         if args.starts(with: ["session", "connect", kind.id]), args.contains("--json") {
-            guard unresolved else { throw RegistryQueryError("Session \(kind.id) was not found") }
             return kind.record
-        }
-        if args == ["session", "complete", kind.id] {
-            unresolved = false
-            return "Session completed"
         }
         if args == ["roadmap", "--all", "--json"] {
             return #"{"generated_at":"2026-08-30T00:00:00Z","waves":[]}"#

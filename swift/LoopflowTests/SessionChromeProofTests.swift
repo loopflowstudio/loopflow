@@ -100,7 +100,7 @@ struct SessionChromeProofTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
         }
-        #expect(throws: Never.self, "complete") {
+        #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
         }
 

@@ -158,7 +158,6 @@ pub enum SessionState {
     Unknown,
     Waiting,
     Active,
-    Ready,
     Closed,
     Interrupted,
 }
@@ -175,7 +174,6 @@ pub enum SessionKind {
 pub enum SessionActionKind {
     Open,
     MoveHere,
-    Complete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,10 +185,8 @@ pub struct SessionAction {
 }
 
 pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<SessionAction> {
-    use SessionActionKind::{Complete, MoveHere, Open};
+    use SessionActionKind::{MoveHere, Open};
     let active_client = kind == SessionKind::Conversation && state == SessionState::Active;
-    let not_ready =
-        (state != SessionState::Ready).then_some("The session agent has not marked this ready");
     let mut actions = vec![(
         Open,
         "Open here",
@@ -198,29 +194,13 @@ pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<Ses
         active_client
             .then_some("This Session is active in another terminal; use Move here to transfer it"),
     )];
-    match kind {
-        SessionKind::Conversation => {
-            if active_client {
-                actions.push((
-                    MoveHere,
-                    "Move here",
-                    "Stop the other client and resume here; unsent text there is lost",
-                    None,
-                ));
-            }
-            actions.push((
-                Complete,
-                "Complete",
-                "Stop the provider and remove this Session; native history remains resumable",
-                None,
-            ));
-        }
-        SessionKind::Flow => actions.push((
-            Complete,
-            "Complete",
-            "Complete the review and return feedback to the next Flow step",
-            not_ready,
-        )),
+    if active_client {
+        actions.push((
+            MoveHere,
+            "Move here",
+            "Stop the other client and resume here; unsent text there is lost",
+            None,
+        ));
     }
     actions
         .into_iter()
@@ -292,8 +272,6 @@ pub enum SessionAttention {
 fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
     if session.completed_at.is_some() {
         SessionState::Closed
-    } else if session.ready_summary.is_some() {
-        SessionState::Ready
     } else if has_clients {
         SessionState::Active
     } else if session.driver_outcome.as_deref() == Some("interrupted") {
@@ -315,9 +293,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
             flow.state == crate::session::FlowSummaryState::Current
                 && flow.pending_session.as_deref() == Some(&session.id)
         });
-    let ready_conversation = session.kind == crate::session::SessionKind::Conversation
-        && session.ready_summary.is_some();
-    if current_review || ready_conversation {
+    if current_review {
         Some(SessionAttention::Review)
     } else if session.interactive
         && session.latest_turn.as_deref() == Some("completed")
@@ -875,119 +851,6 @@ async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<
     }
 }
 
-pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()> {
-    let summary = summary.trim();
-    if summary.is_empty() {
-        bail!("ready summary cannot be empty");
-    }
-    let run_id = active_run_id()?;
-    let id = match active_session_token()? {
-        HumanSessionToken::Flow { token } => flow_token_id(&token),
-        HumanSessionToken::StandaloneFlow { id } => id,
-        HumanSessionToken::Primary { .. } => {
-            bail!("a primary Session has no caller waiting on readiness")
-        }
-    };
-    // The store fences readiness on the Session's current Run.
-    store
-        .ready_session(&id, store.sqlite.captured_sequence(&run_id)?, summary)
-        .await?;
-    Ok(())
-}
-
-async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowSession) -> Result<()> {
-    let token = flow_token(task, position)?;
-    let lock_id = flow_id(position)?;
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-    crate::controller::task::complete_human_flow_step(store, &token, position).await?;
-    let mut task = store
-        .get_task(&token.task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {} disappeared after review completion", token.task_id))?;
-    let launch = if store.task_flow(&task.id).await?.is_some() {
-        crate::ops::task::exec_task_process(store, &mut task, None)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))
-    } else {
-        Ok(())
-    };
-    stop_flow_run(store, &task, position).await;
-    drop(launch_lock);
-    launch.with_context(|| {
-        format!(
-            "Review feedback saved; continue with `lf --task {} flow start`",
-            task.plan.identifier
-        )
-    })
-}
-
-pub(crate) async fn require_current_review_actor(
-    store: &SharedStore,
-    position: &FlowSession,
-) -> Result<()> {
-    let Ok(active) = active_run_id() else {
-        return Ok(());
-    };
-    let id = flow_id(position)?;
-    let owner = store.session_for_artifact(&active).await?;
-    if owner.is_some_and(|session| session.id == id)
-        && position.review_artifact_key() != Some(&active)
-    {
-        bail!("superseded review Run cannot complete this Session");
-    }
-    Ok(())
-}
-
-pub(crate) async fn completion_worktree(
-    store: &SharedStore,
-    session_id: &str,
-) -> Result<Option<PathBuf>> {
-    match find_session(store, session_id, false)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?
-    {
-        SessionTarget::Flow { task, .. } => Ok(Some(task.worktree.clone())),
-        SessionTarget::Row { session } => {
-            Ok((session.kind == crate::session::SessionKind::FlowReview).then_some(session.cwd))
-        }
-    }
-}
-
-async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession) {
-    let Some(run_id) = position.review_artifact_key().cloned() else {
-        return;
-    };
-    let result = async {
-        let placement = store.placement(&WorkRef::Task(task.id.clone())).await?;
-        let home = store
-            .home_by_id(&placement.home_id)
-            .await?
-            .ok_or_else(|| anyhow!("Task {} Home {} disappeared", task.id, placement.home_id))?;
-        if home.route == "local" {
-            return stop_session_client(&run_id);
-        }
-        let repo = crate::engine::wave_home::resolve_home_relative_repo(&task.worktree)
-            .map_err(anyhow::Error::msg)?;
-        let command = vec![
-            "lf".to_string(),
-            "session".to_string(),
-            "stop-client".to_string(),
-            run_id.to_string(),
-        ];
-        tokio::task::spawn_blocking(move || {
-            crate::lf::commands::ssh::capture_home_command(&home.id, &repo, &command)
-        })
-        .await
-        .context("join remote Session stop")?
-        .map(|_| ())
-        .map_err(|error| anyhow!(error.to_string()))
-    }
-    .await;
-    if let Err(error) = result {
-        eprintln!("warning: Review completed but its provider client could not stop: {error:#}");
-    }
-}
-
 pub(crate) async fn serve_flow(
     store: SharedStore,
     task_id: TaskId,
@@ -1328,8 +1191,6 @@ pub(crate) async fn open(
             if mode != OpenMode::Refuse {
                 bail!("--replace and --try apply only to interactive provider sessions");
             }
-            #[cfg(test)]
-            action_test::after_lookup("open", session_id).await;
             let id = flow_id(position)?;
             let lock_id = id.clone();
             let launch_lock =
@@ -1467,36 +1328,6 @@ async fn connect_live_codex(
         Err(error) => return Err(error.into()),
     }
     connected
-}
-
-pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
-    let target = find_session(store, session_id, false)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    #[cfg(test)]
-    action_test::after_lookup("complete", session_id).await;
-    let session = session_surface(store, &target).await?;
-    require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
-    match &target {
-        SessionTarget::Row { session }
-            if session.kind == crate::session::SessionKind::Conversation =>
-        {
-            let native = NativeSession::of(session)?;
-            crate::lf::commands::util::stop_provider_session(&native.dir, native.provider)?;
-            store
-                .complete_session(&session.id, session.captured)
-                .await?;
-        }
-        SessionTarget::Row { session } => {
-            let lock_id = session.id.clone();
-            let _lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-            crate::ops::flow_session::complete(store, session).await?;
-        }
-        SessionTarget::Flow { task, position, .. } => {
-            complete_flow(store, task, position).await?;
-        }
-    }
-    Ok(session)
 }
 
 /// Open a conversation or a saved Flow's review: resume its native history, else
@@ -1821,8 +1652,6 @@ pub(crate) async fn rename(
     };
     // Retain the caller's exact/prefix selector while waiting for replacement.
     let pending_lock = tokio::task::spawn_blocking(move || lock_session_exec(&id));
-    #[cfg(test)]
-    action_test::after_lookup("rename", session_id).await;
     let _launch_lock = pending_lock.await??;
     target = find_session(store, session_id, false)
         .await?
@@ -2124,14 +1953,12 @@ fn token_matches(token: &FlowSessionToken, position: &FlowSession) -> bool {
 
 fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
     format!(
-        "<lf:human-session>\nThis `{skill}` Run is the interactive review for Task {identifier}. Work with the user and save self-contained, topic-named notes under scratch/: feedback, agreed design changes, unresolved questions, and next useful action, with links to the current design and evidence. Put the exact note paths and a short takeaway in the ready summary. Run `lf session ready \"feedback, design changes, and remaining work\"` when the review is ready to end. The user completes it with `lf session complete {session}`. Completion returns feedback to the next Flow step; a following loop-decide owns Advance or Iterate. Do not record a navigation decision from this review.\n</lf:human-session>",
-        skill = token.skill.name,
-        identifier = task.plan.identifier,
-        session = flow_token_id(token),
+        "<lf:human-session>\nThis conversation retains the historical `{}` review for Task {}. Discuss feedback and save agreed changes and remaining work in scratch. Review completion controls are retired; retain this conversation and inspect execution/effect history before choosing further work.\n</lf:human-session>",
+        token.skill.name, task.plan.identifier,
     )
 }
 
-const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
     let step = position.current();
@@ -2330,12 +2157,6 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
     }
 }
 
-fn active_run_id() -> Result<String> {
-    let value = std::env::var(crate::durable::RUN_ID_ENV)
-        .context("this command requires an active Loopflow Run")?;
-    crate::session_record::parse_artifact_key(&value).map_err(Into::into)
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2454,9 +2275,9 @@ mod tests {
         );
         summary.ready_summary = Some("Exact retained feedback".into());
         let row = super::summary_surface(&summary);
-        assert_eq!(row.state, super::SessionState::Ready);
+        assert_eq!(row.state, super::SessionState::Unknown);
         assert_eq!(row.ready_summary, summary.ready_summary);
-        assert_eq!(row.attention, Some(super::SessionAttention::Review));
+        assert_eq!(row.attention, None);
         summary.ready_summary = None;
         summary.driver_outcome = Some("interrupted".into());
         assert_eq!(

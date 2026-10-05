@@ -2,8 +2,9 @@
 
 October 4, 2026. LOO-353, Product. **Design review finished and approved by
 Jack Heart.** Jack requested further kickoff reconciliation and continuation
-through the existing saved pursue Flow. Reconciliation is complete; removal of automatic Flow scheduling is implemented
-locally. The remaining runtime cut and configured acceptance are outstanding.
+through the existing saved pursue Flow. Reconciliation is complete; automatic scheduling and the Ready/Complete review
+control path are deleted locally. Task-worker authority and the remaining runtime
+cut and configured acceptance are outstanding.
 
 ## Outcome
 
@@ -50,7 +51,7 @@ without fetching, launching or migrating. Prior scratch is preserved at
 
 The checkout includes local main `464ac18f0` through merge `85f969785`. Local
 implementation removes repository-driven Flow restart scheduling, its five
-counters/columns and automatic enrollment. The pending consolidation makes Task
+counters/columns and automatic enrollment. Task
 and PR checks share delivery reconciliation and per-landing locks; it removes
 the redundant repository scheduler lock. This is local source evidence, not a
 remote-tip or complete worker-removal claim.
@@ -211,15 +212,19 @@ Historical review evidence remains inspectable without becoming live control sta
 
 ### Other Session completion uses
 
-`ops/human_session.rs::complete` also stops ordinary providers and stamps
-`completed_at`; delete that public operation too. Exact-client stop/interrupt and
+The local cut deletes `ops/human_session.rs::complete`, including ordinary
+provider termination and review settlement, and removes the CLI, store and Desktop
+completion consumers. `exec_driver` and review-completion relaunch are deleted.
+Historical feedback cannot return an executable Flow result. Exact-client stop/interrupt and
 reversible Close view remain; conversations stay reopenable. Add no finish,
 resolve or archive-and-stop replacement. Primary replacement retains its own
 successor/history semantics, never review settlement.
 
 Preserve historical `completed_at` and feedback so completed records do not
-reappear as active. Copy `ready_summary` into Session evidence before dropping
-its live column; remove Ready lifecycle/actions. Provider Completed and Run
+reappear as active. The single draft now copies `ready_summary` into an immutable Session observation
+before dropping its live column. Reads retain historical feedback; Ready state and
+completion actions are deleted. Imported historical feedback uses the same event
+representation and grants no attention or navigation authority. Provider Completed and Run
 outcome remain execution facts. Stopped clients remain accessible in retained/
 history views without completion or pane closure erasing them. Presentation-only
 archive is outside scope. Existing Task completion keeps unresolved feedback and
@@ -245,23 +250,21 @@ modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
 - `tasks.current_invocation_id`; `store/flows.rs` and `store/sqlite/flows.rs`
   managed selection, `start_task_flow`, `claim_task_worker`, `handoff_task_worker`,
   `reclaim_task_worker`, `checkpoint_flow`, `retry_flow`, `recover_flow`,
-  `reserve_task_review`, `complete_task_review`. Replace mixed history writes at
+  `reserve_task_review`. `complete_task_review` is deleted. Replace mixed history writes at
   their owner, rather than deleting their retained data.
 - `ops/run.rs::TaskWorkerExec`, `controller/task` worker/review progression,
-  Task `__worker`, saved `flow resume`, `ops/flow_run.rs::exec_driver`, and managed
+  Task `__worker`, saved `flow resume`, and managed
   branches in `lf/commands/flow.rs`. Keep shared engine graph/cursor traversal.
-- New `FlowReview` Session creation and review-complete-to-driver restart in
-  `ops/flow_session.rs`; `serve-flow` and managed review launch/token branches
+- New `FlowReview` Session creation in `ops/flow_session.rs`; review-complete-to-driver
+  restart and `exec_driver` are deleted. `serve-flow` and managed review launch/token branches
   in `ops/human_session.rs`. Preserve existing review histories during conversion.
-- `lf/mod.rs::SessionCommand::{Ready, Complete}`, their dispatch in
-  `lf/commands/session.rs`, `ops/human_session` ready/complete operations,
-  `SessionActionKind::Complete`, Ready lifecycle and live `ready_summary` reads.
-  Cut `RegistryQuery.completeSession`, `SessionsView` completion/pane-removal
-  behavior and associated Swift action/DTO fixtures together. Rewrite builtin
-  `repo_operate`, `advance`, generated review/primary instructions, API docs and
-  lifecycle tests around conversational results. Keep provider Completed events,
-  historical completion timestamps and primary-successor bookkeeping for their
-  separate meanings; do not bulk-delete anything named complete.
+- Ready/Complete CLI handlers, store mutations, Session action/Ready state,
+  Desktop completion controls and pane-resolution callback are deleted. Historical
+  feedback remains in the read DTOs, sourced from Session evidence. Generated
+  instructions and affected docs no longer prescribe those commands. Preserve
+  provider Completed, historical completion timestamps and primary-successor
+  bookkeeping. New review creation/serve-flow and legacy boundary conversion
+  remain; removed completion controls do not make that cut complete.
 - Resume scheduling in `ops/task_automation.rs` and cron consumers; singular-Flow
   conditions/actions in `ops/task_execution.rs`, `ops/task_flow.rs`,
   `ops/task_actions.rs` and Task controller projections. Retain unrelated cron
@@ -285,8 +288,8 @@ stays LOO-367. Update builtin Task-operation/session guidance and architecture/d
 so they no longer prescribe the deleted worker or retry APIs.
 
 One draft migration, generated with `uv run python scripts/new_migration.py task_flow_observations`
-converts the released schema directly; the draft now exists and currently removes
-only the five scheduling columns. Extend that same draft for the remaining cut. Preserve every invocation,
+converts the released schema directly; it removes five scheduling columns and
+archives review feedback before dropping the live readiness column. Extend that same draft for the remaining cut. Preserve every invocation,
 Session, event, exact review and effect receipt; archive last legacy position as
 historical evidence, not resumable state. Existing pending reviews remain visible
 as unresolved historical boundaries attached to their original conversations; they
@@ -310,8 +313,10 @@ One coherent runtime/UI change, with no intermediate release of two executors:
    consumers are deleted. Review traced
    CI enablement into implicit Flow creation and removed that side effect, plus
    the now-unreachable managed recovery exception in repair admission. CI repair keeps
-   its existing per-Task hold and incident retry policy. Direct Task-worker claims,
-   `exec_driver`, saved resume and the review handshake still exist. Remove Task-worker
+   its existing per-Task hold and incident retry policy. Direct Task-worker claims
+   and saved resume still exist. Ready/Complete store/CLI/UI paths, `exec_driver`,
+   review-completion restart and feedback-to-Flow-result consumption are deleted;
+   new review creation/serve-flow and legacy conversion remain. Remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
    history and cutting over the minimum DTO consumers. Build the changed Rust code
    and run the focused ordinary-Flow crash/no-restart case in `flow_tests`. The existing case proves
@@ -320,7 +325,8 @@ One coherent runtime/UI change, with no intermediate release of two executors:
    admission, legacy review conversion or delivery-effect deduplication.
 2. Separate workflow source guidance from executable operational graphs; implement
    canonical autonomous loops/XOR composition and the loop-or-next catalog rename.
-   Delete human-review launch/settlement APIs and their consumers together. Add
+   Delete the remaining human-review launch paths and convert legacy boundaries;
+   settlement APIs and consumers are already deleted. Add
    ordinary `-b` launch, Task primary selection and caller-owned recovery paths.
 3. Cut all Flow views to the shared lazy detail renderer; implement Waiting through
    Rust/provider mappings. Remove managed fields, controls, automation, exclusive
@@ -409,4 +415,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: realign `git diff --check` passed and `lf context` fits; no code changes or test reruns in this pass. Retained checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --test flow_tests ordinary_flow_crash_retains_effects_without_repository_restart`, `cargo test -p loopflow --lib overlapping_check_returns_while_canceled_repair_retains_its_lock`, architecture and formatting passed after consolidation; earlier Rust/Swift DTO, SwiftPM, website, populated scheduling migration and Clippy passes remain recorded at `9dacab35:scratch/focus-on-your-own-work.md`; full cut/gate and configured demo remain outstanding.
+Checks: `cargo build -p loopflow --bin lf`, focused populated-draft migration, removed-command CLI, crash/no-restart, Session projection (14) and DTO checks passed; 33 Desktop DTO/store/control tests plus corrected navigation (29) passed; architecture and command-doc alignment (4) passed. Monitor/history and inventory regressions, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and context budgets passed. Full runtime cut, materialized gate and configured demo remain outstanding; previous consolidation checks are retained at `0db79697d:scratch/focus-on-your-own-work.md`.

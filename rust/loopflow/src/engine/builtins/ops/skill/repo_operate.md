@@ -215,17 +215,11 @@ Completed. Missing evidence and competing plans require resolution, never a
 new name chosen to bypass them. Rotation output is dated evidence, not another
 durable Chapter owner.
 
-For an existing invocation or an exact review:
-
-```bash
-lf --task <issue> flow start
-lf session complete <session-id>
-```
-
-Complete ends the exact review when the User asks to proceed and returns its
-saved feedback to the next step. The following loop-decide owns navigation.
-The `advance` skill resolves the next action from a review, Task, or unbound
-design. State what actually started after checking status.
+For review feedback, preserve the agreed direction and discuss the next action
+in the existing conversation. Inspect exact execution and effect history before
+starting selected work. Session closure supplies no navigation authority. The
+`advance` skill resolves the next action from a review, Task, or unbound design.
+State what actually started after checking status.
 
 Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
 record. Read any partial-outcome report and retry the same command. Authored files

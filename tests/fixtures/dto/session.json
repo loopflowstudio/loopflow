@@ -10,7 +10,7 @@
   "detail": "review-design",
   "provider": "codex",
   "cwd": "/src/loopflow.task",
-  "state": "ready",
+  "state": "waiting",
   "ready_summary": "The design now reflects Jack's requested changes.",
   "open_argv": [
     "lf",
@@ -29,12 +29,6 @@
       "kind": "open",
       "label": "Open here",
       "help": "Open this Session in a terminal",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "complete",
-      "label": "Complete",
-      "help": "Complete the review and return feedback to the next Flow step",
       "unavailable_reason": null
     }
   ],

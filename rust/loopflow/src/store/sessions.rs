@@ -133,18 +133,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
     }
 
-    pub async fn complete_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_session(&id, expected_capture)
-        })
-        .await
-    }
-
     pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await
@@ -161,20 +149,6 @@ impl Store {
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.rename_session(&id, expected_capture, &title, source)
-        })
-        .await
-    }
-
-    pub async fn ready_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        summary: &str,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.ready_session(&id, expected_capture, &summary)
         })
         .await
     }

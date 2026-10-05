@@ -87,27 +87,3 @@ pub(crate) fn capture_membership() -> Result<StepExec> {
         reserved: Some((token, reserved.0, reserved.1)),
     })
 }
-
-/// Request the existing Home process supervisor to continue this saved invocation.
-#[cfg(not(test))]
-pub(crate) async fn exec_driver(id: &str) -> Result<()> {
-    let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
-    let flow = store
-        .flow(id)
-        .await?
-        .with_context(|| format!("Flow {id} has no invocation row"))?;
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let argv = vec![
-        lf.display().to_string(),
-        "-b".into(),
-        "flow".into(),
-        "resume".into(),
-        id.into(),
-    ];
-    crate::engine::process::start_home_session(&format!("lf-flow-{id}"), &flow.cwd, &argv).await
-}
-
-#[cfg(test)]
-pub(crate) async fn exec_driver(_id: &str) -> Result<()> {
-    Ok(())
-}

@@ -10,7 +10,7 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 const SESSION_SELECT: &str = "SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
-    s.ready_summary,s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
 
@@ -157,7 +157,7 @@ fn inventory_query(
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Flow/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = "SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    s.ready_summary,s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
     s.flow_session_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
 
@@ -1111,26 +1111,6 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Completion closes the Session; its Runs and provider history remain.
-    /// A review closes only with the feedback its caller waits for.
-    /// A Task review closes inside its invocation's transaction instead.
-    pub fn complete_session(&self, id: &str, expected_capture: Option<i64>) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
-             AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
-             AND NOT EXISTS(SELECT 1 FROM tasks m WHERE m.id=agent_sessions.task_id
-                 AND m.current_invocation_id=agent_sessions.flow_session_id)",
-            params![id, expected_capture, crate::store::rows::now_unix()],
-        )? != 1
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session changed before completion".into(),
-            ));
-        }
-        Ok(())
-    }
-
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -1163,37 +1143,6 @@ impl SqliteStore {
             "UPDATE agent_sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
             params![id, title.trim(), title_source(source)],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn ready_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        summary: &str,
-    ) -> StoreResult<()> {
-        if summary.trim().is_empty() {
-            return Err(invalid("ready summary cannot be empty"));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.execute(
-            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_capture=?2
-             AND completed_at IS NULL AND (EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
-                 AND agent_sessions.input_published=1 AND f.pending_session_id=?1 AND f.state='current'
-                 AND f.claim_json IS NULL))",
-            params![id, expected_capture, summary.trim()],
-        )? != 1
-        {
-            return Err(StoreError::InvalidAuthority("Session is stale".into()));
-        }
-        // Readiness invalidates an in-flight completion's snapshot as well.
-        tx.execute(
-            "UPDATE flow_sessions SET position_version=position_version+1
-            WHERE pending_session_id=?1 AND state='current'",
-            [id],
         )?;
         tx.commit()?;
         Ok(())
@@ -1331,30 +1280,6 @@ pub(super) fn reserve_flow_conversation_in(
     )
 }
 
-pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> StoreResult<()> {
-    let id = review_id(expected)?;
-    let summary = expected
-        .ready_summary
-        .as_deref()
-        .filter(|summary| !summary.trim().is_empty())
-        .ok_or_else(|| StoreError::InvalidAuthority("review is not ready".into()))?;
-    let run_id = expected
-        .review_artifact_key()
-        .ok_or_else(|| StoreError::InvalidAuthority("review has no published input".into()))?;
-    if conn.execute(
-        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
-        AND completed_at IS NULL AND ready_summary IS ?4
-        AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?5 AND current_capture=?2 AND state='current')",
-        params![id, capture_seq_in(conn,run_id)?, crate::store::rows::now_unix(), summary, expected.id()],
-    )? != 1
-    {
-        return Err(StoreError::InvalidAuthority(
-            "review changed before completion".into(),
-        ));
-    }
-    Ok(())
-}
-
 /// Resolve ancestry and captured location on the conversation's admission transaction.
 pub(super) fn reserve_session_in(
     conn: &Transaction<'_>,
@@ -1462,11 +1387,11 @@ fn insert_session_in(
     session: &mut AgentSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
-    conn.execute("INSERT INTO agent_sessions(id,title,title_source,ready_summary,completed_at,
+    conn.execute("INSERT INTO agent_sessions(id,title,title_source,completed_at,
         created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
         input_published,cwd,skill,provider,model,node,iterations)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
-        params![session.id,session.title,title_source(session.title_source),session.ready_summary,
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+        params![session.id,session.title,title_source(session.title_source),
             session.completed_at,session.created_at,serde_json::to_value(session.kind)?.as_str(),
             session.request,session.interactive,session.repo,session.task_id.as_ref().map(TaskId::as_str),
             session.wave_id.as_ref().map(crate::id::WaveId::as_str),session.flow_session_id,
@@ -1478,6 +1403,14 @@ fn insert_session_in(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
         params![session.id, session.captured],
     )?;
+    if let Some(summary) = &session.ready_summary {
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
+             VALUES(?1,'observed','legacy_review_feedback',?2,?3,?4,?5,?6)",
+            params![session.id,session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(crate::id::WaveId::as_str),crate::store::rows::now_unix(),
+                serde_json::to_string(&serde_json::json!({"type":"legacy_review_feedback","summary":summary}))?,session.captured],
+        )?;
+    }
     Ok(())
 }
 

@@ -44,7 +44,8 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
-    assert!(help.contains("complete"));
+    assert!(!help.contains("complete"));
+    assert!(!help.contains("ready"));
     assert!(help.contains("connect"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
@@ -58,26 +59,25 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
-        &["session", "ready"][..],
-        &["session", "complete"],
-        &["session", "connect"],
-    ] {
-        let output = run(home.path(), args);
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
-    }
-
-    for args in [
-        &["session", "connect", "missing-session", "--json"][..],
+        &["session", "ready", "Feedback"][..],
         &["session", "complete", "missing-session"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr).trim(),
-            "Error: Session missing-session was not found"
-        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"));
     }
+    let output = run(home.path(), &["session", "connect"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
+    let output = run(
+        home.path(),
+        &["session", "connect", "missing-session", "--json"],
+    );
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim(),
+        "Error: Session missing-session was not found"
+    );
 }
 
 #[cfg(unix)]
@@ -650,16 +650,6 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     assert_eq!(all.len(), 1, "{all:?}");
     assert_eq!(readback["state"], "closed", "the exited orphan is retired");
 
-    let completed = run(home.path(), &["session", "complete", &replacement]);
-    assert!(
-        String::from_utf8_lossy(&completed.stderr).contains("already complete"),
-        "{completed:?}"
-    );
-    let again = run(home.path(), &["session", "complete", id]);
-    assert!(
-        String::from_utf8_lossy(&again.stderr).contains("already complete"),
-        "{again:?}"
-    );
     assert!(!home
         .path()
         .join("human-sessions")

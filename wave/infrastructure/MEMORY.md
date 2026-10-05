@@ -235,14 +235,13 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 October 5 source permits empty Flow and preserves provider names. Jack Heart's
 comment `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only
 correction, preserving original evidence and strict subsequent conflicts.
-Planning/markers are atomic; durable projection is not. Four public-store
-regressions retain transfer, restart-status and acquisition-age failures. Persist
-confirmed mutation facts before projection; locking cannot recover discarded
-readbacks. Accepted observations must exclusively own planning fields, including
-restart and Task-update reconciliation's separate content writer. Preserve each
-entity's age. These fixtures do not prove operation recovery, as Release's
-entry-point findings reinforce. Selection, ensure, rotation and Desktop remain
-unfinished and uninstalled.
+Planning/markers are atomic; durable projection is not. Public-store regressions
+cover transfer, restart-status, acquisition-age and interrupted reteam. Reteam
+persists an identifier alone before final refresh; accepted old planning can
+reverse it. Retain full mutation readbacks before projection. Accepted observations
+must own planning fields exclusively, including restart, Task-update content and
+reteam identifiers and each entity's age. Operation recovery is unproved;
+selection, ensure, rotation and Desktop remain unfinished and uninstalled.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
 autonomous Intelligence repair without another review Session. The reported

@@ -120,15 +120,14 @@ def _summarize(events: list[dict]) -> dict:
             event[field] != starts[identity][field] for field in subject_fields
         ):
             errors.append(f"Result has no matching preceding observation: {identity}.")
-    attempts = []
-    for identity, start in starts.items():
-        attempts.append(
-            ends.get(identity, {**start, "outcome": "interrupted", "duration_ms": None})
-        )
-    groups: dict[tuple, list[dict]] = {}
+    attempts = [
+        ends.get(identity, {**start, "outcome": "interrupted", "duration_ms": None})
+        for identity, start in starts.items()
+    ]
+    groups: dict[tuple, list[dict]] = defaultdict(list)
     for attempt in attempts:
         key = tuple(attempt[field] for field in ["metric", "scenario", "population", "state"])
-        groups.setdefault(key, []).append(attempt)
+        groups[key].append(attempt)
     summaries = []
     for key, values in sorted(groups.items()):
         durations = sorted(value["duration_ms"] for value in values if value["outcome"] == "passed")
@@ -556,22 +555,21 @@ def _run_native(output: Path, samples: int, soak_seconds: int, cli: Path) -> dic
                 if recorder_attempted and (recorder is None or recorder.poll() is not None):
                     (output / "resources-finished").touch(exist_ok=True)
                 time.sleep(0.25)
-            metadata["exit_code"] = process.returncode
             if recorder is not None:
                 try:
-                    metadata["recorder_exit_code"] = recorder.wait(timeout=30)
+                    recorder.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    _stop(recorder)
-                    metadata["recorder_exit_code"] = recorder.returncode
+                    pass  # The shared cleanup below stops a recorder that outlives the runner.
         except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
             metadata["outcome"] = (
                 "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
             )
+        finally:
             _stop(process)
             metadata["exit_code"] = process.returncode
-        finally:
             if recorder is not None:
                 _stop(recorder)
+                metadata["recorder_exit_code"] = recorder.returncode
     return metadata
 
 

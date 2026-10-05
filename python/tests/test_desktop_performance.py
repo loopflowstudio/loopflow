@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,32 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
     metadata.update(cli_sha256="before", cli_sha256_after="after")
     (tmp_path / "run.json").write_text(json.dumps(metadata))
     assert performance._report(tmp_path, None)["status"] == "incomplete"
+
+
+def test_native_runner_stops_owned_child_after_unexpected_journal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The child announces a malformed soak start, then waits for its owner to stop it.
+    child = """
+import os
+import signal
+import time
+from pathlib import Path
+
+journal = Path(os.environ["LF_DESKTOP_PERF_OUTPUT"])
+def stopped(*_):
+    journal.with_suffix(".stopped").touch()
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stopped)
+journal.write_text('{"event":"soak_begin"}\\n')
+time.sleep(60)
+"""
+    monkeypatch.setattr(performance, "COMMAND", [sys.executable, "-c", child])
+    monkeypatch.setattr(
+        performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
+    )
+
+    with pytest.raises(KeyError, match="pid"):
+        performance._run_native(tmp_path, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli")
+
+    assert (tmp_path / "attempts.stopped").exists()

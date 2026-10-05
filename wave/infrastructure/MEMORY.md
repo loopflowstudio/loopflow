@@ -34,15 +34,21 @@ October 3 kickoff seed; this does not establish LOO-367's current delivery state
 Neither unchecked current Project KR has outcome proof;
 the metric portfolio and Project metric targets were empty in this observation.
 
-October 3 source inspection for LOO-366 confirms three independent constraints:
-nonempty Flow checks in create/adopt/update/reset, shared predecessor-name
-inference in rotation, and rejection of unrecognized em-dash title prefixes.
-The kickoff plan proposes explicit Wave Project ensure with shared CLI/Desktop
-operations and durable Project-transition evidence. It is a draft mechanism,
-not Jack's approval or configured acceptance. Project ensure must remain
-independent of primary Session launch and unrelated Waves. Release's child
-memory reinforces the same recovery lesson: successful entry-point return is
-not proof of the provider outcome; retry through the operation's existing owner.
+Jack Heart's October 4 reviewed direction selects an explicit Wave Project
+configuration field and exact-ID ensure; no name matching or candidate selection.
+Chapter creation requires planned KRs, with new Task admission afterward.
+Unreviewed backlog survives rotation until explicit disposition. These decisions
+supersede the earlier status-selection and automatic-expiration proposals.
+
+October 5 implementation inspection found a configuration ownership conflict:
+registry Wave identity is canonical across checkouts, but authored configuration
+reads remain checkout-local. A reset in one checkout leaves another selecting its
+completed predecessor; a settled creation leaves another unbound checkout able to
+create again. Locks do not propagate file changes. Recovery receipts must not
+become a second selection authority. Shared file ownership versus publication and
+checkout synchronization remains unresolved in the working design. No production
+implementation or configured proof occurred. The reviewed design is preserved at
+`e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

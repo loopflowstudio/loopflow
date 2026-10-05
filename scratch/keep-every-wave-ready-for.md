@@ -1,9 +1,10 @@
 # Keep every Wave ready for work — LOO-366
 
-Draft implementation design, 2026-10-03. Jack Heart's accepted product direction
+Implementation design, drafted 2026-10-03; review concluded by Jack Heart before
+the October 5 implementation attempt. Jack Heart's accepted product direction
 comes from [LOO-366](https://linear.app/loopflow/issue/LOO-366): ordinary Projects
-need neither chapters nor a default Flow. The mechanisms below are proposed;
-kickoff is not implementation approval. Base: `12016c6d6`.
+need neither chapters nor a default Flow. The selected configuration/KR boundaries are approved for implementation;
+the unresolved configuration publication mechanism below is not settled. Base: `12016c6d6`.
 
 October 4 direction from Jack Heart: every Wave has exactly one active Project,
 independent of chapters; tools and skills coordinate optional repository-wide
@@ -420,15 +421,36 @@ multi-product platform are excluded.
 
 ## Review and remaining evidence
 
-The config field introduces a concrete remaining ownership question: repository
-checkouts can contain different revisions of the Wave configuration. The existing
-Wave-definition resolver treats the owning checkout's definitions as authoritative
-and context-free reads use configured remote main. Implementation must identify
-which checkout Desktop/ensure edits and how a reset's binding becomes visible to
-other checkouts, without introducing a second current-Project store or letting an
-old checkout undo the switch. This remains unresolved; local file atomicity alone
-does not prove cross-checkout continuity. Do not silently push config edits on
-Wave opening. Resolve publication/checkout visibility before implementation.
+October 5 source inspection confirms an authority conflict, before production
+edits. The reviewed design is preserved at
+`e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
+`work/wave/context.rs` canonicalizes registry identity but explicitly gathers
+authored files from the executing checkout. `work/wave/config.rs` joins the
+supplied repository path; `ops/pm.rs::resolve_context` reads Initiative policy
+from that path. Desktop's `WaveDetailPane::refreshDetail` passes `repoPath` to
+`RegistryQuery.status`. `repository.rs::CanonicalRepo` collapses worktree
+identity to the main checkout, but does not publish configuration. The earlier
+claim that this branch already supplies a remote-main definition resolver was
+incorrect; it described remembered intent, not this branch's implementation.
+
+Counterexample: checkouts A and B both configure Project P. Reset in A creates Q,
+switches A to Q, completes P, and settles its receipt. B still configures P;
+exact-ID ensure must reject completed P, so ordinary work there is unavailable.
+If both began without a binding, after A creates P and settles its receipt, B
+still has no binding and can reserve another Project. A Wave lock serializes
+these calls but does not change B's file. Using the last settled receipt to pick
+P or Q would make receipts a second selection authority, expressly excluded.
+These are source-derived counterexamples, not executed provider tests.
+
+Remaining ownership decision: designate one shared file location for all
+Project-binding reads/writes (for example the canonical main checkout), or make
+publication and checkout synchronization part of switching the binding. The
+first changes checkout-local configuration semantics and writes outside the
+invoking Task checkout; the second introduces a Git delivery dependency into
+opening/rotation. Neither is selected by the reviewed design. A shared SQLite
+pointer, silent push, or stale-checkout refusal does not satisfy its constraints.
+Dependent implementation stops here under the implement skill's authority-model
+rule. All five implementation slices and configured acceptance remain outstanding.
 
 
 The main failure risk is a timeout followed by creation under a new UUID. Reserving
@@ -443,5 +465,4 @@ Wild success is routine opening with no planning ceremony. Wild failure is
 ordinary Projects becoming a second chapter framework; keep the receipt confined
 to unfinished mutations and leave status/content in the provider.
 
-Checks: prose-only review; run `git diff --check` and context-budget inspection.
-Behavior/build checks remain with implementation and gate.
+Checks: October 5 `git diff --check` passed; `lf context` passed (memory 15,976/16,000 tokens; scratch under 12,000). No production code changed; behavioral verification remains outstanding.

@@ -71,3 +71,18 @@ Remaining implementation details: compose the existing chapter skills, specify
 retained candidate output between steps, and settle the previously noted config
 write ownership and chapter metadata representation. No skill implementation,
 provider mutation, or Flow navigation decision was made in this review.
+
+## Configuration ownership counterexample — 2026-10-05
+
+Implementation inspection found no shared authored-configuration resolver in this
+branch. Canonical Wave identity is shared, but configuration reads use the caller's
+checkout. See the design's source references and two-checkout counterexamples.
+The supplied feedback concludes Jack Heart's review and authorizes implementation;
+it does not select a configuration publication mechanism.
+
+Required decision: one designated shared Project configuration file, or published
+configuration with synchronized checkouts. Main-checkout ownership changes which
+files an operation may write; publication changes opening/rotation prerequisites.
+Receipt-based selection would contradict the selected single configuration owner.
+No safe local file-write choice alone resolves this conflict. Dependent production
+work has stopped; no provider writes, resets, or execution changes occurred.

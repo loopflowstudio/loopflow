@@ -53,8 +53,8 @@ Home, account route or unrelated Session was changed by these probes.
 ### Lifecycle counterexample: dependent optimization stops
 
 The baseline's rejected UI also cleared the pre-existing engine endpoint.
-`connect_live_codex` claims the driver before native UI startup, then calls
-`finish_session_driver` even when startup fails. The supported close operation
+The baseline `connect_live_codex` claimed the driver before native UI startup,
+then called `finish_session_driver` even when startup failed. The supported close operation
 ends the live engine. Removing one rejected flag repairs its observed trigger,
 but does not meet the accepted preservation contract for other startup failures.
 This is a reproduced contradiction in the attachment lifecycle, not an auth,
@@ -186,4 +186,10 @@ would hide that regression. PTY bytes are not compositor presentation, synthetic
 responses are not provider service latency, and a single live seed turn is not
 representative retained history. Product has no child Wave memories in this checkout.
 
-Check: build, 32 Session tests, four client-stop tests, owned native/controlled-protocol probes and helper Ruff passed; fmt/Clippy/diff/context checked before checkpoint; first-launch revision and full performance acceptance remain with implementation/gate.
+The probe separates draft-preservation and attached-diagnostic checks from its
+measurement loop. Missing input response fails directly; cleanup attempts every
+owned process/descriptor and retains cleanup errors alongside the original
+failure. Review found cleanup exceptions could previously escape with a passing
+sample still recorded. Production ownership and timing endpoints are unchanged.
+
+Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --output /tmp/loo-378-compress-20261005` passed; helper Ruff and injected failure/cleanup-result check passed (initial injection accidentally mocked platform discovery, corrected); prior Rust checks remain applicable; first-launch revision and full performance acceptance remain with implementation/gate.

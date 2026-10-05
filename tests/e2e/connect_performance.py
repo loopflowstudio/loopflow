@@ -13,7 +13,7 @@ import subprocess
 import termios
 import time
 import uuid
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
 
 
@@ -73,6 +73,74 @@ def _reject_attachment(
         raise AssertionError("invalid native launch unexpectedly succeeded")
     if _state(env) != before or _process_stamp(before[3]) != stamp:
         raise AssertionError("rejected attachment changed driver or engine")
+
+
+def _check_draft_preservation(
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: object,
+    client: subprocess.Popen,
+    master: int,
+    draft_path: Path,
+    rejected_path: Path,
+) -> None:
+    draft = f"Retain draft {uuid.uuid4().hex}"
+    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
+    draft_output = bytearray()
+    deadline = time.monotonic() + 5
+    while draft.encode() not in draft_output and time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            draft_output.extend(os.read(master, 65536))
+    draft_path.write_bytes(draft_output)
+    if draft.encode() not in draft_output:
+        raise AssertionError("native UI did not display the draft")
+    current = _state(env)
+    _reject_attachment(binary, work, env, current, rejected_path)
+    if client.poll() is not None:
+        raise AssertionError("failed replacement stopped the controlling UI")
+    os.write(master, b"\r")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if any(draft in json.dumps(request["input"]) for request in server.requests):
+            return
+        if select.select([master], [], [], 0.05)[0]:
+            with draft_path.open("ab") as log:
+                log.write(os.read(master, 65536))
+    raise AssertionError("retained UI did not submit its exact draft")
+
+
+def _check_attached_timings(
+    binary: Path, work: Path, env: dict[str, str], exec_id: str, timing_path: Path
+) -> None:
+    with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
+        db.execute("BEGIN EXCLUSIVE")
+        with timing_path.open("w") as timing_log:
+            diagnostic = subprocess.Popen(
+                [str(binary), "session", "timings", exec_id],
+                cwd=work,
+                env=env,
+                stdout=timing_log,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while "input_accepted" not in timing_path.read_text():
+                    if time.monotonic() >= deadline or diagnostic.poll() is not None:
+                        raise AssertionError("timing output waits for SQLite admission")
+                    time.sleep(0.02)
+            finally:
+                db.rollback()
+                diagnostic.wait(timeout=15)
+            if diagnostic.returncode != 0:
+                raise AssertionError("timing reader failed")
+    phases = [json.loads(line) for line in timing_path.read_text().splitlines()]
+    if not {"lookup_complete", "attached", "input_accepted"}.issubset(
+        {phase["phase"] for phase in phases}
+    ):
+        raise AssertionError("connection diagnostic is missing an observed phase")
+    if any(phase["phase"] == "exited" for phase in phases):
+        raise AssertionError("attached lifetime was recorded before client exit")
 
 
 def measure(
@@ -195,63 +263,23 @@ def measure(
                                 break
                         if client.poll() is not None:
                             break
-                if sample["input_response_ms"] is not None:
-                    draft = f"Retain draft {uuid.uuid4().hex}"
-                    os.write(master, b"\x1b[200~" + draft.encode() + b"\x1b[201~")
-                    draft_output = bytearray()
-                    deadline = time.monotonic() + 5
-                    while draft.encode() not in draft_output and time.monotonic() < deadline:
-                        if select.select([master], [], [], 0.05)[0]:
-                            draft_output.extend(os.read(master, 65536))
-                    (output / f"draft-{index}.bin").write_bytes(draft_output)
-                    if draft.encode() not in draft_output:
-                        raise AssertionError("native UI did not display the draft")
-                    current = _state(env)
-                    _reject_attachment(
-                        binary, work, env, current, output / f"rejected-draft-{index}.log"
-                    )
-                    if client.poll() is not None:
-                        raise AssertionError("failed replacement stopped the controlling UI")
-                    os.write(master, b"\r")
-                    deadline = time.monotonic() + 10
-                    while time.monotonic() < deadline:
-                        if any(
-                            draft in json.dumps(request["input"]) for request in server.requests
-                        ):
-                            sample["failed_replacement_preserved_draft"] = True
-                            break
-                        if select.select([master], [], [], 0.05)[0]:
-                            with (output / f"draft-{index}.bin").open("ab") as log:
-                                log.write(os.read(master, 65536))
-                    else:
-                        raise AssertionError("retained UI did not submit its exact draft")
+                if sample["input_response_ms"] is None:
+                    raise AssertionError("native UI did not return the input probe response")
+                _check_draft_preservation(
+                    binary,
+                    work,
+                    env,
+                    server,
+                    client,
+                    master,
+                    output / f"draft-{index}.bin",
+                    output / f"rejected-draft-{index}.log",
+                )
+                sample["failed_replacement_preserved_draft"] = True
                 sample["after"] = _state(env)
-                timing_path = output / f"timings-{index}.jsonl"
-                with closing(sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db")) as db:
-                    db.execute("BEGIN EXCLUSIVE")
-                    with timing_path.open("w") as timing_log:
-                        diagnostic = subprocess.Popen(
-                            [str(binary), "session", "timings", sample["after"][5]],
-                            cwd=work, env=env, stdout=timing_log, stderr=subprocess.DEVNULL,
-                        )
-                        try:
-                            deadline = time.monotonic() + 5
-                            while "input_accepted" not in timing_path.read_text():
-                                if time.monotonic() >= deadline or diagnostic.poll() is not None:
-                                    raise AssertionError("timing output waits for SQLite admission")
-                                time.sleep(0.02)
-                        finally:
-                            db.rollback()
-                            diagnostic.wait(timeout=15)
-                        if diagnostic.returncode != 0:
-                            raise AssertionError("timing reader failed")
-                phases = [json.loads(line) for line in timing_path.read_text().splitlines()]
-                if not {"lookup_complete", "attached", "input_accepted"}.issubset(
-                    {phase["phase"] for phase in phases}
-                ):
-                    raise AssertionError("connection diagnostic is missing an observed phase")
-                if any(phase["phase"] == "exited" for phase in phases):
-                    raise AssertionError("attached lifetime was recorded before client exit")
+                _check_attached_timings(
+                    binary, work, env, sample["after"][5], output / f"timings-{index}.jsonl"
+                )
                 sample["diagnostic_while_attached"] = True
                 sample["engine_after"] = _process_stamp(before[3])
                 sample["continuity"] = (
@@ -259,11 +287,7 @@ def measure(
                     and before[:5] == sample["after"][:5]
                     and sample["engine_before"] == sample["engine_after"]
                 )
-                sample["status"] = (
-                    "passed"
-                    if sample["input_response_ms"] is not None and sample["continuity"]
-                    else "failed"
-                )
+                sample["status"] = "passed" if sample["continuity"] else "failed"
                 sample["elapsed_ms"] = (time.monotonic() - started) * 1000
                 sample["exit_before_cleanup"] = client.poll()
                 # This sample started with a held turn. It does not prove retained-history replay.
@@ -272,21 +296,33 @@ def measure(
                 sample.update(status="failed", error=str(error))
             finally:
                 server.release.set()
-                for fd in (master, slave):
-                    if fd is not None:
-                        os.close(fd)
-                if client is not None:
-                    _stop(client, group=True)
-                _stop(seed)
-                if sample.get("diagnostic_while_attached"):
-                    diagnostic = subprocess.run(
-                        [str(binary), "session", "timings", sample["after"][5]],
-                        cwd=work, env=env, capture_output=True, text=True, check=True, timeout=5,
-                    )
-                    (output / f"timings-after-{index}.jsonl").write_text(diagnostic.stdout)
-                    phases = [json.loads(line) for line in diagnostic.stdout.splitlines()]
-                    if not any(phase["attached_lifetime_ms"] is not None for phase in phases):
-                        sample.update(status="failed", error="attached lifetime was not recorded")
-                (output / "results.json").write_text(json.dumps(results, indent=2))
+                try:
+                    with ExitStack() as cleanup:
+                        cleanup.callback(_stop, seed)
+                        if client is not None:
+                            cleanup.callback(_stop, client, group=True)
+                        for fd in (master, slave):
+                            if fd is not None:
+                                cleanup.callback(os.close, fd)
+                    if sample.get("diagnostic_while_attached"):
+                        diagnostic = subprocess.run(
+                            [str(binary), "session", "timings", sample["after"][5]],
+                            cwd=work,
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=5,
+                        )
+                        (output / f"timings-after-{index}.jsonl").write_text(diagnostic.stdout)
+                        phases = [json.loads(line) for line in diagnostic.stdout.splitlines()]
+                        if not any(phase["attached_lifetime_ms"] is not None for phase in phases):
+                            sample.update(
+                                status="failed", error="attached lifetime was not recorded"
+                            )
+                except Exception as error:
+                    sample.update(status="failed", cleanup_error=str(error))
+                finally:
+                    (output / "results.json").write_text(json.dumps(results, indent=2))
         if sample["status"] != "passed":
             break

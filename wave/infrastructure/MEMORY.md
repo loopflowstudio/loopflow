@@ -24,13 +24,14 @@ interruption. Capture keys name subordinate history; durable Session IDs select
 conversation mutations, and current Session/Exec provenance supplies authority.
 Missing payload cannot erase a resumable native conversation's SQLite identity.
 
-Exact SQLite compatibility does not prove layout completion; both installer paths
-must retain candidate recovery before moving bytes. Released v0.13.3 bypass commands
-can journal before installation checks; a receipt version cannot fence them.
-Neither installer locks, empty process samples nor a controlled launcher excludes
-direct retained binaries after converter death. The external exclusion owner and
-target-account recovery access remain undesigned. `runs/` remains in use; source
-inspection and runtime tests prove neither conversion nor installed preservation.
+Exact SQLite compatibility does not prove layout completion; advancement and recovery
+must retain the candidate before moving bytes. Released v0.13.3 can journal before
+installation checks; receipt versions and installer locks cannot exclude it.
+The privileged whole-account-Home exclusion experiment remains unexecuted. Directory
+permissions survive worker death but cannot revoke open descriptors; quiescence,
+explicit target-account recovery and access restoration remain unimplemented.
+`runs/` remains in use. Source inspection and runtime tests prove neither conversion
+nor installed preservation; Linux exclusion alone would not prove macOS behavior.
 
 ## Review replacement (2026-10-04)
 

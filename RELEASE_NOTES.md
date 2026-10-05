@@ -1,5 +1,7 @@
 # v0.13.2
 
+<!-- loopflow:release-notes=narrative;gate=safe -->
+
 v0.13.2 makes returning to work easier: resume the last conversation in a worktree, reopen Desktop on saved workspace content, and keep repository and Wave plans in persistent workspaces. Recovery preserves conversations, review history, and release candidates through interruptions, while new timing reports make remaining waits visible. These notes cover the cycle since v0.13.0, including improvements already shipped in v0.13.1.
 
 ## Pick up the conversation where you left it

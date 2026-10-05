@@ -47,14 +47,16 @@ deleted. Not yet done:
    at most once a minute and only when planning is read; with no store commit
    that is every five minutes. The 15 s poll used to show a dirty checkout
    sooner. Nobody chose this trade.
-5. **No rendered measurement.** `desktop_performance.py write-visible` is
-   built and compiles: one window on a private Home copy through the real
-   reader, `sqlite3` commits, the interval from the writer's exit to the row
-   read back from a captured bitmap. It has not produced a sample: agent runs
-   have no desktop. Its writes and the frames they cause were checked without
-   a window (the numbers in 1). The 20 samples and the installed-app demo are
-   gate's and demo's. A development `lf` reads a Home copy only after the
-   draft migration is applied to the copy by hand; it took 0.19 s on the
+5. **Three rendered samples, not twenty.** `desktop_performance.py
+   write-visible` opens one window on a private Home copy through the real
+   reader, commits with `sqlite3`, and times the writer's exit to the row
+   read back from a captured bitmap. One run, debug `lf` and debug app, 3
+   samples: a renamed Task in the outline and a created Task in its Wave's
+   Task list about 2.3 s warm (4.8–4.9 s first) against 1 s; a Session
+   created, renamed or completed 550–600 ms against 500 ms. Each write waited
+   for an idle reader. The 20-sample release run and the installed-app demo
+   are gate's and demo's. A development `lf` reads a Home copy only after the
+   draft migration is applied to the copy by hand; that took 0.19 s on the
    1.4 GB store.
 6. **Swift coverage gaps.** A scripted feed proves in-place updates, an older
    sequence ignored, a pre-write frame ignored, another repository's rows
@@ -471,6 +473,8 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
+- 2026-10-05 `desktop_performance.py write-visible --samples 3` on a Home
+  copy: complete, 15/15.
 - 2026-10-05 implement, second pass: `cargo test -p loopflow --test
   workspace_watch` 8/8; `--lib -- store_revisions store::changes` 6/6; clippy
   `--all-targets -D warnings` clean; `swift test --filter

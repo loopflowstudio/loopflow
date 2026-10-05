@@ -29,9 +29,10 @@ and a miss ships with numbers and a follow-up Task.
 - An unreadable store must not read as an empty workspace.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
   replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
-  On a copy of Jack's store (debug build) a created Task reaches a frame in
-  about 2.3 s against a 1 s target, a Session row in 0.2 s unless a planning
-  reading is in flight. The rendered benchmark is built and has no samples.
+  Rendered on a copy of Jack's store (debug, 3 samples): a Task change in
+  2.3 s against 1 s, a Session row in 0.56 s against 0.5 s.
+- The outline lists started Tasks only (2026-09-25), so a Task created with
+  no Run never reaches the left pane. LOO-382 asks that it does. Unresolved.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -1077,8 +1078,7 @@ and [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-
 - **Interactive provider clients resume natively.** Reuse `SessionRecord` and
   `lf session open`; do not restore lfd terminal attachment, a tmux presentation
   path, or Ask-specific Swift plumbing.
-- The high-value review move was catching invented fields that duplicate existing
-  ones (e.g. `RunStatus`), not re-litigating the approach.
+- Review for invented fields that duplicate existing ones (e.g. `RunStatus`).
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest

@@ -5,6 +5,24 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Live Session connection evidence (2026-10-05 UTC)
+
+Jack Heart selected live `lf session connect` performance (LOO-378), including
+his exact Flow-review selector. Acceptance separates retained output, verified
+input readiness and attached lifetime, with per-invocation/Session diagnostics.
+Owned isolated fixtures must preserve provider identity, history and drafts;
+stopped resume and automatic replacement cannot count as a live attachment.
+Jack authorized autonomous publication/landing on October 4; no manual performance
+demo is required. This grants no Desktop sustained-use KR credit.
+
+At `58d3b5b3e`, Codex history writes leave the reactor but connection still awaits
+all recovery pages. Flow-review resume stops native clients and supplies no live
+relay endpoint: measuring the conversation route alone misses that gap. Upstream
+LOO-375 also shows why diagnostics cannot depend on a successful SQLite Exec
+receipt. Reuse its process clock and file-recording lessons; its listing speedup
+is not connection evidence. One isolated authenticated turn exists, but no live
+connection baseline, target, runner or optimization is established yet.
+
 ## Capture and configurable New Session (2026-10-03 UTC)
 
 Jack Heart accepted capture on October 1, then selected New Session and the
@@ -715,31 +733,13 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
+The LOO-167/193/195 retry loops, LOO-207 containment counterexample and historical
+server-topology questions remain in
+[`58d3b5b3e`'s dated findings](https://github.com/loopflowstudio/loopflow/blob/58d3b5b3e05135a3267d0f5340e435044440bb49/wave/product/MEMORY.md#earlier-runtime-findings-julyaugust-evidence).
+Their durable lessons remain: missing skills need a bounded failure with a legal
+next action; containment liveness is not provider progress; durable input must
+survive provider exit. Those historical proposals do not authorize restoring
+retired services or changing current execution ownership.
 
 ## Model (design invariants)
 

@@ -5580,7 +5580,6 @@ mod tests {
                 crate::ops::task_automation::admission_blocker(
                     &fixture.store.sqlite,
                     &fixture.task.id,
-                    false,
                     None,
                 )
                 .unwrap()

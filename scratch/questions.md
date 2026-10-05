@@ -20,3 +20,5 @@ holds CI repair. Preserve that setting and its delivery UI while deleting Flow
 scheduling and its counters. This preserves unrelated CI policy; it provides no
 Flow restart authority. Initial Swift dependency resolution failed under the
 headless runner's file-only transport; ordinary package resolution repaired setup.
+
+Sync check: `cargo test -p loopflow --lib completed_session_with_exited_provider_does_not_block_task_work` passed (1 test); retained main's confirmed-dead completed-provider exemption without restoring managed recovery.

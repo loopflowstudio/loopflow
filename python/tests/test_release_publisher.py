@@ -115,6 +115,8 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         env: dict[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        if "--ui-host" in command:
+            raise RuntimeError("UI host unavailable")
         commands.append(command)
         if command[:3] == ["git", "tag", "--points-at"]:
             return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
@@ -167,7 +169,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "installer_verified",
         "dmg_notarized",
         "website_candidate_verified",
-        "ui_host_verified",
     )
     assert receipt.workflow_run_id == "42"
     assert receipt.source_commit == "abc123"
@@ -176,7 +177,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "installer_verified",
         "dmg_notarized",
         "website_candidate_verified",
-        "ui_host_verified",
         "github_draft_staged",
         "crate_published",
         "versioned_dmg_uploaded",
@@ -267,6 +267,8 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run = publish_release._run
 
     def external_command(command, **kwargs):
+        if "--ui-host" in command:
+            raise RuntimeError("UI host unavailable")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "exact-commit\n", "")
         if command == ["gh", "release", "view", "--json", "tagName"]:
@@ -438,26 +440,21 @@ def test_smoke_failure_retains_repaired_external_publication_without_success_rec
     assert "exact_tag_smoke_passed" not in repaired["completed_stages"]
 
 
-def test_public_proof_requires_ui_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release
+@pytest.mark.parametrize("missing_stage", publish_release.CANDIDATE_STAGES)
+def test_public_proof_requires_candidate_preparation(
+    tmp_path: Path, public_release, missing_stage: str
 ):
     _, hashes = public_release
-    # Historic preparation without the required host gate cannot gain a pass
-    # simply because assets are already public.
     candidate = publish_release.ArtifactReceipt(
         "v1.2.3",
         "exact-commit",
         "42",
         hashes,
-        tuple(s for s in publish_release.CANDIDATE_STAGES if s != "ui_host_verified"),
+        tuple(s for s in publish_release.CANDIDATE_STAGES if s != missing_stage),
     )
     publish_release._write_receipt(candidate, ".candidate")
 
-    def missing_ui(*_args):
-        raise RuntimeError("required verification unavailable: ui-host")
-
-    monkeypatch.setattr(publish_release, "_verify_ui_host", missing_ui)
-    with pytest.raises(RuntimeError, match="required verification"):
+    with pytest.raises(RuntimeError, match="required preparation verification"):
         publish_release.verify_release("v1.2.3")
 
 

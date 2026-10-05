@@ -242,18 +242,18 @@ separately. Rejected planning cannot update durable facts first. Shared selectio
 SQL admission, ensure, rotation and Desktop remain unfinished. Installed/configured
 acceptance remains unproved.
 
-The October 5 preservation findings change implementation order. Session creation,
-binding and mechanical Flow starts bypass chapter admission. More fundamentally,
-checkout membership includes unbound conversations without explicit Started;
-rotation's start/claim reader omits them even without concurrency. The public-store
-transfer regression preserves that membership, Session bytes and checkout without
-inventing a binding. It does not prove rotation. The plan now proposes using
-existing checkout admission and the shared Task-work reader, including taskless
-creation, binding from elsewhere and missing checkout paths. Wave planning locks
-alone do not establish execution exclusion. Prove lock order, both rotation
-orderings and failed-reset re-entry before claiming preservation. Historical
-binding remains allowed; pending recovery alone cannot become permanent start
-denial. Release's lesson still applies: prove each operation's entry point.
+October 5 preservation findings change implementation order. Session creation,
+binding and mechanical Flow starts bypass chapter admission. Checkout membership
+includes unbound conversations without Started; rotation's start/claim reader
+omits them even without concurrency. The public-store transfer regression preserves
+membership, Session bytes and checkout without inventing a binding; it does not
+prove rotation. Reuse the complete Task-work rule, including Flow associations and
+primary-scope exclusion, rather than counting conversations by path. The proposed
+checkout admission fence must cover taskless creation, binding from elsewhere and
+missing paths. Wave locks alone do not exclude execution. Lock order, both rotation
+orderings and failed-reset re-entry remain unproved. Historical binding stays
+allowed; pending recovery cannot permanently deny starts. Release's child memory
+reinforces entry-point proofs. Later PM compression changes none of these boundaries.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

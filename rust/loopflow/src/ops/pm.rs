@@ -849,7 +849,7 @@ async fn fetch_pm_snapshot_for_projects(
     ctx: &PmContext,
     projects: Vec<PmProject>,
 ) -> OpsResult<PmSnapshot> {
-    let project_items = try_join_all(projects.iter().cloned().map(|project| async move {
+    let project_items = try_join_all(projects.iter().map(|project| async move {
         let mut items = ctx
             .client
             .list_items(&project.id)
@@ -1771,7 +1771,7 @@ async fn inspect_task_planning_async(
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let Some((mut item, project)) = observation else {
+        let Some((item, project)) = observation else {
             store
                 .invalidate_pm_task(&scope, provider.as_str(), selector)
                 .await
@@ -1783,9 +1783,6 @@ async fn inspect_task_planning_async(
                 "Linear task {} belongs to Team {}, expected repository Team {}",
                 item.identifier, item.team_id, repository.team_id
             )));
-        }
-        if let Some(project) = &project {
-            item.project = Some(project.slug.clone());
         }
         store
             .put_pm_task(
@@ -1843,13 +1840,11 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
 pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     let ResolvedTask {
         wave,
-        mut item,
+        item,
         project,
         ..
     } = resolve_owned_issue(repo, issue).await?;
     let initiative_id = singular_project_initiative(&project)?;
-    item.project_id = Some(project.id.clone());
-    item.project = Some(project.slug.clone());
     Ok(PmResolvedTask {
         wave,
         initiative_id,
@@ -1900,20 +1895,6 @@ pub(crate) fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult
 }
 
 // ── reteam ──────────────────────────────────────────────────────────
-
-/// How repository-wide `reteam` treats one issue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ReteamClass {
-    Already,
-    Move,
-}
-
-fn classify_reteam_item(item: &PmItem, team_id: &str) -> ReteamClass {
-    if item.team_id == team_id {
-        return ReteamClass::Already;
-    }
-    ReteamClass::Move
-}
 
 fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
     project_team_ids.len() != 1 || project_team_ids[0] != bound_team
@@ -2094,27 +2075,26 @@ async fn apply_or_plan_repository_reteam(
                         .map_err(|error| {
                             OpsError::Message(format!("failed to read task registry: {error}"))
                         })?;
-                match classify_reteam_item(&item, team_id) {
-                    ReteamClass::Already => {
-                        already += 1;
-                        if let Some(old_identifier) = registered_identifier
-                            .filter(|identifier| identifier != &item.identifier)
-                        {
-                            identifier_updates.push(ReteamIdentifierUpdate {
-                                issue_id: item.id,
-                                old_identifier,
-                                new_identifier: item.identifier,
-                            });
-                        }
+                if item.team_id == *team_id {
+                    already += 1;
+                    if let Some(old_identifier) =
+                        registered_identifier.filter(|identifier| identifier != &item.identifier)
+                    {
+                        identifier_updates.push(ReteamIdentifierUpdate {
+                            issue_id: item.id,
+                            old_identifier,
+                            new_identifier: item.identifier,
+                        });
                     }
-                    ReteamClass::Move => moves.push(PmReteamMove {
+                } else {
+                    moves.push(PmReteamMove {
                         wave: wave.clone(),
                         project_id: project.id.clone(),
                         id: item.id,
                         old_identifier: item.identifier,
                         title: item.name,
                         new_identifier: None,
-                    }),
+                    });
                 }
             }
             projects.push(project);

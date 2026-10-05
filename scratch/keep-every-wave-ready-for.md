@@ -206,6 +206,12 @@ nor permission to rewrite attribution. Existing independent Sessions/Flows must
 remain associated and preserve their history. Do not copy a second path-matching
 implementation into chapter classification.
 
+October 5 realign confirms that `task_work.rs::session_membership` excludes
+primary-scope conversations and includes Flow-associated Sessions, as well as
+direct binding and checkout membership. Reuse that complete rule; a broad count
+of conversations under a path would change preservation semantics. The latest
+PM compression does not change this reader, start admission or rotation.
+
 After failed reset, released checkout locks permit ordinary starts; recovery
 reclassifies while the predecessor remains configured. The durable configuration
 switch is the proposed boundary after which new historical bindings stay with
@@ -665,9 +671,15 @@ SQL loader directly after seeding pre-cutover data, removing a boolean phase hel
 Project error conversion uses one mapping function. Sync retains its diagnostic
 collection while checked reads reject the first slug conflict; combining these
 would change their reporting contracts.
-The follow-up compression removes the provider fixture's unwritable rename state
-and asserts the retained snapshot name instead. Reteam's collected Projects are
-named directly, removing the last naming residue of its deleted state wrapper.
+The compressed implementation asserts retained provider names and carries Projects
+directly through reteam, comparing Team IDs without a classification enum. Linear's
+ownership decoder supplies Task Project fields on acquisition; normalized planning
+projects the accepted slug on reads. Snapshot collection borrows Projects, retaining
+its association of list results with the selected Project because migration adoption
+can change those facts. Source inspection on October 5 confirms these owners;
+no start/rotation exclusion or shared selection follows from this reduction.
+The recorded nextest pass also reports a leaky projectless-Task case. Its cause
+is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
 historical name-only exception is implemented; the old selector remains to replace.
 
@@ -677,4 +689,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `cargo test -p loopflow --lib checkout_session_membership_survives_project_transfer_without_binding` passes (1 test); `cargo fmt --all -- --check` passes; selection, rotation, Desktop and configured acceptance remain with implement/gate.
+Checks: `cargo nextest run -p loopflow --lib -E 'test(ops::pm::planning_lookup_tests::) | test(repository_team_reteam) | test(foreign_projects_do_not_block_sweep_refresh_or_sync)' --no-fail-fast` passes 15 tests (projectless-Task case reported leaky; gate owns output-handle investigation); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; selection, rotation, Desktop and configured acceptance remain with implement/gate.

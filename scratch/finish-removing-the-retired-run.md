@@ -415,6 +415,12 @@ removed. Save PATH before clearing it, and keep the guard inside the environment
 lock. The shared guard also clears agent caller and Task authority for the paired
 research fixture. This changes fixture isolation, not production behavior.
 
+The exclusion fixture shares one retained-writer lifetime across pathname denial
+and inode sealing. Each exit verifies the exact appended bytes: a suffix check
+could mistake the first writer's text for the second writer's success. SQLite
+count readers close explicitly before the next phase, and snapshots classify
+entries from their existing `lstat` result. Linux execution remains with CI.
+
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
 together with recoverable conversion and surviving-path preservation tests.
@@ -516,4 +522,4 @@ acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
 
-Check (October 5): `uv run ruff check tests/e2e/capture_exclusion.py` and unprivileged `--probe-aliases` passed; `scripts/test_capture_exclusion.py` could not reach Docker (Linux probe deferred to CI); conversion and full gate remain outstanding.
+Check (October 5, compression): `uv run ruff check tests/e2e/capture_exclusion.py` and `uv run python tests/e2e/capture_exclusion.py --probe-aliases` passed; `uv run python scripts/test_capture_exclusion.py` could not reach Docker (Linux writer-lifetime/sealing probe deferred to CI); conversion and full gate remain outstanding.

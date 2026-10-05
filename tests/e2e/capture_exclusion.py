@@ -16,7 +16,8 @@ import stat
 import subprocess
 import sys
 import tempfile
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 CLI = Path("/fixture/prior/lf")
@@ -99,9 +100,9 @@ def _snapshot(home: Path) -> dict[str, str]:
     result = {}
     for path in [home, *home.rglob("*")]:
         metadata = path.lstat()
-        if path.is_symlink():
+        if stat.S_ISLNK(metadata.st_mode):
             content = f"link:{path.readlink()}"
-        elif path.is_file():
+        elif stat.S_ISREG(metadata.st_mode):
             content = hashlib.sha256(path.read_bytes()).hexdigest()
         else:
             content = "directory"
@@ -112,7 +113,7 @@ def _snapshot(home: Path) -> dict[str, str]:
 
 
 def _exec_count(home: Path) -> int:
-    with sqlite3.connect(f"file:{home}/.lf/loopflow.db?mode=ro", uri=True) as store:
+    with closing(sqlite3.connect(f"file:{home}/.lf/loopflow.db?mode=ro", uri=True)) as store:
         return store.execute("SELECT count(*) FROM execs").fetchone()[0]
 
 
@@ -198,8 +199,10 @@ def _attempt_alias_writes(home: Path, aliases: Path, excluded: bool) -> None:
         assert _exec_count(home) > before
 
 
-def _open_writer(path: Path) -> subprocess.Popen[str]:
-    return subprocess.Popen(
+@contextmanager
+def _retained_writer(path: Path) -> Iterator[None]:
+    before = path.read_bytes()
+    writer = subprocess.Popen(
         [
             "runuser",
             "-u",
@@ -216,6 +219,15 @@ def _open_writer(path: Path) -> subprocess.Popen[str]:
         stdout=subprocess.PIPE,
         text=True,
     )
+    try:
+        _await_open(writer)
+        yield
+    finally:
+        # Finish this known writer before any frozen snapshot. This establishes
+        # fixture ownership, not production process discovery or quiescence.
+        writer.communicate("write\n", timeout=10)
+        assert writer.returncode == 0, "retained-descriptor fixture failed"
+        assert path.read_bytes() == before + b"retained descriptor\n"
 
 
 def _attempt_storage_replacement(storage: Path, excluded: bool) -> None:
@@ -318,9 +330,7 @@ def main() -> None:
     _attempt_storage_replacement(storage, excluded=False)
     # Retained descriptors defeat pathname permissions. Exercise that limitation
     # before declaring the fixture quiescent, rather than hiding it with a stub.
-    writer = _open_writer(payload)
-    try:
-        _await_open(writer)
+    with _retained_writer(payload):
         # The root-owned parent prevents the account replacing its Home. Locking
         # only .lf would leave its writable parent able to rename and recreate it.
         os.chown(home, 0, 0)
@@ -330,27 +340,14 @@ def main() -> None:
             os.fsync(directory)
         finally:
             os.close(directory)
-    finally:
-        # Complete the known writer before the frozen byte snapshot. This is
-        # fixture ownership, not a production process-discovery implementation.
-        writer.communicate("write\n", timeout=10)
-        if writer.returncode != 0:
-            raise RuntimeError("retained-descriptor fixture failed")
-    assert payload.read_text().endswith("retained descriptor\n")
     _attempt_released_writes(home, excluded=True)
     # Directory exclusion still permits newly opened aliases and external paths.
     _attempt_alias_writes(home, aliases, excluded=False)
-    writer = _open_writer(aliases / "events.jsonl")
-    try:
-        _await_open(writer)
+    with _retained_writer(aliases / "events.jsonl"):
         saved = _seal_fixture_inodes([home, external])
-    finally:
-        writer.communicate("write\n", timeout=10)
-        assert writer.returncode == 0
     # Inode permissions also cannot revoke an existing writable descriptor.
     # Snapshot only after this known writer exits; production quiescence remains
     # a separate requirement, including writable mappings and inherited handles.
-    assert payload.read_text().endswith("retained descriptor\n")
     frozen = (_snapshot(home), _snapshot(external))
     _attempt_alias_writes(home, aliases, excluded=True)
     assert (_snapshot(home), _snapshot(external)) == frozen

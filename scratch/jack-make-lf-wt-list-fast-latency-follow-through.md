@@ -34,7 +34,9 @@ one connection is not worth a new owner.
   it means answering PR state from something other than the remote, which the
   Task's truthfulness requirement does not obviously allow. Unselected.
 - The three moved proofs have not run in the container: Docker was not running
-  on this host. CI's `task-installation` job owns that result.
+  on this host. CI's `task-installation` job owns that result. PR #1444 is open
+  at `c69eee058` with no hosted CI result yet; the terminated host run left 136
+  Rust tests unrun, which hosted CI also owns.
 - Installation preflight's store backup restarts whenever a writer commits, so
   on a large busy Home it has no bound. Observed only through these tests;
   unselected product work.

@@ -149,6 +149,47 @@ unexpected argument. Clippy clean; `flow_tests` 23, `session_lifecycle_tests` 17
    lines. AGENTS.md and the architecture reference state "One started Flow is
    one FlowSession" and would change with it.
 
+   **Jack decided (October 5): "fold it into this pr."** FlowSession removal
+   is in scope for #1439, with one migration.
+
+## FlowSession removal — proposed shape (agent's, for the implement pass)
+
+Jack's requirement: running a Flow leaves nothing beyond what `lf` logs for
+any command; which Flows run and at what stage is read from that log.
+
+- **Record.** The driver is an Exec (`lf -b run <flow>`); each step is a child
+  Exec. Put the Flow name and the step's label, graph key and loop path on the
+  Exec's existing command/argv, so stage and iteration are read from Execs.
+  No `flow_sessions`, `flow_events`, cursor, `position_version` or
+  `pending_session_id`.
+- **Driver.** Graph and cursor live in the driver's memory. It passes each
+  step to its child as arguments; delete `__flow-step <flow> <n>` reading a
+  row. Liveness is Exec process evidence; delete `driver.lock`.
+- **Receipts.** Publish/land idempotency stays in PR and landing records.
+  Verify first that nothing depends on the `flow_events` copy
+  (`pr_landing.rs`, `task_execution.rs`, CI repair).
+- **Readers.** `task status`, completion blockers, chapter "started work",
+  `flow list/show --sessions` and Desktop's Flow graph read Execs plus the
+  authored template. A past Flow whose YAML changed is drawn from its Exec
+  sequence, not a pinned graph; this loss is accepted by the requirement.
+- **Sessions.** `agent_sessions.flow_session_id` and Session `kind` values
+  tied to Flow boundaries become the parent Exec link.
+- **Migration.** The existing draft (`task_flow_observations`) drops both
+  tables after archiving each row's flow name, state and last cursor as
+  observations on its Sessions or Execs. Parked reviews are already archived
+  by this draft. Live Home conversion stays separately authorized.
+- **Docs.** Rewrite AGENTS.md "Wave Planning" and
+  `docs/architecture-reference.md` where they say one started Flow is one
+  FlowSession.
+- **Proof.** A nested looping Flow in a private Home: `lf monitor` shows
+  driver, current step and iteration from Execs alone; killing the driver
+  leaves dead Execs and nothing else; `git grep -E
+  "FlowSession|flow_sessions|flow_events"` matches only released migrations
+  and the draft.
+
+Sequencing risk: this review runs inside saved Flow `fbd24356` on installed
+0.13.0. Finish its passes there; do not install the branch mid-Flow.
+
 Unresolved, for Jack:
 
 - Where PR preparation (#2 above) goes once it leaves the launch: `lf task

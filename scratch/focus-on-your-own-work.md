@@ -8,6 +8,13 @@ deleted locally; Task Flow launch is an ordinary detached Flow. Workflow and loo
 authoring, Waiting, Task primary selection, the all-Flow Desktop views and
 configured acceptance are outstanding.
 
+**October 5 demo supersedes parts of this design.** Jack Heart decided that
+`-b` blocks, that one thin Task entry replaces `flow start`, and that the
+FlowSession record is removed in this PR. See
+[demo-task-flows.md](demo-task-flows.md); where the two disagree, that note
+governs. Sections below on retained captures, `position_version` fencing and
+the driver lock describe the code at `e10e2add4`, not the target.
+
 ## Outcome
 
 One native Task conversation retains design/review, files, drafts, shells and

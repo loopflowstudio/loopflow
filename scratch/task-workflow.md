@@ -80,7 +80,10 @@ the Task waits on a person. This replaces LOO-317's derived view.
    becoming the one that moves it, or restarting a running edge.
 3. **Reaching `end`.** Default: it does not complete the Task; `lf task
    complete` stays separate (LOO-367).
-4. **Where.** Default: PR #1439, after FlowExec.
+4. **Where.** Unresolved; Jack said both. "I think you own TaskWorkflow. We
+   cant do this design correctly without it" places it in LOO-353; asked
+   whether to keep this PR to the inner record and leave the outer one as the
+   next Task, he said "Yeah i think so." The FlowExec pass built none of it.
 5. **Names.** Default: builtin workflows keep `feature`, `code`, `research`;
    the flows they run are `task-design`, `pursue`, `ship`. `lf feature` then
    names the workflow's `start` edge through `lf task run`; a bare `lf run

@@ -120,8 +120,10 @@ FlowExec, the agent's, postdate it): the outer thing is TaskWorkflow and
 is not built in this PR; one `lf` flow run gets an append-only driver record
 named FlowExec.
 
-The consolidated model is in [the design](focus-on-your-own-work.md#flow-model--decided-october-5-governs-the-rest-of-this-document).
-Open: whether takeover is built in this PR or only designed for.
+The consolidated model is in [the design](focus-on-your-own-work.md)
+under "Flow model".
+Takeover and resume are not built: Jack's request for the FlowExec pass
+excluded them along with TaskWorkflow.
 
 The rule: Flow bookkeeping belongs to the driver process. It may record what
 it started and where it is (journal events, rows or files it writes itself).
@@ -157,7 +159,8 @@ source:
 - **`task automate`/`automation`, `task interrupt`, `task wait`** are kept as
   ordinary Task commands.
 - **The Task entry is `lf task run ISSUE [FLOW]`.**
-- **A past Flow after its YAML changed** is drawn from its Exec sequence.
+- **A past Flow after its YAML changed** keeps the graph FlowExec captured at
+  launch (the earlier pass redrew it from the Exec sequence).
 - **`lf commit`:** `-p` pushes; plain commit stays local.
 
 ## Choices the FlowExec pass made without Jack

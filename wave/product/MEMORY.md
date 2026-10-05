@@ -54,7 +54,8 @@ argument ("I hate __ and hidden arguments") and settled the record: each step
 is the plain command and "doesnt need to know its part of a flow"; the Flow's
 driver keeps an append-only FlowExec (name, launched graph, each step's Exec and
 node) for every run, none primary for a Task. The mutable outer record is
-TaskWorkflow, designed in LOO-353 but unbuilt. Built so: operations run through
+TaskWorkflow: an agent draft Jack has not reviewed, unbuilt, and Jack gave two
+answers on whether it lands in PR #1439 or a following Task. Built so: operations run through
 the ordinary CLI, the answer contract rides in the message with no provider
 schema, and a correction is `lf -b session resume ID MESSAGE`. The agent's
 unreviewed choices are in `scratch/questions.md`.
@@ -62,7 +63,9 @@ unreviewed choices are in `scratch/questions.md`.
 Lessons: the claim that `-b` was unbuilt was wrong (main #1356 had removed it);
 check main's history before calling a flag missing. Deleting a record exposed
 its hidden jobs: a Started trigger, steer acknowledgement per node, the S1–S5
-shared note key and command normalization all leaned on the Flow row. Fake-provider
+shared note key and command normalization all leaned on the Flow row. Skill
+prose narrating a builtin Flow drifts when its YAML changes: `advance` and
+`launch-plan` described human steps two passes after they were removed. Fake-provider
 suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn, a populated-store migration and Desktop remain
 unproven, as do the Waiting, workflow, loop and Task-primary slices.
@@ -365,13 +368,10 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   a bare Mac interrupt. Control inputs without text must remain independent of
   display preferences. The repaired production loopback path demonstrated that
   regression, not just a mock call.
-- Review Complete returns feedback for a following deciding occurrence. The
-  recorded pursue loop has review/concept decisions and a separate outer
-  demo-feedback decision, both able to return to implementation. A completed
-  failed-demo conversation is useful evidence, never a success claim. Runnable
-  prototyping and Flow alternatives belong to
-  [LOO-297](https://linear.app/loopflow/issue/LOO-297); parallel variant retention
-  and joins remain proposals.
+- A failed-demo conversation is useful evidence, never a success claim.
+  Runnable prototyping and Flow alternatives belong to
+  [LOO-297](https://linear.app/loopflow/issue/LOO-297). The retired Review
+  Complete loop is at `70e76a7d3:wave/product/MEMORY.md`.
 - Wave playhead removal leaves Session semantics intact. Task-shell NSView pools
   need per-workspace ownership: a global pool steals terminals between windows.
   Recorded scope retained Session code and background tmux process wrappers.

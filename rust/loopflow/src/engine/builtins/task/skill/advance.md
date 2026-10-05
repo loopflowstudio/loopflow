@@ -36,8 +36,8 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish). `code` adds a human
-PR walkthrough after pursuit. Do not repeat initial
+→ loop-decide, repeated on Iterate, then pr-publish). Its PR review happens
+in the Task conversation, not as a Flow step. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, use the complete feature Flow. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.
@@ -51,6 +51,6 @@ commands only when they express the same action. Do not claim an old
 finite Flow will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
-After completing a Session, refresh `lf session list --json` and the Task status.
-Report the Task link, actual running step or wait, and the next human boundary.
+After launching, refresh `lf session list --json` and the Task status.
+Report the Task link, actual running step or wait, and what next needs the User.
 Follow the selected delivery policy through its review and merge steps.

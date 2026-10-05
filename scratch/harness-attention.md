@@ -3,7 +3,7 @@
 Source audit only; no configured provider experiment. Jack Heart selected one
 Waiting state with provider-specific signals and accepted false positives.
 The implementation contract and 120-second fallback are in
-[the design](focus-on-your-own-work.md#primary-selection-and-waiting).
+[the design](focus-on-your-own-work.md) under "Later slices".
 Original research, including excluded Claude hooks/SDK/permission-host paths,
 remains at `9c6866e8e:scratch/harness-attention.md`.
 

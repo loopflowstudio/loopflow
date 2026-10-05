@@ -49,8 +49,9 @@ We cant do this design correctly without it."
   generations, automatic recovery, resume, the pending-review pointer, the
   `replaced` state, steps reading a cursor.
 
-**TaskWorkflow** is designed in [task-workflow.md](task-workflow.md) and
-belongs to LOO-353. It replaces the "Workflows" bullet under Later slices,
+**TaskWorkflow** is drafted in [task-workflow.md](task-workflow.md), unreviewed
+by Jack. Whether it lands in PR #1439 or a following Task is unresolved (see
+that draft's open choice 4). It replaces the "Workflows" bullet under Later slices,
 including its "no runtime row" rule, and the Task-primary Flow idea.
 
 ## Outcome
@@ -104,8 +105,8 @@ October 5 (delivery review):
 
 ## Branch state after the FlowExec pass
 
-FlowExec and oblivious steps are built on `8535598ef`; Jack Heart has not
-reviewed them. TaskWorkflow, takeover and resume are not built.
+FlowExec and oblivious steps are built (`aa2f42289`, `70e76a7d3`); Jack Heart
+has not reviewed them. TaskWorkflow, takeover and resume are not built.
 
 - **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
   `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
@@ -160,20 +161,15 @@ reviewed them. TaskWorkflow, takeover and resume are not built.
 
 ## Later slices (approved October 4, unbuilt)
 
-Flow history in these means Exec sequence.
+Flow history in these means FlowExec rows joined to their Execs.
 
-- **Two notions of Flow.** Jack (October 5): "two different notions of flow.
-  One where there there is a start and a land node and then in between are
-  human sessions, and the edges are lf flows". The outer one is the workflow
-  below; each edge is an operational Flow with a FlowSession. A workflow has
-  no record of its own yet; the Task-level "primary" layer Jack deferred
-  would sit here.
-- **Workflows.** `.lf/workflows/<name>.yaml`: conversation-stage keys with
-  optional review skills, and edges with `from`, `to`, `flow`. Source guidance
-  only: no Work kind, runtime row, cursor or token, never compiled into a Flow
-  graph. The Task conversation reads results and launches the next edge with
-  `lf -b`. Questions, holds and ambiguous replies launch nothing. Author the
-  builtin kickoff/review and demo/revision stages this way.
+- **Workflows.** Superseded by the TaskWorkflow draft in
+  [task-workflow.md](task-workflow.md), which Jack has not reviewed. Still
+  approved from October 4: stages are where a person takes part in the Task
+  conversation, edges are operational Flows, the conversation launches the
+  next edge with ordinary `lf`, and questions, holds and ambiguous replies
+  launch nothing. The October 4 "source guidance only, no runtime row" form is
+  at `8535598ef:scratch/focus-on-your-own-work.md`.
 - **Loops.** One form: a deciding node last, `loop: <target>` with optional
   `step` defaulting to `loop-or-next`, replacing `loop-decide` and
   `repeat.from` in catalog, skills, templates, docs and tests with no alias.

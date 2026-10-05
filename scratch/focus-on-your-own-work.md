@@ -5,28 +5,11 @@ Jack Heart.** Jack requested further kickoff reconciliation and continuation
 through the existing saved pursue Flow. Reconciliation is complete; implementation
 and configured acceptance remain outstanding.
 
-Final approved direction supersedes the earlier single-graph/segment proposal:
-a higher-level human workflow has conversation-stage nodes and edges labeled with
-operational Flows. The ongoing native Task conversation owns navigation without a
-shared playhead or review-settlement API. Operational Flows contain autonomous
-loops and XORs only; they cannot contain human workflows. Zero-human defaults name
-ordinary operational work. Autonomous loops end with a decider, named loop-or-next
-by default. Internal IDs never require duplicate authored id/name fields.
+## Outcome
 
-## Outcome and demo
-
-Jack keeps designing, discussing and reviewing in one ongoing Task conversation.
-Headless work appears separately as Runs. Returning to a Task preserves the same
-conversation, files, drafts, shells and layout; understanding background work does
-not require finding a privileged Flow or opening a new review conversation.
-
-Demo: in the same native Task conversation, launch two ordinary background
-operational Flows. Inspect each invocation's live graph and results without losing
-files, drafts or layout. Discuss one result with Jack and choose its next workflow
-edge, launching fresh operational work; leave the other discussion unresolved.
-Repeat an autonomous loop with nested XORs and repeated skill names, preserving
-exact occurrence history. The same path works in an external terminal. A crash
-retains evidence and never restarts automatically. This demo remains unexecuted.
+One native Task conversation retains design/review, files, drafts, shells and
+layout while background Runs execute operational Flows. The configured demo
+remains unexecuted.
 
 ## Accepted decisions
 
@@ -60,84 +43,55 @@ stays LOO-366; admission/completion policy stays LOO-367.
 
 ## Current system and reconciliation
 
-Inspected this checkout at `2f14e44224cac531388712c088b03d32ce1a6adf` and local main
-read-only at `c5dc238b0afb53dbe7098f30e2dee8085b53e1e3`. This is a local-main
-snapshot, not a fetched remote tip. Existing scratch was preserved in
-`6513477a5`; the superseded worker-start failure and repair proposal remain at
-`5090f672e:scratch/task-workspace-continuation.md`, outside active scratch.
-That audit performed no sync, worker start, provider launch or live migration.
+The initial audit inspected checkout `2f14e4422` and local main `c5dc238b0`,
+without fetching, launching or migrating. Prior scratch is preserved at
+`6513477a5`; the superseded worker-start repair proposal is at
+`5090f672e:scratch/task-workspace-continuation.md`.
 
-Main already has repo/Wave primaries, Ask removal, provider-native conversation
-lookup/connect, Session working-set filtering, configurable New Session, and Task
-completion-history filtering. Preserve these cuts rather than recreating their
-older counterparts. `PrimaryScope` currently has Repository and Wave only; Task
-primary selection is not delivered by that implementation. Main still has:
+Preserve main's repo/Wave primaries, Ask removal, native conversation lookup,
+Session working-set filtering, configurable New Session and Task history filters.
+Task primary selection remains absent. Reuse the existing engine traversal,
+primary scope lock, indexed Flow inventory/lazy detail and Swift graph renderer.
+The deletion inventory below identifies their controller dependencies. Claude's
+persistent stream-json stdin is not native-composer delivery and is unnecessary
+for workflow navigation.
 
-| Owner | Observed responsibility and required change |
-| --- | --- |
-| `durable.rs::FlowSession` | Capture plus mutable cursor, version, attempt, pending Session and worker claim. Split live execution state from retained invocation evidence. |
-| `store/sqlite/flows.rs` | `tasks.current_invocation_id`, `start_task_flow`, claim/reclaim, checkpoint/retry, review settlement. Delete runtime controller writes; preserve capture and event history. |
-| `lf/commands/flow.rs` | One driver with managed branches, saved resume, child launch and checkpoint. Keep the engine/graph traversal; use an in-memory execution position. |
-| `ops/flow_session.rs` | `reserve` creates a new `FlowReview`; `complete` closes it and launches a resumed driver. Delete review settlement; ordinary conversation launches the next operational Flow. |
-| `ops/human_session/primary.rs` | Scope admission, retained native identity, launch lock. Extend selection to Tasks without excluding Task primaries from membership. |
-| `store/sqlite/flow_inventory.rs` | Indexed inventory and lazy detail already exist; managed bit/filter derives from the Task pointer. Reuse inventory/detail, remove privilege. |
-| `TaskWorkView.swift`, `TaskFlowView.swift` | All-work rows versus richer selected-Flow graph. One detail view per selected invocation; no selected invocation acquires execution authority. |
-| `harness/claude.rs` | Persistent binary stream-json stdin and retained provider ID already support successive inputs. This capability is not native-composer delivery and is unnecessary for workflow navigation. |
+Inspected `lf/mod.rs` exposes `--mode batch`, while `ops/flow_run.rs::exec_driver`
+emits unparsed `-b`. Add ordinary detached skill/prompt/Flow launch through one
+placement/Exec path, returning durable Session/invocation identity after admission.
+Batch selects provider behavior; detachment is separate. Delete the worker path.
 
-`lf/mod.rs` on inspected main exposes `--mode batch`, not a parsed `-b` option;
-`ops/flow_run.rs::exec_driver` nevertheless emits `-b`. Treat that as a concrete
-surface inconsistency. Add `-b` as the ordinary detached headless launch option
-for skills, prompts and Flows, with one common placement/Exec path. Batch mode
-selects provider behavior; detachment additionally returns a durable invocation or
-Session identity after admission. Do not fix it by preserving the Task worker.
-
-Read [the workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
-`bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md`.
-The review predates #1369's merge and main's Ask deletion. Its remaining native,
-remote, file and performance proof survives; its old Ask and mutable switching
-requirements do not. PR #1313/tag `backup/file-browser-20260930` is historical
-web-prototype evidence, not a second file-editor implementation to restore.
+[Workspace review](../docs/reviews/task-workspace.md) and Unit 3 at
+`bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` retain
+native/remote/file/performance obligations. Their Ask and switching requirements
+are superseded. PR #1313/tag `backup/file-browser-20260930` retains web-prototype
+evidence, not another editor to restore.
 
 ## Chosen architecture — reconciled October 4
 
 ### Human workflows and operational Flows
 
-A human workflow is authored guidance: conversation-stage nodes joined by edges
-that name operational Flows. The ongoing native Task conversation follows this
-map, interprets Jack's direction and invokes an edge with ordinary `lf -b`.
-No database row, shared cursor, pending-boundary token or review-settlement API
-owns the conversation's position. Reopening a Task reads its conversation and
-actual work history; it does not resume a workflow controller.
+Author workflows in `.lf/workflows/<name>.yaml`: conversation-stage keys with
+optional review skills, and edges with `from`, `to`, `flow`. This reversible source
+format adds no Work kind, runtime row, shared cursor or boundary token. The native
+Task conversation interprets Jack's direction and launches authorized edges via
+`lf -b`. Reopening reads conversation and work history. Display guidance without
+a fabricated current-stage marker; reuse catalog/source resolution and graph
+primitives, never compile workflows into executable Flow graphs. Missing/invalid
+references stay visibly invalid.
 
-Operational Flows contain only autonomous work, loops and XORs. They may compose
-other operational Flows; they cannot contain human workflows or human steps,
-including through nested references and XOR alternatives. Validate the resolved
-composition before launch. Human review skills remain usable in the ongoing
-conversation; they are not executable human nodes in an operational capture.
+Operational Flows compose autonomous work, loops and XORs only. Validate resolved
+composition before launch, rejecting human steps/workflows even inside nested
+references or XOR alternatives. Review skills remain conversation instructions.
+Each edge launch creates a distinct captured FlowSession linked to Execs and
+AgentSessions, ending completed, failed or blocked with exact results/effects.
+Completion supplies evidence, never conversational navigation authority.
 
-Each edge launch creates an ordinary captured FlowSession with associated Execs
-and AgentSessions. It ends completed, failed or blocked, with exact results and
-effect receipts. Completion makes evidence available for discussion; it does not
-move a human-workflow playhead. The conversation chooses another edge only when
-Jack's direction and existing authorization support it. A question, hold, unrelated
-message or ambiguous “yes” across two results launches nothing. Stop interrupts
-an exact owned process if necessary; later continuation is a fresh explicit launch
-after inspection, not a review completion or automatic replay.
-
-Implementation choice: represent workflow definitions beside authored Flows in
-`.lf/workflows/<name>.yaml`, using conversation-stage keys and edges with `from`,
-`to`, and `flow`. Stage keys are the single authored name; optional review-skill
-references supply instructions. This is a source format, not a new Work kind or
-runtime store. Reuse catalog/source resolution and graph display primitives where
-they apply, but never convert a workflow into the executable Flow graph. Show the
-workflow map as guidance and actual Flow invocations as observed work; do not draw
-a fabricated current-stage marker. Missing/invalid references stay visibly invalid.
-
-For example, design discussion → delivery review can name `pursue`; delivery
-review → delivery review can name `pursue` again for requested changes. A separate
-accepted delivery edge can name the existing delivery operation. These are distinct
-launches, with historical invocation identity, not mutations of one saved Flow.
-Any publish/merge effect still requires the applicable authorization.
+For example, design → delivery review and delivery review → delivery review may
+both name `pursue`; each choice launches fresh work. Questions, holds, unrelated
+messages or ambiguous “yes” across results launch nothing. Stop targets an exact
+owned process; later continuation requires inspection and explicit fresh launch.
+Publication/merge still require applicable authorization.
 
 ### Autonomous loops and exact history
 
@@ -175,38 +129,27 @@ captures retain their original labels and evidence.
 
 ### History, launch and recovery
 
-Retain SQLite invocation/event history, graph captures, attribution, exact
-Session/Exec links and external-effect receipts. Ordinary launch admission and
-process fencing prevent duplicate execution of the same admitted launch; Task
-membership grants no privileged execution authority. Do not introduce feedback
-submission receipts or idempotent review-consumption transactions: neither has a
-boundary to settle in this architecture. Preserve existing operation idempotency
-for publication and landing independently of workflow navigation.
-
-A crash or uncertain remote liveness requires caller inspection of the existing
-execution and effects before a fresh launch. Missing evidence stays unknown.
-There is no automatic resume, sleeping runner, segment continuation token,
-start-after-human API or background composer injection. The earlier segmented
-single-graph proposal is preserved at `5090f672e:scratch/focus-on-your-own-work.md`
-as superseded review history, not an implementation dependency.
+Retain captures, events, attribution, exact Session/Exec links and effect receipts.
+Ordinary launch admission and process fencing prevent duplicate admitted launches;
+Task membership grants no execution authority. Publication/landing retain their
+own idempotency. There is no feedback transaction, automatic resume, sleeping
+runner, segment token, start-after-human API or composer injection. After a crash
+or uncertain remote liveness, the caller inspects execution/effects before fresh
+work; missing evidence stays unknown. Migration preservation is specified below.
 
 ### Current source and launch bridge
 
-Read-only inspection on October 4 found local main at `a1d2f8a591e14f52d29b87fe56a27eccd5e31f8f`.
-Its builtin `pursue` now ends after autonomous iteration and `pr-publish`; it no
-longer contains demo or a post-demo decider. The Task's saved capture
-`fbd24356-3d6f-415d-a236-16b4f6140c8f` still contains implement → compress → refresh
-→ loop-decide → pr-publish → demo → loop-decide, at node 0 with no completed nodes,
-no pending Session and no recorded failure. Installed `lf flow start` explicitly
-continues saved progress; a template argument only supplies a new Task's Flow.
+October 4 inspection: local main `a1d2f8a59` has zero-human `pursue`, ending
+at `pr-publish`. Saved capture `fbd24356-3d6f-415d-a236-16b4f6140c8f` instead
+has implement → compress → refresh → loop-decide → pr-publish → demo → loop-decide.
+At inspection it was at node 0, with no completed nodes, pending Session or failure.
 
-Jack requested continuing that exact saved capture while building its replacement.
-That is an execution bridge, not permission to rewrite the capture or retain the
-worker in the final product. Continue with `lf --task LOO-353 flow start`; do not
-supply a replacement template, reset progress or start a parallel implementation.
-If the retained runtime reaches a human review, report it to the calling
-conversation without opening another interactive review Session. A command failure
-is a blocker to report, not permission to edit the live Home or retry uncertain work.
+Jack requested continuing that capture with `lf --task LOO-353 flow start`.
+Installed start continues saved progress; templates only select a new Task's Flow.
+Do not replace/reset the capture or launch a competing driver from a running step.
+This bridge does not retain workers in the final product. Report failures or reached
+human review to the caller; do not edit the live Home, retry uncertain work or open
+another interactive review conversation.
 
 ### Primary selection and Waiting
 
@@ -248,40 +191,28 @@ Historical review evidence remains inspectable without becoming live control sta
 
 ### Other Session completion uses
 
-Main's `ops/human_session.rs::complete` also stops an ordinary conversation's
-provider and stamps `completed_at`; it is not exclusively a review API. Delete
-that public operation too. Existing process-stop/interrupt controls continue to
-stop exact clients without completing a conversation. Close view remains reversible
-presentation. Conversations remain reopenable; no replacement `finish`, `resolve`
-or `archive-and-stop` action is introduced. Primary replacement keeps its own
-explicit successor/history semantics and cannot release any Flow review.
+`ops/human_session.rs::complete` also stops ordinary providers and stamps
+`completed_at`; delete that public operation too. Exact-client stop/interrupt and
+reversible Close view remain; conversations stay reopenable. Add no finish,
+resolve or archive-and-stop replacement. Primary replacement retains its own
+successor/history semantics, never review settlement.
 
-Preserve historical `completed_at` and feedback in migrated history so completed
-records do not suddenly reappear as active work. Remove `ready_summary` as a live
-column after copying its historical content into Session evidence. Remove Ready
-from live Session lifecycle/action projection; successful provider turn completion
-and Run outcome remain execution facts. Inventory and cleanup must no longer rely
-on people completing conversations: stopped clients remain accessible in the
-existing retained/history presentation, and closing their pane does not erase them.
-Whether a later presentation-only archive affordance is useful is outside this
-cut, not a reason to preserve the completion API. Task completion still belongs
-to its existing Task operation, with unresolved feedback/unknown execution kept
-explicit; it must not stamp every associated conversation complete.
+Preserve historical `completed_at` and feedback so completed records do not
+reappear as active. Copy `ready_summary` into Session evidence before dropping
+its live column; remove Ready lifecycle/actions. Provider Completed and Run
+outcome remain execution facts. Stopped clients remain accessible in retained/
+history views without completion or pane closure erasing them. Presentation-only
+archive is outside scope. Existing Task completion keeps unresolved feedback and
+unknown execution explicit; it must not complete every associated conversation.
 
 ## Template and consumer cutover
 
-Separate human workflow definitions from operational templates. Move kickoff/review
-and demo/revision guidance into conversation stages and operational edges. Keep
-zero-human defaults named for ordinary work; Project's Default Flow selects an
-operational Flow. Remove post-review deciders and all `human: true` execution paths
-from new operational definitions. Autonomous XORs keep their existing branch
-selection; conversational choices select workflow edges without structured review
-output or a settlement command.
-
-The same Task can show every associated Flow with equally rich lazy graph, progress
-and output views. Swift consumes Rust's captured operational graph and actual
-history, while source workflow guidance remains distinct. No selected row, primary
-conversation or displayed workflow stage acquires process authority.
+Move kickoff/review and demo/revision into workflow conversation stages. Project's
+Default Flow selects operational work. Remove post-review deciders and all
+`human: true` execution paths from new definitions. Keep autonomous XOR selection.
+Every associated Flow gets equally rich lazy graph/progress/output views from
+Rust captures and history. Workflow guidance stays separate; selection grants no
+process authority.
 
 ## Delete — do not maintain
 
@@ -341,30 +272,13 @@ as unresolved historical boundaries attached to their original conversations; th
 are not auto-approved, discarded or silently reassigned. No live Home conversion
 or active worker interruption is authorized by this design. Conversion requires
 confirmed quiescence of writers in that Home; an isolated copy proves migration.
-Do not maintain two executors to avoid a coordinated cutover. Keep legacy reviews
-as unresolved history with their original conversations and result references;
-caller inspection may choose fresh work but cannot settle or silently replay them.
-Live rollout remains separate from this authorized implementation.
+Keep one executor after cutover. Caller inspection cannot settle or silently
+replay legacy reviews; live rollout remains separately authorized.
 
-## Alternatives and failure analysis
-
-The approved two-level model removes the need for human-boundary serialization,
-feedback submission and shared navigation. Sleeping runners, segmented single
-captures and renamed Task controllers recreate the deleted authority. A second
-review conversation or composer breaks native continuity. Retain exact autonomous
-occurrence history without confusing that evidence with a human-workflow position.
-
-Review finding: the earlier plan's clean-boundary receipt and feedback validation
-would have recreated the review handshake despite deleting Ready/Complete. Both
-are removed from this plan. A second finding is that main's new pursue source does
-not describe the Task's older saved capture; continuation must use the saved one.
+Review rejected handshake-like feedback receipts. Superseded proposals remain at
+`5090f672e:scratch/focus-on-your-own-work.md`.
 
 ## Internal slices and remaining workspace scope
-
-**Status: design review approved; kickoff reconciliation complete.** The source
-format, 120-second timeout and deterministic primary selection above are reversible
-implementation choices. No missing product judgment blocks implementation. Live
-migration, publication and configured usability verdicts retain their own boundaries.
 
 One coherent runtime/UI change, with no intermediate release of two executors:
 
@@ -458,11 +372,9 @@ compositor proof remain required; fixtures do not prove configured intent handli
 Other providers need continuity evidence. Gate's headless checks run without a
 display; missing configured demonstration remains with demo, never a fabricated pass.
 
-The supplied chapter has no metric targets. Its KRs require Jack's confirmation of
-three consecutive working days mostly in Desktop and three real sessions of at
-least two hours without crash/lost access forcing a move. Record dates/durations and
-Jack's verdict after use; local tests or this design cannot mark those KRs complete.
-The design serves Product's workspace contract but earns no Cube/Etude/Kata/Hootro
-weekly-progress credit.
+Chapter KRs still require Jack's dated confirmation: three consecutive days mostly
+in Desktop, and three two-hour sessions without crash/lost access forcing a move.
+No metric targets are supplied. Local checks earn neither KR completion nor
+Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `git diff --check` passed for prose reconciliation; saved Flow and local-main source inspected; no production build/test or configured demo run during kickoff reconciliation.
+Checks: `git diff --check` passed for prose compression; runtime implementation and its build/focused test remain outstanding; configured proof belongs to demo.

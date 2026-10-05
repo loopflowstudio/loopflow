@@ -16,16 +16,16 @@ no Desktop KR credit follows.
 Native rejection exposed destructive startup cleanup. The relay now transfers
 its driver after delivering successful thread resume; rejected startup/replacement
 preserves the engine, driver and native draft. Owner exit still closes its engine.
-`lf session timings EXEC` retains file-backed phases and unavailable UI endpoints;
-output survives SQLite contention, though accounting may delay reader exit.
+`lf session timings EXEC` records phases and unavailable UI endpoints.
+Output survives SQLite contention; accounting may delay exit.
 [Attachment evidence](../../scripts/benchmarks/session-connect/20261005-attachment/README.md)
-retains failures and synthetic/native limits. Response timing bounds readiness,
+retains failures and limits. Response timing bounds readiness,
 not its onset. No representative baseline, targets or speedup exists.
 
-Normal Flow reviews launch native TUI without the Harness relay endpoint.
-Changing resume alone cannot preserve that provider/draft. Revise first-launch
+Flow reviews launch native TUI without a relay.
+Resume cannot preserve that provider/draft. Revise first-launch
 ownership before optimization; preserve Infrastructure's launch-lock ordering
-and exact review fences. Conversation proof cannot cover Jack's selector.
+and exact review fences. Conversation proof excludes reviews.
 Pagination, repeated native connects and authenticated providers remain unproven.
 
 ## Capture and configurable New Session (2026-10-03 UTC)

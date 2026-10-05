@@ -12,6 +12,9 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py record --sec
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --template 'Time Profiler'   # attribute main-thread hangs; open hitches.trace in Instruments
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-20260926-1200
 
+# Real launches of the release build against a private copy of your Home; nothing live is touched.
+uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/desktop-launch/run
+
 # Startup without a display: replay captured `lf` reads and their latency in-process.
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
@@ -81,6 +84,19 @@ LOO-300's work; it is not in this tree.
 `20260924-capture-input/` is the earlier bitmap-capture/OCR baseline for
 `scripts/desktop_performance.py`; its README explains why it is not comparable
 with signpost intervals.
+
+`launch.py run` copies the Home's database with SQLite's backup, builds the
+release binary into its own app bundle (`com.loopflow.mac.bench`), and opens it
+in the background: three launches with no saved workspace, twenty with one, and
+three whose planning and Sessions reads fail. The bundle's `lf` forwards the
+startup reads to the installed `lf` under the copy and refuses every other
+command, so no helper, Session or repair starts. Each sample is the app's own
+launch journal plus `ps` RSS and CPU time at the endpoint and the `lf` processes
+it started. `--built` reuses the bundle already in `--work`; `--home <other
+work>/home` copies another run's Home, so a baseline and a candidate read the
+same data. It needs a logged-in desktop; OS file caches stay warm, and
+main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
+a baseline and a candidate.
 
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads

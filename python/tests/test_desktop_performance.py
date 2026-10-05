@@ -234,6 +234,30 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
     assert performance._report(tmp_path, None)["status"] == "incomplete"
 
 
+def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -> None:
+    cli = tmp_path / "lf"
+    cli.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib\n"
+        "directory = pathlib.Path(os.environ['LF_PERF_OUTPUT'])\n"
+        "directory.mkdir(parents=True, exist_ok=True)\n"
+        "start = dict(event='start', pid=os.getpid(), time=10, elapsed_ms=0, "
+        "connections=0, statements=0, rows=0)\n"
+        "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
+        "(directory / f'lf-{os.getpid()}.jsonl').write_text("
+        "json.dumps(start) + '\\n' + json.dumps(end))\n"
+        "print('[{\"id\":\"retained-session\"}]')\n"
+    )
+    cli.chmod(0o755)
+    fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
+    assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
+    report = _report(tmp_path, _events())
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 2
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 24
+    assert report["cli_volume"]["status"] == "unmeasured"
+    assert report["cli_volume"]["observed_totals"]["statements"] is None
+
+
 def test_native_runner_stops_owned_child_after_unexpected_journal_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -315,6 +315,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
         metadata=metadata, status="complete" if complete else "incomplete", journal_errors=errors
     )
     summary["cli_volume"] = _cli_volume(output / "cli-volume")
+    summary["fixture_setup_cli_volume"] = _cli_volume(output / "fixture-setup-cli-volume")
     recording = output / "soak-resources" / "report.json"
     summary["soak"]["resources"] = json.loads(recording.read_text()) if recording.exists() else None
     summary["soak"]["memory_after_four_rounds_mib"] = None
@@ -387,12 +388,20 @@ def _report(output: Path, baseline: Path | None) -> dict:
             "Idle-only trace coverage is reported separately; partial coverage is not acceptance.",
         ]
     volume = summary["cli_volume"]
+    scoped = (output / "fixture-setup-cli-volume").is_dir()
+    scope = "Scenario" if scoped else "Unscoped"
     lines += [
         "",
-        f"CLI volume: {volume['status']}; "
+        f"{scope} CLI volume: {volume['status']}; "
         f"processes started/ended {volume['processes_started']}/{volume['processes_ended']}; "
         f"observed SQLite totals {volume['observed_totals']}. "
         "Scope and partial receipts are retained in report.json.",
+        (
+            "Fixture setup is excluded and reported separately in fixture_setup_cli_volume. "
+            "Scenario totals include native reopening; "
+            "synthetic planning reads emit no CLI receipts."
+            if scoped else "No separate setup receipts; setup/scenario attribution is unmeasured."
+        ),
     ]
     if not complete:
         lines += [
@@ -449,7 +458,7 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         "TMPDIR": str(home),
         "PERF_NATIVE_ID": native_id,
         "PERF_TRANSCRIPT": str(transcript),
-        "LF_PERF_OUTPUT": str(output / "cli-volume"),
+        "LF_PERF_OUTPUT": str(output / "fixture-setup-cli-volume"),
         "RUST_LOG": "off",
     }
     for args in (["resume", native_id], ["session", "list", "--all", "--history", "--json"]):
@@ -472,6 +481,10 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
     records = json.loads(stdout)
     if len(records) != 1:
         raise RuntimeError("Native fixture did not retain exactly one Session")
+    # Setup processes have exited before publishing the scenario environment.
+    # Separate destinations retain partial setup receipts without subtracting
+    # cumulative counters or attributing setup work to the measured journey.
+    environment["LF_PERF_OUTPUT"] = str(output / "cli-volume")
     fixture = output / "native-fixture.json"
     _write(
         fixture,

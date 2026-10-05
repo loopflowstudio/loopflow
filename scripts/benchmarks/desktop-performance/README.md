@@ -181,7 +181,10 @@ reopen. Headless `DesktopNativeSessionTests` exercises the same fixture and publ
 API without Ghostty when `LOOPFLOW_TEST_NATIVE_FIXTURE` names the runner's
 `native-fixture.json`. No live conversation or credentials are used.
 
-These CLI totals cover fixture setup and native reopening, not the DTO-backed
-planning refresh or the retained-cat soak. Native provider service costs and
+Scenario receipts in `cli-volume/` cover native reopening; setup receipts stay
+separate in `fixture-setup-cli-volume/` and `fixture_setup_cli_volume` in the report.
+Both retain partial counts. Older recordings without separate setup receipts
+remain unscoped. Neither measures DTO-backed planning refresh or the retained-cat
+soak. Native provider service costs and
 realistic workspace process/query volume still require LOO-371's isolated
 snapshot runner; this fixture is not a replacement for that runner.

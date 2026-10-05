@@ -99,7 +99,7 @@ pub(crate) fn exec_session_with_env(
     if target == ExecTarget::Ide {
         if let Some(url) = launch.ide_url.as_deref() {
             match crate::engine::platform::open_url_checked(url) {
-                Ok(()) => return Ok(()),
+                Ok(()) => return record_interactive_opened(environment),
                 Err(err) => eprintln!("Could not open vendor app ({err}); falling back to TUI."),
             }
         } else if harness == "opencode" {
@@ -642,6 +642,7 @@ fn spawn_session_command_with_env(
 
 fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static str {
     match reason {
+        ProviderClientStopReason::Retired => "Review retired by Task restart.",
         ProviderClientStopReason::Moved => "Session moved to another terminal.",
         ProviderClientStopReason::Completed => "Session completed elsewhere.",
     }
@@ -651,6 +652,32 @@ fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static st
 struct SessionCommandOutcome {
     status: std::process::ExitStatus,
     stop_reason: Option<ProviderClientStopReason>,
+}
+
+fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
+    let Some(input) = environment.get(crate::durable::RUN_ID_ENV) else {
+        return Ok(());
+    };
+    let Some(exec) = crate::journal::current_exec_id() else {
+        return Ok(());
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session_for_artifact(input)?
+        .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
+    if !session.interactive {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc();
+    store.retain_session_observation(&session, &crate::session::SessionObservation {
+        artifact_key: crate::session_record::parse_artifact_key(input)?,
+        source: format!("interactive_opened:{exec}:{}", session.id),
+        observed_at: now.unix_timestamp(),
+        task_id: session.task_id.clone(),
+        wave_id: session.wave_id.clone(),
+        payload: serde_json::json!({"type":"interactive_opened", "opened_at_ms": now.unix_timestamp_nanos() / 1_000_000}),
+    })?;
+    Ok(())
 }
 
 fn session_command_status_with_env(
@@ -751,6 +778,11 @@ fn session_command_status_with_env(
             return Err(error);
         }
     };
+    if let Err(error) = record_interactive_opened(environment) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
     // Completion and another Open can proceed once exact client ownership is visible.
     drop(launch_lock);
     drop(launch);

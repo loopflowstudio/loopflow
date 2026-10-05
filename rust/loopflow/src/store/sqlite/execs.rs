@@ -395,7 +395,7 @@ impl SqliteStore {
     // Dispatch and driver changes share a per-Session OS lock, never a SQLite
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
-    fn lock_session_driver(&self, session: &str) -> StoreResult<File> {
+    pub(super) fn lock_session_driver(&self, session: &str) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -540,6 +540,15 @@ impl SqliteStore {
         let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let closed_review: bool = tx.query_row(
+            "SELECT kind='flow_review' AND completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
+            [session], |row| row.get(0),
+        )?;
+        if closed_review {
+            return Err(StoreError::InvalidAuthority(
+                "review has been closed".into(),
+            ));
+        }
         let current = driver_in(&tx, session)?;
         if current.as_ref() != expected {
             return Err(StoreError::InvalidAuthority(

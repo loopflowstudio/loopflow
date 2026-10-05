@@ -95,8 +95,7 @@ struct WorkspaceNavigator: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
                     ForEach(rows) { row in outlineRow(row) }
-                    if model.repoPath != nil, rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
-                       model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
+                    if model.repoPath != nil, rows.isEmpty, model.workspaceStatus == .current {
                         Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
                     }
@@ -214,15 +213,14 @@ struct WorkspaceNavigator: View {
     }
 
     @ViewBuilder private var forReadErrors: some View {
-        if model.roadmap.isLoading {
-            Text("Reading planning…").foregroundStyle(palette.textSecondary)
-                .accessibilityIdentifier("workspace-planning-loading")
+        let status = model.workspaceStatus
+        if let message = status.message {
+            Group {
+                if case .failed = status { warning(message) }
+                else { Text(message).foregroundStyle(palette.textSecondary).padding(4) }
+            }
+            .accessibilityIdentifier("workspace-status")
         }
-        if let error = model.roadmap.errorMessage {
-            warning("Planning unavailable: \(error)").accessibilityIdentifier("workspace-planning-unavailable")
-        }
-        if model.sessions.isLoading { Text("Reading Sessions…").foregroundStyle(palette.textSecondary) }
-        if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
         ForEach(model.workspace.waves) { wave in
             if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
             if case .available(_, let truncated) = wave.roadmap.tasks, truncated {

@@ -343,51 +343,14 @@ mod planning_tests {
         assert_eq!(position.current().step, "demo");
         assert_eq!(position.cursor.iteration, 9);
         assert!(position.cursor.progress.verdict.is_none());
-        position.cursor.progress.direction = Some("Human requested a delivery correction".into());
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "loop-decide");
-        assert!(position.cursor.progress.verdict.is_none());
-        assert_eq!(position.cursor.iteration, 9);
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "Human requested a delivery correction".into(),
-        });
+        position.cursor.progress.direction = Some("Delivery reviewed".into());
         assert!(!finish(&mut position).unwrap());
-        assert_eq!(position.current().step, "implement");
         assert_eq!(
             position.cursor.progress.direction.as_deref(),
-            Some("Human requested a delivery correction")
+            Some("Delivery reviewed")
         );
-        for _ in 0..4 {
-            finish(&mut position).unwrap();
-        }
-        assert_eq!(position.current().step, "loop-decide");
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "Continue the human-requested revision".into(),
-        });
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "implement");
-        assert_eq!(position.cursor.progress.repeats["decide"], 10);
-        // Final Advance is the only edge into queue and landing. This traverses
-        // the authored plan without invoking any publication operation.
-        for _ in 0..4 {
-            finish(&mut position).unwrap();
-        }
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "Revision proved".into(),
-        });
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "pr-publish");
-        finish(&mut position).unwrap();
-        assert_eq!(position.current().step, "demo");
-        finish(&mut position).unwrap();
-        position.cursor.progress.verdict = Some(crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "Human feedback addressed".into(),
-        });
-        finish(&mut position).unwrap();
+        assert!(position.cursor.progress.verdict.is_none());
+        assert_eq!(position.cursor.iteration, 9);
         for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
@@ -1583,6 +1546,12 @@ mod planning_tests {
             step.id.as_deref(),
             true,
         );
+        let current = store.task_flow(&task.id).await.unwrap().unwrap();
+        store.sqlite.retire_task_review(&current).unwrap();
+        store
+            .sqlite
+            .review_execution_stopped(current.pending_session_id.as_ref().unwrap())
+            .unwrap();
         store
             .restart_task_flow(
                 &task,
@@ -1763,7 +1732,13 @@ mod planning_tests {
         use crate::engine::transitions::{FlowDecision, FlowVerdict};
         use crate::engine::{ConcretePath, ConcreteStep, ConcreteXor, Skill};
         let (store, task, _) = human_task_fixture().await;
-        let mut flow = super::start_task_flow(&task, "pursue").unwrap();
+        let flows = task.worktree.join(".lf/flows");
+        std::fs::create_dir_all(&flows).unwrap();
+        std::fs::write(
+            flows.join("review-loop.yaml"),
+            "- flow: pursue\n- step:\n    id: review_delivery\n    name: demo\n    human: true\n- step:\n    id: decide_delivery\n    name: loop-decide\n    repeat:\n      from: implement\n",
+        ).unwrap();
+        let mut flow = super::start_task_flow(&task, "review-loop").unwrap();
         let body = flow.invocation.steps.clone();
         let suffix = body[0].clone();
         flow.invocation.steps = vec![

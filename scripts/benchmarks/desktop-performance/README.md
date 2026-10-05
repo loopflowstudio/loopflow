@@ -8,6 +8,10 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py record --sec
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --template 'Time Profiler'   # attribute main-thread hangs; open hitches.trace in Instruments
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-20260926-1200
 
+# Startup without a display: replay captured `lf` reads and their latency in-process.
+uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
+uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
+
 # The older capture/OCR journeys and their hash-pinned baseline.
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
 ```
@@ -25,6 +29,7 @@ while it records — the intervals are named after what you did.
 | Interval | Begins | Ends |
 |---|---|---|
 | `cold_start` | `LoopflowApp.init` (message carries `pre_main_ms`) | next main-queue callback after non-empty rows are observed |
+| `workspace_current` | `LoopflowApp.init` | every part of the workspace was read by this launch, none shown from the saved workspace |
 | `hierarchy_interaction` | fold, presentation, filter keystroke, repository switch | next main-queue callback after changed rows are observed |
 | `task_workspace_ready` | `scenario=wave` / `task`: selection; `scenario=session`: Session opened | next main-queue callback after detail/focus is observed |
 | `retained_workspace_action` | collapse, expand, focus or restore of a retained pane | next main-queue callback after the workspace observes the layout change |
@@ -51,3 +56,10 @@ LOO-300's work; it is not in this tree.
 `20260924-capture-input/` is the earlier bitmap-capture/OCR baseline for
 `scripts/desktop_performance.py`; its README explains why it is not comparable
 with signpost intervals.
+
+`startup.py` measures when the model first holds outline content for an
+uncached launch, a launch with a saved workspace, a saved launch whose reads
+fail, and a second window in the process that saved. Twenty samples by default,
+with `lf` reads counted before usable and until settled. It runs without a
+display, so it reports no first frame, CPU, memory or stalls;
+`20261004-startup-inprocess/` is its receipt.

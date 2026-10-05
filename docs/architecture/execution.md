@@ -125,7 +125,7 @@ after process death still requires inspection before retry. Cursor movement
 cannot prove exactly-once external effects.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
-and outcomes provide the evidence. The Wave operator resolves authorized
+and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 

@@ -53,7 +53,7 @@ Task/PR references, changed claims and coverage gaps underneath. Report actual
 Task transfers and cancellations only where dated evidence establishes them.
 If a next chapter name is supplied, `lf repo new-chapter <name> --dry-run --json`
 can supply prospective dispositions for the entire repository. Label that dated
-preview separately from historical facts; it neither applies nor authorizes
+preview separately from historical facts; it does not apply
 rotation. Never invent a second Task classifier in prose.
 
 Separate next-chapter proposals: valuable goals, changed assumptions, goals not

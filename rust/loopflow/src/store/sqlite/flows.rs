@@ -1087,36 +1087,6 @@ impl SqliteStore {
         Ok(flow)
     }
 
-    /// Retire a stopped Flow by request. Its remaining steps never run and no
-    /// step result is invented; the row, its failure and its history remain.
-    pub fn retire_flow(&self, id: &str, version: u64, reason: &str) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let flow = current_flow_in(&tx, id)?;
-        if flow.version != version || flow.claim.is_some() {
-            return Err(stale(id));
-        }
-        tx.execute(
-            "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE id=?1",
-            params![id, now_unix()],
-        )?;
-        if let Some(task) = &flow.task_id {
-            super::children::insert_task_event_in(
-                &tx,
-                task,
-                &TaskEventKind::Progress {
-                    summary: format!("Flow {id} {reason}"),
-                },
-            )?;
-        }
-        tx.execute(
-            "UPDATE tasks SET current_invocation_id=NULL WHERE current_invocation_id=?1",
-            [id],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     /// The Flow ran its last step.
     pub fn end_flow(&self, id: &str, version: u64, summary: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

@@ -17,11 +17,11 @@ below. Mechanisms not listed there remain proposals.
    basically end at landing." If a Task's selected Flow does not end at
    landing, the Task either changes its Flow (wanted, not yet designed) or
    waits on Jack. "If there is a defined flow, we need to proceed."
-5. **How a Task changes its Flow stays TBD.**
 4. **`task/session` is a plain skill**, launched with
    `lf --task <issue> skill task/session`. "This is the right entry point."
    A primary Task session is "just a smaller wrapper around this that saves
    that id in a field"; the wrapper is not built here.
+5. **How a Task changes its Flow stays TBD.**
 
 ## Problem
 

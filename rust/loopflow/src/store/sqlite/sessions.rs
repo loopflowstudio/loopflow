@@ -1243,7 +1243,7 @@ pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
     ))
 }
 
-/// Store the review Session a Task's Flow parks at, with its first Run
+/// Store the review Session a Task's Flow parks at, with its first capture
 /// reserved. Parking at the same review again finds the Session it left.
 pub(super) fn reserve_task_review_in(
     conn: &Transaction<'_>,

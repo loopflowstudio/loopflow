@@ -484,7 +484,7 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
 
     assert_eq!(status["wave"]["id"], wave.id().as_str());
     assert_eq!(status["wave"]["name"], "audit-b");
-    assert_eq!(status["runs"]["state"], "ok");
+    assert_eq!(status["history"]["state"], "ok");
 }
 
 #[test]
@@ -701,9 +701,9 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let status = status_json(home.path(), &["audit-c"], None);
 
     assert_eq!(status["wave"]["status"], "ready");
-    assert_eq!(status["runs"]["state"], "ok");
-    assert_eq!(status["runs"]["items"], serde_json::json!([]));
-    assert_eq!(status["runs"]["truncated"], false);
+    assert_eq!(status["history"]["state"], "ok");
+    assert_eq!(status["history"]["items"], serde_json::json!([]));
+    assert_eq!(status["history"]["truncated"], false);
 }
 
 #[test]

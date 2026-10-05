@@ -127,15 +127,15 @@ def test_run_window_includes_long_runs_and_excludes_foreign_unfinished_and_futur
         _run(tmp_path / "other", id="foreign"),
     ]
     path.write_text(json.dumps(runs))
-    selected = scorecard.load_runs(path, tmp_path)
+    selected = scorecard.load_history(path, tmp_path)
     assert [run["id"] for run in selected] == ["long", "boundary", "unfinished", "old", "future"]
     report = scorecard.build_report(
         _policy(), tmp_path, NOW.replace(microsecond=500000), selected, [], []
     )
     rows = {row["id"]: row for row in report["rows"]}
-    assert rows["run_elapsed_seconds"]["eligible"] == 2
-    assert rows["run_elapsed_seconds"]["p50"] == 60
-    assert rows["run_elapsed_seconds"]["p95"] == 180
+    assert rows["session_elapsed_seconds"]["eligible"] == 2
+    assert rows["session_elapsed_seconds"]["p50"] == 60
+    assert rows["session_elapsed_seconds"]["p95"] == 180
 
 
 def test_recorded_attempt_joins_exact_pr_across_run_windows(tmp_path: Path) -> None:
@@ -210,13 +210,13 @@ def test_usage_keeps_missing_nonfinal_and_gapped_receipts_unknown(tmp_path: Path
             None,
         )
     }
-    assert rows["run_total_input_tokens"]["eligible"] == 4
-    assert rows["run_total_input_tokens"]["measured"] == 1
-    assert rows["run_total_input_tokens"]["p50"] == 100
-    assert rows["run_cost_usd"]["measured"] == 0
-    assert rows["run_cost_usd"]["p50"] is None
-    assert rows["run_cost_usd"]["verdict"] == "unknown"
-    assert rows["run_elapsed_seconds"]["measured"] == 4
+    assert rows["session_total_input_tokens"]["eligible"] == 4
+    assert rows["session_total_input_tokens"]["measured"] == 1
+    assert rows["session_total_input_tokens"]["p50"] == 100
+    assert rows["session_cost_usd"]["measured"] == 0
+    assert rows["session_cost_usd"]["p50"] is None
+    assert rows["session_cost_usd"]["verdict"] == "unknown"
+    assert rows["session_elapsed_seconds"]["measured"] == 4
 
 
 def test_current_pr_owners_measure_intervals_and_preserve_missing_coverage(tmp_path: Path) -> None:
@@ -308,7 +308,7 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
                 str(tmp_path),
                 "--database",
                 str(database),
-                "--runs",
+                "--history",
                 str(runs),
                 "--envelope",
             ]
@@ -317,8 +317,8 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
     )
     envelope = json.loads(capsys.readouterr().out)
     rows = {row["id"]: row for row in envelope["report"]["rows"]}
-    assert rows["run_elapsed_seconds"]["p50"] == 59
-    assert rows["run_total_input_tokens"]["p50"] == 100
+    assert rows["session_elapsed_seconds"]["p50"] == 59
+    assert rows["session_total_input_tokens"]["p50"] == 100
     attempt = rows["recorded_attempt_to_merge_seconds"]
     assert (attempt["eligible"], attempt["measured"], attempt["p50"]) == (1, 1, 40)
     assert "Observed lower bound" in envelope["text"]

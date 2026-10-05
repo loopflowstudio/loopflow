@@ -278,7 +278,7 @@ impl std::fmt::Debug for AgentConfig {
     }
 }
 
-/// Select and pin a managed Claude/Codex account before publishing a Run.
+/// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
     let (harness, _) = parse_agent(launch.agent());
     let provider = match harness.as_str() {

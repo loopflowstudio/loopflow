@@ -152,9 +152,9 @@ fn build_snapshot(
         }
     }
 
-    let runs =
+    let history =
         store.conversation_history(filter.wave, filter.project, filter.task, None, since, true)?;
-    for snapshot in runs {
+    for snapshot in history {
         let work = snapshot
             .task_id
             .clone()

@@ -1396,7 +1396,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(history.provider_session_id, "retained-history");
-        // Deliberate historical resumption remains supported for unrelated Runs.
+        // Deliberate historical resumption remains supported for unrelated Sessions.
         let provider = fake_provider(&fixture.temp, "touch resumed");
         let command = SessionCommand {
             program: provider.display().to_string(),

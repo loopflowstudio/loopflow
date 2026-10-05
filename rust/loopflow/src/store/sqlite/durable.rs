@@ -999,7 +999,7 @@ mod durable_store_tests {
             .artifact_key
     }
 
-    /// Launch the reserved Run: the worker's publication of its attempt.
+    /// Launch the reserved capture: the worker's publication of its attempt.
     fn publish(
         store: &SqliteStore,
         flow: &FlowSession,
@@ -1016,7 +1016,7 @@ mod durable_store_tests {
         )
     }
 
-    /// Park a Task's Flow at its review with the review's Run launched and,
+    /// Park a Task's Flow at its review with the review's capture published and,
     /// when given, its feedback ready.
     fn parked_review(
         store: &SqliteStore,
@@ -1197,7 +1197,7 @@ mod durable_store_tests {
         let run_count: i64 = conn
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        // Callers cannot publish a Run under a different node or loop pass.
+        // Callers cannot publish a capture under a different node or loop pass.
         for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
             let mut requested = conversation(Some(position.invocation.id.clone()), None, None);
             requested.node = node;
@@ -1846,7 +1846,7 @@ mod durable_store_tests {
             .reserve_task_review(position.id(), position.version)
             .unwrap();
         let session_id = crate::ops::human_session::flow_id(&position).unwrap();
-        // The review's reserved Run starts the Task before anything launches.
+        // The review's reserved capture starts the Task before anything launches.
         assert!(store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
         assert!(!store.retire_chapter_backlog(&task_id).unwrap());
@@ -2727,7 +2727,7 @@ mod durable_store_tests {
         );
         drop(conn);
         assert!(store.task_started(&work).unwrap());
-        // The launch publishes that Run under the claim; nothing else can.
+        // The launch publishes that capture under the claim; nothing else can.
         let flow = store.task_flow(&work).unwrap().unwrap();
         let run = flow.selected_capture.clone().unwrap();
         assert!(!run.published);

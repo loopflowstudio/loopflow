@@ -17,29 +17,26 @@ Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke
 source integration is not configured acceptance. Exact recovery evidence belongs
 in [Release memory](release/MEMORY.md).
 
-## Capture cutover (LOO-370, source evidence 2026-10-05)
+## Capture cutover (LOO-370, reconciled 2026-10-05)
 
-Jack Heart authorized source delivery, not installed conversion or interruption.
+Jack Heart authorized autonomous source delivery, not installed conversion or
+interruption. Infrastructure selected one opaque `runs/` physical capture root
+under that delegation; the updated brief and delivered steers explicitly accept
+it. This changes the prior layout-replacement requirement. No relocation,
+parallel layout, compatibility alias or privileged offline migration is required.
+
 Capture keys select history; Session IDs select mutations; Session/Exec provenance
 supplies authority. Missing payload cannot erase resumable SQLite identity.
+Keep historical paths, payloads, feedback, native identity and usage unchanged.
+Checksum-pinned released-Home runtime preservation passed with stub providers;
+final affected gate remains open.
 
-SQLite compatibility cannot prove layout completion; v0.13.3 journals before checks.
-macOS probes demonstrate writable hard-link aliases despite Home traversal denial
-and shared-parent replacement after partial sealing. October 5's deterministic
-race replaces the path after recovery checks its inode: recovery changes the
-replacement's permissions and reports success. Reject that restoration mechanism.
-
-Five portable cases expose metadata damage despite preserved bytes; retry needs
-fixture namespace repair. Linux remains CI-owned; quiescence/power-loss are unproved.
-Detail:
-`05c3267df4aa585903d0d4af22a37f21b096c359:wave/infrastructure/MEMORY.md`.
-
-Jack Heart's October 5 steers select offline recovery investigation, with the
-original OS absent. Neither Recovery boot nor account/container isolation proves
-storage custody through reboot. An external owner must retain it, with a frozen
-backup before mutation. No Mac owner is proved. Keeping opaque `runs/` paths
-changes acceptance and is unapproved. Conversion and installer schema shortcuts
-remain unresolved; permission helpers cannot supply the required reboot proof.
+The abandoned permission probes demonstrated writable hard-link aliases and a
+recovery check/write race that altered unrelated replacement metadata. Those
+counterexamples and the unresolved Mac boot-custody investigation remain at
+`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46:scratch/finish-removing-the-retired-run.md`.
+Deleting the probes does not establish exclusion or migration. Installed acceptance
+remains separate from source fixtures and delivery.
 
 ## Review replacement (2026-10-04)
 

@@ -330,7 +330,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
-/// comes only from its Run's invocation, never from matching Task, checkout,
+/// comes only from its recorded Flow invocation, never from matching Task, checkout,
 /// provider, or skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -482,7 +482,7 @@ pub(crate) async fn retarget_prepared_task_review(store: &SharedStore, task: &Ta
     Ok(())
 }
 
-/// The Task whose own Flow waits at this Run's review: the Run's invocation is
+/// The Task whose own Flow waits at this Session's review: its Flow invocation is
 /// the one the Task points at. Any other review naming a Task is a Flow about it.
 async fn managed_review(
     store: &SharedStore,

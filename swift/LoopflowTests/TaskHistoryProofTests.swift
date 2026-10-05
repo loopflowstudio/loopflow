@@ -96,7 +96,7 @@ struct TaskHistoryProofTests {
         #expect(await source.reads.isEmpty)
 
         // Expanding reads that Task's exact identifier through the shared reader.
-        await source.reply("W2-131", with: .runs(["run_a1", "run_a2"]))
+        await source.reply("W2-131", with: .history(["run_a1", "run_a2"]))
         try find("task-history-toggle").button().tap()
         try await waitFor { (try? find("task-history-input-run_a2:12")) != nil && !model.sessionHistory.inFlight.contains("issue-review") }
         #expect(await source.reads == [["usage", "--days", "0", "--task", "W2-131", "--json"]])
@@ -126,7 +126,7 @@ struct TaskHistoryProofTests {
         try await settle(window)
         #expect(try label("task-history-toggle") == "Session history, collapsed")
         #expect(await source.reads.count == readsBeforeB)
-        await source.reply("W2-156", with: .runs([]))
+        await source.reply("W2-156", with: .history([]))
         try find("task-history-toggle").button().tap()
         try await waitFor { (try? find("task-history-empty")) != nil }
         #expect(try find("task-history-empty").text().string() == "No Session history recorded for this Task.")
@@ -189,7 +189,7 @@ struct TaskHistoryProofTests {
 /// Shared planning reads plus per-Task `lf usage --days 0 --task ID --json` replies. Any other
 /// operation — including preparing or starting a Task — fails loudly.
 private actor HistorySource {
-    enum Reply { case runs([String]), held([String]), failure }
+    enum Reply { case history([String]), held([String]), failure }
 
     private let roadmap: String
     private let session: String
@@ -204,7 +204,7 @@ private actor HistorySource {
         roadmap = String(decoding: try fixture("roadmap_snapshot.json"), as: UTF8.self)
         self.session = String(decoding: session, as: UTF8.self)
         let detail = try JSONSerialization.jsonObject(with: fixture("wave_detail.json")) as? [String: Any]
-        let runs = detail?["runs"] as? [String: Any]
+        let runs = detail?["history"] as? [String: Any]
         template = (runs?["items"] as? [[String: Any]])?.first ?? [:]
     }
 
@@ -225,7 +225,7 @@ private actor HistorySource {
             let task = args[4]
             let ids: [String]
             switch replies[task] {
-            case .runs(let chosen): ids = chosen
+            case .history(let chosen): ids = chosen
             case .held(let chosen):
                 await withCheckedContinuation { hold = $0 }
                 ids = chosen

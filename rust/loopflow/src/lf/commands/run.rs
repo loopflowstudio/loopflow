@@ -787,11 +787,11 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     };
     let settlement = capture.finish(outcome);
     match (result, settlement) {
-        (Err(error), Err(settlement)) => {
-            Err(error.context(format!("Run execution also failed to settle: {settlement}")))
-        }
+        (Err(error), Err(settlement)) => Err(error.context(format!(
+            "Session execution also failed to settle: {settlement}"
+        ))),
         (Err(error), Ok(())) => Err(error),
-        (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
+        (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
         (Ok(()), Ok(())) => Ok(capture.final_answer()?),
     }
 }
@@ -1627,7 +1627,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let implicit_identities = std::fs::read_to_string(implicit_evidence).unwrap();
         let identities = implicit_identities.lines().collect::<Vec<_>>();
         assert_eq!(identities.len(), 2, "transient failure should retry once");
-        assert_eq!(identities[0], identities[1], "retry must stay in one Run");
+        assert_eq!(
+            identities[0], identities[1],
+            "retry must stay in one Session"
+        );
         let fields = identities[0].split('|').collect::<Vec<_>>();
         assert_eq!(&fields[2..], ["unset", "unset"]);
         let implicit_run_id = crate::session_record::parse_artifact_key(fields[0]).unwrap();

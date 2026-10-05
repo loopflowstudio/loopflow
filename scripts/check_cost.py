@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize check time and submitted context by skill from local Run records."""
+"""Summarize check time and submitted context by skill from Session capture records."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def _span_seconds(spans: list[tuple[float, float]]) -> float:
 def _context(directory: Path) -> dict[str, int]:
     path = directory / "context.json"
     if not path.exists():
-        return {"missing_context_runs": 1}
+        return {"missing_context_captures": 1}
     context = json.loads(path.read_text())["context"]
     result: Counter[str] = Counter()
     for channel in ("system", "task"):
@@ -161,19 +161,19 @@ def _command_cost(directory: Path, created: float, finished: float) -> Counter[s
     return result
 
 
-def summarize(runs: Path, repo: Path, since: str, until: str) -> dict[str, Any]:
+def summarize(captures: Path, repo: Path, since: str, until: str) -> dict[str, Any]:
     start, end = _timestamp(since), _timestamp(until)
     identities: dict[str, Path] = {}
     steps: dict[str, Counter[str]] = defaultdict(Counter)
-    unavailable_repository_runs = 0
-    for path in sorted(runs.glob("*/*/manifest.json")):
+    unavailable_repository_captures = 0
+    for path in sorted(captures.glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
         created = _timestamp(manifest["created_at"])
         if not start <= created < end or not manifest.get("repo"):
             continue
         source = manifest["repo"]
         if not Path(source).exists():
-            unavailable_repository_runs += 1
+            unavailable_repository_captures += 1
             continue
         if source not in identities:
             identities[source] = canonical_repo(Path(source))
@@ -181,32 +181,33 @@ def summarize(runs: Path, repo: Path, since: str, until: str) -> dict[str, Any]:
             continue
         step = manifest.get("skill") or "unattributed"
         result = steps[step]
-        result["observed_runs"] += 1
+        result["observed_captures"] += 1
         terminal = path.parent / "terminal.json"
         if not terminal.exists():
-            result["unsettled_runs"] += 1
+            result["unsettled_captures"] += 1
             continue
         finished = _timestamp(json.loads(terminal.read_text())["ended_at"])
         if finished > end:
-            result["unfinished_at_cutoff_runs"] += 1
+            result["unfinished_at_cutoff_captures"] += 1
             continue
-        result["settled_runs"] += 1
-        result["run_seconds"] += max(0, finished - created)
+        result["settled_captures"] += 1
+        result["capture_seconds"] += max(0, finished - created)
         result.update(_context(path.parent))
         result.update(_command_cost(path.parent, created, finished))
     return {
         "schema_version": 1,
         "repository": str(repo),
-        "unavailable_repository_runs": unavailable_repository_runs,
+        "unavailable_repository_captures": unavailable_repository_captures,
         "since": since,
         "until": until,
         "steps": {step: dict(values) for step, values in sorted(steps.items())},
         "method": "Missing repository paths are unattributable and excluded. "
-        "Settled Runs in the start-time window, canonical repository identity. "
-        "Shell/check seconds union observed command spans within each Run; overlapping Runs "
+        "Settled captures in the start-time window, canonical repository identity. "
+        "Shell/check seconds union observed command spans within each capture; "
+        "overlapping captures "
         "are separate work. Check classification is a shell-word command-family heuristic. "
         "Context tokens are captured channel/asset counts, not total provider consumption. "
-        "No-command Runs and unsettled Runs are counted explicitly, not inferred idle.",
+        "No-command captures and unsettled captures are counted explicitly, not inferred idle.",
     }
 
 
@@ -214,7 +215,7 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]
     comparisons = {}
     for step, after in current["steps"].items():
         before = baseline["steps"].get(step, {})
-        if not before.get("run_seconds") or not after.get("run_seconds"):
+        if not before.get("capture_seconds") or not after.get("capture_seconds"):
             continue
         if any(
             report.get(gap)
@@ -222,11 +223,11 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]
             for gap in ("runs_without_command_records", "commands_without_start")
         ):
             continue
-        old = 100 * before.get("check_seconds", 0) / before["run_seconds"]
-        new = 100 * after.get("check_seconds", 0) / after["run_seconds"]
+        old = 100 * before.get("check_seconds", 0) / before["capture_seconds"]
+        new = 100 * after.get("check_seconds", 0) / after["capture_seconds"]
         comparisons[step] = {
-            "baseline_runs": before["settled_runs"],
-            "current_runs": after["settled_runs"],
+            "baseline_captures": before["settled_captures"],
+            "current_captures": after["settled_captures"],
             "baseline_check_percent": old,
             "current_check_percent": new,
             "change_percentage_points": new - old,
@@ -236,13 +237,13 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs", type=Path, required=True)
+    parser.add_argument("--captures", type=Path, required=True)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--since", required=True, help="ISO timestamp with UTC offset")
     parser.add_argument("--until", required=True, help="exclusive ISO cutoff with UTC offset")
     parser.add_argument("--baseline", type=Path, help="compare with a saved aggregate JSON report")
     args = parser.parse_args()
-    report = summarize(args.runs, canonical_repo(args.repo), args.since, args.until)
+    report = summarize(args.captures, canonical_repo(args.repo), args.since, args.until)
     if args.baseline:
         report["comparison"] = compare(json.loads(args.baseline.read_text()), report)
     print(json.dumps(report, indent=2))

@@ -1366,7 +1366,7 @@ fn run() -> anyhow::Result<()> {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Home, repository, account, or Run state. Its
+    // Screenshot capture owns no Home, repository, account, or Session state. Its
     // hidden supervisor must also be able to clean up after its public parent
     // dies, so both forms dispatch before those unrelated boundaries.
     match &cli.command {
@@ -1732,7 +1732,7 @@ fn execute_command(
             tokio::runtime::Runtime::new()?
                 .block_on(loopflow::controller::task::run_worker(task_id.clone()))
         }),
-        // Local document access owns no Run lifecycle. Placement and the recorded
+        // Local document access owns no Session lifecycle. Placement and the recorded
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
             cmd:

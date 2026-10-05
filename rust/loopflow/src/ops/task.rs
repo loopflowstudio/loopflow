@@ -6979,7 +6979,7 @@ time.sleep(30)
 
         exec_task_process(&store, &mut task, None).await.unwrap();
 
-        // A parked human boundary keeps its Session's reserved Run without
+        // A parked human boundary keeps its Session's reserved capture without
         // launching a provider; everything else about the position is untouched.
         let stored = store.task_flow(&task.id).await.unwrap().unwrap();
         let sessions = store
@@ -7381,7 +7381,7 @@ time.sleep(30)
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes process-wide Run env
+    #[allow(clippy::await_holding_lock)] // the guard serializes process-wide capture environment
     async fn parent_run_cannot_override_task_worktree_resolution() {
         let _lock = crate::journal::test_env_lock();
         let _environment =

@@ -74,7 +74,7 @@ is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
 Task status and `lf mon list` show up to 50 Runs started in the last seven days.
-Inspect an exact Run ID for older evidence; an empty recent list does not prove
+Inspect an exact Session with `lf mon show <session> --input <capture>` for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
 Answer an exact pending question, send unsolicited durable direction through

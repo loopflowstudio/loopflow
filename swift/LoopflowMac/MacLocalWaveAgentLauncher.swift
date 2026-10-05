@@ -166,7 +166,7 @@ enum LocalWaveAgentLauncher {
         return bundled.path
     }
 
-    /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
+    /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.

@@ -1,39 +1,22 @@
-# LOO-370 execution decisions — October 4
+# LOO-370 decisions — October 5
 
-Jack Heart authorized autonomous implementation, verification and landing. The
-previous design-review hold is superseded; no additional product approval is
-required for reversible source design choices. Jack suggested `sessions/` for
-the retired `runs/` layout; implementation must resolve the actual capture owner
-without treating an artifact key as a Session ID.
+The updated Task brief accepts Infrastructure's opaque `runs/` root choice under
+Jack Heart's delegated autonomous direction. The former conversion/boot-custody
+blocker is superseded by an explicit scope change. No further product decision
+is pending. Keep one physical root and prove semantic/runtime preservation.
 
-Use the existing Task and checkout. Prove preservation and interrupted conversion
-in isolation. Do not migrate the installed Home or interrupt live conversations.
-The earlier offline-window proposal remains a deployment design choice to test,
-not evidence that a configured maintenance window has been performed or approved.
+The prior investigation and contrary evidence remain at
+`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46:scratch/finish-removing-the-retired-run.md`.
+No installed-Home mutation, live interruption, installation or release is authorized.
+The current plan is [Finish the Run cutover](finish-removing-the-retired-run.md).
 
-Current design: [Finish the Run cutover](finish-removing-the-retired-run.md).
+## Local installation-test exclusion
 
-## Earlier runtime recovery evidence
-
-The October 4 restart/admission failure is preserved at
-`0faa2502a:scratch/questions.md`. This implementation used the supplied checkout;
-no competing worker, manual Session completion or database repair was performed.
-That earlier observation does not establish the current state of those Execs.
-
-## Verification and integration
-
-October 5 builds supersede the October 4 disk-capacity limitation. Its diagnostics,
-the sync onto `8ea0bec9c`, and the Session CLI run (9/10 followed by the repaired
-case passing 1/1) remain at
-`71a784cdf5135fad8b26a21ddd6ea1ab354c4a93:scratch/questions.md`.
-No installed data, unrelated writer or other checkout was changed. Conversion,
-populated released-Home preservation and the affected gate remain outstanding.
-
-## October 5 unresolved decision
-
-The [offline recovery decision](finish-removing-the-retired-run.md#offline-recovery-decision--october-5-steer)
-owns the external-custody contract, feasibility evidence and opaque-path comparison.
-No concrete Mac storage/boot owner is proved. Retaining one opaque `runs/` root
-would change acceptance and is not authorized. Conversion remains unimplemented;
-no live interruption or permission-helper refinement is selected. Full prior
-notes remain at `b6cfe0521:scratch/questions.md`.
+Jack Heart's October 5 steer `bc7a98f5-2796-4786-9372-5c334cb9a046` forbids
+these host tests because getpwuid bypasses HOME/LF_HOME isolation:
+`global_commands::installation_uses_candidate_authority_from_any_checkout`,
+`global_commands::installation_reaches_candidate_verdict_with_an_unreadable_task_registry`,
+and `exec_ownership_tests::early_observation_records_preflight_and_screenshot_child_ancestry`.
+PR #1444 moves their unchanged assertions to `scripts/test_task_installation.py`
+under disposable OS accounts. Gate must reuse that repair after integration or
+leave these checks to isolated CI; do not delete or weaken them.

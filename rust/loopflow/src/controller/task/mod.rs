@@ -715,7 +715,7 @@ mod planning_tests {
         store.update_task(&task).await.unwrap();
         let resumed = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(resumed.agent.as_deref(), Some("claude:sonnet"));
-        // Parking at the review reserves its Run; the choice lands on that row.
+        // Parking at the review reserves its capture; the choice lands on that row.
         let mut flow = store.start_task_flow(&task.id, flow.clone()).await.unwrap();
         flow = store
             .reserve_task_review(flow.id(), flow.version)

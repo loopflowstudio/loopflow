@@ -3413,7 +3413,7 @@ mod tests {
                 super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
             }
             // Interrupt after artifacts, before SQL publication. There must be
-            // no capture Drop receipt falsely settling the prepared Run.
+            // no capture Drop receipt falsely settling the prepared capture.
             let denied = || {
                 Err(crate::store::StoreError::InvalidAuthority(
                     "interrupted publication".into(),
@@ -3710,7 +3710,7 @@ mod tests {
             },
             final_receipt: false,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"type\":\"usage\""));
@@ -4047,7 +4047,7 @@ mod tests {
             output_tokens: Some(5),
             cache_read_tokens: None,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"account_id\":\"fallback-account\""));

@@ -870,66 +870,28 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
-Reproduce the retained-alias counterexample without Docker or privileges:
+### Released capture-history preservation
 
 ```bash
-uv run python tests/e2e/capture_exclusion.py --probe-aliases
+uv run python tests/e2e/capture_history.py \
+  --released-archive /tmp/lf-aarch64-apple-darwin.tar.gz \
+  --candidate target/debug/lf
 ```
 
-Newly opened hard links outside an inaccessible temporary directory can modify
-its payload and SQLite database. No descriptor survives from before exclusion.
-The probe restores permissions and removes its own files; it uses no installed
-Home. This disproves directory permissions as the sole conversion boundary.
+Supply the matching v0.13.3 CLI archive from its published release. The fixture
+checks its pinned SHA256 before extraction, creates a temporary Home with stub
+providers, and exercises ordinary public commands with both binaries. It preserves
+capture paths/bytes, native identity, usage and released review feedback through
+candidate reads, replay, resume, review settlement and nested Exec ancestry.
+`runs/` remains the one opaque capture root; no migration or installation runs.
+Provider and terminal transport are simulated, so this is not installed acceptance.
 
-Reproduce interrupted sealing with a writable shared parent:
-
-```bash
-uv run python tests/e2e/capture_exclusion.py --probe-recovery
-```
-
-The probe fsyncs original inode identities and metadata, then kills workers at
-ownership/mode boundaries during sealing and restoration. The portable variant
-changes modes only; ownership mutations require the container. A shared-parent
-replacement before recovery is detected without changing either history. A
-replacement **after** recovery's identity check instead receives the original
-file's permissions while recovery reports success. Pipe barriers reproduce this
-race without sleeps, and unrelated writes continue in both cases.
-
-Only the fixture repairs the namespace. Two fresh processes then restore metadata
-from the receipt, including after interrupted restoration. These are counterexamples
-and conditional retry proofs, not safe installer recovery, admission exclusion,
-quiescence or power-loss proof. The container repeats the cases with root-owned
-inodes and an unprivileged replacing process.
-
-Probe released commands, hard links and external storage in isolation:
-
-```bash
-uv run python scripts/test_capture_exclusion.py
-```
-
-The runner builds a disposable Ubuntu 24.04 image containing only the fixture
-and the published v0.13.3 Linux CLI, verified against its pinned release checksum.
-Downloads finish before the experiment starts with `--network none`, no host
-mounts or credentials. It removes its named container and image afterward.
-`.github/workflows/capture-exclusion.yml` runs it for changes to the experiment,
-including PR checkpoints that retain scratch. A missing Docker service is an
-unavailable check, never a passing exclusion result.
-
-The fixture creates its own account and Home. It attempts direct released
-preflight, doctor and screenshot commands before exclusion, while a privileged
-worker accesses that Home, and after worker death. It compares database/payload
-bytes and filesystem ownership, retaining the directory-only and open-descriptor
-counterexamples. Inode sealing additionally tests `chmod` through outside hard
-links, an aliased database selected by `LF_HOME`, and external payload storage
-reached through a symlink. Namespace replacement must fail while sealed. Writes
-must succeed again after restoring the fixture's original ownership and modes.
-The privileged reader uses immutable SQLite access to avoid creating its own WAL.
-
-The full sealing probe still uses fixed roots and in-memory metadata. The separate
-interruption probe has a durable fixture receipt, not candidate recovery or a
-complete interruption matrix. Neither establishes ACL/mount coverage, shared-namespace
-preservation, general quiescence, a candidate converter, populated Session
-preservation, macOS privileged exclusion or recovery targeting.
+Pair this with `session_lifecycle_tests`' interruption, nested Task attribution and
+review replacement cases and `session_cli_tests`' stale actor/identity cases.
+Full affected verification belongs to gate. Do not run installation preflight or
+promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
+uses getpwuid. The three tests named in LOO-370's current isolation steer remain
+isolated-CI owned until PR #1444's disposable-account runner is integrated.
 
 ## Nightly Package Tests
 

@@ -97,3 +97,10 @@ enum Perf {
         return (Date().timeIntervalSince1970 - started) * 1000
     }
 }
+
+extension ContinuousClock.Instant {
+    var elapsedMs: Double {
+        let elapsed = ContinuousClock.now - self
+        return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
+    }
+}

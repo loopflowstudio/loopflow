@@ -6,9 +6,9 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 
 use super::{
-    ask_background_name, ask_exec_is_running, capture_is_prepared, lock_session_exec,
-    publish_prepared_input, session_not_found, start_durable_session, surface, NativeSession,
-    SessionRecord,
+    capture_is_prepared, conversation_background_name, conversation_exec_is_running,
+    lock_session_exec, publish_prepared_input, session_not_found, start_durable_session, surface,
+    NativeSession, SessionRecord,
 };
 use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
@@ -21,7 +21,7 @@ pub(crate) async fn ensure(
     repo: &Path,
     wave: Option<&str>,
 ) -> Result<SessionRecord> {
-    let (scope, session) = match wave {
+    let (scope, mut session) = match wave {
         Some(wave) => {
             let binding =
                 crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?;
@@ -37,6 +37,7 @@ pub(crate) async fn ensure(
         }
     };
     let _lock = lock_scope(&scope).await?;
+    session.cwd = ensure_scope_worktree(&session.cwd, &scope)?.path;
     let session = store.ensure_primary_session(&scope, None, session).await?;
     start(store, session).await
 }
@@ -59,17 +60,64 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
         stop_client(&previous)
             .with_context(|| format!("stop primary Session {id}; it remains primary"))?;
     }
-    let successor = match &scope {
+    let mut successor = match &scope {
         PrimaryScope::Repository(repo) => repository_session(repo),
         PrimaryScope::Wave(wave) => wave_session(
             &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}"))
                 .await?,
         ),
     };
+    successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
     start(store, session).await
+}
+
+pub(crate) fn ensure_scope_worktree(
+    repo: &Path,
+    scope: &PrimaryScope,
+) -> Result<crate::engine::worktrees::AgentWorktree> {
+    use crate::engine::worktrees::{ensure_agent_worktree, wave_agent_segment, WorktreeSegment};
+    let segment = match scope {
+        PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
+        PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
+    };
+    Ok(ensure_agent_worktree(repo, segment)?)
+}
+
+/// Adapt only at an idle driver boundary. Historical captures and native
+/// conversation identity remain attached to the same Session.
+pub(super) async fn admit_workspace(
+    store: &SharedStore,
+    mut session: AgentSession,
+) -> Result<AgentSession> {
+    let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
+        return Ok(session);
+    };
+    if conversation_exec_is_running(&session.id).await?
+        || !NativeSession::of(&session)?.clients()?.is_empty()
+    {
+        return Ok(session);
+    }
+    let repo = match &scope {
+        PrimaryScope::Repository(repo) => repo.as_path().to_path_buf(),
+        PrimaryScope::Wave(id) => {
+            let wave = store
+                .get_wave(id)
+                .await?
+                .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
+            std::path::PathBuf::from(wave.repo())
+        }
+    };
+    let workspace = ensure_scope_worktree(&repo, &scope)?;
+    if session.cwd != workspace.path {
+        store
+            .sqlite
+            .move_primary_workspace(&session, &workspace.path)?;
+        session.cwd = workspace.path;
+    }
+    Ok(session)
 }
 
 fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
@@ -132,6 +180,13 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 /// Publish the admitted input and launch it unless a launcher already holds
 /// it. A failed start keeps the prepared input for the next caller.
 async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionRecord> {
+    let session = if conversation_exec_is_running(&session.id).await? {
+        session
+    } else {
+        let id = session.id.clone();
+        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+        admit_workspace(store, session).await?
+    };
     let session = if session.input_published {
         session
     } else {
@@ -141,22 +196,28 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
             crate::session_record::SessionFlowMembership::Independent,
         )?
     };
-    if capture_is_prepared(&session.artifact_key)? && !ask_exec_is_running(&session.id).await? {
+    if capture_is_prepared(&session.artifact_key)?
+        && !conversation_exec_is_running(&session.id).await?
+    {
         let lf = crate::engine::process::resolve_pinned_lf_binary()?;
         let argv = vec![
             lf.to_string_lossy().to_string(),
             "session".to_string(),
-            "serve-ask".to_string(),
+            "serve-conversation".to_string(),
             session.artifact_key.to_string(),
         ];
-        start_durable_session(&ask_background_name(&session.id), &session.cwd, &argv, &[])
-            .await
-            .with_context(|| {
-                format!(
-                    "launch primary Session {}; run the same command to retry",
-                    session.id
-                )
-            })?;
+        start_durable_session(
+            &conversation_background_name(&session.id),
+            &session.cwd,
+            &argv,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "launch primary Session {}; run the same command to retry",
+                session.id
+            )
+        })?;
     }
     surface(store, &session).await
 }
@@ -187,8 +248,10 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
 #[cfg(test)]
 mod tests {
     use super::{ensure, replace};
-    use crate::ops::human_session::tests::{AskHome, ASK_LAUNCHERS, FAILED_ASK_LAUNCHERS};
-    use crate::ops::human_session::{action_test::NativeClients, ask_background_name};
+    use crate::ops::human_session::tests::{
+        SessionHome, CONVERSATION_LAUNCHERS, FAILED_CONVERSATION_LAUNCHERS,
+    };
+    use crate::ops::human_session::{action_test::NativeClients, conversation_background_name};
     use crate::session::SessionKind;
 
     async fn wave(
@@ -203,7 +266,7 @@ mod tests {
     #[test]
     fn ensure_finds_the_same_wave_conversation_and_launches_once() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
@@ -219,10 +282,10 @@ mod tests {
                 .unwrap();
 
             assert_eq!(first.id, second.id);
-            assert!(ASK_LAUNCHERS
+            assert!(CONVERSATION_LAUNCHERS
                 .lock()
                 .unwrap()
-                .contains(&ask_background_name(&first.id)));
+                .contains(&conversation_background_name(&first.id)));
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(session.kind, SessionKind::Conversation);
             assert!(session.interactive && session.input_published);
@@ -233,9 +296,38 @@ mod tests {
     }
 
     #[test]
+    fn opening_waits_for_completion_under_the_launch_lock() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let repo = loopflow_test_support::TestRepo::new();
+            let record = ensure(&store, repo.path(), None).await.unwrap();
+            let session = store.session(&record.id).await.unwrap().unwrap();
+            let lock = super::lock_session_exec(&session.id).unwrap();
+            let opening = super::super::open_waiting(&store, &session.id);
+            tokio::pin!(opening);
+            tokio::select! {
+                biased;
+                result = &mut opening => panic!("opened while locked: {result:?}"),
+                () = async {
+                    store.complete_session(&session.id, session.captured).await.unwrap();
+                    drop(lock);
+                } => {}
+            }
+            assert!(opening
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("already complete"));
+            assert_eq!(store.session_inputs(&session.id).await.unwrap().len(), 1);
+        });
+    }
+
+    #[test]
     fn failed_start_keeps_the_session_for_the_next_ensure() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
@@ -246,26 +338,29 @@ mod tests {
             let admitted = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
-            let name = ask_background_name(&admitted.id);
-            ASK_LAUNCHERS.lock().unwrap().remove(&name);
-            FAILED_ASK_LAUNCHERS.lock().unwrap().insert(name.clone());
+            let name = conversation_background_name(&admitted.id);
+            CONVERSATION_LAUNCHERS.lock().unwrap().remove(&name);
+            FAILED_CONVERSATION_LAUNCHERS
+                .lock()
+                .unwrap()
+                .insert(name.clone());
             assert!(ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .is_err());
 
-            FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
+            FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
             let retried = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             assert_eq!(retried.id, admitted.id);
-            assert!(ASK_LAUNCHERS.lock().unwrap().contains(&name));
+            assert!(CONVERSATION_LAUNCHERS.lock().unwrap().contains(&name));
         });
     }
 
     #[test]
     fn replace_stops_the_predecessor_and_repeats_to_the_same_successor() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
@@ -303,7 +398,7 @@ mod tests {
     #[test]
     fn a_repository_without_waves_has_its_own_conversation() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
@@ -341,9 +436,73 @@ mod tests {
     }
 
     #[test]
+    fn scope_workspaces_survive_replacement_without_task_membership() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let repo = loopflow_test_support::TestRepo::new();
+            wave(&store, &repo).await;
+            let mut workspaces = Vec::new();
+            for scope in [None, Some("infrastructure")] {
+                let first = ensure(&store, repo.path(), scope).await.unwrap();
+                let session = store.session(&first.id).await.unwrap().unwrap();
+                assert_ne!(session.cwd, repo.path());
+                std::fs::create_dir_all(session.cwd.join("scratch")).unwrap();
+                std::fs::write(session.cwd.join("scratch/plan.md"), "private plan").unwrap();
+                std::fs::write(session.cwd.join("memory.md"), "durable decision").unwrap();
+                let successor = replace(&store, &first.id).await.unwrap();
+                let session = store.session(&successor.id).await.unwrap().unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(session.cwd.join("scratch/plan.md")).unwrap(),
+                    "private plan"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(session.cwd.join("memory.md")).unwrap(),
+                    "durable decision"
+                );
+                let mut records = vec![successor];
+                crate::ops::human_session::workspace::associate(&store, &mut records)
+                    .await
+                    .unwrap();
+                let workspace = records[0].workspace.as_ref().unwrap();
+                assert_eq!(workspace.task_id, None);
+                assert!(records[0].task_ids.is_empty());
+                workspaces.push(session.cwd);
+            }
+            assert_ne!(workspaces[0], workspaces[1]);
+        });
+    }
+
+    #[test]
+    fn idle_primary_adopts_persistent_workspace_without_losing_identity() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let repo = loopflow_test_support::TestRepo::new();
+            let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+            let previous = store
+                .ensure_primary_session(
+                    &crate::session::PrimaryScope::Repository(canonical.clone()),
+                    None,
+                    super::repository_session(&canonical),
+                )
+                .await
+                .unwrap();
+            let first = ensure(&store, repo.path(), None).await.unwrap();
+            let admitted = store.session(&first.id).await.unwrap().unwrap();
+            assert_eq!(admitted.id, previous.id);
+            assert_eq!(admitted.title, previous.title);
+            assert_eq!(admitted.artifact_key, previous.artifact_key);
+            assert_ne!(admitted.cwd, previous.cwd);
+        });
+    }
+
+    #[test]
     fn replace_refuses_an_ordinary_conversation() {
         let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
+        let home = SessionHome::new();
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let error = replace(&store, "not-a-primary").await.unwrap_err();

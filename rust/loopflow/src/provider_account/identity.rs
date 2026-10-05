@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use secrecy::ExposeSecret;
 use sha2::{Digest, Sha256};
 
 use crate::provider_auth::{codex_identity_from_home, Provider};
@@ -93,7 +94,7 @@ pub(crate) async fn validate_observed_identity(
         if let Some(home) = other
             .home
             .as_deref()
-            .filter(|home| home.join(".credentials.json").is_file())
+            .filter(|home| claude_login(home).is_some())
         {
             let observed = crate::subscription::claude_identity(home).await?;
             other.observed_email = Some(observed.email);
@@ -137,8 +138,49 @@ pub(crate) fn cached_identity(account: &ProviderAccount) -> Option<AccountIdenti
 }
 
 fn current_credential_digest(account: &ProviderAccount) -> Option<String> {
-    let raw = std::fs::read_to_string(account.home.as_ref()?.join(".credentials.json")).ok()?;
-    Some(credential_digest(&raw))
+    Some(credential_digest(&claude_login(account.home.as_ref()?)?))
+}
+
+pub(crate) fn claude_login(home: &Path) -> Option<String> {
+    let login = crate::provider_auth::read_claude_login(home).ok()??;
+    Some(login.expose_secret().clone())
+}
+
+/// Whether two homes hold a credential for the same person. A Codex login
+/// names its person. A Claude login is opaque, so only a shared token proves
+/// it: once the provider rotates both, the answer needs
+/// `activation::observe_active_account`.
+pub(crate) fn same_login(provider: Provider, left: &Path, right: &Path) -> bool {
+    if provider == Provider::Claude {
+        return match (claude_login(left), claude_login(right)) {
+            (Some(left), Some(right)) => same_claude_grant(&left, &right),
+            _ => false,
+        };
+    }
+    match (
+        codex_identity_from_home(left),
+        codex_identity_from_home(right),
+    ) {
+        (Some(left), Some(right)) => left.same_login(&right),
+        _ => false,
+    }
+}
+
+fn same_claude_grant(left: &str, right: &str) -> bool {
+    let (Ok(left), Ok(right)) = (
+        serde_json::from_str::<serde_json::Value>(left),
+        serde_json::from_str::<serde_json::Value>(right),
+    ) else {
+        return false;
+    };
+    let left = left.get("claudeAiOauth").unwrap_or(&left);
+    let right = right.get("claudeAiOauth").unwrap_or(&right);
+    ["accessToken", "refreshToken"].into_iter().any(|name| {
+        left[name]
+            .as_str()
+            .filter(|token| !token.is_empty())
+            .is_some_and(|token| right[name].as_str() == Some(token))
+    })
 }
 
 pub(crate) fn credential_digest(credential: &str) -> String {
@@ -189,7 +231,7 @@ pub(crate) fn acquire_identity_install_lock(account_home: &Path) -> anyhow::Resu
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{check_account_identity, validate_identity};
+    use super::{check_account_identity, same_claude_grant, validate_identity};
     use crate::profile::EmailAddress;
     use crate::provider_account::{new_account, order_accounts_by_strain};
     use crate::provider_auth::{codex_identity_from_home, Provider};
@@ -206,6 +248,29 @@ pub(crate) mod tests {
         account.observed_email = Some(account.login_email.as_ref().unwrap().to_string());
         account.observed_subject = Some(account.account_id.to_string());
         account.observed_credential_digest = Some(super::credential_digest(&raw));
+    }
+
+    #[test]
+    fn claude_login_matches_while_either_token_survives_rotation() {
+        let original = r#"{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}}"#;
+        for (replacement, matches) in [
+            (r#"{"accessToken":"access","refreshToken":"rotated"}"#, true),
+            (
+                r#"{"accessToken":"rotated","refreshToken":"refresh"}"#,
+                true,
+            ),
+            (r#"{"accessToken":"other","refreshToken":"other"}"#, false),
+            ("{}", false),
+            ("invalid", false),
+        ] {
+            assert_eq!(same_claude_grant(original, replacement), matches);
+            assert_eq!(same_claude_grant(replacement, original), matches);
+        }
+        assert!(!same_claude_grant("{}", "{}"));
+        assert!(!same_claude_grant(
+            r#"{"accessToken":""}"#,
+            r#"{"accessToken":""}"#
+        ));
     }
 
     fn account(root: &Path, id: &str, email: &str, subject: &str) -> crate::store::ProviderAccount {

@@ -147,6 +147,8 @@ while read -r line; do :; done
 "#,
     );
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    // Isolated launches run in the routed account's own home.
+    std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
     struct RestoreLfBin(Option<std::ffi::OsString>);
     impl Drop for RestoreLfBin {
         fn drop(&mut self) {

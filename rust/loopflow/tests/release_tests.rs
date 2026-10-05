@@ -27,11 +27,11 @@ fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
 }
 
 fn write_gh_incomplete_release_script() -> &'static str {
-    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') echo 'release not found' >&2; exit 1;;\n  'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
 fn write_gh_failed_release_script() -> &'static str {
-    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') echo 'release not found' >&2; exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
 fn write_gh_candidate_release_script(log_path: &str, conclusion: &str) -> String {
@@ -120,6 +120,7 @@ case "$1 $2" in
       echo '{{"isDraft":false}}'
       exit 0
     fi
+    echo 'release not found' >&2
     exit 1;;
 esac
 echo "unexpected gh invocation: $*" >&2
@@ -187,7 +188,7 @@ JSON
     if [ "$queued" = 1 ]; then echo 'queued work is already armed' >&2; exit 56; fi
     touch "$armed"
     exit 0;;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
 esac
 echo "unexpected gh invocation: $*" >&2
 exit 1
@@ -266,7 +267,7 @@ JSON
     fi
     exit 0;;
   'pr ready'|'pr edit') exit 0;;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
 esac
 echo "unexpected gh invocation: $*" >&2
 exit 1
@@ -738,6 +739,7 @@ fn release_check_returns_merged_prs() {
     fs::write(repo.path().join("feature.txt"), "new stuff\n").unwrap();
     git(&repo, &["add", "feature.txt"]);
     git(&repo, &["commit", "-m", "Add feature"]);
+    repo.push();
     let sha = git_output(&repo, &["rev-parse", "HEAD"]);
     let old_sha = git_output(&repo, &["rev-parse", "v0.9.0"]);
     let pr_list = format!(
@@ -763,6 +765,7 @@ fn release_check_uses_direct_commits_as_release_truth() {
     fs::write(repo.path().join("direct.txt"), "shipped without a PR\n").unwrap();
     git(&repo, &["add", "direct.txt"]);
     git(&repo, &["commit", "-m", "Ship a direct commit"]);
+    repo.push();
 
     let changes = release_check(repo.path(), None).expect("check should succeed");
 
@@ -949,6 +952,7 @@ fn release_run_is_a_green_noop_without_merged_changes() {
         ReleaseRunOutcome::NoChanges {
             target: "default".to_string(),
             latest_tag: Some("v0.9.1".to_string()),
+            origin_commit: git_output(&repo, &["rev-parse", "HEAD"]),
         }
     );
 }
@@ -992,7 +996,11 @@ case "$1 $2" in
       *' number=100 '*) branch=jack/release-default-v0-10-0 ;;
       *) exit 1 ;;
     esac ;;
-  'release view') echo '{{"isDraft":false}}'; exit 0 ;;
+  'release view')
+    if git ls-remote --tags origin "refs/tags/$3" | grep -q .; then
+      echo '{{"isDraft":false}}'; exit 0
+    fi
+    echo 'release not found' >&2; exit 1 ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
 esac
 case "$branch" in
@@ -1175,6 +1183,38 @@ fn interrupted_minor_reuses_its_published_patch() {
 }
 
 #[test]
+fn interrupted_minor_adopts_a_completed_successor_patch() {
+    let repo = TestRepo::new();
+    prepare_minor_cycle(&repo, false);
+    let state = tempfile::tempdir().unwrap();
+    let receipt_path = repo.path().join(".lf/releases/minor-default.json");
+    fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
+    fs::write(
+        &receipt_path,
+        r#"{
+        "version":"0.10.0", "patch_version":"0.9.0", "notes_base":"v0.9.0",
+        "patch_commit":null, "prepared_tree":null, "completed":false
+    }"#,
+    )
+    .unwrap();
+    let (gh, lf) = minor_release_scripts(state.path());
+    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
+
+    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Released(receipt) = result else {
+        panic!("expected minor from the completed successor patch")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    let pair: serde_json::Value = serde_json::from_slice(&fs::read(receipt_path).unwrap()).unwrap();
+    assert_eq!(pair["patch_version"], "0.9.1");
+    assert_eq!(
+        pair["patch_commit"],
+        git_output(&repo, &["rev-parse", "v0.9.1"])
+    );
+    assert!(git_output(&repo, &["tag", "--list", "v0.9.2"]).is_empty());
+}
+
+#[test]
 fn minor_release_does_not_tag_a_merge_that_changed_its_patch_snapshot() {
     let repo = TestRepo::new();
     prepare_minor_cycle(&repo, false);
@@ -1224,6 +1264,7 @@ fn release_run_checks_the_host_local_publisher_role() {
         ReleaseRunOutcome::NoChanges {
             target: "default".to_string(),
             latest_tag: Some("v0.9.1".to_string()),
+            origin_commit: git_output(&repo, &["rev-parse", "HEAD"]),
         }
     );
 }
@@ -1265,6 +1306,107 @@ fn release_run_proves_the_candidate_before_pushing_the_version_tag() {
 }
 
 #[test]
+fn release_run_replaces_a_merged_candidate_with_unprepared_migrations() {
+    prove_unprepared_candidate_recovery(false, false);
+}
+
+#[test]
+fn release_run_preserves_an_invalid_tag_and_publishes_its_successor() {
+    prove_unprepared_candidate_recovery(true, false);
+}
+
+#[test]
+fn release_run_preserves_partially_published_invalid_candidates() {
+    prove_unprepared_candidate_recovery(true, true);
+}
+
+fn prove_unprepared_candidate_recovery(tagged: bool, partially_published: bool) {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    let publisher = repo.path().join("publisher.sh");
+    let publications = if partially_published {
+        r#"["crates.io"]"#
+    } else {
+        "[]"
+    };
+    let inspection = format!(
+        r#"inspect)
+    if git cat-file -e "$3:pending.sql" 2>/dev/null; then
+      echo '{{"preparation_required":["pending.sql"],"publications":{publications}}}'
+    else
+      echo '{{"preparation_required":[],"publications":[]}}'
+    fi
+    exit 0 ;;"#
+    );
+    let script = fs::read_to_string(&publisher)
+        .unwrap()
+        .replace("v0-9-2", "v0-9-3")
+        .replace(
+            r#"inspect) echo '{"preparation_required":[],"publications":[]}'; exit 0 ;;"#,
+            &inspection,
+        );
+    fs::write(&publisher, script).unwrap();
+    fs::write(repo.path().join("pending.sql"), "SELECT 1;\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &[
+            "commit",
+            "-m",
+            "Merge a migration after release preparation",
+        ],
+    );
+    let invalid = git_output(&repo, &["rev-parse", "HEAD"]);
+    if tagged {
+        git(&repo, &["tag", "v0.9.2"]);
+        git(&repo, &["push", "origin", "v0.9.2"]);
+    }
+    fs::rename(
+        repo.path().join("pending.sql"),
+        repo.path().join("canonical.sql"),
+    )
+    .unwrap();
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &["commit", "-m", "Prepare the corrected closing patch"],
+    );
+    git(&repo, &["push", "origin", "HEAD"]);
+    let corrected = git_output(&repo, &["rev-parse", "HEAD"]);
+    let gh = fixture.gh_script
+        .replace("v0.9.2", "v0.9.3")
+        .replace("v0-9-2", "v0-9-3")
+        .replace(r#"head="$(git rev-parse HEAD)""#, &format!(
+            "head=\"$(git rev-parse HEAD)\"\ncase \"$*\" in *release-default-v0-9-2*) head={invalid} ;; esac"
+        ));
+    let _env = EnvGuard::new(&[("gh", &gh)]);
+    let outcome = release_run(repo.path(), "0.9.2", None, &NullProgress);
+    if partially_published {
+        assert!(outcome.unwrap_err().to_string().contains("crates.io"));
+        assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
+    } else {
+        let ReleaseRunOutcome::Released(receipt) = outcome.unwrap() else {
+            panic!("expected the corrected candidate to publish")
+        };
+        assert_eq!(receipt.tag, "v0.9.3");
+        assert_eq!(receipt.commit, corrected);
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.3"]),
+            corrected
+        );
+    }
+    if tagged {
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+            invalid
+        );
+    } else {
+        assert!(git_output(&repo, &["tag", "--list", "v0.9.2"]).is_empty());
+    }
+}
+
+#[test]
 fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
     let repo = TestRepo::new();
     prepare_candidate_release_repo(&repo);
@@ -1278,6 +1420,7 @@ fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
       echo 'version tag existed before publisher preparation' >&2
@@ -1339,6 +1482,165 @@ exit 2
     };
     assert_eq!(receipt.commit, head);
     assert!(receipt.release_exists);
+}
+
+#[test]
+fn release_download_retries_with_fresh_artifacts_for_the_same_candidate() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let fixture = configure_candidate_publisher(&repo, state.path());
+    let download = r#"'run download')
+    [ "$3" = 84 ] || exit 91
+    directory="$5"
+    if [ ! -f "$log.partial" ]; then
+      echo broken > "$directory/partial"
+      echo "$directory" > "$log.partial"
+      echo 'read timeout' >&2
+      exit 1
+    fi
+    [ ! -e "$(cat "$log.partial")" ] || exit 92
+    [ ! -e "$directory/partial" ] || exit 93
+    echo complete > "$directory/artifact"
+    exit 0;;"#;
+    let script = fixture
+        .gh_script
+        .replace("'run download') exit 0;;", download);
+    let publisher = repo.path().join("publisher.sh");
+    let body = fs::read_to_string(&publisher).unwrap()
+        .replace("--output) output=", "--artifacts) artifacts=\"$2\"; shift 2 ;;\n        --output) output=")
+        .replace("    expected=", "    [ ! -e \"$artifacts/partial\" ] || exit 94\n    [ \"$(cat \"$artifacts/artifact\")\" = complete ] || exit 95\n    expected=");
+    fs::write(publisher, body).unwrap();
+    git(&repo, &["add", "publisher.sh"]);
+    git(
+        &repo,
+        &["commit", "-m", "Check downloaded artifact contents"],
+    );
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = repo.head_sha();
+    let _env = EnvGuard::new(&[("gh", &script)]);
+    let ReleaseRunOutcome::Released(receipt) =
+        release_run(repo.path(), "patch", None, &NullProgress).unwrap()
+    else {
+        panic!("expected released candidate")
+    };
+    assert_eq!(receipt.commit, head);
+    assert_eq!(receipt.workflow_run_id, 84);
+    assert_eq!(fs::read_to_string(fixture.attempts).unwrap(), "prepare\n");
+}
+
+#[test]
+fn failed_download_never_prepares_or_tags_a_candidate() {
+    for (failure, attempts) in [("HTTP 403: Forbidden", 1), ("HTTP 503: unavailable", 3)] {
+        let repo = TestRepo::new();
+        let state = tempfile::tempdir().unwrap();
+        let fixture = configure_candidate_publisher(&repo, state.path());
+        let script = fixture.gh_script.replace(
+            "'run download') exit 0;;",
+            &format!("'run download') echo '{failure}' >&2; exit 1;;"),
+        );
+        let _env = EnvGuard::new(&[("gh", &script)]);
+        let error = release_run(repo.path(), "patch", None, &NullProgress).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&format!("after {attempts} attempt")));
+        assert!(!fixture.attempts.exists());
+        assert!(git_output_bare(
+            &repo,
+            &["for-each-ref", "--format=%(refname)", "refs/tags/v0.9.2"]
+        )
+        .is_empty());
+        let log = fs::read_to_string(state.path().join("gh.log")).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.starts_with("run download 84 "))
+                .count(),
+            attempts
+        );
+    }
+}
+
+#[test]
+fn candidate_retry_recovers_lost_ref_and_workflow_acknowledgements() {
+    for boundary in ["ref", "workflow"] {
+        let repo = TestRepo::new();
+        let state = tempfile::tempdir().unwrap();
+        let fixture = configure_candidate_publisher(&repo, state.path());
+        let real_git = Command::new("which").arg("git").output().unwrap();
+        let real_git = String::from_utf8(real_git.stdout).unwrap();
+        let interrupted = state.path().join("interrupted");
+        let git_script = format!(
+            r#"#!/bin/sh
+if [ '{boundary}' = ref ] && [ "$1 $2" = 'push origin' ]; then
+  case "$3" in
+    *:refs/heads/release-candidate/*)
+      if [ ! -f '{marker}' ]; then
+        '{git}' "$@" || exit $?
+        : > '{marker}'
+        echo 'candidate ref acknowledgement lost' >&2
+        exit 74
+      fi ;;
+  esac
+fi
+exec '{git}' "$@"
+"#,
+            marker = interrupted.display(),
+            git = real_git.trim(),
+        );
+        let gh = if boundary == "workflow" {
+            fixture.gh_script.replace(
+                "    : > \"$dispatched\"\n    exit 0;;",
+                &format!("    : > \"$dispatched\"\n    if [ ! -f '{}' ]; then\n      : > '{}'\n      echo 'workflow acknowledgement lost' >&2\n      exit 74\n    fi\n    exit 0;;", interrupted.display(), interrupted.display()),
+            )
+        } else {
+            fixture.gh_script.clone()
+        };
+        let _env = EnvGuard::new(&[("gh", &gh), ("git", &git_script)]);
+        repo.create_file("caller.txt", "staged\n");
+        git(&repo, &["add", "caller.txt"]);
+        repo.create_file("caller.txt", "working\n");
+        repo.create_file("untracked.txt", "untracked\n");
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let branch = git_output(&repo, &["symbolic-ref", "HEAD"]);
+        let error = release_run(repo.path(), "patch", None, &NullProgress).unwrap_err();
+        assert!(
+            error.to_string().contains("acknowledgement lost"),
+            "{error}"
+        );
+        let candidate_ref = format!(
+            "refs/heads/release-candidate/default/v0-9-2/{}",
+            fixture.head
+        );
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", &candidate_ref]),
+            fixture.head
+        );
+        assert!(git_output_bare(&repo, &["tag", "--list", "v0.9.2"]).is_empty());
+        let result = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
+        let ReleaseRunOutcome::Released(receipt) = result else {
+            panic!("expected recovered candidate");
+        };
+        assert_eq!(receipt.commit, fixture.head);
+        assert_eq!(receipt.workflow_run_id, 84);
+        assert_eq!(
+            fs::read_to_string(state.path().join("gh.log.dispatch-count")).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+            fixture.head
+        );
+        assert_eq!(repo.head_sha(), fixture.head);
+        assert_eq!(git_output(&repo, &["symbolic-ref", "HEAD"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("caller.txt")).unwrap(),
+            "working\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+    }
 }
 
 #[test]
@@ -1600,11 +1902,16 @@ fn prove_release_merge_wait(queued: bool) {
 #[test]
 fn release_run_repairs_failed_checks_before_tagging() {
     for awaiting_queue in [false, true] {
-        prove_release_repairs_failed_checks(awaiting_queue);
+        prove_release_repairs_failed_checks(awaiting_queue, false);
     }
 }
 
-fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
+#[test]
+fn release_run_reconciles_a_merge_observed_after_repair_blocks() {
+    prove_release_repairs_failed_checks(false, true);
+}
+
+fn prove_release_repairs_failed_checks(awaiting_queue: bool, stale_after_repair: bool) {
     let merge_state = if awaiting_queue { "BEHIND" } else { "BLOCKED" };
     let state = tempfile::tempdir().unwrap();
     let repaired = state.path().join("repaired");
@@ -1627,13 +1934,16 @@ fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
         }),
     );
     let merged = support::github_merge_response(1309, "$head", "MERGED", "UNKNOWN", None);
+    // Keep the release poll and both repair observations stale. The error-path
+    // refresh is the first authoritative merge observation.
+    let stale_views = if stale_after_repair { 3 } else { 0 };
     let gh = format!(
         r#"#!/bin/sh
 repaired='{}'
 head=$(git rev-parse HEAD)
 case "$1 $2" in
   '--version ') echo 'gh fixture';;
-  'release view') exit 1;;
+  'release view') echo 'release not found' >&2; exit 1;;
   'run list') echo '[]';;
   'pr list')
     case " $* " in
@@ -1649,6 +1959,16 @@ JSON
         ;;
       *)
         if [ -f "$repaired" ]; then
+          count=0
+          [ ! -f "$repaired.views" ] || count=$(cat "$repaired.views")
+          count=$((count + 1))
+          printf '%s' "$count" > "$repaired.views"
+          if [ "$count" -le {stale_views} ]; then
+            cat <<JSON
+{open}
+JSON
+            exit 0
+          fi
           cat <<JSON
 {merged}
 JSON
@@ -1669,12 +1989,14 @@ esac
         &format!("touch '{}'", repaired.display()),
     );
     let repair_log = state.path().join("repair.log");
+    let finish_repair = if stale_after_repair { "wait $!" } else { "" };
     let tmux = format!(
         r#"#!/bin/sh
 if [ "$1" = new-session ]; then
   cd "$6" || exit 1
   for arg do command=$arg; done
   /bin/sh -c "$command" </dev/null >'{}' 2>&1 &
+  {finish_repair}
 fi
 "#,
         repair_log.display()
@@ -1739,6 +2061,54 @@ fi
             .count(),
         1
     );
+}
+
+#[test]
+fn release_pr_rebuild_preserves_divergent_local_branch() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let main_branch = git_output(&repo, &["branch", "--show-current"]);
+    let release_branch = "jack/release-default-v0-9-2";
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::write(repo.path().join("feature.txt"), "release me\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add release change"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    git(&repo, &["checkout", "-b", release_branch]);
+    git(&repo, &["push", "origin", release_branch]);
+    fs::write(repo.path().join("operator.txt"), "unpublished repair\n").unwrap();
+    git(&repo, &["add", "operator.txt"]);
+    git(&repo, &["commit", "-m", "Keep unpublished release repair"]);
+    let local_head = git_output(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["checkout", &main_branch]);
+    let caller_head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
+    let script = write_gh_dirty_release_script(
+        &state.path().join("gh.log").to_string_lossy(),
+        release_branch,
+        &main_branch,
+    );
+    let _env = EnvGuard::new(&[("gh", &script)]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("divergent local release work must survive recovery");
+
+    assert!(error.to_string().contains(&local_head), "{error}");
+    assert_eq!(
+        git_output(&repo, &["rev-parse", release_branch]),
+        local_head
+    );
+    assert_eq!(
+        git_output(&repo, &["show", &format!("{release_branch}:operator.txt")]),
+        "unpublished repair"
+    );
+    assert_eq!(git_output(&repo, &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(
+        git_output(&repo, &["branch", "--show-current"]),
+        main_branch
+    );
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
 }
 
 #[test]
@@ -1893,13 +2263,13 @@ fn release_run_fails_closed_when_the_publisher_role_is_missing() {
 
 #[test]
 fn release_run_refuses_to_skip_an_incomplete_tag() {
-    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -1912,13 +2282,13 @@ fn release_run_refuses_to_skip_an_incomplete_tag() {
 
 #[test]
 fn release_run_keeps_a_failed_tag_red_until_a_fix_merges() {
-    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -1947,6 +2317,7 @@ fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -2002,6 +2373,7 @@ case "$1 $2" in
       echo '{{"isDraft":false}}'
       exit 0
     fi
+    echo 'release not found' >&2
     exit 1 ;;
   'run list')
     echo '[{{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}}]'
@@ -2126,6 +2498,7 @@ fn configure_candidate_publisher(
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -2263,6 +2636,7 @@ fn configure_same_tag_publisher(repo: &TestRepo, state: &std::path::Path) -> Str
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -2318,7 +2692,7 @@ exit 2
 if [ "$1" = "--version" ]; then exit 0; fi
 case "$1 $2" in
   'release view')
-    [ -f '{}' ] || exit 1
+    [ -f '{}' ] || {{ echo 'release not found' >&2; exit 1; }}
     echo '{{"isDraft":false}}'
     exit 0 ;;
   'run list')
@@ -2738,4 +3112,84 @@ fn release_tag_fails_if_remote_tag_points_to_different_commit() {
     let message = err.to_string();
     assert!(message.contains("already exists on origin"));
     assert!(message.contains("expected"));
+}
+
+#[test]
+fn release_nochange_and_failed_verification_preserve_caller_branch_index_and_bytes() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    for verify in ["true", "exit 19"] {
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::write(
+            repo.path().join(".lf/config.yaml"),
+            format!("release:\n  targets:\n    default:\n      verify: ['{verify}']\n"),
+        )
+        .unwrap();
+        fs::write(repo.path().join("tracked.txt"), "published\n").unwrap();
+        git(&repo, &["add", ".lf/config.yaml", "tracked.txt"]);
+        git(&repo, &["commit", "-m", "published baseline"]);
+        git(&repo, &["push", "origin", "HEAD"]);
+        let origin = git_output(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["tag", "v0.9.1"]);
+        // Local commits and both index/worktree edits must survive source selection.
+        fs::write(repo.path().join("local.txt"), "local commit\n").unwrap();
+        git(&repo, &["add", "local.txt"]);
+        git(&repo, &["commit", "-m", "caller only"]);
+        fs::write(repo.path().join("tracked.txt"), "staged\n").unwrap();
+        git(&repo, &["add", "tracked.txt"]);
+        fs::write(repo.path().join("tracked.txt"), "unstaged\n").unwrap();
+        fs::write(repo.path().join("untracked.txt"), "untracked\n").unwrap();
+        let head = git_output(&repo, &["rev-parse", "HEAD"]);
+        let branch = git_output(&repo, &["symbolic-ref", "HEAD"]);
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let result = release_run(repo.path(), "patch", None, &NullProgress);
+        if verify == "true" {
+            assert!(
+                matches!(result.unwrap(), ReleaseRunOutcome::NoChanges { origin_commit, .. } if origin_commit == origin)
+            );
+        } else {
+            assert!(result.unwrap_err().to_string().contains("verification"));
+        }
+        assert_eq!(git_output(&repo, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git_output(&repo, &["symbolic-ref", "HEAD"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+            "unstaged\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+            "local commit\n"
+        );
+    }
+}
+
+#[test]
+fn release_resume_rejects_candidate_that_fails_checks_even_when_origin_passes() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      verify: ['test -f VERIFIED']\n",
+    )
+    .unwrap();
+    repo.stage_all();
+    repo.commit("Candidate missing required verification input");
+    release_tag(repo.path(), "0.9.1", None).unwrap();
+    repo.create_file("VERIFIED", "new main passes; the immutable tag still fails");
+    repo.stage_all();
+    repo.commit("Fix verification input on main");
+    git(&repo, &["push", "origin", "main"]);
+
+    let error = release_run(repo.path(), "0.9.1", None, &NullProgress)
+        .expect_err("passing origin checks must not qualify a failing exact tag");
+    assert!(error.to_string().contains("verification"), "{error}");
+    assert!(repo.path().join("VERIFIED").exists());
 }

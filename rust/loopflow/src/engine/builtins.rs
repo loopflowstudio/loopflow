@@ -111,12 +111,17 @@ pub fn get_builtin_flow(name: &str) -> Option<&'static str> {
     BUILTIN_FLOWS.get(name).copied()
 }
 
-/// Resolve a bare name to its builtin skill key. Returns the exact match if one
-/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
-/// that key. Returns `None` for no match or ambiguous matches.
+/// Resolve a builtin skill key: exact name, `operate` for `repo/operate`, then
+/// a unique namespace suffix. Returns `None` for absent or ambiguous names.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
     if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(name) {
         return Some(key);
+    }
+    // Repository operation owns the short name; Wave operation stays explicit.
+    if name == "operate" {
+        return BUILTIN_SKILLS
+            .get_key_value("repo/operate")
+            .map(|(key, _)| *key);
     }
     resolve_bare_in_map(name, &BUILTIN_SKILLS)
 }
@@ -247,7 +252,7 @@ mod tests {
             );
         }
 
-        for name in ["refine", "review-open-work", "init"] {
+        for name in ["refine", "repo/operate", "init"] {
             let skill = get_builtin_skill(name).expect("builtin skill");
             assert!(
                 skill.contains("## Reviewer mode"),
@@ -271,7 +276,7 @@ mod tests {
         for contract in [
             "human feedback, revised artifact references, and remaining",
             "headless surface",
-            "run `lf ask \"<exact request>\"`",
+            "blocker in ordinary output and stop",
             "closing, detaching, provider exit, or lack of response",
         ] {
             assert!(demo.contains(contract), "demo omits {contract:?}");
@@ -345,7 +350,7 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- cmd: task pr land -c"));
+            .contains("- cmd: pr land -c"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());
@@ -504,6 +509,20 @@ mod tests {
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");
             assert!(!skill.contains("lf pm show"), "{name}");
+        }
+    }
+
+    #[test]
+    fn capture_tasks_is_discoverable_without_aliases() {
+        assert!(get_builtin_skill("capture-tasks").is_some());
+        assert!(!builtin_skill_description("capture-tasks").is_empty());
+        assert_eq!(
+            resolve_builtin_skill("capture-tasks"),
+            Some("capture-tasks")
+        );
+        assert!(get_builtin_skill("design").is_some());
+        for name in ["capture-task", "create-task"] {
+            assert!(get_builtin_skill(name).is_none());
         }
     }
 

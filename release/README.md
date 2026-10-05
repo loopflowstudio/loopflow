@@ -12,6 +12,7 @@ find release -maxdepth 2 -type f | sort
 ```bash
 scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
 lf cron history --wave infrastructure --days 35
+lf release history --wave infrastructure --days 35 --json
 ```
 
 ```bash
@@ -99,7 +100,25 @@ credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
 and the GitHub Release. It deploys the website from the exact tag and requires
 `/healthz` to report that tag. If the proof fails it restores the previous Fly
 image and leaves the release incomplete. Publishing the non-draft GitHub
-Release is the final completion marker.
+Release records an external effect. Scheduled settlement follows public artifact
+read-back and exact-version installer smoke, with every required check retained.
+In history JSON, `attempts[].verification` holds those checks once; each attempt
+saves its checks and product outcome together. `attempts[].telemetry` retains
+original prerequisite associations with retained schedule/Home segments and the
+current execution's automatic retry, if needed. Successful recovery leaves the
+earlier failure and its repair disposition visible. An interrupted telemetry runner can recover after its exact
+process identity is confirmed gone and its surviving children release the cron
+job lock. The original receipt remains unresolved; the new check supplies current
+verification. Receipts without runner identity cannot authorize that recovery.
+
+Closed, unfinished release owners remain visible beyond the history window in
+`summary.closed_unsettled`. Record repair ownership with the printed
+`lf cron disposition` command on the original Home. This preserves the candidate,
+attempts and late ownership evidence without claiming product settlement or
+transferring execution to a new Home. A replacement schedule on the same Home
+continues its predecessors on the next wake, freezing all outstanding dues in
+one attempt. The saved candidate keeps its original owner. A Home change breaks
+that continuation chain; removed schedules have no future wake.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a
@@ -108,9 +127,97 @@ An ambiguous Fly command result is accepted only when `/healthz` and the root
 page prove the exact tag; rollback starts only after that production proof
 fails.
 
-The daily run is idempotent. No merged changes is success. If a tag's hosted
+The daily run is idempotent. No merged changes settles only after the published
+baseline and current required verification pass. Selection uses fetched origin
+without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
+Scheduled overlap deferrals retain the next due time from the firing
+obligation's calendar and Home. That observation reserves no execution; if the
+obligation has closed, the continuation names its opportunity repair command
+on the original Home instead.
+Preparation, publication, and public verification retain the publisher checkout
+lease in their child processes. If the controller dies, ordinary checkout
+removal remains blocked until those children exit; unrelated checkouts remain
+independent.
+If a publisher launcher exits while a descendant survives, controller cleanup
+also preserves the checkout and reports its path for later cleanup.
+Configured repository verification and preparation hooks retain both the target
+lock and their checkout lease, including preparation during PR rebuild. A
+surviving hook keeps cleanup and another release blocked until it exits.
+Manifest lockfile updates (`cargo update --workspace` and `uv lock`) retain both
+locks during preparation, so their surviving children also keep the checkout
+available and competing releases deferred.
+Notes generation passes both locks through its nested CLI to the provider.
+Its exact JSON input remains in `.lf/prompts/` under a unique name, so a surviving
+provider can finish after launcher failure without losing its checkout or input.
+PR rebuild uses the same exact-source recovery checks as candidate preparation:
+divergent local branches and dirty existing checkouts remain intact for repair.
+If creation returns an unexpected HEAD, retain its checkout and branch for
+inspection before retry; a creation hook may still own work there.
+Source fetches, checkout creation, rebuild resets and cleanup retain their held
+locks through surviving Git children. Source checkout creation stays local;
+it never synchronizes or resets the caller's main checkout. Release preparation
+owns the explicit commit and branch push.
+Release PR creation, base/title/body edits, readiness and auto-merge commands
+retain the target lock. During preparation they retain the checkout lease too,
+so a surviving command keeps that checkout available until it exits. Preparation
+stages, commits and pushes with both locks retained by Git children, then shared
+PR finalization creates the review surface
+with the release title and notes. Re-arming a dropped request retains the target
+lock while waiting for merge.
+CI repair keeps the same landing and reserved Session/Exec. Release-owned
+repairs inherit both locks through a direct child launch, so a surviving repair
+continues to exclude publication and checkout removal after controller death.
+The release waits for that repair’s process evidence before continuing.
+Task merge-request revocation and failed-finalization compensation carry the
+same held locks. Revocation completes before a new head is pushed or durable
+settlement intent is cleared; interrupted attempts retain that intent for retry.
+
+Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
+commands retain the release target's lock in their child process. If the
+controller dies during one of these operations, another release invocation
+defers until the surviving child exits. Other repositories and targets remain
+independent.
+Manual tag and publication commands record intervention on pending scheduled
+releases. Nested publisher calls reusing the active lock preserve the owning
+execution's provenance.
+
+An invalid saved candidate can advance to a patch successor only after exact-source
+inspection confirms that preparation remains and GitHub, crates.io, and the
+versioned DMG are all unpublished. Unknown or partial publication blocks
+replacement. Release history retains the rejected candidate and inspection on
+the same opportunity's attempt; earlier failures and original dues remain.
+A valid interrupted candidate resumes unchanged. Cached packaged binaries must
+still pass installation preflight in a fresh Home before reuse or publication.
+
+Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
+The publisher retains candidate hashes and gate evidence before external writes.
+Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
+and latest DMGs, website release identity, crate version, and installed `lf`
+version in an isolated Home. Scheduled settlement uses `reconcile --tag <tag>`:
+it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
+stages from the exact source and verified public artifacts, then repeats read-back.
+Repair requires this tag to remain GitHub's latest release. Unavailable services
+and conflicting immutable bytes fail without overwriting them. A crash after
+publication does not require signing again or republishing GitHub assets just to
+obtain a receipt. A missing historical host-gate result must be executed against
+that exact source; published assets cannot substitute for the check.
+
+After integration, the publisher inspects the exact merged source before the
+controller builds or tags it. A migration arriving after preparation causes a
+new patch cut; canonical batches already on main stay immutable. For an invalid
+tagged candidate, replacement first requires confirmed absence of a GitHub
+Release (including drafts), crates.io version, and versioned R2 download.
+Provider errors leave publication state unresolved. Partial publication needs
+reconciliation; the controller never rewrites the old tag.
+
+The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
+with `preparation_required` (a list of reasons) and `publications` (null when
+unchecked). `--check-publication` queries external publication when source needs
+preparation; only a successfully queried empty list permits replacement.
+Progress goes to stderr. The publisher owns repository-specific source and
+publication facts; the release controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
@@ -123,8 +230,10 @@ preceding `.0` tag. A missing cycle baseline is reported explicitly.
 An explicit minor version such as `lf release run 0.13.0` follows the same policy.
 
 The selected pair and snapshot survive interruption in
-`.lf/releases/minor-<target>.json`. Retrying finishes the same pair without
-creating another patch. A minor candidate whose merged tree differs from its
+`.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing
+an unprepared candidate advances the closing patch within the same cycle. A
+completed successor is recovered even if publication finished before the pair
+was saved. A minor candidate whose merged tree differs from its
 prepared snapshot is stopped before tagging. Notes previews print Markdown to
 stdout and progress to stderr, without changing manifests or release archives.
 For an existing version, previews end at its tag and read historical release

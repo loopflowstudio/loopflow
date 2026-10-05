@@ -71,6 +71,8 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
     assert_eq!(snapshot.projects[0].flow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
+    assert_eq!(snapshot.items[0].state.as_deref(), Some("unstarted"));
+    assert_eq!(snapshot.items[0].completed_at, None);
     assert_eq!(
         snapshot.items[0].project_id.as_deref(),
         Some("project-gmail")

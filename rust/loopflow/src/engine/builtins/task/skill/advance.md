@@ -3,7 +3,7 @@ description: Move the current Loopflow work forward from a review, an existing T
 action_style: procedural
 ---
 Advance the work the User is discussing. Resolve the context, carry out the next
-authorized action, and report what actually started or what is waiting.
+action, and report what actually started or what is waiting.
 
 Read the current conversation and scratch design, then run `lf session list --json`. Use explicit Task identity or the current checkout's tracked Task;
 never select a different Task merely because it is the only waiting session.
@@ -20,8 +20,7 @@ lf session complete <session-id>
 Completion returns feedback to the next Flow step. A following loop-decide
 interprets it and chooses Advance or Iterate through an authored edge. If the
 User requests design revisions, clarify and save them before completing review.
-Readiness alone leaves the conversation waiting. For a blocked Ask, Complete
-returns the answer to its waiting caller. An unbound interactive conversation
+Readiness alone leaves the conversation waiting. An unbound interactive conversation
 does not become a Task by being closed.
 
 ## An existing Task needs to continue
@@ -44,8 +43,8 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish, human demo, and another loop-decide).
-Both decisions have explicit edges to implementation. Do not repeat initial
+→ loop-decide, repeated on Iterate, then pr-publish). `code` adds a human
+PR walkthrough after pursuit. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, use the complete feature Flow. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.
@@ -55,10 +54,10 @@ Ask only when intent or placement cannot be resolved from available evidence.
 
 Check installed CLI help before mutation when command availability is uncertain.
 If Advance is unavailable, report that limitation and use existing Task/Session
-commands only when they express the same authorized action. Do not claim an old
+commands only when they express the same action. Do not claim an old
 finite Flow will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
 After completing a Session, refresh `lf session list --json` and the Task status.
 Report the Task link, actual running step or wait, and the next human boundary.
-Respect the selected delivery policy; advancing design is not permission to merge.
+Follow the selected delivery policy through its review and merge steps.

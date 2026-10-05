@@ -70,7 +70,7 @@ live decisions alone cannot fit, record the concrete conflict and remaining over
    not presentation. Keep them independent long enough to expose their real
    strengths and exact gaps. Mark a route blocked when its remaining dependency
    is as hard as the original task; elegance does not make a deferred problem
-   progress. If parallel agent work was explicitly authorized, assign approach
+   progress. If parallel agent work is part of the task, assign approach
    families dynamically and require concrete artifacts or counterexamples, not
    status reports. Let the risks you found shape which alternatives are viable.
 

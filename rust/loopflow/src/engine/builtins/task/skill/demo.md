@@ -31,12 +31,9 @@ implement the agreed empty state; verify recovery after clearing the query"`.
 The following loop-decide interprets that evidence and chooses the explicit
 edge; this demo supplies no navigation verdict.
 
-On a headless surface, run the same demonstration autonomously. If one material
-product judgment blocks the proof, run `lf ask "<exact request>"`; its review
-session stays visible after the session agent is ready, and only the user can
-Complete it. Do not manufacture a question merely to
-create a checkpoint. If the proof genuinely requires absent-User action beyond
-that session, stop
-with that exact blocker; the declared interactive demo owns presentation.
+On a headless surface, run the same demonstration autonomously. If required
+product judgment or absent-user action prevents the proof, explain the exact
+blocker in ordinary output and stop. The declared interactive demo owns
+presentation. Do not manufacture a question to create a checkpoint.
 
 Never treat closing, detaching, provider exit, or lack of response as approval.

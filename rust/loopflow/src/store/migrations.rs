@@ -989,7 +989,7 @@ fn pending_migrations<'a>(
         }
         return match MigrationId::parse_version(version) {
             Some(_) => Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf doctor with that binary",
+                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf home doctor with that binary",
                 env!("CARGO_PKG_VERSION"),
                 set.last()
                     .map(Migration::version)
@@ -1235,6 +1235,77 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn remove_ask_preserves_conversations_and_history() {
+        let conn = open();
+        apply_before_current_draft(&conn, "remove_ask");
+        if !_draft_is_canonical("remove_ask") {
+            conn.execute_batch(&current_draft_sql("primary_session_scope"))
+                .unwrap();
+        }
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave-preserved','proof','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project-preserved','wave-preserved','external-project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES('task-preserved','project-preserved','external-issue','PROOF-1','/repo',1);").unwrap();
+        for (id, completed, native, published) in [
+            ("completed", Some(30), Some("native-completed"), true),
+            ("open", None, Some("native-open"), true),
+            ("reserved", None, None, false),
+        ] {
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,ready_summary,completed_at,created_at,request,kind,interactive,cwd,skill,provider,provider_thread,input_published)
+                VALUES(?1,?1,'human',?2,?3,10,'Retained request','ask',1,'/repo','unblock','codex',?4,?5)",
+                rusqlite::params![id, completed.map(|_| "Retained answer"), completed, native, published]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,10,'{}')",
+                rusqlite::params![id, format!("run_{id}")]).unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=?1",
+                [id],
+            )
+            .unwrap();
+        }
+        conn.execute("UPDATE agent_sessions SET task_id='task-preserved',wave_id='wave-preserved',work_source='inherited'", []).unwrap();
+        let before: Vec<(i64, String, String)> = conn
+            .prepare("SELECT seq,session_id,payload FROM session_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("remove_ask"))
+            .unwrap();
+        for (id, completed, native, published) in [
+            ("completed", Some(30), Some("native-completed"), true),
+            ("open", None, Some("native-open"), true),
+            ("reserved", None, None, false),
+        ] {
+            let row = conn.query_row("SELECT kind,skill,primary_scope,request,completed_at,provider_thread,input_published,ready_summary FROM agent_sessions WHERE id=?1", [id], |row| Ok((
+                row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,String>(3)?,
+                row.get::<_,Option<i64>>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,bool>(6)?,row.get::<_,Option<String>>(7)?
+            ))).unwrap();
+            assert_eq!(
+                row,
+                (
+                    "conversation".into(),
+                    None,
+                    None,
+                    "Retained request".into(),
+                    completed,
+                    native.map(str::to_string),
+                    published,
+                    completed.map(|_| "Retained answer".into())
+                )
+            );
+        }
+        let after: Vec<(i64, String, String)> = conn
+            .prepare("SELECT seq,session_id,payload FROM session_events ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE task_id='task-preserved' AND wave_id='wave-preserved' AND work_source='inherited'", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
     }
 
     fn development_draft(
@@ -1962,6 +2033,201 @@ mod tests {
                 .get::<_, String>(0))
                 .unwrap(),
             r#"{"tasks":[{"applied":true}]}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
+        use std::sync::Arc;
+
+        use crate::ops::pr_landing::{reconcile_pr_landing, LandingDriver, LandingObservation};
+        use crate::ops::OpsResult;
+        use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
+        use crate::store::sqlite::SqliteStore;
+        use time::OffsetDateTime;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_before_current_draft(&conn, "retire_home_landing_supervisors");
+        conn.execute_batch(
+            "INSERT INTO homes (id, route, created_at, observed_at)
+             VALUES ('retired_home', 'remote', 1, 2);
+             INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('landing_wave', 'landing', '/repo', 1);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
+             VALUES ('landing_project', 'landing_wave', 'linear-project', 1, 1);
+             INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier,
+                worktree, workspace_slug, created_at, updated_at)
+             VALUES ('landing_task', 'landing_project', 'linear-task', 'INF-1',
+                '/tmp/landing', 'landing', 1, 1);",
+        )
+        .unwrap();
+        for (index, state) in ["watching", "repairing", "blocked", "merged", "closed"]
+            .iter()
+            .enumerate()
+        {
+            for placement in ["home", "local"] {
+                conn.execute(
+                    "INSERT INTO pr_landings (
+                        id, repo, pr_number, worktree, branch, requested_head_sha,
+                        observed_head_sha, merge_commit, state, generation,
+                        supervisor_placement, supervisor_home_id, supervisor_process_id,
+                        supervisor_heartbeat_at, blocked_reason, created_at, updated_at,
+                        task_id, after_merge, next_slug, ci_pending_head, ci_pending_since, ci_timeout_reruns
+                     ) VALUES (?1, 'owner/repo', ?2, '/tmp/landing', 'repair', 'requested',
+                        'observed', ?3, ?4, 7, ?5, ?6, 123, 30, ?7, 10, 40,
+                        'landing_task', 'continue_task', 'follow-up', 'observed', 20, 1)",
+                    rusqlite::params![
+                        format!("{placement}_{state}"),
+                        index as i64 + if placement == "home" { 1 } else { 11 },
+                        (*state == "merged").then_some("merge"),
+                        state,
+                        placement,
+                        (placement == "home").then_some("retired_home"),
+                        (*state == "blocked").then_some("credential revoked"),
+                    ],
+                )
+                .unwrap();
+            }
+        }
+        // A taskless retained delivery can settle through the real reconciler.
+        assert!(std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory.path())
+            .status()
+            .unwrap()
+            .success());
+        conn.execute(
+            "INSERT INTO pr_landings (id, repo, pr_number, worktree, branch,
+                requested_head_sha, observed_head_sha, state, generation,
+                supervisor_placement, supervisor_home_id, supervisor_process_id,
+                supervisor_heartbeat_at, created_at, updated_at)
+             VALUES ('home_taskless', 'taskless/repo', 42, ?1, 'repair', 'head', 'head',
+                'watching', 7, 'home', 'retired_home', 123, 30, 10, 40)",
+            [directory.path().to_str().unwrap()],
+        )
+        .unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql).unwrap();
+        }
+        drop(conn);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
+        let now = OffsetDateTime::from_unix_timestamp(50).unwrap();
+        for state in ["watching", "repairing", "blocked", "merged", "closed"] {
+            for placement in ["home", "local"] {
+                let id = PrLandingId::from_raw(format!("{placement}_{state}"));
+                let landing = store.get_pr_landing(&id).unwrap().unwrap();
+                assert_eq!(landing.state.as_str(), state);
+                assert_eq!(landing.requested_head_sha, "requested");
+                assert_eq!(landing.observed_head_sha, "observed");
+                assert_eq!(landing.task_id.as_ref().unwrap().as_str(), "landing_task");
+                assert_eq!(
+                    landing.after_merge,
+                    Some(crate::work::task::AfterMerge::ContinueTask)
+                );
+                assert_eq!(landing.next_slug.as_deref(), Some("follow-up"));
+                assert_eq!(landing.updated_at.unix_timestamp(), 40);
+                assert_eq!(
+                    landing.blocked_reason.as_deref(),
+                    (state == "blocked").then_some("credential revoked")
+                );
+                if placement == "local" {
+                    assert_eq!(landing.generation, 7);
+                    assert_eq!(landing.supervisor.unwrap().process_id, 123);
+                    continue;
+                }
+                assert_eq!(landing.generation, 8);
+                assert!(landing.supervisor.is_none());
+                assert!(!store.heartbeat_pr_landing(&id, 7, now).unwrap());
+                let mut stale = landing;
+                stale.generation = 7;
+                stale.state = PrLandingState::Closed;
+                stale.blocked_reason = None;
+                assert!(!store.update_pr_landing(&stale).unwrap());
+                assert!(store
+                    .claim_pr_landing(
+                        &id,
+                        7,
+                        &LandingSupervisor {
+                            placement: LandingPlacement::Local,
+                            process_id: 456,
+                            heartbeat_at: now,
+                        },
+                        now
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+        }
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert!(conn.execute(
+            "UPDATE pr_landings SET supervisor_placement='home', supervisor_home_id='retired_home',
+                supervisor_process_id=456, supervisor_heartbeat_at=50 WHERE id='home_watching' AND generation=8", [],
+        ).is_err());
+        let retained_ci: (String, i64, i64) = conn.query_row(
+            "SELECT ci_pending_head, ci_pending_since, ci_timeout_reruns FROM pr_landings WHERE id='home_blocked'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(retained_ci, ("observed".into(), 20, 1));
+        let history: String = conn
+            .query_row(
+                "SELECT retired_supervisor_json FROM pr_landings WHERE id='home_blocked'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&history).unwrap(),
+            serde_json::json!({
+                "placement": "home", "home_id": "retired_home", "process_id": 123,
+                "heartbeat_at": 30, "generation": 7,
+            })
+        );
+        validate_foreign_keys(&conn).unwrap();
+        drop(conn);
+        drop(store);
+
+        struct Merged;
+        impl LandingDriver for Merged {
+            fn observe(&self, _: &crate::pr_landing::PrLanding) -> OpsResult<LandingObservation> {
+                Ok(LandingObservation::Merged {
+                    head_sha: "head".into(),
+                    merge_commit: "merge".into(),
+                })
+            }
+            fn repair(
+                &self,
+                _: &crate::pr_landing::PrLanding,
+                _: &crate::work::task::CiIncident,
+            ) -> OpsResult<()> {
+                panic!("merged delivery must not start a repair")
+            }
+        }
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(path))
+                .await
+                .unwrap(),
+        );
+        let id = PrLandingId::from_raw("home_taskless");
+        let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
+        let merged = reconcile_pr_landing(store.clone(), landing, Arc::new(Merged))
+            .await
+            .unwrap();
+        assert_eq!(merged.state, PrLandingState::Merged);
+        assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
+        let repeated = reconcile_pr_landing(store.clone(), merged.clone(), Arc::new(Merged))
+            .await
+            .unwrap();
+        assert_eq!(repeated, merged);
+        assert_eq!(
+            store.pending_pr_landings("owner/repo").await.unwrap().len(),
+            6
         );
     }
 
@@ -3696,6 +3962,10 @@ mod tests {
             .unwrap(),
             "{\"state\":\"current\"}"
         );
+        // The store below opens with this build's schema, drafts included.
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql).unwrap();
+        }
         drop(conn);
 
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -3859,7 +4129,7 @@ mod tests {
             message.contains("latest known 0.10.001_initial"),
             "{message}"
         );
-        assert!(message.contains("run lf doctor"), "{message}");
+        assert!(message.contains("run lf home doctor"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned

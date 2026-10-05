@@ -3,8 +3,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use crate::ops::cron::calendar;
 use anyhow::{anyhow, Result};
-use chrono::{Datelike, Local, LocalResult, NaiveDate, TimeZone, Utc};
+use chrono::{Local, Utc};
 use time::{Duration, OffsetDateTime};
 
 use crate::exec::Exec;
@@ -74,40 +75,45 @@ struct StoreReport {
 
 pub fn run(json: bool) -> Result<()> {
     let database_path = crate::store::database_path_from_env()?;
-    let opened = crate::store::sqlite::SqliteStore::new(&database_path);
-    let mut store_report = inspect_store(&database_path);
-    let (events, mut checks) = match opened {
-        Ok(store) => {
-            let events = store.execs_since(0)?;
-            let now = OffsetDateTime::now_utc().unix_timestamp();
-            let checks = match crate::ops::default_launch_agents_dir()
-                .and_then(|directory| crate::ops::list_cron_obligations(&directory))
-            {
-                Ok(obligations) => audit_at(&events, &obligations, now),
-                Err(error) => {
-                    let mut checks = audit_at(&events, &[], now);
-                    let continuity = Check::fail(
-                        "continuity",
-                        format!("cannot read durable scheduler obligations: {error}"),
-                    );
-                    if let Some(existing) =
-                        checks.iter_mut().find(|check| check.name == "continuity")
-                    {
-                        *existing = continuity;
-                    } else {
-                        checks.insert(0, continuity);
-                    }
-                    checks
-                }
-            };
-            (events, checks)
-        }
+    let store_report = inspect_store(&database_path);
+    let mut checks = vec![match &store_report.migration_error {
+        Some(error) => Check::fail("store", error.clone()),
+        None => Check::ok("store", "selected database is compatible with this build"),
+    }];
+    let events = match crate::store::sqlite::SqliteStore::open_execs_read_only(&database_path)
+        .and_then(|store| store.execs_since(0))
+    {
+        Ok(events) => Some(events),
         Err(error) => {
-            let detail = error.to_string();
-            store_report.migration_error = Some(detail.clone());
-            (Vec::new(), vec![Check::fail("store", detail)])
+            checks.push(Check::fail(
+                "execs",
+                format!("cannot read Exec evidence: {error}"),
+            ));
+            None
         }
     };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    match crate::ops::default_launch_agents_dir()
+        .and_then(|directory| crate::ops::list_cron_obligations(&directory))
+    {
+        Ok(obligations) => checks.push(check_continuity(
+            events.as_deref().unwrap_or(&[]),
+            &obligations,
+            now,
+        )),
+        Err(error) => checks.push(Check::fail(
+            "continuity",
+            format!("cannot read durable scheduler obligations: {error}"),
+        )),
+    }
+    if let Some(events) = &events {
+        checks.extend([
+            check_attribution(events),
+            check_identity(events),
+            check_lineage(events),
+        ]);
+    }
+    let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_machine_install(&database_path));
     checks.push(check_binary_freshness());
@@ -116,23 +122,22 @@ pub fn run(json: bool) -> Result<()> {
             "{}",
             serde_json::to_string(&DoctorReport {
                 store: store_report,
-                rows: events.len(),
+                rows,
                 checks: &checks,
             })?
         );
     } else {
-        print_checks(&store_report, &checks, events.len());
+        print_checks(&store_report, &checks, rows);
     }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("run ledger audit failed"));
+        return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
 }
 
 const FRESHNESS: &str = "binary-freshness";
 const UPSTREAM: &str = "origin/main";
-const UPSTREAM_REFSPEC: &str = "+refs/heads/main:refs/remotes/origin/main";
 
 /// Report whether the running binary predates merged upstream work.
 fn check_binary_freshness() -> Check {
@@ -142,31 +147,26 @@ fn check_binary_freshness() -> Check {
             FRESHNESS,
             format!(
                 "cannot compare build revision {}: no git checkout at this binary's source root \
-                 or working directory. Run `lf doctor` from a loopflow checkout to learn whether \
+                 or working directory. Run `lf home doctor` from a loopflow checkout to learn whether \
                  the running binary is current",
                 crate::build_info::short_revision(revision)
             ),
         );
     };
 
-    if let Err(error) = crate::engine::git::fetch(&repo, "origin", UPSTREAM_REFSPEC) {
-        return Check::warn(
-            FRESHNESS,
-            format!("cannot prove whether the running lf is current: could not refresh {UPSTREAM}: {error}"),
-        );
-    }
-
     match crate::build_info::classify_revision(revision, &repo, UPSTREAM) {
         crate::build_info::BuildFreshness::Current { revision } => Check::ok(
             FRESHNESS,
             format!(
-                "running lf is built from {}, current with {UPSTREAM}",
+                "running lf is built from {}, current with cached {UPSTREAM} (not refreshed)",
                 crate::build_info::short_revision(&revision)
             ),
         ),
         crate::build_info::BuildFreshness::Behind { revision, missing } => {
             let commits = missing
                 .iter()
+                .rev()
+                .take(3)
                 .map(|commit| {
                     format!(
                         "{} {}",
@@ -179,18 +179,17 @@ fn check_binary_freshness() -> Check {
             Check::warn(
                 FRESHNESS,
                 format!(
-                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}, so \
-                     these fixes are not running: {commits}. Rebuilding is an operator action; \
-                     this check installs nothing",
+                    "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
+                     latest merged changes: {commits}. Run `lf home install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
             )
         }
-        crate::build_info::BuildFreshness::OffMain { revision } => Check::ok(
+        crate::build_info::BuildFreshness::OffMain { revision } => Check::warn(
             FRESHNESS,
             format!(
-                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare",
+                "running lf is built from {}, which is not on cached {UPSTREAM}; release freshness is unproven",
                 crate::build_info::short_revision(&revision)
             ),
         ),
@@ -233,7 +232,14 @@ fn inspect_store(path: &Path) -> StoreReport {
                         crate::build_info::migration_draft_manifest(),
                     )
                 } else {
-                    crate::store::migrations::validate_sqlite(&connection)
+                    crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                        if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
+                            return Err(crate::store::StoreError::InvalidData(format!(
+                                "selected database is missing {pending}; run `lf home install` to install a published release"
+                            )));
+                        }
+                        Ok(())
+                    })
                 };
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
@@ -241,6 +247,9 @@ fn inspect_store(path: &Path) -> StoreReport {
             }
             Err(error) => migration_error = Some(error.to_string()),
         }
+    }
+    if !path.exists() {
+        migration_error = Some(format!("selected database {} does not exist; run `lf home install` to initialize a published installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
@@ -407,7 +416,6 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             receipt.source == CronSource::Scheduled
                 && receipt.wave == obligation.wave
                 && receipt.flow == obligation.flow
-                && receipt.target_kind == obligation.target_kind
                 && receipt.home_id == obligation.home_id
                 && receipt.schedule == obligation.schedule.expression()
                 && receipt.started_at >= interval.start
@@ -417,15 +425,29 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             satisfied += 1;
             continue;
         }
+        let wave = if obligation.wave.is_empty() {
+            "''"
+        } else {
+            &obligation.wave
+        };
+        let sync = if obligation.target_kind == crate::ops::CronTargetKind::Repository {
+            "lf wave cron sync --repo".to_string()
+        } else {
+            format!("lf wave cron sync --wave {wave}")
+        };
         missing.push(format!(
-            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; inspect `lf cron history --wave {} --flow {} --days 2`",
+            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; \
+             inspect `lf wave cron history --wave {wave} --flow {} --days 2`; \
+             configured executable {}; inspect log {}; reconcile with `{sync}` from repository {}",
             obligation.wave,
             obligation.flow,
             obligation.home_id,
             format_interval(interval),
             obligation.schedule.expression(),
-            obligation.wave,
             obligation.flow,
+            obligation.lf_path.display(),
+            obligation.log_path.display(),
+            obligation.repo.display(),
         ));
     }
 
@@ -516,7 +538,8 @@ fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<Expected
             end: start + 120,
         });
     }
-    let start = scheduled_at_or_before(
+    let start = calendar::at_or_before(
+        &Local,
         now,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
@@ -524,46 +547,13 @@ fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<Expected
     if start < obligation.activated_at {
         return None;
     }
-    let end = scheduled_after(
+    let end = calendar::after(
+        &Local,
         start,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
     )?;
     Some(ExpectedInterval { start, end })
-}
-
-fn scheduled_at_or_before(now: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(now, 0).single()?.date_naive();
-    for _ in 0..370 {
-        if let Some(timestamp) = scheduled_on(date, hour, minute) {
-            if timestamp <= now {
-                return Some(timestamp);
-            }
-        }
-        date = date.pred_opt()?;
-    }
-    None
-}
-
-fn scheduled_after(timestamp: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(timestamp, 0).single()?.date_naive();
-    for _ in 0..370 {
-        date = date.succ_opt()?;
-        if let Some(next) = scheduled_on(date, hour, minute) {
-            if next > timestamp {
-                return Some(next);
-            }
-        }
-    }
-    None
-}
-
-fn scheduled_on(date: NaiveDate, hour: u32, minute: u32) -> Option<i64> {
-    match Local.with_ymd_and_hms(date.year(), date.month(), date.day(), hour, minute, 0) {
-        LocalResult::Single(value) => Some(value.timestamp()),
-        LocalResult::Ambiguous(first, _) => Some(first.timestamp()),
-        LocalResult::None => None,
-    }
 }
 
 fn format_interval(interval: ExpectedInterval) -> String {
@@ -596,25 +586,29 @@ fn check_attribution(events: &[Exec]) -> Check {
     }
 }
 
-/// Repo identity is the absolute main-repo root, never a basename.
+/// Execs may be machine-scoped; recorded repositories must be absolute.
 fn check_identity(events: &[Exec]) -> Check {
-    let repos: HashSet<Option<&str>> = events.iter().map(|event| event.repo.as_deref()).collect();
+    let repos: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| event.repo.as_deref())
+        .collect();
+    let unscoped = events.iter().filter(|event| event.repo.is_none()).count();
     let invalid = repos
         .iter()
-        .filter(|repo| repo.is_none_or(|repo| !Path::new(repo).is_absolute()))
+        .filter(|repo| !Path::new(repo).is_absolute())
         .count();
     if invalid == 0 {
         return Check::ok(
             "identity",
-            format!("{} repo value(s), all absolute", repos.len()),
+            format!(
+                "{} repo value(s), all absolute; {unscoped} Exec(s) without repository scope",
+                repos.len()
+            ),
         );
     }
     Check::fail(
         "identity",
-        format!(
-            "{invalid}/{} repo value(s) are missing or not absolute",
-            repos.len()
-        ),
+        format!("{invalid}/{} repo value(s) are not absolute", repos.len()),
     )
 }
 
@@ -667,7 +661,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     if let Some(error) = &store.migration_error {
         println!("migration error: {error}");
     }
-    println!("ledger: {rows} run events\n");
+    println!("ledger: {rows} Execs\n");
     for check in checks {
         let (mark, color) = match check.status {
             Status::Ok => ("ok  ", colors.green),
@@ -766,12 +760,15 @@ mod tests {
 
     fn obligation(activated_at: i64) -> CronObligation {
         CronObligation {
+            target_kind: CronTargetKind::Flow,
             wave: "infrastructure".to_string(),
             flow: "telemetry-daily".to_string(),
-            target_kind: CronTargetKind::Flow,
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
             home_id: HomeId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
+            repo: PathBuf::from("/src/loopflow"),
+            lf_path: PathBuf::from("/usr/local/bin/lf"),
+            log_path: PathBuf::from("/src/loopflow/.lf/logs/cron.log"),
             receipts: Vec::new(),
         }
     }
@@ -781,10 +778,11 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 123,
+            runner_started_at: None,
             home_id: obligation.home_id.clone(),
             wave: obligation.wave.clone(),
             flow: obligation.flow.clone(),
-            target_kind: obligation.target_kind,
+            target_kind: CronTargetKind::Flow,
             source,
             schedule: obligation.schedule.expression().to_string(),
             repo: PathBuf::from("/src/loopflow"),
@@ -854,7 +852,10 @@ mod tests {
             "expected interval [",
             "0 0 9 * * *",
             "has no scheduled receipt",
-            "lf cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "lf wave cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "configured executable /usr/local/bin/lf",
+            "inspect log /src/loopflow/.lf/logs/cron.log",
+            "lf wave cron sync --wave infrastructure",
         ] {
             assert!(
                 check.detail.contains(expected),
@@ -862,6 +863,20 @@ mod tests {
                 check.detail
             );
         }
+    }
+
+    #[test]
+    fn repository_schedule_recovery_does_not_require_a_wave() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        cron.wave.clear();
+        cron.target_kind = CronTargetKind::Repository;
+        let check = check_continuity(&[], &[cron], now);
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.detail.contains("lf wave cron sync --repo"));
+        assert!(check
+            .detail
+            .contains("lf wave cron history --wave '' --flow"));
     }
 
     #[test]
@@ -942,9 +957,31 @@ mod tests {
     }
 
     #[test]
+    fn machine_scoped_execs_have_valid_identity() {
+        let mut event = named(row(DAY, "completed"), "lf help");
+        event.repo = None;
+        assert_eq!(status_of(&[event], "identity"), Status::Ok);
+    }
+
+    #[test]
     fn a_repo_basename_fails_identity() {
         let mut event = row(DAY, "completed");
         event.repo = Some("loopflow".to_string());
         assert_eq!(status_of(&[event], "identity"), Status::Fail);
+    }
+    #[test]
+    fn skill_to_flow_cutover_preserves_firing_but_triggered_receipt_does_not_count() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        let interval = latest_due_interval(&cron, now).unwrap();
+        let mut prior = receipt(&cron, interval.start + 60, CronSource::Scheduled);
+        prior.target_kind = CronTargetKind::Skill;
+        cron.receipts.push(prior);
+        assert_eq!(
+            check_continuity(&[], &[cron.clone()], now).status,
+            Status::Ok
+        );
+        cron.receipts[0].source = CronSource::Triggered;
+        assert_eq!(check_continuity(&[], &[cron], now).status, Status::Fail);
     }
 }

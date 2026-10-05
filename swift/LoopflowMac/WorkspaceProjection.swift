@@ -19,7 +19,13 @@ struct WorkspaceTask: Identifiable {
 
     /// The started working set. A Task with open Sessions stays reachable even
     /// when its start predates recorded evidence.
-    var inWorkingSet: Bool { !sessions.isEmpty || (started && !task.task.completed) }
+    var inWorkingSet: Bool {
+        if !sessions.isEmpty { return true }
+        guard started else { return false }
+        return !task.task.isTerminal || TaskHistoryFilter.hasUnresolvedExecution(
+            runtime: task.runtime, condition: task.condition, flow: task.flow
+        )
+    }
 }
 
 enum WorkspacePresentation: String, CaseIterable {
@@ -379,6 +385,8 @@ final class WorkspaceNavigation {
     var recentDestinations: [WorkspacePaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
     var expandedTemplateGroups: [String: Set<String>] = [:]
+    /// Show a launched repository shell while retaining the selected Task.
+    var showsRetainedTerminals = false
     var showsActivity = false
     var presentation: WorkspacePresentation = .compact
     var selectedSessionId: String? {

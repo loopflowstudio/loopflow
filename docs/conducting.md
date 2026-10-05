@@ -106,7 +106,7 @@ lf usage --json    # current usage wire, newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf ci watch --status # the CI watcher: live or not, last poll, what it started
-lf doctor          # audit the ledger: continuity, attribution, lineage
+lf doctor          # check installation, Exec integrity and scheduled receipts
 ```
 
 `lf top` is the first move when work feels slow — live machine-health evidence.
@@ -136,10 +136,10 @@ comments without starting execution. Task interrupt ends the active turn so
 advancement re-reads direction. Publication and transport acceptance do not
 prove that the agent applied the correction. See [The Agent API](agent-api.md#steer).
 
-`lf ask` is a synchronous boundary with a person. It opens an interactive AgentSession
-against the caller's exact checkout, enters the Sessions surface, and blocks
-the caller until the user completes the conversation.
-Use `lf --task <task> : "<prompt>"` when only another agent perspective is needed.
+Headless work that lacks required input explains its failure and stops. Read
+its existing status and logs; discuss unresolved judgment in the ongoing Wave
+chat. Authored Task reviews keep their own Sessions and feedback contract.
+Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
 A review node retains its exact FlowSession boundary and captured Skill. Opening
 its AgentSession returns to the conversation. Ready saves feedback; Complete
@@ -160,7 +160,8 @@ Task workspace shells run directly in the app's terminal.
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
 Use `lf comment` for durable Task direction,
-`lf --task` for another agent perspective, and `lf ask` for a new review boundary.
+and `lf --task` for another agent perspective. Author interactive review nodes
+in the Flow when a Task needs its own review conversation.
 
 ## Next
 

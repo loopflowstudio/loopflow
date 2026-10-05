@@ -108,6 +108,7 @@ fn install_current_telemetry_obligation(home: &Path) {
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: 123,
+        runner_started_at: None,
         home_id,
         wave: "infrastructure".to_string(),
         flow: "telemetry-daily".to_string(),
@@ -135,15 +136,17 @@ fn install_current_telemetry_obligation(home: &Path) {
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
     let home = TestRepo::new();
-    let output = run_lf(home.path(), &["doctor", "--json"]);
+    SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let fetch_head = home.path().join(".git/FETCH_HEAD");
+    let before = fs::read(&fetch_head).ok();
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
     assert!(
         output.status.success(),
-        "lf doctor failed: {}",
+        "lf home doctor failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let fetched = fs::read_to_string(home.path().join(".git/FETCH_HEAD")).unwrap();
-    assert!(fetched.contains(&home.head_sha()));
+    assert_eq!(fs::read(fetch_head).ok(), before);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         report["store"]["build_source_revision"],
@@ -211,10 +214,38 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         ))
         .unwrap();
 
+    // Recovery success cannot stand in for the missing natural firing, even
+    // when the current SessionHistory scorecard can run after continuity passes.
+    let receipt_path = fs::read_dir(
+        home.path()
+            .join("cron/receipts/infrastructure/telemetry-daily"),
+    )
+    .unwrap()
+    .next()
+    .unwrap()
+    .unwrap()
+    .path();
+    let original_receipt = fs::read(&receipt_path).unwrap();
+    let mut recovery: CronReceipt = serde_json::from_slice(&original_receipt).unwrap();
+    recovery.source = CronSource::Recovery;
+    fs::write(&receipt_path, serde_json::to_vec(&recovery).unwrap()).unwrap();
+    let missing = run_lf(home.path(), &["doctor", "--json"]);
+    assert_eq!(continuity_check(&missing)["status"], "fail");
+    let blocked = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
+    assert!(!blocked.status.success());
+    assert!(!String::from_utf8_lossy(&blocked.stdout).contains("Lifecycle scorecard"));
+    assert_eq!(
+        serde_json::from_slice::<CronReceipt>(&fs::read(&receipt_path).unwrap())
+            .unwrap()
+            .source,
+        CronSource::Recovery
+    );
+    fs::write(&receipt_path, original_receipt).unwrap();
+
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         doctor.status.success(),
-        "lf doctor failed: {}{}",
+        "lf home doctor failed: {}{}",
         String::from_utf8_lossy(&doctor.stdout),
         String::from_utf8_lossy(&doctor.stderr)
     );
@@ -241,4 +272,108 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     for original in original_events {
         assert!(events_after_telemetry.contains(&original));
     }
+}
+
+#[test]
+fn doctor_accepts_machine_commands_without_a_repository() {
+    let home = TestRepo::new();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    insert_exec(
+        &store,
+        "machine-command",
+        OffsetDateTime::now_utc().unix_timestamp(),
+    );
+    let mut event = store.execs_since(0).unwrap().pop().unwrap();
+    event.id = loopflow::id::ExecId::new();
+    event.repo = None;
+    event.command = Some("lf help".to_string());
+    store.record_exec(&event).unwrap();
+
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let identity = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"] == "identity")
+        .unwrap();
+    assert_eq!(identity["status"], "ok");
+    assert!(identity["detail"]
+        .as_str()
+        .unwrap()
+        .contains("2 Exec(s) without repository scope"));
+}
+
+#[test]
+fn doctor_does_not_initialize_a_missing_database() {
+    let home = TestRepo::new();
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    assert!(!output.status.success());
+    assert!(!home.path().join("loopflow.db").exists());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"]
+        .as_str()
+        .unwrap()
+        .contains("does not exist"));
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "install-selection"));
+}
+
+#[test]
+fn doctor_reports_execs_and_scheduler_despite_an_unknown_migration() {
+    let home = TestRepo::new();
+    let path = home.path().join("loopflow.db");
+    let store = SqliteStore::new(&path).unwrap();
+    insert_exec(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"]
+        .as_str()
+        .unwrap()
+        .contains("9.0.001_future"));
+    assert!(report["rows"].as_u64().unwrap() >= 1);
+    assert_eq!(continuity_check(&output)["status"], "ok");
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "attribution" && check["status"] == "ok"));
+    let latest: String = connection
+        .query_row(
+            "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(latest, "9.0.001_future");
+}
+
+#[test]
+fn doctor_keeps_reporting_when_the_database_is_corrupt() {
+    let home = TestRepo::new();
+    let path = home.path().join("loopflow.db");
+    fs::write(&path, b"not a sqlite database").unwrap();
+    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["store"]["migration_error"].is_string());
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "execs" && check["status"] == "fail"));
+    assert_eq!(continuity_check(&output)["status"], "ok");
+    assert_eq!(fs::read(path).unwrap(), b"not a sqlite database");
 }

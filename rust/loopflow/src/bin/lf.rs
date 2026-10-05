@@ -131,7 +131,7 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-/// Insert clap's internal `--` at the public `lf ssh` target boundary.
+/// Insert clap's internal `--` at the public `lf home ssh` target boundary.
 ///
 /// The public syntax omits it, but making the boundary explicit before parsing
 /// prevents a remote `--account` from being consumed by the origin command.
@@ -312,7 +312,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return args;
     };
     if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        // `lf ssh` has a deliberate positional boundary: origin options come
+        // `lf home ssh` has a deliberate positional boundary: origin options come
         // before the target and every later token belongs to the remote lf.
         // Moving global flags across that boundary changes which machine owns
         // an account selection.
@@ -418,11 +418,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+                loopflow::lf::commands::run::run(Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+            loopflow::lf::commands::run::run(Some("default"), None, cli)
         }),
     }
 }
@@ -558,13 +558,14 @@ fn execute_target(
                     if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
-                            message: Some(format!("lf task commit: {name}")),
+                            message: Some(format!("lf commit: {name}")),
                             ..loopflow::ops::CommitOptions::for_task(name)
                         };
                         loopflow::ops::commit_workflow(
                             &repo_root,
                             &options,
                             &loopflow::ops::NullProgress,
+                            &|_| {},
                         )?;
                     }
                     Ok(())
@@ -861,19 +862,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
         serde_json::to_string(&cli.step_args())?,
     );
     match command {
-        TaskCommand::Pr { cmd } => loopflow::lf::commands::ops::run_pr(cmd.as_ref(), agent),
-        TaskCommand::Wt { cmd } => loopflow::lf::commands::ops::run_wt(cmd),
-        TaskCommand::Sync(args) => loopflow::lf::commands::ops::run_sync(
-            args.onto.as_deref(),
-            args.plan,
-            args.manual,
-            args.continue_sync,
-            args.abort,
-            args.adopt,
-        ),
-        TaskCommand::Commit { message, no_add } => {
-            loopflow::lf::commands::ops::run_commit(message.as_deref(), *no_add, agent)
-        }
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
@@ -1321,7 +1309,7 @@ fn run() -> anyhow::Result<()> {
         })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
-    let cli = match Cli::try_parse_from(args.clone()) {
+    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1340,6 +1328,10 @@ fn run() -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Install { .. }
+                | loopflow::lf::HomeCommand::Doctor {
+                    planning: false,
+                    ..
+                }
         })
     );
     if !bypasses_machine_startup_gate
@@ -1362,6 +1354,10 @@ fn run() -> anyhow::Result<()> {
         Some(
             Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Install { .. }
+                    | loopflow::lf::HomeCommand::Doctor {
+                        planning: false,
+                        ..
+                    }
             } | Commands::Home {
                 cmd: loopflow::lf::HomeCommand::Screenshot { .. }
             } | Commands::ScreenshotSupervisor { .. }
@@ -1385,10 +1381,23 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
 
+    // Machine diagnosis must reach incompatible or uninitialized Homes without
+    // ordinary admission creating or migrating the database first.
+    if let Some(Commands::Home {
+        cmd:
+            loopflow::lf::HomeCommand::Doctor {
+                json,
+                planning: false,
+            },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::doctor::run(*json);
+    }
+
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
-    // trace/store capture. `lf install` opens the store only read-only, inside
+    // trace/store capture. `lf home install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Home {
         cmd: loopflow::lf::HomeCommand::Install { cmd },
@@ -1456,6 +1465,12 @@ fn run() -> anyhow::Result<()> {
             preferred_accounts.extend(origin_account.iter().cloned());
             restricted_accounts.extend(origin_only_account.iter().cloned());
         }
+        let _account_isolation = cli
+            .isolate
+            .then_some(true)
+            .or(cli.shared.then_some(false))
+            .map(loopflow::provider_account::activation::isolation_env)
+            .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
             &preferred_accounts,
             &restricted_accounts,
@@ -1678,12 +1693,36 @@ fn execute_command(
             cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Place { .. }),
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
-        Some(Commands::Task {
-            cmd: cmd @ TaskCommand::Sync(_),
-        }) => {
-            let repo =
-                loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
-            with_runtime(&repo, args, || run_task_command(&repo, cmd, cli))
+        Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
+        }),
+        Some(Commands::Wt { cmd }) => {
+            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
+        }
+        Some(Commands::Commit {
+            message,
+            no_add,
+            paths,
+        }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_commit(
+                message.as_deref(),
+                *no_add,
+                paths,
+                cli.model.as_deref(),
+            )
+        }),
+        Some(Commands::Sync(sync)) => {
+            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+            with_runtime(&repo, args, || {
+                loopflow::lf::commands::ops::run_sync(
+                    sync.onto.as_deref(),
+                    sync.plan,
+                    sync.manual,
+                    sync.continue_sync,
+                    sync.abort,
+                    sync.adopt,
+                )
+            })
         }
         Some(Commands::Task {
             cmd: TaskCommand::Worker { task_id },
@@ -1744,7 +1783,7 @@ fn execute_command(
             all,
         }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::flow::execute_step(id, *version)
+            loopflow::lf::commands::flow::execute_step(id, *version, cli)
         }),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
@@ -1915,11 +1954,7 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
         std::fs::write(repo.path().join(".lf/skills/land.md"), "Review landing.").unwrap();
-        std::fs::write(
-            repo.path().join(".lf/flows/land.yaml"),
-            "- cmd: task pr land\n",
-        )
-        .unwrap();
+        std::fs::write(repo.path().join(".lf/flows/land.yaml"), "- cmd: pr land\n").unwrap();
         let _cwd = CwdGuard::enter(repo.path()).unwrap();
         let resolve = |args: &[&str]| {
             let args = loopflow::lf::navigation::normalize_args(
@@ -1935,6 +1970,7 @@ mod tests {
             "lf",
             "-m",
             "codex",
+            "pr",
             "land",
             "--message",
             "Keep this together",
@@ -1944,14 +1980,7 @@ mod tests {
         };
         assert_eq!(
             command.argv(),
-            [
-                "lf",
-                "task",
-                "pr",
-                "land",
-                "--message",
-                "Keep this together"
-            ]
+            ["lf", "pr", "land", "--message", "Keep this together"]
         );
         assert!(message.is_none());
         assert!(matches!(resolve(&["lf", "run", "land"]).0, Target::Flow(_)));
@@ -2060,17 +2089,6 @@ mod tests {
                 cmd: loopflow::lf::HomeCommand::Desktop
             })
         ));
-    }
-
-    #[test]
-    fn bare_lf_has_a_terminal_control_skill() {
-        let cli = Cli::try_parse_from(["lf"]).unwrap();
-        assert!(cli.command.is_none());
-        let skill = loopflow::engine::builtins::get_builtin_skill("loopflow")
-            .expect("builtin terminal control skill");
-        assert!(skill.contains("lf session list --json"));
-        assert!(skill.contains("lf session connect <session-id> --json"));
-        assert!(skill.contains("Keep this conversation open"));
     }
 
     #[test]
@@ -2221,14 +2239,13 @@ mod tests {
     fn reorder_args_known_command_unchanged() {
         let args = vec![
             "lf".to_string(),
-            "task".to_string(),
             "commit".to_string(),
             "-m".to_string(),
             "msg".to_string(),
         ];
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
-        assert_eq!(result, vec!["lf", "task", "commit", "-m", "msg"]);
+        assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
     }
 
     #[test]
@@ -2300,7 +2317,7 @@ mod tests {
             .to_vec();
         assert_eq!(
             reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
-            vec!["lf", "--wave", "goals", "task", "commit", "-m", "ship it"]
+            vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
     }
 
@@ -2346,40 +2363,36 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "task", "pr", "-m", "codex", "open"]
+        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "task", "pr", "open", "-m", "codex"]);
+        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Pr {
-                    cmd: Some(PrCommand::Open { .. })
-                }
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Open { .. })
             })
         ));
 
-        let args: Vec<String> = ["lf", "task", "pr", "--strict", "submit"]
+        let args: Vec<String> = ["lf", "pr", "--strict", "submit"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "task", "pr", "submit", "--strict"]);
+        assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Pr {
-                    cmd: Some(PrCommand::Submit { strict: true, .. })
-                }
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Submit { strict: true, .. })
             })
         ));
 
-        let args: Vec<String> = ["lf", "task", "wt", "--force", "delete", "old-tree"]
+        let args: Vec<String> = ["lf", "wt", "--force", "delete", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "task", "wt", "delete", "--force", "old-tree"]
+            vec!["lf", "wt", "delete", "--force", "old-tree"]
         );
     }
 

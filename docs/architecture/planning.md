@@ -20,14 +20,15 @@ records the remaining implementation and proof gaps.
 
 ```bash
 lf repo new-chapter 2026-10
-lf repo refresh product
+lf refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
 successor or creates one with the predecessor's Flow. Started unfinished Tasks
 move with identity, checkout, PR and captured execution intact. Proven untouched
 backlog is canceled; completed Tasks stay historical. Missing local or provider
-evidence cannot authorize retirement. Linear keeps the Projects and their Tasks.
+evidence cannot establish that work should be retired. Linear keeps the Projects
+and their Tasks.
 
 Rotation reads fresh provider state after each interruption. A partial transition
 to the requested name is recoverable using stable Project identities and one
@@ -137,7 +138,9 @@ runs in its own child lf Exec through the ordinary command path. The Flow driver
 owns navigation; a child's command outcome alone cannot settle agent work.
 
 A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
-`summary`, or `blocked` with a nonempty `reason`. A router returns a JSON object containing
+`summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
+keys are required in the provider schema. Settlement also accepts persisted receipts
+that omitted the unused field. A router returns a JSON object containing
 `path`, constrained to the captured branch's path names. Each provider receives
 the schema before generation. Session history retains the native output and
 completion separately; only the exact selected successful result is consumed
@@ -145,9 +148,10 @@ inside the Flow's fenced settlement transaction. Invalid output receives at most
 two corrective turns in the same conversation; provider failure remains distinct.
 Helpers, older successes and late generations cannot settle the current selection.
 
-A blocked decision opens one keyed Ask. Completion returns saved feedback for
-reassessment at the same boundary, never a navigation verdict. Retry preserves
-the answer instead of opening duplicate conversations.
+Blocked records the reason and stops at the current Flow position. Existing logs
+and outcomes provide the evidence. The Wave operator resolves
+impediments or discusses missing judgment in its ongoing chat. Explicit retry
+retains the position and pass; unchanged failures do not automatically retry.
 
 ## Recover without inventing an outcome
 
@@ -176,18 +180,15 @@ their claim and background placement are driver mechanics.
 A live claimed worker cannot be replaced because a status read timed out. Missing
 process evidence is uncertainty, and causal ancestry grants no signal authority.
 
-## Ask and review
+## Task reviews
 
 ```bash
-lf ask "Review which migration should survive"
 lf session list --json
 lf session connect SESSION --json
-lf session ready "Feedback and remaining work"
+lf ready "Feedback and remaining work"
 lf session complete SESSION
 ```
 
-Ask opens a durable AgentSession in the caller's checkout and waits for explicit
-completion. A keyed retry returns the stored answer without a provider launch.
 A Flow review opens its captured Skill and retains exact Flow membership. Ready
 saves feedback; Complete persists it before provider teardown and successor
 launch. The following step receives the feedback; a later decision chooses
@@ -205,7 +206,7 @@ live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
-lf task comment INF-124 "keep the public name"
+lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 

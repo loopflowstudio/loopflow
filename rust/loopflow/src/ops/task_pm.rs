@@ -29,18 +29,6 @@ pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResult<PmSho
     )
 }
 
-async fn load_wave_async(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResult<PmShowResult> {
-    crate::ops::pm::pm_show_async(
-        repo,
-        &PmShowOptions {
-            wave: Some(wave.to_string()),
-            refresh,
-        },
-        &crate::ops::NullProgress,
-    )
-    .await
-}
-
 pub fn resolve_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<ResolvedTask> {
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| OpsError::Message(format!("failed to create async runtime: {error}")))?;
@@ -111,15 +99,20 @@ where
     let (issue, prepared) =
         crate::ops::pm::pm_create_task_idempotent(repo, wave, title, report, marker, prepare)
             .await?;
-    if let Err(error) = load_wave_async(repo, wave, PmRefresh::Force).await {
+    // The mutation already committed. Confirm only its issue; a Wave-wide
+    // sweep makes unrelated Project latency a prerequisite for using the Task.
+    let resolved = resolve_task_async(repo, &issue, PmRefresh::Force)
+        .await
+        .map_err(|error| OpsError::Message(format!(
+            "Linear task {issue} is committed, but its planning record could not refresh: {error}. No new Task or worktree was created. Retry the same `lf task create` command, retaining its original options, to confirm the issue and reuse its creation marker."
+        )))?;
+    if resolved.wave != wave {
         return Err(OpsError::Message(format!(
-            "Linear task {issue} is committed, but the local wave/{wave} snapshot could not refresh: {error}. No new Task or worktree was created. Retry the same `lf task create` command, retaining its original options, to refresh the snapshot and reuse the issue's creation marker."
+            "Linear task {issue} is committed in wave/{} rather than wave/{wave}; inspect the existing issue before starting it",
+            resolved.wave
         )));
     }
-    Ok((
-        resolve_task_async(repo, &issue, PmRefresh::Never).await?,
-        prepared,
-    ))
+    Ok((resolved, prepared))
 }
 
 pub async fn complete_task(

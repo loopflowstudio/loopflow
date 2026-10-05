@@ -353,31 +353,31 @@ fn prepare_source_for_relocation(planned: &PlannedWaveMove) -> Result<()> {
         default_branch.clone()
     };
 
-    let segment = wave_agent_segment(planned.wave.slug())?;
-    if let Some(resident) = existing_agent_worktree(source_repo, segment)? {
-        if !is_clean(&resident.path)? {
+    let segment = wave_agent_segment(planned.wave.id().as_str())?;
+    if let Some(persistent) = existing_agent_worktree(source_repo, segment)? {
+        if !is_clean(&persistent.path)? {
             return Err(anyhow!(
-                "cannot relocate Wave {} while resident worktree {} is dirty",
+                "cannot relocate Wave {} while persistent worktree {} is dirty",
                 planned.wave.id(),
-                resident.path.display()
+                persistent.path.display()
             ));
         }
         if github_repo_nwo(source_repo).is_some()
-            && crate::ops::current_pr(&resident.path)?.is_some()
+            && crate::ops::current_pr(&persistent.path)?.is_some()
         {
             return Err(anyhow!(
-                "cannot relocate Wave {} while resident branch {} has an open pull request",
+                "cannot relocate Wave {} while persistent branch {} has an open pull request",
                 planned.wave.id(),
-                resident.branch
+                persistent.branch
             ));
         }
-        let integrated = is_ancestor(&resident.path, &resident.branch, &merge_target)?
-            || is_squash_merged(&resident.path, &resident.branch, &merge_target)?;
+        let integrated = is_ancestor(&persistent.path, &persistent.branch, &merge_target)?
+            || is_squash_merged(&persistent.path, &persistent.branch, &merge_target)?;
         if !integrated {
             return Err(anyhow!(
-                "cannot relocate Wave {} while resident branch {} has changes absent from {merge_target}",
+                "cannot relocate Wave {} while persistent branch {} has changes absent from {merge_target}",
                 planned.wave.id(),
-                resident.branch
+                persistent.branch
             ));
         }
     }
@@ -521,7 +521,7 @@ fn copy_tree(source: &Path, target: &Path, skip_boot_files: bool) -> Result<()> 
         if skip_boot_files
             && name
                 .to_str()
-                .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-resident-token"))
+                .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-persistent-token"))
         {
             continue;
         }
@@ -566,7 +566,7 @@ fn tree_contents(root: &Path, skip_boot_files: bool) -> Result<BTreeMap<PathBuf,
             if skip_boot_files
                 && name
                     .to_str()
-                    .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-resident-token"))
+                    .is_some_and(|name| matches!(name, ".wave-endpoint" | ".wave-persistent-token"))
             {
                 continue;
             }
@@ -591,7 +591,7 @@ fn tree_contents(root: &Path, skip_boot_files: bool) -> Result<BTreeMap<PathBuf,
 }
 
 fn remove_boot_files(path: &Path) -> Result<()> {
-    for name in [".wave-endpoint", ".wave-resident-token"] {
+    for name in [".wave-endpoint", ".wave-persistent-token"] {
         match std::fs::remove_file(path.join(name)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -873,21 +873,21 @@ mod tests {
     #[test]
     fn relocation_preserves_unmerged_authored_work_then_syncs_merged_bytes() {
         let (root, repo, planned) = relocation_repo();
-        let resident = crate::engine::worktrees::ensure_agent_worktree(
+        let persistent = crate::engine::worktrees::ensure_agent_worktree(
             &repo,
-            crate::engine::worktrees::wave_agent_segment("infrastructure").unwrap(),
+            crate::engine::worktrees::wave_agent_segment(planned.wave.id().as_str()).unwrap(),
         )
         .unwrap();
         std::fs::write(
-            resident.path.join("wave/infrastructure/MEMORY.md"),
+            persistent.path.join("wave/infrastructure/MEMORY.md"),
             "Curated.\n",
         )
         .unwrap();
-        git(&resident.path, &["add", "."]);
-        git(&resident.path, &["commit", "-m", "curate memory"]);
+        git(&persistent.path, &["add", "."]);
+        git(&persistent.path, &["commit", "-m", "curate memory"]);
 
         let pending = prepare_source_for_relocation(&planned)
-            .expect_err("unmerged resident state blocks relocation");
+            .expect_err("unmerged persistent state blocks relocation");
         assert!(pending.to_string().contains("absent from origin/main"));
 
         let integration = root.path().join("integration");
@@ -901,19 +901,19 @@ mod tests {
         );
         git(&integration, &["config", "user.name", "integrator"]);
         git(&integration, &["config", "user.email", "i@example.com"]);
-        let resident_head = crate::engine::git::rev_parse(&resident.path, "HEAD").unwrap();
+        let persistent_head = crate::engine::git::rev_parse(&persistent.path, "HEAD").unwrap();
         git(
             &integration,
             &[
                 "fetch",
-                &resident.path.display().to_string(),
-                &resident_head,
+                &persistent.path.display().to_string(),
+                &persistent_head,
             ],
         );
-        git(&integration, &["cherry-pick", &resident_head]);
+        git(&integration, &["cherry-pick", &persistent_head]);
         git(&integration, &["push", "origin", "main"]);
 
-        prepare_source_for_relocation(&planned).expect("merged resident state may relocate");
+        prepare_source_for_relocation(&planned).expect("merged persistent state may relocate");
         assert_eq!(
             std::fs::read_to_string(repo.join("wave/infrastructure/MEMORY.md")).unwrap(),
             "Curated.\n"

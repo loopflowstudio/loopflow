@@ -190,6 +190,28 @@ fn exec_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<FinalAnswer>> {
+    let mut scoped;
+    let binding = if skill == Some("wave/operate")
+        && cli.bound_cwd.is_none()
+        && cli.task.is_none()
+        && cli.wt.is_none()
+        && crate::repository::CanonicalRepo::discover(&binding.cwd)?.as_path()
+            == binding.cwd.canonicalize()?
+    {
+        if let crate::durable::WorkRef::Wave(id) = &binding.work {
+            scoped = binding.clone();
+            scoped.cwd = crate::ops::human_session::ensure_scope_worktree(
+                &binding.cwd,
+                &crate::session::PrimaryScope::Wave(id.clone()),
+            )?
+            .path;
+            &scoped
+        } else {
+            binding
+        }
+    } else {
+        binding
+    };
     let mut launch = cli.exec_options();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
@@ -278,6 +300,20 @@ struct PromptBuild {
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
+    let repo_root = if skill == Some("repo/operate")
+        && cli.bound_cwd.is_none()
+        && cli.task.is_none()
+        && cli.wt.is_none()
+        && crate::repository::CanonicalRepo::discover(&repo_root)?.as_path()
+            == repo_root.canonicalize()?
+    {
+        let scope = crate::session::PrimaryScope::Repository(
+            crate::repository::CanonicalRepo::discover(&repo_root)?,
+        );
+        crate::ops::human_session::ensure_scope_worktree(&repo_root, &scope)?.path
+    } else {
+        repo_root
+    };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     let saved = skill
         .map(crate::ops::human_session::active_flow_skill)
@@ -396,13 +432,7 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let exec_target = if cli.mode == Some(crate::lf::LaunchMode::Ide) {
-        ExecTarget::Ide
-    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) || skill == Some("loopflow") {
-        ExecTarget::Tui
-    } else {
-        config.session.launch
-    };
+    let exec_target = forced_launch_target(cli, skill).unwrap_or(config.session.launch);
     let surface = if is_interactive && exec_target == ExecTarget::Ide {
         Surface::Ide
     } else if is_interactive {
@@ -663,18 +693,20 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
+fn forced_launch_target(cli: &Cli, skill: Option<&str>) -> Option<ExecTarget> {
+    // The default conversation stays in the terminal that opened it.
+    if skill == Some("default") {
+        return Some(ExecTarget::Tui);
+    }
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Ide) => Some(ExecTarget::Ide),
+        Some(crate::lf::LaunchMode::Tui) => Some(ExecTarget::Tui),
+        _ => None,
+    }
+}
+
 fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
-    // Bare terminal control always stays in the TUI. Other interactive skills
-    // use explicit flags first, then the configured launch target.
-    let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
-        Some(ExecTarget::Tui)
-    } else if cli.mode == Some(crate::lf::LaunchMode::Ide) {
-        Some(ExecTarget::Ide)
-    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) {
-        Some(ExecTarget::Tui)
-    } else {
-        None
-    };
+    let forced_target = forced_launch_target(cli, built.skill_name.as_deref());
 
     if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
@@ -793,7 +825,7 @@ fn exec_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf task wt switch`).
+    // (e.g. `cd` after `lf wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
@@ -1240,13 +1272,14 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
-        exec_headless_prompt, exec_prompt, is_interactive_run, is_interactive_run_with_tty,
-        should_exec_via_skill, skill_exec_seed, split_skill_args, PromptBuild,
+        exec_headless_prompt, exec_prompt, forced_launch_target, is_interactive_run,
+        is_interactive_run_with_tty, should_exec_via_skill, skill_exec_seed, split_skill_args,
+        PromptBuild,
     };
 
     use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, Skill, Surface};
+    use crate::engine::{Config, ExecTarget, Skill, Surface};
     use crate::lf::Cli;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
@@ -1274,6 +1307,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
+        for mode in [
+            None,
+            Some(crate::lf::LaunchMode::Ide),
+            Some(crate::lf::LaunchMode::Tui),
+        ] {
+            let cli = Cli {
+                mode,
+                ..Default::default()
+            };
+            assert_eq!(
+                forced_launch_target(&cli, Some("default")),
+                Some(ExecTarget::Tui)
+            );
+        }
+        let cli = Cli {
+            mode: Some(crate::lf::LaunchMode::Ide),
+            ..Default::default()
+        };
+        assert_eq!(
+            forced_launch_target(&cli, Some("repo/operate")),
+            Some(ExecTarget::Ide)
+        );
+        assert_eq!(
+            forced_launch_target(&Cli::default(), Some("repo/operate")),
+            None
+        );
     }
 
     #[test]
@@ -1451,7 +1514,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn ad_hoc_batch_launch_uses_generic_run_record_without_planning_registry() {
+    fn ad_hoc_batch_launch_captures_session_without_planning_registry() {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");

@@ -7,8 +7,8 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("Shared activity never creates a local terminal; reconciliation removes resolved Sessions")
-    func reconcileTracksTheTaskPlayhead() throws {
+    @Test("Filtered refresh retains Sessions without creating local terminals")
+    func filteredRefreshRetainsSessions() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([
             session(id: "a", state: "waiting"),
@@ -20,7 +20,7 @@ struct SessionsStoreTests {
 
         store.reconcile(try records([session(id: "a", state: "active")]))
 
-        #expect(store.sessions.map(\.id) == ["a"])
+        #expect(store.sessions.map(\.id) == ["a", "b"])
         #expect(item(store, "a")?.state == .pending)
     }
 
@@ -90,6 +90,10 @@ struct SessionsStoreTests {
             session(id: "native", state: "active", kind: "conversation"),
         ]))
 
+        #expect(item(store, "native")?.state == .prepared)
+        #expect(item(store, "native")?.surface?.openArgv == prepared.openArgv)
+        store.reconcile([])
+        store.reconcile([])
         #expect(item(store, "native")?.state == .prepared)
         #expect(item(store, "native")?.surface?.openArgv == prepared.openArgv)
     }
@@ -170,34 +174,6 @@ struct SessionsStoreTests {
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
             ["session", "complete", "native"],
-        ])
-    }
-
-    @Test("Completing a ready Ask resumes its caller")
-    func completionRemovesAskSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "ask"] {
-                    return "Ask session completed: Ready for review"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([
-            session(id: "ask", state: "ready", kind: "ask"),
-        ]))
-
-        let completed = await store.complete("ask")
-
-        #expect(completed)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "ask"],
         ])
     }
 

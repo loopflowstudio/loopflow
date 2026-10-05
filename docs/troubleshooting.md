@@ -3,6 +3,38 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
+## Doctor reports a failure
+
+```bash
+lf doctor
+lf cron list
+lf cron history --wave infrastructure --flow telemetry-daily --days 2
+lf cron sync --wave infrastructure
+```
+
+Doctor checks installation selection, store compatibility, Exec integrity and
+scheduled receipts separately. Machine commands can have no repository; a
+recorded repository must be an absolute path. Missing scheduled receipts remain
+failures even when ordinary commands work. A receipt proves invocation, not
+successful completion of its Flow or Skill.
+
+For a missing receipt, inspect the executable and log path Doctor prints. Jobs
+installed before the stable entry gate may pin an inactive retained binary and
+fail before recording a receipt. After installing a release with this repair,
+run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
+use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+follow the selected machine installation across promotions. Existing Sessions
+retain their runtime ownership.
+
+Doctor reads storage without initializing it or applying migrations. An incompatible
+store still reports readable Exec evidence, scheduler obligations and installation
+selection.
+
+Binary freshness compares against locally cached `origin/main`, without fetching.
+That reference may be stale, and merged source may be newer than the latest
+published release. `lf install` installs that published release; Doctor
+itself installs nothing.
+
 ## A Wave has no active conversation
 
 Wave operations are finite. Read its plan and invoke the next pass explicitly,
@@ -41,7 +73,7 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
-Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
+Task status and `lf mon list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
@@ -50,7 +82,7 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session connect <session-id>
-lf session complete <session-id>       # return saved review or Ask feedback
+lf session complete <session-id>       # return saved review feedback
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
 lf --task INF-123 flow start
@@ -88,7 +120,7 @@ lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
 Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
-for another planning pass; it has no resident Project process to resume.
+for another planning pass; there is no long-running Project process to resume.
 
 Other options:
 
@@ -113,7 +145,7 @@ or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf task sync
+lf sync
 ```
 
 Refreshes the local default branch, preserving its unpublished commits and edits,

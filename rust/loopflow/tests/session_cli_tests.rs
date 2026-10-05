@@ -36,6 +36,12 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     let help = run(home.path(), &["session", "--help"]);
     assert!(help.status.success());
     let help = String::from_utf8_lossy(&help.stdout);
+    assert!(!help
+        .lines()
+        .any(|line| line.trim_start().starts_with("ask ")));
+    for args in [&["ask", "Help"][..], &["session", "ask", "Help"]] {
+        assert!(!run(home.path(), args).status.success());
+    }
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
     assert!(help.contains("complete"));
@@ -93,7 +99,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     let path = std::env::join_paths(paths).unwrap();
-    let (id, ..) = prepare_ask(
+    let (id, ..) = prepare_conversation(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
         "codex",
@@ -158,9 +164,9 @@ fn development_session_handoff_keeps_its_binary_and_home() {
 }
 
 #[test]
-fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
+fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_start() {
     let home = tempfile::tempdir().unwrap();
-    let (id, run_id, dir) = prepare_ask(
+    let (id, run_id, dir) = prepare_conversation(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
         "codex",
@@ -178,7 +184,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     assert!(opened.get("run_id").is_none());
-    assert_eq!(opened["state"], "waiting");
+    assert_eq!(opened["state"], "unknown");
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
@@ -232,7 +238,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
     for resume in [true, false] {
         let home = tempfile::tempdir().unwrap();
-        let (id, run_id, dir) = prepare_ask(home.path(), home.path(), "opencode", "Local proof");
+        let (id, run_id, dir) =
+            prepare_conversation(home.path(), home.path(), "opencode", "Local proof");
         let (id, run_id) = (id.as_str(), run_id.as_str());
         // Old live Runs must survive the history reader's seven-day window.
         let mut manifest: serde_json::Value =
@@ -250,7 +257,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             )
             .unwrap();
             db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                SELECT id,'observed','fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
                 FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
@@ -317,11 +324,16 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             );
         }
         let selector = id;
-        let mut second = command(home.path(), &["session", "connect", selector, "--json"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        // Polling exit must not block the child on an undrained JSON pipe.
+        let metadata = home.path().join("metadata.json");
+        let mut second = command(
+            home.path(),
+            &["session", "connect", selector, "--try", "--json"],
+        )
+        .stdout(std::fs::File::create(&metadata).unwrap())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
         // The provider waits on stdin indefinitely, so a slow machine cannot pass by accident.
         let deadline = Instant::now() + Duration::from_secs(60);
         while second.try_wait().unwrap().is_none() && Instant::now() < deadline {
@@ -342,7 +354,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             "Session metadata open waited for the resumed provider to exit"
         );
         assert!(reopened.status.success(), "{:?}", reopened);
-        let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
+        let reopened: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(metadata).unwrap()).unwrap();
         assert!(reopened.get("run_id").is_none());
         let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
             .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
@@ -382,7 +395,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert!(completed_at.is_none());
+            assert!(completed_at.is_some(), "the exited orphan is retired");
             assert!(ready_summary.is_none());
         }
     }
@@ -390,102 +403,71 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
 const CALLER: &str = "run_00000000000000000000000000000002";
 
-/// Ask through the real CLI from a stand-in caller Run, then stop the caller.
-/// The Session keeps waiting: (Session id, Run id, Run directory).
-fn prepare_ask(
+/// A prepared conversation, before a provider has started.
+fn prepare_conversation(
     home: &std::path::Path,
     cwd: &std::path::Path,
     harness: &str,
-    question: &str,
+    title: &str,
 ) -> (String, String, std::path::PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
-    use std::time::{Duration, Instant};
-
-    let caller = home.join("runs").join(&CALLER[4..6]).join(CALLER);
-    std::fs::create_dir_all(&caller).unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let input = format!("run_{}", uuid::Uuid::new_v4().simple());
+    let session = store
+        .create_session(
+            loopflow::session::AgentSession {
+                captured: None,
+                id: format!("session_{input}"),
+                artifact_key: input.clone(),
+                caller_artifact_key: Some(CALLER.into()),
+                input_published: false,
+                cwd: cwd.into(),
+                skill: None,
+                provider: Some(harness.into()),
+                model: None,
+                node: None,
+                iterations: None,
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
+                kind: loopflow::session::SessionKind::Conversation,
+                interactive: true,
+                repo: None,
+                title: title.into(),
+                title_source: loopflow::session::TitleSource::Generated,
+                request: Some(title.into()),
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let dir = home.join("runs").join(&input[4..6]).join(&input);
+    std::fs::create_dir_all(&dir).unwrap();
     let manifest = serde_json::json!({
-        "schema_version": 1, "artifact_key": CALLER, "caller_artifact_key": null,
+        "schema_version": 1, "artifact_key": input, "caller_artifact_key": CALLER,
         "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
-        "surface": "headless", "cwd": cwd, "repo": null, "worktree": null,
-        "skill": "proof", "subjects": [], "flow": null, "exec": null, "context": null,
+        "surface": "tui", "cwd": cwd, "repo": null, "worktree": null,
+        "skill": null, "subjects": [], "flow": {"kind":"independent"}, "exec": null, "context": null,
         "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
     });
-    std::fs::write(caller.join("manifest.json"), manifest.to_string()).unwrap();
-    // The background launcher only acknowledges; each test opens the Session itself.
-    let launcher = home.join("launcher");
-    std::fs::create_dir_all(&launcher).unwrap();
-    let tmux = launcher.join("tmux");
-    std::fs::write(
-        &tmux,
-        "#!/bin/sh\nif [ \"$1\" = has-session ]; then exit 1; fi\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut asking = command(home, &["ask", question])
-        .current_dir(cwd)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                launcher.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
+    std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+    std::fs::write(dir.join("prepared"), "").unwrap();
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET input_published=1 WHERE id=?1",
+            [&session.id],
         )
-        .env("LF_RUN_ID", CALLER)
-        .env("LF_RUN_DIR", &caller)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(180);
-    let stored = loop {
-        let stored = rusqlite::Connection::open_with_flags(
-            home.join("loopflow.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .and_then(|db| {
-            let ready: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions')", [], |row| row.get(0))?;
-            if !ready { return Err(rusqlite::Error::QueryReturnedNoRows); }
-            db.query_row(
-                "SELECT id, (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture) FROM agent_sessions WHERE kind='ask' AND input_published=1 AND request=?1",
-                [question],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-        });
-        match stored {
-            Ok(stored) => break stored,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {}
-            Err(rusqlite::Error::SqliteFailure(error, _))
-                if matches!(
-                    error.code,
-                    rusqlite::ErrorCode::CannotOpen
-                        | rusqlite::ErrorCode::DatabaseBusy
-                        | rusqlite::ErrorCode::DatabaseLocked
-                ) => {}
-            Err(error) => {
-                let _ = asking.kill();
-                let output = asking.wait_with_output();
-                panic!("cannot inspect stored Ask: {error}; caller: {output:?}");
-            }
-        }
-        if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
-            let _ = asking.kill();
-            panic!("lf ask stored no Session: {:?}", asking.wait_with_output());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    asking.kill().unwrap();
-    asking.wait().unwrap();
-    let dir = home
-        .join("runs")
-        .join(&stored.1.strip_prefix("run_").unwrap_or(&stored.1)[..2])
-        .join(&stored.1);
-    (stored.0, stored.1, dir)
+    (session.id, input, dir)
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(home, &["session", "list", "--all", "--json"]);
+    let output = run(home, &["session", "list", "--all", "--history", "--json"]);
     assert!(output.status.success(), "{output:?}");
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     sessions
@@ -506,7 +488,7 @@ fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
 #[test]
 fn session_names_are_shared_and_human_names_win() {
     let home = tempfile::tempdir().unwrap();
-    let (id, _run_id, dir) = prepare_ask(
+    let (id, _run_id, dir) = prepare_conversation(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
         "codex",
@@ -561,7 +543,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     use std::time::{Duration, Instant};
 
     let home = tempfile::tempdir().unwrap();
-    let (id, first_run, first_dir) = prepare_ask(
+    let (id, first_run, first_dir) = prepare_conversation(
         home.path(),
         home.path(),
         "opencode",
@@ -574,7 +556,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     // boundary even before provider history exists.
     let suggested = rename(home.path(), &[&first_run, "Release target", "--suggest"]);
     assert_eq!(suggested["id"], id);
-    assert_eq!(suggested["kind"], "ask");
+    assert_eq!(suggested["kind"], "conversation");
     assert_eq!(suggested["title"], "Release target");
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title_source"], "human");
@@ -587,7 +569,7 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF.tmp\"\nmv \"$LF_RESUME_PROOF.tmp\" \"$LF_RESUME_PROOF\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$LF_RESUME_PROOF.tmp\"\nmv \"$LF_RESUME_PROOF.tmp\" \"$LF_RESUME_PROOF\"\nprintf '%s\\n' \"$@\" > \"$LF_RESUME_PROOF.args\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -639,12 +621,15 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     let opened = opened.wait_with_output().unwrap();
     assert!(started, "fixture provider did not start: {opened:?}");
     assert!(opened.status.success(), "{opened:?}");
+    let prompt = std::fs::read_to_string(evidence.with_extension("args")).unwrap();
+    assert!(prompt.contains("Which release target?"));
+    assert!(!prompt.contains("The originating Loopflow Run is blocked"));
     assert_ne!(replacement, first_run);
 
     assert!(inside.status.success(), "{inside:?}");
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
-    assert_eq!(inside["kind"], "ask");
+    assert_eq!(inside["kind"], "conversation");
     assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");
@@ -654,35 +639,22 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // The boundary's Run never appears as a second, interactive Session.
-    let all: Vec<serde_json::Value> =
-        serde_json::from_slice(&run(home.path(), &["session", "list", "--all", "--json"]).stdout)
-            .unwrap();
-    assert_eq!(all.len(), 1, "{all:?}");
-
-    // Completing by that Run ID acts on the Ask boundary, never on the Run's
-    // provider history as if it were an interactive Session.
-    let early = run(home.path(), &["session", "complete", &replacement]);
-    assert!(!early.status.success(), "{early:?}");
-    assert!(
-        String::from_utf8_lossy(&early.stderr).contains("not marked this ready"),
-        "{early:?}"
-    );
-    assert_eq!(
-        listed(home.path(), id)["ready_summary"],
-        serde_json::Value::Null
-    );
-    let ready = command(home.path(), &["session", "ready", "Ship to staging"])
-        .env("LF_RUN_ID", &replacement)
-        .env(
-            "LF_HUMAN_SESSION",
-            serde_json::json!({"kind": "ask", "id": id}).to_string(),
+    let all: Vec<serde_json::Value> = serde_json::from_slice(
+        &run(
+            home.path(),
+            &["session", "list", "--all", "--history", "--json"],
         )
-        .output()
-        .unwrap();
-    assert!(ready.status.success(), "{ready:?}");
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(readback["state"], "closed", "the exited orphan is retired");
+
     let completed = run(home.path(), &["session", "complete", &replacement]);
-    assert!(completed.status.success(), "{completed:?}");
-    assert!(String::from_utf8_lossy(&completed.stdout).contains("Ship to staging"));
+    assert!(
+        String::from_utf8_lossy(&completed.stderr).contains("already complete"),
+        "{completed:?}"
+    );
     let again = run(home.path(), &["session", "complete", id]);
     assert!(
         String::from_utf8_lossy(&again.stderr).contains("already complete"),
@@ -722,5 +694,222 @@ fn session_inventory_pages_are_explicit_bounded_and_complete() {
             !run(home.path(), args).status.success(),
             "accepted {args:?}"
         );
+    }
+}
+
+#[test]
+fn resume_shorthand_help_and_empty_worktree() {
+    let home = tempfile::tempdir().unwrap();
+    for args in [&["resume", "--help"][..], &["session", "resume", "--help"]] {
+        let output = run(home.path(), args);
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
+    }
+    let flow = run(home.path(), &["flow", "resume", "--help"]);
+    assert!(flow.status.success(), "{flow:?}");
+    for args in [&["resume"][..], &["session", "resume"]] {
+        let output = command(home.path(), args)
+            .current_dir(home.path())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("No interactive session found in this worktree"),
+            "{output:?}"
+        );
+    }
+}
+
+fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+        [id, native],
+    )
+    .unwrap();
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
+        FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let home = tempfile::tempdir().unwrap();
+    let repo = home.path().join("repo");
+    let sibling = home.path().join("sibling");
+    std::fs::create_dir_all(repo.join("subdir")).unwrap();
+    std::fs::create_dir(&sibling).unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--quiet"])
+        .arg(&repo)
+        .status()
+        .unwrap()
+        .success());
+    let link = home.path().join("link");
+    symlink(&repo, &link).unwrap();
+    let (a, input_a, _) = prepare_conversation(home.path(), &link.join("subdir"), "codex", "A");
+    let (b, input_b, _) = prepare_conversation(home.path(), &repo, "codex", "B");
+    let (background, _, _) = prepare_conversation(home.path(), &repo, "codex", "Background");
+    let (other, _, _) = prepare_conversation(home.path(), &sibling, "codex", "Other");
+    let (review, _, _) = prepare_conversation(home.path(), &repo, "codex", "Stale review");
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET interactive=0,created_at=9999999999 WHERE id=?1",
+        [&background],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET created_at=9999999999 WHERE id=?1",
+        [&other],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET kind='flow_review',created_at=9999999999 WHERE id=?1",
+        [&review],
+    )
+    .unwrap();
+    db.execute("UPDATE agent_sessions SET completed_at=2 WHERE id=?1", [&a])
+        .unwrap();
+    record_native(home.path(), &a, &input_a, "native-a");
+    record_native(home.path(), &b, &input_b, "native-b");
+    let codex = home.path().join("codex");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::write(
+        codex.join("history.jsonl"),
+        "{\"session_id\":\"native-b\",\"ts\":10}\n{\"session_id\":\"native-a\",\"ts\":20}\n",
+    )
+    .unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("codex");
+    std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_RUN_ID\" > \"$CODEX_HOME/opened\"\n").unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let resume = |args: &[&str]| {
+        command(home.path(), args)
+            .current_dir(repo.join("subdir"))
+            .env("PATH", &path)
+            .env("CODEX_HOME", &codex)
+            .output()
+            .unwrap()
+    };
+    let result = resume(&["resume"]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        std::fs::read_to_string(codex.join("opened")).unwrap(),
+        input_a
+    );
+    let openings: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type')='interactive_opened'", [&a], |row| row.get(0)).unwrap();
+    assert_eq!(openings, 1);
+    // No native input: the recorded opening supplies recency, including completed conversations.
+    std::fs::remove_file(codex.join("history.jsonl")).unwrap();
+    let result = resume(&["session", "resume"]);
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(
+        std::fs::read_to_string(codex.join("opened")).unwrap(),
+        input_a
+    );
+    for selector in [&b, "native-b"] {
+        let result = resume(&["resume", selector]);
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(
+            std::fs::read_to_string(codex.join("opened")).unwrap(),
+            input_b
+        );
+    }
+    // An unavailable provider must not add another opening receipt.
+    std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+    let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
+    assert!(!resume(&["resume", &b]).status.success());
+    let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
+    assert_eq!(before, after);
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
+    use std::os::unix::fs::PermissionsExt;
+    for provider in ["claude", "codex"] {
+        let home = tempfile::tempdir().unwrap();
+        let native = home.path().join(provider);
+        let id = uuid::Uuid::new_v4().to_string();
+        let transcript = if provider == "codex" {
+            native
+                .join("sessions/2026/10/04")
+                .join(format!("rollout-2026-10-04T00-00-00-{id}.jsonl"))
+        } else {
+            native.join("projects/test").join(format!("{id}.jsonl"))
+        };
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(
+            &transcript,
+            serde_json::json!({"cwd":home.path()}).to_string(),
+        )
+        .unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let executable = bin.join(provider);
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
+        let resume = |args: &[&str]| {
+            command(home.path(), args)
+                .current_dir(home.path())
+                .env("PATH", &path)
+                .env("CODEX_HOME", home.path().join("codex"))
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .output()
+                .unwrap()
+        };
+        for args in [
+            vec!["resume", id.as_str()],
+            vec!["session", "resume", id.as_str()],
+        ] {
+            let output = resume(&args);
+            assert!(output.status.success(), "{provider}: {output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&id));
+        }
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT count(DISTINCT session_id) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        // The same UUID in both providers must remain ambiguous, with no admission.
+        let ambiguous = uuid::Uuid::new_v4().to_string();
+        for relative in [
+            format!("claude/projects/test/{ambiguous}.jsonl"),
+            format!("codex/sessions/2026/10/04/rollout-time-{ambiguous}.jsonl"),
+        ] {
+            let file = home.path().join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "{}").unwrap();
+        }
+        let output = resume(&["resume", &ambiguous]);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("ambiguous"),
+            "{output:?}"
+        );
+        let count: i64 = db
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

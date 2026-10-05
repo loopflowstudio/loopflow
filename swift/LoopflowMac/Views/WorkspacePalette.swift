@@ -36,7 +36,7 @@ extension PodiumModel {
                 rows.append(recent)
             }
         }
-        for session in sessions.value ?? [] {
+        for session in visibleSessions {
             rows.append(.init(id: .session(session.id), title: session.title,
                               detail: ["Session", session.workPath, session.provider].compactMap { $0 }.joined(separator: " · "),
                               key: session.title))
@@ -167,7 +167,7 @@ struct TaskLinkView: View {
                     if let reason = wave.tasks.unavailableReason { Text("\(wave.wave.repo): \(reason)") }
                     ForEach(wave.tasks.items) { task in
                         Button("\(task.task.identifier) · \(task.task.name)\n\(wave.wave.repo) / \(wave.wave.name)") {
-                            model.openTaskDestination(wave: wave, task: task)
+                            Task { await model.chooseLinkedTask(wave: wave, task: task) }
                         }.buttonStyle(.plain)
                     }
                 }

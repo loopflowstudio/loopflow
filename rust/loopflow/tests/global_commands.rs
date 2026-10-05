@@ -125,7 +125,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
             "ssh://proof@example.invalid",
             "--json",
         ],
-        vec!["ps", "--json"],
+        vec!["monitor", "ps", "--json"],
     ] {
         let output = command(home.path(), home.path(), &args)
             .env("LF_RUN_DIR", source.path().join("runs/parent"))
@@ -148,7 +148,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
 }
 
 #[test]
-fn installation_restriction_uses_checkout_or_explicit_declaration() {
+fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     repo.create_branch("install-task");
@@ -158,15 +158,15 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         "install-task",
         &repo.head_sha(),
     );
-    for (cwd, declaration, restricted) in [
-        (repo.path(), None, true),
-        (home.path(), Some(format!("task:{}", task.task.id)), true),
-        (home.path(), None, false),
+    for (cwd, declaration) in [
+        (repo.path(), None),
+        (home.path(), Some(format!("task:{}", task.task.id))),
+        (home.path(), None),
     ] {
         let mut cmd = command(
             home.path(),
             cwd,
-            &["install", "promote", "--cli-target", "/unused/lf"],
+            &["home", "install", "promote", "--cli-target", "/unused/lf"],
         );
         cmd.env("LF_WORK_ADVANCE_CLAIM", "obsolete");
         if let Some(value) = declaration {
@@ -175,13 +175,39 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         let output = cmd.output().unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        let expected = if restricted {
-            "Task Work cannot change"
-        } else {
-            "only a published candidate"
-        };
-        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("only a published candidate"), "{error}");
     }
+}
+
+#[test]
+fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let database = home.path().join(".lf/loopflow.db");
+    fs::create_dir_all(database.parent().unwrap()).unwrap();
+    fs::write(&database, b"not a compatible Task registry").unwrap();
+    let target = home.path().join("lf");
+    let output = command(
+        home.path(),
+        repo.path(),
+        &[
+            "home",
+            "install",
+            "promote",
+            "--cli-target",
+            target.to_str().unwrap(),
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("only a published candidate"), "{error}");
+    assert_eq!(
+        fs::read(database).unwrap(),
+        b"not a compatible Task registry"
+    );
+    assert!(!target.exists());
 }
 
 #[test]
@@ -199,7 +225,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["account", "route"],
         vec!["account", "route", "--repo", "example/project"],
         vec!["wave", "list", "--json"],
-        vec!["ps", "--json"],
+        vec!["monitor", "ps", "--json"],
     ] {
         let output = command(home.path(), cwd.path(), &args)
             .env("PATH", no_tools.path())
@@ -224,13 +250,11 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["task", "sync", "--plan"])
+    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Run lf task sync from a Git repository")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
@@ -338,7 +362,7 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
     let run = |args: &[&str]| {
         success(
-            command(home.path(), cwd.path(), &["install", "schedule"])
+            command(home.path(), cwd.path(), &["home", "install", "schedule"])
                 .args(args)
                 .env("PATH", &bin)
                 .env("LF_INSTALL_DIR", home.path().join("installed & current"))
@@ -359,7 +383,8 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
         serde_json::from_str(&success(output)).unwrap()
     };
     let plist = read_plist();
-    assert_eq!(plist["ProgramArguments"][1], "install");
+    assert_eq!(plist["ProgramArguments"][1], "home");
+    assert_eq!(plist["ProgramArguments"][2], "install");
     assert_eq!(
         plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
         home.path().join("installed & current").to_str().unwrap()
@@ -402,10 +427,14 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
         assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
     }
     let before = fs::read(&path).unwrap();
-    let output = command(home.path(), cwd.path(), &["install", "schedule", "monthly"])
-        .env("PATH", &bin)
-        .output()
-        .unwrap();
+    let output = command(
+        home.path(),
+        cwd.path(),
+        &["home", "install", "schedule", "monthly"],
+    )
+    .env("PATH", &bin)
+    .output()
+    .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
     assert_eq!(fs::read(&path).unwrap(), before);

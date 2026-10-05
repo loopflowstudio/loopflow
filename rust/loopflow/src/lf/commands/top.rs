@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf ps` once, `lf top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -474,8 +474,8 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
         return Ok(ActivityData { execs: Vec::new() });
     }
     let store = SqliteStore::open_execs_read_only(path)
-        .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
-    Ok(store.read_run_ledger_snapshot(|store| {
+        .map_err(|error| anyhow!("failed to read Exec history {}: {error}", path.display()))?;
+    Ok(store.read_exec_snapshot(|store| {
         let mut execs = Vec::new();
         for receipt in live_execs {
             let id = crate::id::ExecId::parse(&receipt.exec_id)

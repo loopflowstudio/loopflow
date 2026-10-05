@@ -19,6 +19,13 @@ still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
 
+Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
+auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
+from Doppler, with repository Contents and Pull requests write access. Renew
+the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
+the required merge queue. Successful PR CI explicitly enqueues the unchanged
+Dependabot head when it is not already queued; queue CI still gates merging.
+
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;
@@ -58,6 +65,11 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
+Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
+Run the affected controller progression and CLI behavior tests as well as graph
+checks; use authored fixture Flows when a test needs a fixed sequence independent
+of product defaults.
+
 ## Quick Reference
 
 ```bash
@@ -78,6 +90,28 @@ for full sampling, comparison and the explicit capture-versus-presentation bound
 Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
+
+## External network isolation
+
+```bash
+uv sync
+uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
+```
+
+Prepare dependencies and compile binaries before isolating test execution.
+The test runner and CI use `test_network.py` for Python, Rust test executables,
+Swift tests, website tests and smoke tests. Each invocation proves loopback works
+and an external connection is denied; the OS boundary covers descendants too.
+Git transport is file-only. Local bare remotes and loopback protocol fixtures
+remain available. No developer shell or global Git configuration changes.
+
+macOS uses `sandbox-exec`; Linux uses passwordless sudo, `unshare --net` and `ip`
+to create a private network namespace, enable loopback and restore the caller's
+user identity. macOS permits only the fixed `/bin/ps` system reader outside the
+sandbox, matching Desktop's existing headless profile; it cannot launch fixture
+children or open service connections. Unsupported isolation fails explicitly. Installation-container
+proofs disconnect their external Docker network after compiling, then run the
+same denial/loopback probes before executing tests. Display diagnostics remain opt-in.
 
 ## Changed-Aware Runner
 
@@ -277,6 +311,9 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
 Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+After integrating Session kind changes, run `scripts/test_desktop.sh --filter
+'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
+participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
 
@@ -494,6 +531,15 @@ Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-decision-retry missing|replace` for native structured-output exhaustion
 or successful retry, `--flow-blocked` for keyed feedback continuation, and
 `--public-connect` for a live headless-to-terminal handoff.
+`--shared-provider-home` proves Loopflow and plain Codex share one home signed
+in as one stored account at a time: switching, saved-back logins, isolation,
+and provider conversation IDs in `lf session`.
+`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
+target/debug/lf --output <dir>` proves the same for Claude with synthetic
+logins and a local endpoint: a Claude started after a switch sends the login
+Loopflow installed, a shared launch gets no account home or credential
+variable, and an isolated launch stays in its account's home. On macOS it
+writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Homes and stops only its identified
 engine children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
@@ -649,6 +695,10 @@ uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow
 Detached repair proofs enter through the compiled CLI so admission records its
 Exec before launching a child. Assert the published tag and completed repair;
 an in-process `release_run` call does not exercise that execution boundary.
+Include stale failure observations after repair completion: a fresh authoritative
+merge must still settle the release and publish its tag, even if repair admission
+has already blocked the completed incident. Use fixture synchronization to prove
+the ordering without timing-dependent sleeps.
 
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
 binary mid-test mixes migration frontiers in a single temporary Home.
@@ -894,8 +944,8 @@ cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | t
 
 Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
 fixture, restore it afterward, and serialize environment changes with
-`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
-in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
+in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
 Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
 the Session driver references share the same database. Simulated finite-provider

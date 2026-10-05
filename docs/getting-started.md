@@ -68,6 +68,13 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                            # fix it
 ```
 
+### Open a conversation
+
+```bash
+lf                         # ask a question or start work
+lf operate                 # review and operate the repository’s open work
+```
+
 ### Inline prompts
 
 ```bash
@@ -194,7 +201,7 @@ Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
-`lf session list` finds conversations, Asks and Flow reviews; open one with
+`lf session list` finds conversations and Flow reviews; open one with
 `lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
@@ -216,7 +223,7 @@ lf ssh <home-id> --wave shipper wave/operate
 The target Home proves its identity before running the command and keeps the
 resulting execution locally.
 
-Reads follow the same rule: `lf monitor list`, `lf usage`, `lf wave list`, and `lf wave status`
+Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate execution records.
 

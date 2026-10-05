@@ -2,7 +2,7 @@
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
 //! Home placement. `lf wave status [wave]` adds current Projects, Task conditions,
-//! metric readings and Session history; it never reads resident health or a live
+//! metric readings and Session history; it never reads process health or a live
 //! loop. With no argument it resolves the ambient Wave. Reads preserve missing
 //! evidence; `--json` is the dashboard contract.
 //!
@@ -120,6 +120,8 @@ pub struct PmTaskSummary {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
+    pub state: Option<String>,
+    pub completed_at: Option<String>,
     pub assignee: Option<String>,
 }
 
@@ -769,7 +771,9 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
 /// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
-        return if task.task.completed {
+        return if crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed)
+            .is_some()
+        {
             RoadmapSection::Later
         } else {
             RoadmapSection::Available
@@ -995,7 +999,9 @@ async fn snapshot_tasks(
             name: task.plan.title.clone(),
             description: task.plan.description.clone(),
             rank: u32::MAX,
-            completed: work_status_is_terminal(&status),
+            // Missing planning is unknown, even when local execution has settled.
+            completed: false,
+            completed_at: None,
             state: None,
             project_id: Some(parent.plan.id.as_str().to_string()),
             project: Some(parent.plan.slug.clone()),
@@ -1133,13 +1139,12 @@ async fn snapshot_task_detail(
     });
     let next_move = match next_move {
         Some(next_move) => next_move,
-        None if item.completed => NextMove {
-            owner: NextMoveOwner::Wave,
-            reason: "Linear Task is complete".to_string(),
-        },
         None => NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "Task is ready to start".to_string(),
+            reason: item
+                .terminal_reason()
+                .unwrap_or("Task is ready to start")
+                .to_string(),
         },
     };
     let local_progress =
@@ -1194,11 +1199,13 @@ async fn snapshot_task_detail(
         action_evidence.as_ref(),
         observed_at,
     );
-    let actions = action_evidence
-        .as_ref()
-        .map_or_else(TaskActionModel::no_task, |evidence| {
-            derive_task_actions(evidence)
-        });
+    let actions = action_evidence.as_ref().map_or_else(
+        || TaskActionModel {
+            recommended: None,
+            reason: next_move.reason.clone(),
+        },
+        derive_task_actions,
+    );
     let direction = match task {
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
@@ -1207,7 +1214,7 @@ async fn snapshot_task_detail(
         &flow_record,
         &crate::ops::task_flow::TaskFlowGate {
             status: runtime.as_ref().map(|runtime| &runtime.status),
-            plan_completed: item.completed,
+            plan_terminal_reason: item.terminal_reason(),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -1506,6 +1513,8 @@ fn task_summary(item: PmItem) -> PmTaskSummary {
         description: item.description,
         rank: item.rank,
         completed: item.completed,
+        state: item.state,
+        completed_at: item.completed_at,
         assignee: item.assignee,
     }
 }
@@ -1565,8 +1574,7 @@ fn next_move_for_task(
         }
         return NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "PR is published but settlement is not armed with `lf task pr land -c`"
-                .to_string(),
+            reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
         };
     }
     let owner = NextMoveOwner::Wave;
@@ -1940,12 +1948,12 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
 
 fn print_runs(runs: &Evidence<SessionHistory>) {
     match runs {
-        Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
+        Evidence::Unavailable { reason } => println!("  sessions unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
-            println!("  runs       no Run records in the window")
+            println!("  sessions   no Session history in the window")
         }
         Evidence::Ok { items, truncated } => {
-            println!("  runs");
+            println!("  sessions");
             for run in items {
                 println!(
                     "    {label:<24}  {status:<12}  tok {tokens:>7}  {age:>7} ago",
@@ -2195,6 +2203,78 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[tokio::test]
+    async fn task_history_preserves_canceled_inventory_without_admitting_execution() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "product".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        store
+            .put_pm_snapshot(crate::store::PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative".into(),
+                synced_at: 1,
+                snapshot: planning.clone(),
+            })
+            .await
+            .unwrap();
+        let stored = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        let (details, gaps) =
+            super::snapshot_tasks(&store, vec![], vec![], stored.snapshot, false, false)
+                .await
+                .unwrap();
+        assert!(gaps.is_empty());
+        assert_eq!(details.len(), planning.items.len());
+        for detail in &details {
+            let item = planning
+                .items
+                .iter()
+                .find(|item| item.id == detail.task.id)
+                .unwrap();
+            assert_eq!(detail.task.state, item.state);
+            assert_eq!(detail.task.completed_at, item.completed_at);
+            assert_eq!(detail.task.completed, item.completed);
+            let terminal = item.terminal_reason();
+            assert_eq!(
+                matches!(super::task_section(detail), super::RoadmapSection::Later),
+                terminal.is_some()
+            );
+            assert_eq!(detail.flow.controls[0].unavailable.as_deref(), terminal);
+            if let Some(reason) = terminal {
+                assert_eq!(detail.next_move.reason, reason);
+                assert_eq!(detail.actions.reason, reason);
+            }
+        }
+        let mut rows = details
+            .into_iter()
+            .map(super::roadmap_task)
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|row| row.task.rank);
+        for row in &mut rows {
+            row.condition.observed_at = "2026-10-02T12:00:00Z".into();
+        }
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_rows.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(rows).unwrap(), expected);
+    }
+
+    #[tokio::test]
     async fn portfolio_ownership_is_scoped_to_repository() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2265,6 +2345,7 @@ mod tests {
             description: String::new(),
             rank: 1,
             completed: false,
+            completed_at: None,
             state: Some("unstarted".into()),
             project_id: Some("current".into()),
             project: Some("current".into()),

@@ -20,6 +20,8 @@ pub struct QueuedInvocation {
     pub id: String,
     pub flow: String,
     pub accounts: Option<Box<crate::provider_account::lease::AccountSelection>>,
+    /// `--isolate` / `--shared` as launched; `None` follows configuration.
+    pub isolate: Option<bool>,
     pub steps: Vec<ConcreteStep>,
 }
 
@@ -82,22 +84,6 @@ impl QueuedInvocation {
         Ok(u32::try_from(locate(&self.steps, cursor)?)?)
     }
 
-    /// The Ask key of a loop blocker raised at this cursor:
-    /// `flow:<invocation>:<node>:<iterations>`. A Task's decision and a saved
-    /// Flow's decision share it, so the deciding Run and its recovery meet the
-    /// same unblock Session.
-    pub fn blocker_key(&self, cursor: &crate::engine::ExecutionCursor) -> Result<String> {
-        Ok(format!(
-            "flow:{}:{}:{}",
-            self.id,
-            self.node_id(cursor)?,
-            serde_json::to_string(&crate::engine::flow_graph::flow_iterations(
-                &self.steps,
-                cursor
-            ))?
-        ))
-    }
-
     pub fn new(flow: impl Into<String>, steps: Vec<ConcreteStep>) -> Result<Self> {
         let flow = flow.into();
         if steps.is_empty() {
@@ -109,8 +95,15 @@ impl QueuedInvocation {
             accounts: Some(Box::new(
                 crate::provider_account::lease::AccountSelection::from_env()?,
             )),
+            isolate: crate::provider_account::activation::isolation_from_env(),
             steps,
         })
+    }
+
+    /// The captured launch mode, for a process relaunched from this invocation.
+    pub(crate) fn isolation_env(&self) -> Option<(&'static str, &'static str)> {
+        self.isolate
+            .map(crate::provider_account::activation::isolation_env)
     }
 
     pub fn load(repo: &Path, flow: &str) -> Result<Self> {

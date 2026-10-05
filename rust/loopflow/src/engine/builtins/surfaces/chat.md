@@ -4,7 +4,7 @@ the message they see — not a log, not a working transcript. Talk to them.
 - Answer the person first, in plain language. Give them the useful thing — a
   result, a link, a decision, or one sharp question — not a status monologue.
 - Never narrate your internal machinery: no skill names, no phase names, no
-  "I'm using…", no "control ancestry / placement / durable Ask identity" or
+  "I'm using…", no "control ancestry / placement / execution identity" or
   other control-plane vocabulary. The person does not care how you work.
 - Ground every claim in real state. In prose, link work as
   `[Title · Task ID or PR number](known URL)` on first mention. In operational

@@ -38,6 +38,110 @@ post-review decider. Source templates cannot establish a saved invocation's shap
 No configured proof follows from this reconciliation. Workspace/remote/performance/
 defaults/website scope stays LOO-353; LOO-366/367 retain separate policy scope.
 
+## Capture and configurable New Session (2026-10-03 UTC)
+
+Jack Heart accepted capture on October 1, then selected New Session and the
+Linear-style compose row on October 2. Jack approved the searchable skill-picker
+prototype and requested pursue through its human demo boundary, preserving the
+existing opening prompt. New Session launches; choosing a skill only updates the
+next launch and persists per repository. The default is `capture-tasks`.
+
+Tasks express intention. Favor cohesive behavioral promises; several Tasks across
+Waves/repositories are supported, never a quota. Launch scope is a revisable clue,
+not a filing boundary. Capture stays in its repository/Wave conversation, files
+self-contained briefs without workers, and leaves operation to owners. Wave
+conversations read the same skill without changing their existing authority.
+Keep design and general/Task conversations. After an uncertain write, reconcile
+in its destination and retry identical input there; preserve each successful filing.
+
+The branch uses lf-owned discovery and explicit `skill <name>` launch syntax to
+avoid Flow-name collisions. Repository presentation retains `(Home, checkout)`
+identity and both layouts without changing Task selection. A successful app build
+proved insufficient when its configured CLI lacked the skill: configured runtime
+and shipped packaging need their own evidence. Six focused post-sync tests cover
+selection, scope and production-control layout/error behavior; native picker
+interaction, provider/draft continuity and real cross-repository capture remain
+unproven. Prototype approval supplies no native acceptance or sustained-use KR.
+The accepted design and dated demo evidence are retained at
+[the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
+
+## Session working set (2026-10-03)
+
+Jack Heart requested unfinished interactive participation in ordinary API and
+Desktop Session navigation (LOO-372). Task association still includes all work.
+`--needs-me` narrows the selected mode; explicit headless/history filters retain
+full inspection. Filtered absence cannot release native surfaces or clear drafts
+and selection. Explicit completion remains separate from turn completion.
+Local headless regressions cover visibility, counts and refresh/completion races;
+they establish no sustained-use KR or configured provider acceptance.
+
+## Current Tasks and completion history (2026-10-02)
+
+Jack Heart requested current work without obsolete duplicates, completed Tasks
+hidden initially, and Show completed with 7 days, positive N days and All time
+(LOO-369). Coordinator guidance limits that control to successful completions;
+it is not attributed as a separate decision from Jack. Canceled/duplicate history
+remains in the shared inventory and Linear. Window-local filters affect displayed
+rows and their count, never Task lifecycle, Flow settlement or Session membership.
+
+The observed Growth snapshot already contained canceled states; the Task summary
+dropped them. Preserve provider state separately from successful completion and
+carry actual completion time. Unknown dates belong only in All time; reopening
+makes planning current despite an old timestamp. Equal-revision storage enrichment
+may fill a genuinely absent completion-date key, but cannot change an observed
+null or date. Snapshot acquisition and unrelated updates cannot establish recency.
+
+Jack relayed the coordinator finding that settled Tasks with removed checkouts
+still carried recovery conditions. That condition alone must not bypass history
+filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
+and observed unsettled files/commits remain visible; open Sessions stay reachable
+independently. This agrees with the Task workspace's checkout association contract.
+
+Jack Heart subsequently approved the inline checkbox/number prototype and
+requested Desktop implementation. Completed enables the remembered range
+(initially seven days); the active label edits N Days, with zero shown as All
+Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
+One native text surface handles display and editing to preserve glyph placement;
+long integers scroll within the compact viewport. Wave identity bounds drafts.
+
+The earlier affected gate and configured app compilation passed. The later inline
+revision and compression have seven focused passing tests and SwiftPM compilation;
+queue gate and native visual/focus review remain separate. Jack's Growth screenshot
+shows six current Tasks without the seven duplicates. The isolated offline capture
+has no successful completions or Sessions, so it cannot prove recency or native
+Session continuation. Live refresh and retained-Session review remain unproven.
+See [the review evidence](../../docs/reviews/task-history.md). These observations
+provide no sustained-use KR or external-progress credit.
+
+## Ask removal decision (2026-10-01)
+
+Jack Heart requested ordinary headless failure without an escalation conversation,
+reporting command, notification queue, or required handoff. The responsible Wave
+operator reads existing status and logs, resolves authorized impediments, and
+uses its ongoing Wave chat for necessary judgment. Taskless failure returns to
+its caller without creating a Wave or conversation. Known failed work stays
+stopped until explicit recovery; retry retains the Flow position and conversation.
+
+Jack clarified “no, Task sessions stay”: Task conversations and authored human
+reviews retain their feedback and completion contract. Persistent versus one-off
+Task conversations remains open. Historical Ask rows become ordinary conversations
+without replacing the Wave chat or granting Flow settlement authority. Older Ask
+identity and caller-release notes below describe the retired model.
+
+The local Ask removal implements this boundary with provider simulations and
+store recovery coverage; full Rust and Desktop acceptance remains with gate.
+A successful provider turn is not reclassified from prose alone. This records
+Product’s shared Session contract, not a Task or Wave placement decision.
+
+Reconciliation with the October 1 Session attention change preserves `--needs-me`
+for current reviews, ready conversations and recorded interactive replies.
+Converted Ask history follows ordinary conversation rules; its former kind alone
+creates no attention obligation. Conversion itself never completes a Session.
+Later confirmed owning-driver exits can retire unassigned, non-primary
+conversations; Task/Wave conversations and Flow reviews remain open. Missing
+process evidence grants neither retirement nor Flow settlement. This is source
+inspection, not full Desktop acceptance.
+
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
 Jack Heart accepted a Task workspace that keeps Sessions, shells and files
@@ -65,8 +169,9 @@ checkpoint final writes after confirmed stop. Crossing repeat intervals and an
 already-claimed decider need explicit resolution, not an invented inner boundary.
 These are required implementation mechanics, not delivered behavior.
 
-Jack accepted automatic Wave wakes for operational blockers and reading existing
-Task/Session output. A repo-associated Session may request repo attention with
+Earlier planning accepted automatic Wave wakes for operational blockers and
+reading existing Task/Session output. The Ask removal decision above supersedes
+this escalation plan and its direct-Ask caller contract. A repo-associated Session may request repo attention with
 original evidence and a reason. These asynchronous requests never release direct
 Asks and do not introduce a messaging UI. Upstream `3dc89bc9a` already removed
 the resident/listener, external chat bridge and turn claims. The outbox survives
@@ -549,8 +654,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   old failures do not diagnose a new runner. Never replay retired mutation probes.
 - LOO-291 retains ten human-selected external-work trials, an authorized directive
   edit, and twenty long-lived-registry trials against published budgets. The external
-  workflow/text remain unprovided. LOO-251 retains promoted-Ask blocked-caller release
-  and D2's fourteen-day/twenty-open readiness obligations. Local PTYs, one cached
+  workflow/text remain unprovided. LOO-251’s promoted-Ask blocked-caller proof
+  was superseded by Jack Heart’s 2026-10-01 Ask removal; retained Task reviews
+  still require completion proof. D2’s fourteen-day/twenty-open readiness
+  obligations remain. Local PTYs, one cached
   population, or AX count timings do not satisfy these. Earlier fallback attempts
   stopped at resource preflight; the September 25 supervised Xcode compile later
   passed. Neither compile supplies the missing verdict or authorizes removing
@@ -607,12 +714,6 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   establishes a forward boundary; retain later wording changes as dated evidence.
   Append-only PM revisions or provider KR identities remain an instrumentation
   option when a real review needs lineage the archive cannot supply.
-- **LOO-278 delivery is consolidated, Task placement is not** (observed
-  2026-09-23). The combined code and sealed archive are in
-  `loopflow.review-chapter`; the Task still records `loopflow.chapter-planning`
-  and its original serial PR branch. Preserve that checkout and history until
-  supported reassignment exists. Do not infer a binding from copied files,
-  rewrite the registry, or start a second writer. No publication is established.
 
 ## Work and continuity (reconciled 2026-09-23)
 
@@ -629,11 +730,11 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   machine bylines, and the database message bus are deleted.
 - **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
-  is useful. `lf ask` brings a decision that genuinely needs Jack into a direct
-  Session in the caller's checkout; ordinary Runs can ask without an authored
-  review node. Explicit completion releases the exact caller. Authored review
-  Sessions return feedback to their recorded Flow boundary, with navigation
-  owned by the following decider. There is no agent exchange row, answer lane,
+  is useful. Ask was removed by Jack Heart’s 2026-10-01 decision. Failed work
+  retains its normal logs and outcome; necessary judgment belongs in the existing
+  Wave chat. Authored review Sessions return feedback to their recorded Flow
+  boundary, with navigation owned by the following decider. There is no agent
+  exchange row, answer lane,
   or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
   oldest-first. There is no live memory stream, and recent Wave Chat is not
@@ -752,71 +853,57 @@ substitute for another merely because identifiers coincide.
   `ok`, `waiting`, `failed`, `pending`), not the lfd int enum. No invented
   `cancelled`. An unknown status must be **loud** (surface it), never a silent
   `?? .pending`. When `lf` and lfd disagree, `lf` wins.
-## Performance — reads never block on lfd
+## Performance — launch renders before any read (2026-10-04)
 
-- **Governing invariant: the repo/wave list paints from `lf` (daemon-less); a
-  listener or Home process must never gate a read.** First instance
-  (diagnosed, fix implemented this branch): `WavesView.syncRepoStates`
-  early-returned while `SharedDaemon.currentConnection == nil` and
-  `prepareConnectionIfNeeded` awaited `SharedDaemon.manager.start()` — the wave
-  list waited on lfd booting even though `RegistryQuery`/`lf ls` is daemon-less.
-- Cheap wins landed this branch: one machine-wide `RegistryQuery.allWaves()`
-  (`lf ls --json`) per poll distributed to each `PortfolioRepoState` (was one
-  spawn per repo); memoized `lf` binary resolution (was `lf help wave` probe per
-  query); first paint boots lfd concurrently, not as a barrier; `WavePlanParser`
-  moved off render/`body` onto a per-refresh cache; one `tmux list-sessions`
-  snapshot + Set lookup (was `tmux has-session` per wave). These are historical
-  reductions, not measurements of the current canvas. Use the two experience
-  runners above to establish current budgets.
+Jack Heart requested Desktop open on a usable workspace with one loading
+vocabulary and one refresh path (LOO-376). On Jack's Home, installed `lf`
+0.12.32, single samples: `roadmap --all` 14.5 s, `session list` 12.4 s,
+`wave list` 2.4 s, `home id` and `ps` 1.2 s each. No read fits the 1000 ms
+budget, so a returning launch shows saved wire text first; that CLI latency has
+no owning Task (LOO-375 owns `wt list` only).
+
+- Save the reads' wire text, restore through the live decoder, and strip
+  liveness and legal actions before saving. Display evidence, never authority.
+  Keep it inside the Home; a different `lf home id` drops content and selection.
+- One model owns refresh; views that each start a loop supersede each other's
+  reads. A view that builds its own model reopens the blocking path.
+- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
+  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
+  CPU and the 400/1000 ms targets are unmeasured.
+- Jack's delivery contract (2026-10-04): land on autonomous checks and honest
+  benchmark evidence; rendered startup is post-merge validation, not a gate.
+  Still owed on LOO-376 after PR #1425: recorded timing of real launches and
+  refreshes with a documented report command. Not complete without it.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
-- **`lf session list --json` is the sole unresolved-human-work projection.** It
-  merges interactive Runs (including native resumes of headless Runs), human Asks,
-  and Task human FlowSteps into required-field `SessionRecord` values. The Mac app renders that
-  projection and owns no second queue, title store, liveness model, or resolution
-  state.
-- **Provider history is the resume authority; interactive takeover is explicit.**
-  A row click focuses or reveals its retained terminal. An interactive client
-  active elsewhere opens an explanation; only **Move here** requests replacement
-  of the exact Loopflow-owned client whose PID and birth evidence match its Run.
-  Native resume preserves conversation history, not unsent input in the old TUI.
-  `session open --json --replace` prepares the replacement argv without stopping
-  that client. Closing a pane or provider exit resolves nothing. Complete applies
-  only to interactive Sessions and ready Asks; Approve and Iterate apply only to
-  ready Task FlowSteps.
-- **tmux is only the first client's detached PTY cradle.** It lets an interactive
-  TUI start before a desktop exists, but it is not Session identity, readiness,
-  presentation, liveness authority, or a resolution mechanism. A kernel advisory
-  lock protects first-launch publication; native resume releases it before waiting
-  on the conversation so metadata access remains available.
-- **The Mac multiplexer presents Sessions without owning them.** The unified
-  outline has exact Session leaves; splits are explicit. Selecting another row changes the
-  focused viewing slot and retains the previous terminal. **Close view** hides a
-  Session and Undo restores it live; Complete removes its row and reconciles its
-  pane. VIEWING, RUNNING, ELSEWHERE, OPENING, and RETRY describe distinct states.
-  Repository selection uses canonical Git common-directory identity so linked
-  Task worktrees never appear as portfolio roots.
-- **Work conditions remain non-actionable descriptions.** `lf status` and `lf
-  roadmap` expose one Task condition: `clear`, `waiting`, `blocked`, or `unknown`.
-  Sessions alone open or resolve human work. NOW groups the same conditions, and
-  usage and Run inspection preserve explicit subject provenance without adding
-  another planning hierarchy.
-- **Two configured-path proofs remain release evidence.** One promoted Ask must
-  survive open, provider-native continuation, Ready, Complete, pane clearing, and
-  blocked-caller release. The permissioned macOS UI gate must interact with a
-  Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
-  launch-only screenshot, empty list, or live row without caller release is not
-  equivalent evidence.
-- **Shared action reduction is implemented in this branch.** Required action
-  descriptors and shared Work paths replace Swift's legality/replacement matrix
-  and labels-only roadmap read. Local surfaces, prepared commands, drafts and
-  opening/resolution errors retain independent presentation lifetimes.
-- **PM reconciliation applied 2026-09-23.** LOO-251 now carries the native
-  Sessions and real caller-release proof; LOO-284 carries shared actions and
-  labels; LOO-291 carries scoped planning integration. Their current directives
-  and activation conditions live in Linear. The older Ask-only directive is
-  superseded; do not file duplicate follow-ups.
+The older Ask/Ready/Complete and Task-review control contract is superseded by
+October 4's Task conversation correction. Its dated implementation and proof
+notes remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
+under this heading. Retain these independent constraints:
+
+- `lf session list --json` owns the shared Session projection; Desktop owns no
+  second queue, title store, liveness model or resolution state.
+- Provider history owns native resume. Row selection focuses the retained
+  terminal; **Move here** explicitly replaces an exact Loopflow-owned client
+  using PID and birth evidence. Resume preserves history, not unsent TUI input.
+  `session open --json --replace` prepares argv without stopping the old client.
+  Closing a pane or provider exit resolves nothing.
+- tmux is the first client's detached PTY cradle, never identity or authority.
+  An advisory lock protects first-launch publication; native resume releases it
+  before waiting so metadata remains readable.
+- Desktop retains terminals across selection, with explicit splits and reversible
+  Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
+  Canonical Git common-directory identity keeps Task checkouts out of repo roots.
+- Work conditions describe evidence; usage and inspection preserve attribution.
+  Shared action descriptors replace Swift's legality matrix. Prepared commands,
+  drafts, surfaces and opening errors have independent presentation lifetimes.
+- Configured provider continuation and native focus/pane reconciliation remain
+  unproven by mocks, launch screenshots or empty inventories. The deleted review
+  handshake is no longer an acceptance requirement.
+- September 23 reconciliation assigned native continuation to LOO-251, shared
+  actions to LOO-284 and scoped planning to LOO-291. Retain their dated directives
+  and evidence limits; do not infer completion or file duplicate follow-ups.
 
 ### Task observation and Watch (2026-09-23)
 
@@ -985,14 +1072,13 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Historical Wave controls and failures
+## Historical Wave controls
 
-The retired resident/listener controls, attempt-card fixes, dictation decision and
-signed UI-test limits remain at `5090f672e:wave/product/MEMORY.md` under
-“Historical Wave controls & truthful failures”. Upstream removed those runtime/UI
-surfaces; they are not dependencies of primary Sessions. Attempt failure is not
-Wave failure, empty thought records are not cards, and native UI proof remains
-separate from a signed build. Wispr Flow remains the selected dictation tool.
+The retired listener controls, failed-turn presentation and dictation decisions
+are preserved in `12016c6d6dd34a4c1a553c25b5cf2529ee93615b:wave/product/MEMORY.md`
+under “Historical Wave controls & truthful failures”. They do not authorize
+restoring the listener. Attempt failure remains distinct from Work failure;
+Wispr Flow owns dictation; configured UI execution requires a capable host.
 
 ## Learnings
 
@@ -1002,10 +1088,6 @@ separate from a signed build. Wispr Flow remains the selected dictation tool.
   fresh `RepoSidebarWindow` re-derived the burgundy sidebar / create sheet /
   terminal panes and got each subtly wrong; the proven components already encode
   the right style + behavior — adapt them.
-- **Historical palette implementation, not a canvas requirement:** a custom `VStack{…}.background(Color.loopflowBurgundy)`
-  with white text (`WaveSidebar.swift`), NOT a `NavigationSplitView` column (its
-  gray vibrant material can't be overridden). Fields = `.textFieldStyle(.plain)` +
-  `palette.surfaceMuted` (`CatchWaveView`), NOT `.roundedBorder` (renders black).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
   branch checkout. Repository discovery collapses linked worktrees to the
   canonical main checkout through the Git common directory; Task Work remains
@@ -1019,18 +1101,9 @@ separate from a signed build. Wispr Flow remains the selected dictation tool.
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
-- Kickoff line numbers drift fast — re-verify before citing in a design.
-- **Migration numbers collide across branches — shared `lfd.db` is the blast
-  radius.** Product and intelligence both minted `061` (`061_pm_snapshots` vs
-  `061_trace_capture`); distinct version strings apply but inter-order is
-  undefined. Worse, editing a historical migration CREATE in place (product added
-  `run_events.context` to `057`) means DBs created before the edit never get the
-  column, and `057` won't re-run — so `validate_run_events_schema` selecting
-  `context` takes down *every* command sharing `lfd.db` (that was the `pm show`
-  break; worked around by hand-adding the column). Fix is intelligence's, one
-  line: `061_trace_capture`'s unguarded `ALTER TABLE run_events DROP COLUMN
-  context` fails `no such column` on pre-context DBs and isn't in the convergence
-  path — tolerate it (or rebuild). Product must NOT add a forward `ADD COLUMN
-  context`; it would fight the drop. Wants a real convention: per-wave migration
-  ranges, or Jack's idea — a separate dev lfdb via `LF_HOME=~/.lf-dev` (honored at
-  `lfd/mod.rs:66`) so in-flight schema can't corrupt the real ledger.
+- **Historical migrations demonstrated the shared-store blast radius.** Product
+  and Intelligence collided on `061`; editing an already-applied migration left
+  existing databases without a required column. Preserve released migrations and
+  test upgrades from the released frontier. The specific 057/061 incident and
+  proposed remedies are retained in the prior memory linked above; they are not
+  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.

@@ -1,6 +1,6 @@
 ---
 requires: a design or findings that may warrant implementation
-produces: an execution decision and any authorized Task handoffs
+produces: an execution decision and any Task handoffs
 action_style: procedural
 ---
 Turn the design into an execution decision using the Task controls that already
@@ -18,7 +18,7 @@ the same outcome; do not create a prevention project merely to fill a Flow step.
 When no useful change remains, record that decision and finish.
 
 A standalone invocation need not already have a Task. Use the existing-design
-handoff below for selected work, retaining unresolved ownership or authorization
+handoff below for selected work, retaining unresolved ownership or direction
 as an explicit next decision. Never launch a competing worker into active work.
 
 ## Decide what stays here
@@ -60,9 +60,8 @@ Mark possible solutions as tentative. Keep architecture, implementation steps,
 and detailed proof in the design, linked and available to the worker.
 
 Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments when posting
-is authorized. A comment should say what changed and what it means; link detailed
-receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Chapter
+changes, launch attempts, and verification updates in Task comments.
+A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Chapter
 records still own application receipts. Proposals draft comments without posting.
 Do not use a description update or worker steering as a substitute log channel.
 
@@ -94,9 +93,8 @@ launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → refresh
 → loop-decide. Refresh runs sync → realign. Iterate returns to implementation;
-Advance publishes, then reaches a human demo. Its completion returns feedback to another loop-decide
-whose explicit edge also targets implement. The `feature` Flow
-retains the initial design review. Preserve intent, constraints, and done-when
+Advance publishes and ends the pursuit. `code` adds a human PR walkthrough;
+`feature` adds the initial design review, then a demo and landing after pursuit. Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.
 
 Finish with a short accounting of the selected work and its design/evidence

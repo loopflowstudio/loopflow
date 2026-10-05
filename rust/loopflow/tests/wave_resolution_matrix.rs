@@ -88,6 +88,7 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "cron", "preflight"],
     &["wave", "cron", "run"],
     &["wave", "cron", "history"],
+    &["wave", "cron", "disposition"],
     &["wave", "cron", "trigger"],
     &["wave", "cron", "remove"],
 ];
@@ -257,7 +258,7 @@ fn classify(output: &std::process::Output) -> Outcome {
     let combined = format!("{stderr}{stdout}");
     let resolution_text = combined
         .lines()
-        .filter(|line| !line.contains("ambient wave identity failed validation; run attributed"))
+        .filter(|line| !line.contains("ambient wave identity failed validation;"))
         .collect::<Vec<_>>()
         .join("\n");
 

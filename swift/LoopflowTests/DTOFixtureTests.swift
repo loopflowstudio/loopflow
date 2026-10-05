@@ -201,6 +201,8 @@ struct DTOFixtureTests {
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
+        #expect(detail.tasks.items[0].task.state == "unstarted")
+        #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].prs.compactMap(\.publication?.github?.number) == [912])
         #expect(detail.tasks.items[0].activePr == "pr_33333333333333333333333333333333")
         #expect(detail.tasks.items[0].prs[0].publication?.merge?.afterMerge == .completeTask)
@@ -405,7 +407,7 @@ struct DTOFixtureTests {
     @Test("Every Session kind retains its identity without a Run field")
     func sessionIdentityHasNoRun() throws {
         let data = try loadFixtureData("session.json")
-        for kind in ["conversation", "ask", "flow"] {
+        for kind in ["conversation", "flow"] {
             var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             value["kind"] = kind
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))

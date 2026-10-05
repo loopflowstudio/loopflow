@@ -144,7 +144,8 @@ impl SqliteStore {
     pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events start WHERE start.session_id=?1
-            AND start.kind='started' AND NOT EXISTS(SELECT 1 FROM session_events done
+            AND start.kind='started' AND NOT EXISTS(SELECT 1 FROM session_events retired WHERE retired.session_id=start.session_id AND retired.receipt_key='task_restart:stopped')
+            AND NOT EXISTS(SELECT 1 FROM session_events done
                 WHERE done.session_id=start.session_id AND done.kind='completed'
                 AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))",
             [session], |row| row.get(0))?)
@@ -322,15 +323,15 @@ mod tests {
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/missing/task%_',1)", params![task.as_str(), project.as_str()]).unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
-                ("ask", "/missing/task%_", false, false),
+                ("conversation", "/missing/task%_", false, false),
                 ("history", "/elsewhere", true, true),
                 ("sibling", "/missing/task%_-other", false, false),
                 ("wildcard", "/missing/taskAB", false, false),
             ] {
                 conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,kind,completed_at)
-                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),if id=="ask" {"ask"} else {"conversation"},complete.then_some(2)]).unwrap();
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),"conversation",complete.then_some(2)]).unwrap();
             }
-            for id in ["manual", "ask", "history", "sibling", "wildcard"] {
+            for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
                 super::super::sessions::test_capture(
                     &conn,
                     id,
@@ -372,7 +373,7 @@ mod tests {
                 .iter()
                 .map(|s| s.id.as_str())
                 .collect::<Vec<_>>(),
-            ["ask", "history", "manual"]
+            ["conversation", "history", "manual"]
         );
         assert_eq!(
             work.flows

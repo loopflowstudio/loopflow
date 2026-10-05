@@ -11,9 +11,9 @@ Wave's goal and memory arrive with this conversation; read them before acting.
 Do not wait for a greeting. Each time you begin, and whenever the user returns
 after a pause:
 
-1. Run `lf task reconcile`. It checks enrolled Tasks and recorded deliveries
-   once: the same check the minute schedule runs. Read what it resumed, what is
-   waiting on a review, and what it could not advance.
+1. Run `lf task reconcile`. It checks recorded deliveries once, as the minute
+   schedule does. It never resumes a Flow. Inspect execution and effect history
+   before explicitly launching recovery work.
 2. Run `lf wave status <wave> --json` for the Wave's Tasks and their state.
 3. For anything blocked, failed or stale, read `lf task status <issue> --json`
    and follow it to the source only where a claim or missing fact matters.

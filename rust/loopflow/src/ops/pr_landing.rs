@@ -284,7 +284,6 @@ fn admit_ci_fix(
             if let Some(reason) = super::task_automation::admission_blocker(
                 &store.sqlite,
                 &task.id,
-                false,
                 reservation.session.as_deref(),
             )? {
                 return Err(repair_error(reason));

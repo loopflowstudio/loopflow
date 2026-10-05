@@ -134,21 +134,18 @@ without publishing, rotating the branch, or completing the Task. Multiple PRs
 for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
-## Keep Tasks progressing in the background
+## Check authorized deliveries in the background
 
 ```bash
-lf cron sync --repo                 # install this Home's minute check
-lf --task EXP-12 flow start                  # new launches enroll automatically
-lf task automate EXP-12 off         # hold future automatic work
-lf task automate EXP-12 on          # enroll or clear its retry hold
-lf task automation --json           # schedule coverage and Task blockers
-lf task reconcile --json            # run one check now
+lf cron sync --repo                 # install this Home's minute delivery check
+lf task reconcile --json            # check recorded deliveries once
+lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
 Checks continue with Desktop closed while the placed Home's user is logged in.
-They resume captured Flows, respect reviews and holds, record CI failures, and
-settle verified merges. They do not repair CI.
+They record CI failures and settle verified merges. Flow recovery belongs to its
+caller: inspect execution and effect history before launching fresh work.
 
 ## Repair failed CI
 
@@ -172,11 +169,13 @@ continue when the schedule is disabled or a Task is held.
 Set repository defaults in `.lf/config.yaml`:
 
 ```yaml
-automation: {enroll_new_tasks: true, retries: 1, timeout_reruns: 1}
+automation: {retries: 1, timeout_reruns: 1}
 ```
 
-Historical Tasks stay unenrolled until selected. One unchanged launch/runtime
-failure may retry; a completed blocked repair waits for changed evidence.
+Use `lf task automate EXP-12 off` to hold future CI repair, and
+`lf task automate EXP-12 on` to enable it again. These settings never resume a
+Flow. One failed repair startup may retry; a completed blocked repair waits for
+changed evidence.
 Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
 Use an always-available Home for progress through laptop logout or shutdown.
 

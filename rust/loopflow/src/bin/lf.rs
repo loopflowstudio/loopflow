@@ -876,7 +876,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                     println!(
                         "{}: {}",
                         task.issue,
-                        task.detail.as_deref().unwrap_or("not yet checked")
+                        if task.enabled == Some(false) {
+                            "CI repair held"
+                        } else {
+                            "CI repair enabled"
+                        }
                     );
                 }
             }
@@ -886,14 +890,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             let result = loopflow::ops::task_automation::reconcile(repo)?;
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
-            } else {
-                for task in &result.tasks {
-                    println!(
-                        "{}: {}",
-                        task.task_id,
-                        task.detail.as_deref().unwrap_or("unchecked")
-                    );
-                }
             }
             if !result.errors.is_empty() {
                 anyhow::bail!("{}", result.errors.join("\n"));

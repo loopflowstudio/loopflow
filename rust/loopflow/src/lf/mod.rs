@@ -750,17 +750,17 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Inspect repository scheduling and Task enrollment
+    /// Inspect delivery scheduling and Task CI repair settings
     Automation {
         #[arg(long)]
         json: bool,
     },
-    /// Check enrolled Tasks and authorized deliveries once, then exit
+    /// Check authorized deliveries once, then exit
     Reconcile {
         #[arg(long)]
         json: bool,
     },
-    /// Enroll or hold a Task without interrupting running work
+    /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
         #[arg(value_parser = ["on", "off"])]

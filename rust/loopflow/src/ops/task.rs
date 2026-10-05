@@ -2580,16 +2580,6 @@ pub(crate) async fn exec_task_process(
     task: &mut Task,
     selected_flow: Option<&str>,
 ) -> OpsResult<()> {
-    store
-        .sqlite
-        .set_task_automation(
-            &task.id,
-            crate::engine::config::load_config_or_default(Some(&task.worktree))
-                .automation
-                .enroll_new_tasks,
-            true,
-        )
-        .map_err(task_error)?;
     let _declaration = crate::lf::commands::flow::EnvVarGuard::set(
         crate::lf::WORK_DECLARATION_ENV,
         &format!("task:{}", task.id),
@@ -5083,7 +5073,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         store
             .sqlite
-            .set_task_automation(&task.id, false, false)
+            .set_task_automation(&task.id, false)
             .map_err(task_error)?;
         let work = crate::durable::WorkRef::Task(task.id.clone());
         store.append_interrupt(&work).await.map_err(task_error)?;

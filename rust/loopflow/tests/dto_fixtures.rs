@@ -449,7 +449,7 @@ fn task_work_preserves_all_owners_and_managed_marker() {
 }
 
 #[test]
-fn task_automation_keeps_coverage_distinct_from_held_and_reviewing_work() {
+fn task_automation_keeps_coverage_distinct_from_repair_hold() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/task_automation.json"
     ))

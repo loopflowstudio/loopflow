@@ -1897,6 +1897,44 @@ mod tests {
     }
 
     #[test]
+    fn task_flow_observations_removes_scheduling_and_preserves_repair_hold() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_flow_observations");
+        conn.execute_batch(r#"
+            INSERT INTO execs(id,trace_id,started_at,outcome) VALUES('old-exec','trace',1,'interrupted');
+            INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree,
+              automation_enabled,automation_exec_id,automation_retry_key,automation_retries,
+              automation_checked_at,automation_detail)
+            VALUES('t','p','linear-t','LOO-1',1,'/repo/task',0,'old-exec','old-position',3,20,'stopped');
+            INSERT INTO task_events(task_id,kind_json,created_at) VALUES('t','{"kind":"started"}',17);
+        "#).unwrap();
+        conn.execute_batch(&current_draft_sql("task_flow_observations"))
+            .unwrap();
+        let retained: (String, bool, String) = conn.query_row(
+            "SELECT worktree,automation_enabled,kind_json FROM tasks JOIN task_events ON tasks.id=task_events.task_id WHERE tasks.id='t'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            retained,
+            ("/repo/task".into(), false, r#"{"kind":"started"}"#.into())
+        );
+        let retired: i64 = conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('tasks') WHERE name IN ('automation_exec_id','automation_retry_key','automation_retries','automation_checked_at','automation_detail')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT outcome FROM execs WHERE id='old-exec'", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            "interrupted"
+        );
+        assert_eq!(retired, 0);
+    }
+
+    #[test]
     fn task_agent_migration_preserves_existing_tasks() {
         let conn = open();
         apply_before_current_draft(&conn, "task_agent");

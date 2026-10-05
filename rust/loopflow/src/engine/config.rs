@@ -280,7 +280,6 @@ fn default_summary_tokens() -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutomationConfig {
-    pub enroll_new_tasks: bool,
     pub retries: u32,
     pub timeout_reruns: u32,
 }
@@ -288,7 +287,6 @@ pub struct AutomationConfig {
 impl Default for AutomationConfig {
     fn default() -> Self {
         Self {
-            enroll_new_tasks: true,
             retries: 1,
             timeout_reruns: 1,
         }

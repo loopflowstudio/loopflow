@@ -1186,7 +1186,7 @@ Concrete work and Task lifecycle
 
 ## lf task automation
 
-Inspect repository scheduling and Task enrollment
+Inspect delivery scheduling and Task CI repair settings
 
 | Argument | What it does |
 |---|---|
@@ -1195,7 +1195,7 @@ Inspect repository scheduling and Task enrollment
 
 ## lf task reconcile
 
-Check enrolled Tasks and authorized deliveries once, then exit
+Check authorized deliveries once, then exit
 
 | Argument | What it does |
 |---|---|
@@ -1204,7 +1204,7 @@ Check enrolled Tasks and authorized deliveries once, then exit
 
 ## lf task automate
 
-Enroll or hold a Task without interrupting running work
+Enable or hold CI repair for a Task without interrupting running work
 
 | Argument | What it does |
 |---|---|

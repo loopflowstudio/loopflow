@@ -231,7 +231,7 @@ fn mechanical_failure_retains_earlier_step_success() {
 }
 
 #[test]
-fn mechanical_step_survives_its_driver_and_resume_consumes_it_once() {
+fn ordinary_flow_crash_retains_effects_without_repository_restart() {
     use std::time::{Duration, Instant};
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
@@ -291,73 +291,67 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         .unwrap();
     driver.kill().unwrap();
     driver.wait().unwrap();
-    let mut resume = lf_command(repo.path(), home.path(), &["flow", "resume", &id], None)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    // Wait until the replacement reached the existing driver lock, then check
-    // that it leaves the live effect selected with no failure or duplicate.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        let count: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM execs WHERE parent_exec_id IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if count == 2 {
-            break;
+    // Reconciliation before and after the surviving effect completes must not
+    // resume the saved invocation or execute its successor.
+    for effect_finished in [false, true] {
+        if effect_finished {
+            fs::write(repo.path().join("release"), "").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                let finished: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM flow_events WHERE flow_id=?1 AND kind='operation_completed')",
+                    [&id], |row| row.get(0),
+                ).unwrap();
+                if finished {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "effect receipt never arrived");
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(resume.try_wait().unwrap().is_none());
-    assert_eq!(
-        fs::read_to_string(repo.path().join("effects")).unwrap(),
-        "started\n"
-    );
-    let failure: Option<String> = conn
-        .query_row(
-            "SELECT failure_json FROM flow_sessions WHERE id=?1",
-            [&id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(failure, None);
-    fs::write(repo.path().join("release"), "").unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        if let Some(status) = resume.try_wait().unwrap() {
-            assert!(status.success(), "resume failed: {status}");
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "resume did not consume the step result"
+        let check = run_lf(
+            repo.path(),
+            home.path(),
+            &["task", "reconcile", "--json"],
+            None,
         );
-        std::thread::sleep(Duration::from_millis(20));
+        assert!(
+            check.status.success(),
+            "{}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("effects")).unwrap(),
+            "started\n"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM flow_events WHERE kind='operation_started'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "inspection must not launch the successor"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+                .get::<_, i64>(0),)
+                .unwrap(),
+            0,
+            "inspection must not create a review conversation"
+        );
+        assert_ne!(
+            conn.query_row(
+                "SELECT state FROM flow_sessions WHERE id=?1",
+                [&id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "completed",
+            "an effect receipt does not finish its dead driver"
+        );
     }
-    assert_eq!(
-        conn.query_row(
-            "SELECT count(*) FROM flow_events WHERE kind='operation_started'",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        2
-    );
-    assert_eq!(
-        conn.query_row(
-            "SELECT state FROM flow_sessions WHERE id=?1",
-            [&id],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        "completed"
-    );
     assert_eq!(
         conn.query_row(
             "SELECT parent_exec_id FROM execs WHERE id=?1",
@@ -374,12 +368,6 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         .unwrap(),
         None,
         "driver disappearance cannot manufacture command completion"
-    );
-    assert_eq!(
-        conn.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        4,
-        "resume consumes the first child's result without executing it again"
     );
 }
 

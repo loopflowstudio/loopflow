@@ -2,8 +2,8 @@
 
 October 4, 2026. LOO-353, Product. **Design review finished and approved by
 Jack Heart.** Jack requested further kickoff reconciliation and continuation
-through the existing saved pursue Flow. Reconciliation is complete; implementation
-and configured acceptance remain outstanding.
+through the existing saved pursue Flow. Reconciliation is complete; removal of automatic Flow scheduling is implemented
+locally. The remaining runtime cut and configured acceptance are outstanding.
 
 ## Outcome
 
@@ -49,8 +49,9 @@ without fetching, launching or migrating. Prior scratch is preserved at
 `5090f672e:scratch/task-workspace-continuation.md`.
 
 The checkout includes local main `16fa97425` through merge `48d9eecd6`; the
-current diff from local main contains planning/memory only. No runtime slice has
-been implemented. This is local source evidence, not a fetched remote-tip claim.
+initial diff from local main contained planning/memory only. Local implementation
+now removes repository-driven Flow restart scheduling, its counters/columns and
+automatic enrollment. This is local source evidence, not a remote-tip claim.
 
 Preserve main's repo/Wave primaries, Ask removal, native conversation lookup,
 Session working-set filtering, configurable New Session and Task history filters.
@@ -274,7 +275,8 @@ stays LOO-367. Update builtin Task-operation/session guidance and architecture/d
 so they no longer prescribe the deleted worker or retry APIs.
 
 One draft migration, generated with `uv run python scripts/new_migration.py task_flow_observations`
-after integration, converts the released schema directly. Preserve every invocation,
+converts the released schema directly; the draft now exists and currently removes
+only the five scheduling columns. Extend that same draft for the remaining cut. Preserve every invocation,
 Session, event, exact review and effect receipt; archive last legacy position as
 historical evidence, not resumable state. Existing pending reviews remain visible
 as unresolved historical boundaries attached to their original conversations; they
@@ -291,7 +293,13 @@ Review rejected handshake-like feedback receipts. Superseded proposals remain at
 
 One coherent runtime/UI change, with no intermediate release of two executors:
 
-1. **Runtime slice remains:** current local main is integrated; remove Task-worker
+1. **Runtime slice remains:** current local main is integrated. Repository checks
+   now reconcile deliveries only; automatic Flow scheduling, automatic enrollment,
+   five scheduling columns and their DTO/UI consumers are deleted. Review traced
+   CI enablement into implicit Flow creation and removed that side effect, plus
+   the now-unreachable managed recovery exception in repair admission. CI repair keeps
+   its existing per-Task hold and incident retry policy. Direct Task-worker claims,
+   `exec_driver`, saved resume and the review handshake still exist. Remove Task-worker
    authority at store/driver ownership while preserving invocation/event/effect
    history and cutting over the minimum DTO consumers. Build the changed Rust code
    and run the focused ordinary-Flow crash/no-restart case in `flow_tests`.
@@ -386,4 +394,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `git diff --check` passed for prose reconciliation; runtime implementation and its build/focused test remain outstanding; configured proof belongs to demo.
+Checks: Rust build, ordinary-Flow crash/no-repository-restart proof, Rust/Swift automation DTO checks, SwiftPM headless build, architecture and two website documentation checks passed; populated released-frontier scheduling migration passed; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` passed; full cut/gate and configured demo remain outstanding.

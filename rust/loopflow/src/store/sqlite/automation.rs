@@ -1,4 +1,4 @@
-//! Automation selection belongs to Task; repair admission belongs to its CI incident.
+//! Task CI repair holds and incident-owned repair admission.
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
@@ -71,26 +71,24 @@ impl SqliteStore {
 
     pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT automation_enabled,automation_exec_id,automation_retry_key,automation_retries,automation_checked_at,automation_detail,issue_identifier FROM tasks WHERE id=?1", [task.as_str()], |row| Ok(TaskAutomation {
-            task_id: task.to_string(), issue: row.get(6)?, enabled: row.get(0)?, exec_id: row.get(1)?, retry_key: row.get(2)?, retries: row.get(3)?, checked_at: row.get(4)?, detail: row.get(5)?,
-        }))?)
+        Ok(conn.query_row(
+            "SELECT automation_enabled,issue_identifier FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| {
+                Ok(TaskAutomation {
+                    task_id: task.to_string(),
+                    issue: row.get(1)?,
+                    enabled: row.get(0)?,
+                })
+            },
+        )?)
     }
 
-    pub(crate) fn set_task_automation(
-        &self,
-        task: &TaskId,
-        enabled: bool,
-        only_unset: bool,
-    ) -> StoreResult<()> {
+    pub(crate) fn set_task_automation(&self, task: &TaskId, enabled: bool) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE tasks SET automation_enabled=?2, automation_retries=CASE WHEN ?3=0 AND ?2=1 THEN 0 ELSE automation_retries END WHERE id=?1 AND (?3=0 OR automation_enabled IS NULL)", params![task.as_str(), enabled, only_unset])?;
-        Ok(())
-    }
-
-    pub(crate) fn record_automation(&self, state: &TaskAutomation) -> StoreResult<()> {
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE tasks SET automation_exec_id=?2,automation_retry_key=?3,automation_retries=?4,automation_checked_at=?5,automation_detail=?6 WHERE id=?1",
-            params![state.task_id,state.exec_id,state.retry_key,state.retries,state.checked_at,state.detail])?;
+            "UPDATE tasks SET automation_enabled=?2 WHERE id=?1",
+            params![task.as_str(), enabled],
+        )?;
         Ok(())
     }
 

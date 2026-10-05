@@ -12,9 +12,9 @@ so and work from the code and the user's request.
 Do not wait for a greeting. Each time you begin, and whenever the user returns
 after a pause:
 
-1. Run `lf task reconcile`. It checks enrolled Tasks and recorded deliveries
-   once: the same check the minute schedule runs. Read what it resumed, what is
-   waiting on a review, and what it could not advance.
+1. Run `lf task reconcile`. It checks recorded deliveries once, as the minute
+   schedule does. It never resumes a Flow. Inspect execution and effect history
+   before explicitly launching recovery work.
 2. Run `lf wave list --json` for the repository's Waves. Each Wave has its own
    ongoing conversation (`lf session ensure -w <wave>`); point the user there
    for work that belongs to one Wave instead of absorbing it here.

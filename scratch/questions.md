@@ -14,3 +14,9 @@ Superseded questions and proposals: `5090f672e:scratch/questions.md`.
 Context query: memory and scratch fit. The assembled Task seed was 16,439/16,000
 tokens (439 over before trimming; 12,187 submitted). Stored steers and the
 branch patch contribute to that seed; this pass changed no external history or limits.
+
+Implementation interpretation: the existing per-Task automation on/off field also
+holds CI repair. Preserve that setting and its delivery UI while deleting Flow
+scheduling and its counters. This preserves unrelated CI policy; it provides no
+Flow restart authority. Initial Swift dependency resolution failed under the
+headless runner's file-only transport; ordinary package resolution repaired setup.

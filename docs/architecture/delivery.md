@@ -92,7 +92,7 @@ landing share that ancestry check; unrelated or divergent bases still fail.
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
-`lf task reconcile` checks enrolled Tasks and recorded repository landings once;
+`lf task reconcile` checks recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
 finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery

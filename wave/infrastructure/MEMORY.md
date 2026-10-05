@@ -232,34 +232,34 @@ receipts cannot select it; Git publication is no opening prerequisite. The desig
 uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
-October 5 code permits empty Flow and preserves names through inspection, sync
-and reteam. Jack Heart's comment
-`5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name correction,
-retaining original bodies and acquisition/revision evidence. All non-name checks
-and subsequent equal-revision rejection remain strict. Planning and conversion
-markers settle atomically; durable Project synchronization follows acceptance
-separately. Rejected planning cannot update durable facts first. Shared selection,
-SQL admission, ensure, rotation and Desktop remain unfinished. Installed/configured
-acceptance remains unproved.
+October 5 source permits empty Flow and preserves provider names in inspection,
+sync and reteam. Jack Heart's comment `5419b87c-bfec-4f42-8914-021483249895`
+authorizes one historical name-only correction with original bodies and
+acquisition/revision evidence retained. Non-name checks and subsequent
+same-revision rejection stay strict. Planning acceptance and conversion markers
+are atomic; durable Project synchronization follows separately. Shared selection,
+ensure, rotation and Desktop remain unfinished, with no installed acceptance.
 
-October 5 preservation findings change implementation order. Session binding and
-mechanical Flow starts bypass chapter admission. Unbound checkout-associated
-conversations lack Started; rotation's start/claim reader omits them. Reuse the
-complete Task-work rule, including Flow associations and primary-scope exclusion.
-The transfer regression preserves membership and Session bytes without binding;
-it does not prove rotation.
+Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
+autonomous Intelligence repair without another review Session. The reported
+Backlog/empty-Flow Project is `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`; preserve its
+KRs, Tasks and identity, with no competing creation or repository rotation.
+This explicit ID supplies bootstrap selection, not a candidate heuristic.
+The source adoption test starts with an active Project; it does not prove
+Backlog activation. Supported binding and ensure remain to build and ship.
 
-Checkout locks also require a stable Task population. Existing-issue registration
-in `create_prepared_task` holds no Wave planning lock and can introduce a checkout
-after rotation collects locks. Registration immediately associates earlier
-conversations without another Session write. The public-store regression preserves
-that history without setting Started. Generic Task updates can change checkout
-membership too. Stabilize registration/relocation as well as taskless starts,
-binding from elsewhere and missing-path admission before claiming exclusion.
-Lock order, both rotation orderings and failed-reset re-entry remain unproved.
-Historical binding stays allowed; pending recovery cannot permanently deny starts.
-Release's child memory reinforces operation-entry-point proofs. PM compression
-changes none of these boundaries; selection and Desktop remain unfinished.
+Preservation requires complete Task-work membership, not Started/worker claims
+alone. Unbound checkout Sessions can lack Started; shared membership includes
+Flow associations and excludes primary scopes. Session binding and mechanical
+Flow starts bypass chapter admission. Registration and generic checkout relocation
+can change membership after rotation collects locks, without any Session write.
+Stabilize the Task/checkout population as well as taskless starts, binding from
+elsewhere and missing-path admission. The three public-store regressions preserve
+historical binding, transfer and registration bytes; none proves rotation exclusion.
+Lock order, both start/rotation orderings and failed-reset re-entry remain unproved.
+Historical binding stays allowed; pending receipts cannot permanently deny starts.
+Release's recovery lesson applies: prove operation entry points. Publication and
+installation prove no Project readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
@@ -861,15 +861,12 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-The `task-viewer` branch removes the unused prompt-direction feature end to end
-and collapses unchecked gather/render wrappers to `PromptComponents` and `String`.
-The context-specific contract is in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
-Keep reductions tied to actual ownership: `WorkCatalog` preserves historical
-identity lookup, `TaskExecutionSnapshot` distinguishes current execution from
-durable Work disposition, and `PreparedLaunchPrompt` carries consumed evidence.
-None is interchangeable with the deleted wrappers. LOO-287 still owns the broader
-architecture pass and its real weekly observations; local deletion and passing
-checks do not complete that Task or establish its KR.
+The task-viewer reduction and owner distinctions remain at
+`cf0804aab:wave/infrastructure/MEMORY.md#prompt-reduction-boundary-2026-09-24`
+and in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
+Historical identity, execution eligibility and consumed launch evidence remain
+separate responsibilities. LOO-287's broader architecture pass and real weekly
+observations remain unproved; local deletion and checks establish no KR.
 
 ## Installation and command scope (curated 2026-10-02)
 

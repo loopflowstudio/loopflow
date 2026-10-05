@@ -21,11 +21,11 @@ at `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
   remains a proposed extension, while Wave-scoped chapter creation is requested.
 - Existing skill/Flow composition and retained Task-candidate format between
   KR planning, chapter creation and separate Task admission.
-- Designated fixture Waves and provider write authority for configured acceptance.
+- Designated fixture Waves and provider write authority beyond Intelligence; Jack Heart explicitly selected its existing Project for repair (see design).
 
 Jack Heart's October 5 shared-local ownership decision is resolved in
 [the design](keep-every-wave-ready-for.md#shared-local-configuration-ownership--accepted-october-5),
 including the Home-local path assumption. The design owns implementation status
-and the remaining deletion list; the saved Flow retains its review boundary.
+and the remaining deletion list. Jack Heart's October 5 Intelligence steer authorizes that repair without another review Session; it does not establish implementation or configured acceptance.
 
 Jack Heart approved the bounded historical name-only cutover on October 5; the design records its evidence and strict post-conversion boundary.

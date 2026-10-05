@@ -74,6 +74,40 @@ refuse empty Flow, rendering omits an empty line, and rotation supplies no inven
 default. The cached-name cutover is implemented below. Shared binding, exact-ID ensure,
 rotation recovery and Desktop remain unimplemented. No provider mutation or configured acceptance has occurred.
 
+## Intelligence repair — Jack Heart's October 5 steer
+
+Jack Heart's comment `e4dafef5-2a87-4359-818a-3770356ba850` reports Intelligence's
+existing Project `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3` (Chapter demo-20260924)
+as Backlog with empty Flow, and `lf repo refresh intelligence` rejecting adoption
+for missing default Flow. These are supplied incident observations, not a fresh
+provider read in this reconciliation. Jack authorized autonomous repair without
+another review Session, preserving this Project's KRs, Tasks and identity and
+forbidding a competing Project or repository chapter rotation. This supersedes
+the earlier review wait for this repair, not the preservation or acceptance tests.
+
+The exact ID supplies the explicit bootstrap selection required by the accepted
+configuration policy. The intended supported path is binding that ID through the
+shared configuration writer, then status-only activation through ensure and
+provider readback. Binding setup needs an explicit supported operation alongside
+ensure; its CLI spelling remains an implementation choice. It must validate the
+exact Project's ownership under the same Wave lock and preserve unrelated file
+bytes. Ordinary ensure must not infer this binding from candidate discovery.
+
+Source inspection confirms `migration_adoption_accepts_a_started_project_without_flow`
+uses Started status and disables promotion. It proves neither Backlog activation
+nor the configured Intelligence repair. Existing migration adoption can promote
+only from retained migration evidence; it is not a general bootstrap API.
+The empty-Flow refusal is removed in source, but shared binding and ensure do not
+exist yet. No installed repair is established, and a branch binary must not write
+the installed Home. Delivery must report the actual supported binding/activation
+commands once implemented and available in a published installation.
+
+Add the Backlog/empty-Flow case through the operation entry point: explicitly bind
+an existing Project, activate that UUID, preserve original content/KRs, Tasks and
+execution identity, and repeat without creating a Project. Configured acceptance
+for Intelligence has this explicit destination and repair authority; other fixture
+Waves still need designated destinations. No global reset is authorized.
+
 ## Cached-name cutover — approved and implemented October 5
 
 Jack Heart approved one-time historical name-only replacement in comments
@@ -514,7 +548,7 @@ This is one coherent delivery; internal slices are implementation order:
    allowed. Prove starts on both sides of rotation and failed-reset re-entry
    through operation entry points; a pending receipt alone cannot deny starts.
    The approved name transition is implemented in this Task's one migration draft. Add the Home-local per-Wave Project file and shared configured-ID reader;
-   seed existing bindings from explicit IDs without provider mutations on reads. Ordinary Project recording and name-prefix deletion across readers, sync and
+   expose supported exact-ID binding setup, including the selected Intelligence ID, without provider mutations on reads. Ordinary Project recording and name-prefix deletion across readers, sync and
    reteam are implemented; shared selection remains. Preserve provider bytes on ordinary adoption; the
    optional-Flow removal is already implemented. Cut CLI/status/DTO consumers
    over with it, including `ops/pm.rs` current-Project callers and
@@ -645,7 +679,7 @@ Project fields; normalized planning projects the accepted slug. Snapshot collect
 retains each list result's selected Project association because migration adoption
 can change those facts. Earlier reduction details remain at
 `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`.
-This pass consolidates the preservation design only; it changes no runtime code.
+Reconciliation retains the preservation design and incorporates the Intelligence steer; no runtime code changed.
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
@@ -657,4 +691,4 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Checks: `git diff --check` passes; `lf context --skill compress` reports all sources within budget. Prose-only change, no behavioral rerun; unchanged code checks remain at `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`. Gate retains affected suites, the output-handle investigation and configured acceptance.
+Checks: `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no behavioral rerun; prior code checks remain at `2a9fe32076f31512299e19e07235ac07d10857fe:scratch/keep-every-wave-ready-for.md`; gate retains affected suites, output-handle investigation and configured acceptance.

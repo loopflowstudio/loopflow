@@ -27,225 +27,123 @@ Jack supplied this reproduction: lf session connect task_7c24c806bfaa464a877352b
 
 Additional acceptance: retain connect phase timings keyed to the exact invocation and Session, and expose them through a supported diagnostic command/log view so Product can answer how long a specific connect took afterward. Separate lookup, preparation/connection, first output and verified input readiness from total attached lifetime; record unavailable readiness evidence explicitly.
 
-## Implementation evidence and revised design — October 5 UTC
+## Remaining design and implementation — October 5 UTC
 
-`tests/e2e/codex_connect.py --connect-performance N --output <new-dir>` now
-launches production `lf session connect` under an owned PTY, using a real Codex
-engine/native UI, synthetic local Responses and disposable Loopflow/provider
-Homes. Each sample starts a fresh held seed turn. It records driver claim,
-recognizable output and a unique input-response marker separately, preserves
-failures, checks recorded Session/thread/PID/generation and the OS birth stamp,
-and stops owned processes. Failed samples stop the run with a nonzero exit.
-It has no configured-account dependency. These are harness smoke checks, not
-retained-history or authenticated-provider acceptance.
+Ordinary reconnect loses the native UI's unsent draft. The disposable runner
+observes that draft in the original UI, connects again without `--replace`, then
+submits a fresh marker from the second UI. The accepted request contains the
+marker but not the draft, despite unchanged Session/thread/generation/PID/birth.
+Driver transfer and engine reuse cannot satisfy Jack Heart's continuity contract.
+[The reconnect evidence](../scripts/benchmarks/session-connect/20261005-reconnect/README.md)
+retains the submitted input, earlier inconclusive attempts and cleanup timeouts.
 
-The native baseline exposed a concrete failure: the resume command adds local
-permission overrides, which Codex 0.160.0 rejects on remote resume. The bounded
-production repair builds remote resume without local permission/model/workspace
-overrides; the live engine owns those values. Ordinary stopped resume remains
-unchanged. Two successful native probes reached output and a submitted response;
-the latest also checked the actual engine birth stamp. Failed attempts remain in
-[the dated evidence](../scripts/benchmarks/session-connect/20261005-native-smoke/README.md).
-The first probe timed out on disposable folder trust and its cleanup failed;
-a later probe separated text/Enter to avoid Codex paste handling. No installed
-Home, account route or unrelated Session was changed by these probes.
+**Proposal, not implemented:** retain the native UI and its PTY across connections.
+Establish terminal ownership at first launch for conversations and reviews, then
+attach presentation without creating another UI/provider or transferring the
+Session driver. Additional views stay passive until explicit control transfer.
+The terminal owner must handle replay, resize, input fencing and failure cleanup;
+view closure must be separate from provider shutdown. Do not scrape or retype
+composers or introduce a parallel draft store. Already-running standalone native
+clients without an attachment transport cannot be silently converted.
 
-### Repaired lifecycle counterexample
+The normal Flow-review route launches `--mode tui` through `serve_flow_locked`
+→ `run::exec_prompt` → `exec_session_with_env`, without the batch Harness's relay.
+`launch_flow` → `start_durable_session` already provides a tmux cradle, but
+`resume_native_session` stops and recreates its native UI. Direct terminal launch
+has no retained transport. Routing reviews through `connect_live_codex` alone
+falls back to that replacement; the attempted adaptation was removed.
 
-The baseline's rejected UI also cleared the pre-existing engine endpoint.
-The baseline `connect_live_codex` claimed the driver before native UI startup,
-then called `finish_session_driver` even when startup failed. The supported close operation
-ends the live engine. Removing one rejected flag repairs its observed trigger,
-but does not meet the accepted preservation contract for other startup failures.
-This is a reproduced contradiction in the attachment lifecycle, not an auth,
-display-server or performance-budget blocker.
+Compare opt-in tmux presentation with a transparent PTY relay before selecting
+this owner, as Product's shared-viewing contract requires. The earlier engine-first
+proposal is superseded: an app-server endpoint alone cannot retain a UI-local
+draft. Dependent optimization remains stopped at architectural review under
+implement's counterexample rule. This requires no new authorization, account
+repair or manual performance demo.
 
-The implementation distinguishes unsuccessful UI attachment from an established
-controlling UI's ordinary exit, using the existing Session/driver authority.
-The implementation prepares the native UI without transferring write authority.
-The relay transfers only after delivering the matching successful thread/resume
-response. This is a protocol attachment boundary, not proof of rendered output
-or usable input. Native bootstrap reads remain passive; turn writes and approval
-responses keep the existing driver fence. Failed startup before that boundary
-leaves the original driver and clients intact. Explicit replacement snapshots
-old clients before launching and stops only those clients after attachment.
-A controlling UI's normal exit retains existing engine-close semantics. It must retain driver fences and survive
-failure without restoring stale authority. Merely skipping all driver cleanup
-would abandon current exit semantics and is not an adequate repair. Dependent
-latency optimization and delivery depend on this lifecycle revision; local
-implementation remains authorized.
+Preserve Infrastructure's LOO-377 launch-lock-before-driver-fence ordering and
+exact review revalidation (`c5dc238b0afb`). Attachment grants no review-completion
+authority. Keep captured input, review tokens, provider/driver generations and
+history intact; failed startup cannot settle a review.
 
-Infrastructure's October 4 review-replacement evidence (LOO-377, merged
-`c5dc238b0afb`) separates review service, driver and provider ownership. Its
-launch-lock-before-driver-fence ordering and exact Flow revalidation apply to
-the Flow-review repair. Attachment must not acquire review-completion authority
-or turn failed startup into successful settlement. A substantial lifecycle
-change remains implementation work, not a bounded reconciliation edit.
+### Delete — do not maintain
 
-Flow-review selectors have another unresolved path: lock, repeated position
-validation, projection, then `resume_native_session`, which stops native clients
-and passes no live relay endpoint. The new runner does not exercise that selector
-yet. Preserve its revalidation/review token and prove existing provider/draft
-continuity when adapting it. A conversation-only success cannot stand in for
-Jack's exact selector. Claude/OpenCode remain unmeasured; their absence from the
-Codex relay path is not an all-provider support verdict.
+- In the retained-terminal cut, remove live attachment through
+  `resume_native_session` that stops/recreates the UI. Supply the replacement in
+  the same cut; preserve stopped resume and explicit replacement as distinct
+  operations. Do not polish that predecessor or its exclusive fixtures meanwhile.
+- Local launch overrides on remote resume are already removed. The live engine
+  owns workspace, model and permission policy.
+- Retain `recover_history`. It currently awaits every page before UI startup;
+  changing that requires history-ordering and readiness proof, not just faster
+  new-UI startup.
 
-### First-launch counterexample and revised scope — October 5 UTC
+### Acceptance still open
 
-Source inspection found that the normal Task Flow-review launch has no relay
-endpoint to reuse. `serve_flow_locked` launches the skill with `--mode tui`;
-`run::exec_prompt`'s native branch calls `exec_session_with_env`, whose
-Codex command is the native executable with the prompt, not the owned app-server.
-The live relay fixture starts a batch Harness instead. Routing review resume
-through `connect_live_codex` therefore falls through to the existing destructive
-native replacement for normal reviews. The attempted adaptation was removed,
-not retained as an unexercised second path. This is a source-proven architecture
-gap, not a claim that Jack's live Session was inspected or changed.
+- Prove Jack's exact Flow-review selector with retained native draft/history,
+  failed startup and exact review completion/retirement fences.
+- Prove successful and repeated retained-UI attachments, including detach
+  behavior; complete short/paginated history and supported authenticated-provider
+  coverage. Claude/OpenCode and standalone-native attachment remain unmeasured.
+- Capture comparable baseline samples and contributing lookup/startup/transport
+  costs. Select numeric median/p95 targets before optimization; p95 requires at
+  least 20 comparable samples. Then fix measured costs and compare on the same
+  host/data, preserving failures, timeouts and observer limitations.
+- Verify per-invocation diagnostics on the revised review path, keeping unavailable
+  UI endpoints explicit. Complete acceptance before authorized delivery.
 
-Dependent performance optimization remains behind this counterexample. Revised design:
-Codex interactive/review first launch needs to reuse the owned app-server and
-remote UI path, preserving its captured input, exact review token, launch-lock
-ordering and driver/provider generations. Prepare that one engine before native
-UI startup and publish it through the existing Session owner. No second engine,
-parallel lifecycle record or automatic replacement of an incumbent native TUI is
-acceptable. An already-running standalone native UI has no recorded attach
-transport; report that route explicitly without pretending saved-history resume
-preserves its draft. The first-launch cut and its exact-selector native proof
-remain implementation work within Jack's existing authorization.
+## Existing safety and diagnostic evidence
 
-Reconciliation on October 5 UTC confirmed a second continuity limit: the runner
-explicitly reports that successful takeover does not copy drafts. The relay
-starts a new native UI and stops the observed old clients after attachment; its
-failed-replacement proof preserves a draft only because the original UI survives.
-Publishing an app-server endpoint on first launch alone does not preserve an
-incumbent UI's unsent composer. The remaining implementation must establish
-draft continuity for ordinary live connection and repeated connections, rather
-than counting successful explicit replacement as that proof. Jack's preservation
-requirement remains unchanged; no reduced acceptance was approved.
+The runner uses real Codex engine/native UIs, private Loopflow/provider Homes and
+synthetic local Responses. Each sample begins with one fresh held seed turn.
+It checks engine identity including OS birth stamp, records output and response
+markers separately, and exits nonzero on failure. It needs no configured account.
+These are smoke checks, not representative history or provider-service timings.
 
-### Implemented safety and diagnostic slice
+[Native smoke evidence](../scripts/benchmarks/session-connect/20261005-native-smoke/README.md)
+records Codex 0.160.0 rejecting local permission overrides during remote resume.
+That failure also exposed destructive cleanup: claiming the driver before UI
+startup let a rejected UI close the pre-existing engine. Remote resume now omits
+local overrides; stopped resume is unchanged.
 
-Driver transfer occurs after the relay delivers the matching successful native
-thread-resume response. Before that point, failed argument parsing, history
-recovery or bootstrap leaves the previous driver and engine intact. Native
-bootstrap metadata reads are passive; writes and approval replies keep their
-existing fences. After attachment the current UI still owns normal engine close.
-The native runner now rejects startup and `--replace` against an existing
-controlling UI, then submits that UI's exact retained draft. The draft probe's
-first attempt failed on input injection; bracketed paste plus observed draft
-text repaired the fixture. These smoke samples do not prove a distribution.
+[Attachment evidence](../scripts/benchmarks/session-connect/20261005-attachment/README.md)
+records the lifecycle repair. The relay claims authority only after delivering
+the matching successful thread-resume response. Failed bootstrap retains the old
+driver/engine/UI; the runner submits the exact retained draft after a rejected
+replacement. Bootstrap reads stay passive; writes and approval replies retain
+driver fences. Explicit replacement snapshots old clients and stops only those
+clients after attachment. Current-owner exit still closes its engine. Protocol
+fixtures separately prove stale-write rejection and sibling-thread preservation.
+Neither protocol attachment nor failed-replacement proof establishes successful
+reconnect continuity.
 
-`lf session timings EXEC` reads file-backed per-invocation JSON lines without
-SQLite admission. It retains selector, resolved Session, process-relative phase
-offsets, explicit unavailable first-output/readiness endpoints and attached
-lifetime through return or handled interruption. Native turn acceptance bounds
-readiness; it is not its onset. SIGKILL can leave lifetime unknown. The exclusive
-SQLite-lock probe initially timed out in generic CLI admission; diagnostics now
-dispatch before process observation. Timing output arrives while SQLite is
-locked; ordinary process accounting may delay command exit until unlock. No
-second lifecycle store or provider authority was added.
+`lf session timings EXEC` reads file-backed JSON lines without SQLite admission:
+selector, resolved Session, process-relative phases, unavailable output/readiness
+endpoints and attached lifetime through return or handled interruption. Output
+arrives under an exclusive SQLite lock, though accounting can delay reader exit.
+SIGKILL may leave lifetime unknown. These observations grant no lifecycle authority.
 
-Review caught a client-stop postcondition requiring *all* clients to disappear.
-That rejects a successfully attached replacement. Stop now succeeds when its
-exact observed clients exit, preserving other clients and existing PID/birth
-checks. Controlled protocol evidence confirms stale writes are rejected, a
-sibling thread survives, explicit replacement works, and current-owner exit
-still closes an exclusively owned engine. This is separate from native PTY proof.
+The attachment smoke recorded 652 ms output, 1,149 ms input response and 998 ms
+attached lifetime. Response bounds readiness rather than measuring onset; it
+includes 300 ms before Enter and synthetic tool work. Attached lifetime includes
+post-input proof. External PTY timing starts before spawn, internal phases at
+process entry. PTY bytes are not compositor presentation. Changing probes and
+reduced observer polling make these samples unsuitable for speedup/distribution
+claims. No Desktop KR credit follows.
 
-### Remaining implementation and acceptance
+Review found that protocol-only fixtures missed native argument rejection and
+that cleanup exceptions could hide the behavioral failure. The runner now retains
+cleanup errors separately and attempts every owned cleanup. Reconnect cleanup
+still timed out; the later exact-path inspection found no remaining final-probe
+lf process, which does not prove reliable cleanup. Jack's live Session and
+unrelated processes were not touched.
 
-- Resolve the native UI/PTY ownership revision below before the engine-first
-  launch cut; then prove Jack's
-  exact Flow-review selector with real native UI, retained draft/history, failed
-  startup and exact review completion/retirement fences. Resolve the successful
-  takeover draft gap separately from engine reuse.
-- Extend production PTY coverage to completed short/paginated history and repeated
-  connections. Check supported authenticated providers; Claude/OpenCode and
-  standalone native clients remain unmeasured or without this attachment route.
-- Capture comparable baseline samples and contributing startup/lookup/transport
-  costs before choosing numeric median/p95 targets. At least 20 comparable samples
-  are required for p95. Changing smoke probes establish no distribution.
-- Verify diagnostics on the revised review path. Record unavailable UI endpoints
-  explicitly; external PTY endpoints still require the runner's spawn clock.
-- Only then optimize measured work, verify before/after results and complete
-  acceptance and the caller's authorized delivery boundary.
+Earlier design chronology and observer notes are preserved at
+`42c4c791cea8d8cb07f8ee545c2b83194bf8fc63:scratch/connect-quickly-to-an-existing.md`.
+Compression removes the superseded engine-first sequence and duplicate evidence;
+production code and the failing regression remain unchanged.
 
-### Ordinary reconnect counterexample — October 5 UTC
-
-The new `--check-reconnect-draft` regression extends the disposable native runner.
-It observes a unique unsent draft in the original UI, performs a second ordinary
-`lf session connect` (no `--replace`), and appends a different input marker in
-that UI. The synthetic Responses request accepts the marker without the draft.
-Session/thread/generation/PID/birth remain unchanged while the driver changes.
-This disproves continuity on ordinary connect, not just explicit replacement.
-Retained evidence is under
-`scripts/benchmarks/session-connect/20261005-reconnect/`; early cleanup errors
-and the distinction between input acceptance and draft preservation remain visible.
-
-**Revised proposal; not implemented:** preserve the existing native UI and its
-PTY across connections. Publishing an app-server endpoint on first launch is
-insufficient and is no longer the next independent implementation slice.
-The ordinary Flow-review first launch already runs inside the existing tmux
-cradle (`launch_flow` → `start_durable_session`); `resume_native_session` abandons
-that native UI by stopping clients and starting another. Direct terminal launch
-has no retained attachment transport. Engine ownership alone cannot unify them.
-
-The next coherent cut must establish retained terminal ownership on first launch
-for direct conversations and reviews, then attach presentation to that terminal
-without another provider/UI or driver transfer. Keep the same Session authority,
-review token and lock ordering. Additional views remain passive until explicit
-control transfer; view closure and provider shutdown must be separate operations.
-Replay, resize, input fencing and failure cleanup belong to that terminal owner.
-No composer scraping, simulated typing of the old draft, or parallel draft store.
-Already-running native clients without a transport cannot be silently converted.
-
-Product memory requires comparing an opt-in tmux path with transparent PTY relay
-before changing native presentation. Reusing the cradle as default presentation
-without that comparison would contradict the current contract. The prior plan's
-engine-first approach therefore returns to architectural review; dependent
-optimization is stopped under implement's counterexample rule. This is a design
-gap, not missing account access, a rendering environment, or a request for Jack
-to repeat authorization. The exact review selector, repeated retained-UI
-attachments, representative history and baseline-derived targets remain open.
-
-Delete — do not maintain in that cut: the live-attachment route through
-`resume_native_session` that stops/recreates the native UI. Preserve stopped
-Session resume and explicit replacement as distinct operations, exact review
-revalidation, existing driver fences and all captured history. Do not remove
-`recover_history` merely to make a new-UI benchmark faster.
-
-Delete — do not maintain: remote resume no longer applies local launch overrides.
-No history-recovery deletion is justified. `recover_history` still awaits every
-page before UI startup; moving it requires proof of history ordering and readiness.
-Preserve ownership fences, review revalidation, historical data and failure evidence.
-
-The probe uses recorded endpoint timestamps instead of duplicate sent/released
-flags, closes each SQLite poll connection, and stops polling after driver claim.
-This reduces observer work; new timings are not directly comparable with the old
-polling loop and establish no production speedup.
-The subsequent smoke sample reached output at 856 ms and a response at 1528 ms
-with the same engine birth stamp. The response is an upper bound on input
-readiness, including 300 ms before Enter and synthetic response work; it is not
-the instant the UI first accepted input. Continuity is checked before cleanup,
-so this success establishes neither attached lifetime nor detach preservation.
-
-The new [attachment evidence](../scripts/benchmarks/session-connect/20261005-attachment/README.md)
-retains native and diagnostic failures plus the repaired smoke probe. Its 652 ms
-output and 1,149 ms input-response sample establishes no speedup or distribution.
-The 998 ms attached lifetime includes post-input proof and ends at handled
-interruption; it is not connect latency.
-
-Review findings: protocol fixtures previously replaced the native UI and missed
-its rejected launch arguments. A successful socket/driver claim did not establish
-usable input. The failed native UI also exposed destructive cleanup; timing alone
-would hide that regression. PTY bytes are not compositor presentation, synthetic
-responses are not provider service latency, and a single live seed turn is not
-representative retained history. Product has no child Wave memories in this checkout.
-
-The probe separates draft-preservation and attached-diagnostic checks from its
-measurement loop. Missing input response fails directly; cleanup attempts every
-owned process/descriptor and retains cleanup errors alongside the original
-failure. Review found cleanup exceptions could previously escape with a passing
-sample still recorded. Production ownership and timing endpoints are unchanged.
-
-Check: `uv run tests/e2e/codex_connect.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --connect-performance 1 --check-reconnect-draft --output /tmp/loo-378-reconnect-final-20261005` reproduced accepted input without the original draft (exit 1; separate cleanup timeout retained); helper Ruff passed; whole-runner Ruff has pre-existing formatting/line-length failures; `git diff --check` and `lf context --skill implement` passed; retained native UI/PTY ownership returns to design review, full acceptance remains open.
+Check: prior native `--connect-performance 1 --check-reconnect-draft` exited 1 on
+accepted input without the original draft, with cleanup timeout retained; helper
+Ruff passed, whole-runner Ruff had pre-existing failures. Documentation-only
+compression: `git diff --check` and `lf context --skill compress` passed; no
+build or native rerun required. Full acceptance remains open.

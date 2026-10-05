@@ -758,6 +758,12 @@ refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
 these performance measurements.
 
+Harness completion and execution need separate evidence: LOO-304's synthetic
+soak records fixture reads and retained cat surfaces, not SQLite query/process
+volume or native conversation reopening. A capable display host cannot supply
+missing instrumentation. Release's retirement of the publisher UI receipt does
+not waive this Task's accepted rendered performance proof.
+
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

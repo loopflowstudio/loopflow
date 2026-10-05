@@ -5104,6 +5104,55 @@ mod tests {
         assert!(blockers().iter().any(|reason| reason.contains(flow.id())));
         drop(driver);
         assert!(blockers().is_empty());
+
+        // A reboot proves stale execution exited without settling the Flow.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let exec = crate::exec::Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: None,
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some("implement".into()),
+            repo: None,
+            cwd: Some(fixture.task.worktree.to_string_lossy().into_owned()),
+            started_at: now - 100,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture.store.sqlite.record_exec(&exec).unwrap();
+        let session = fixture
+            .store
+            .sqlite
+            .test_session("stalled", &crate::session_record::new_artifact_key());
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
+            rusqlite::params![fixture.task.worktree.to_str().unwrap(), session.id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             VALUES(?1,'thread','turn','started','turn',?2,'{}')",
+            rusqlite::params![session.id, now - 100],
+        )
+        .unwrap();
+        crate::journal::set_test_machine_booted_at(Some(now - 200));
+        let unresolved = blockers();
+        crate::journal::set_test_machine_booted_at(Some(now - 50));
+        let after_boot = blockers();
+        crate::journal::set_test_machine_booted_at(None);
+        assert_eq!(unresolved.len(), 2, "{unresolved:?}");
+        assert!(unresolved
+            .iter()
+            .any(|reason| reason.contains(exec.id.as_str())));
+        assert!(unresolved.iter().any(|reason| reason.contains("stalled")));
+        assert!(after_boot.is_empty(), "{after_boot:?}");
+        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
         assert_eq!(
             runtime
                 .block_on(fixture.store.latest_task_flow(&fixture.task.id))

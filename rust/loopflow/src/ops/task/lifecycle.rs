@@ -513,6 +513,12 @@ fn execution_blockers(
             .map_err(task_error)?
             .and_then(|exec| exec.parent_exec_id);
     }
+    let ended_flows: HashSet<&str> = work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state != crate::session::FlowSummaryState::Current)
+        .map(|flow| flow.summary.id.as_str())
+        .collect();
     let mut own_flows = HashSet::new();
     for flow in work
         .flows
@@ -549,8 +555,14 @@ fn execution_blockers(
                 blockers.push(format!("Session {} has a reserved input", session.id));
             }
         }
+        // Nothing waits for a review whose Flow ended; its Execs and turns are
+        // still judged on their own evidence.
         if session.completed_at.is_none()
             && session.kind != crate::session::SessionKind::Conversation
+            && !session
+                .flow_session_id
+                .as_deref()
+                .is_some_and(|flow| ended_flows.contains(flow))
         {
             blockers.push(format!("Session {} awaits completion", session.id));
         }

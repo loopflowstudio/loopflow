@@ -951,10 +951,63 @@ pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> Proce
     {
         return receipt.process_evidence();
     }
+    // Receipts are keyed by PID, so a later process or a prune can remove the
+    // only record of one that never settled. A restart still proves its exit.
     match store.exec(exec) {
-        Ok(Some(record)) if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
+        Ok(Some(record))
+            if record.completed_at.is_some() || began_before_boot(record.started_at) =>
+        {
+            ProcessIdentityEvidence::Dead
+        }
         _ => ProcessIdentityEvidence::Unknown,
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_MACHINE_BOOTED_AT: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pretend this machine booted at `at` for the rest of the test thread.
+#[cfg(test)]
+pub(crate) fn set_test_machine_booted_at(at: Option<i64>) {
+    TEST_MACHINE_BOOTED_AT.with(|cell| cell.set(at));
+}
+
+/// When this machine last booted. No local process survives that boundary, so
+/// work that began earlier and never settled has exited.
+pub(crate) fn machine_booted_at() -> Option<i64> {
+    #[cfg(test)]
+    if let Some(at) = TEST_MACHINE_BOOTED_AT.with(std::cell::Cell::get) {
+        return Some(at);
+    }
+    static BOOTED_AT: OnceLock<Option<i64>> = OnceLock::new();
+    *BOOTED_AT.get_or_init(read_machine_booted_at)
+}
+
+pub(crate) fn began_before_boot(started_at: i64) -> bool {
+    machine_booted_at().is_some_and(|booted_at| started_at < booted_at)
+}
+
+fn read_machine_booted_at() -> Option<i64> {
+    if let Ok(stat) = fs::read_to_string("/proc/stat") {
+        return stat
+            .lines()
+            .find_map(|line| line.strip_prefix("btime "))
+            .and_then(|value| value.trim().parse().ok());
+    }
+    let output = Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    parse_sysctl_boottime(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026`
+fn parse_sysctl_boottime(value: &str) -> Option<i64> {
+    let seconds = value.split_once("sec = ")?.1;
+    seconds.split([',', ' ']).next()?.parse().ok()
 }
 
 pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
@@ -1158,6 +1211,22 @@ mod tests {
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn boot_time_parses_and_bounds_what_can_still_run() {
+        assert_eq!(
+            super::parse_sysctl_boottime(
+                "{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026"
+            ),
+            Some(1_791_140_551)
+        );
+        assert_eq!(super::parse_sysctl_boottime("unavailable"), None);
+        // This test began after the machine that runs it booted.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        assert!(super::machine_booted_at().is_some_and(|booted_at| booted_at <= now));
+        assert!(!super::began_before_boot(now));
+        assert!(super::began_before_boot(1));
+    }
 
     const CHILD_APPEND_ENV: &str = "LOOPFLOW_JOURNAL_APPEND_CHILD";
     const CHILD_EVENT_COUNT_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_EVENT_COUNT";

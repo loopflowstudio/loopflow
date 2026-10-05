@@ -1,0 +1,316 @@
+{
+  "source": "58d3b5b3e",
+  "lf": "lf 0.13.0",
+  "host": "Apple M4 Max",
+  "database_mb": 966,
+  "budgets_ms": {
+    "first_frame": 400,
+    "usable": 1000
+  },
+  "endpoints": {
+    "first_frame": "first window content committed to the render server; not on-glass presentation",
+    "usable": "outline rows observed, next main-queue callback",
+    "fresh": "every part of the workspace read by this launch"
+  },
+  "not_measured": [
+    "main-thread stalls",
+    "on-glass presentation",
+    "launches with cold OS file caches"
+  ],
+  "scenarios": {
+    "uncached": {
+      "launches": 3,
+      "reached_endpoint": 3,
+      "cache": {
+        "miss": 3
+      },
+      "usable_source": {
+        "fresh": 3
+      },
+      "metrics": {
+        "pre_main": {
+          "samples": 3,
+          "median_ms": 35.1,
+          "p95_ms": null,
+          "max_ms": 37
+        },
+        "restored": {
+          "samples": 3,
+          "median_ms": 68.2,
+          "p95_ms": null,
+          "max_ms": 72.4
+        },
+        "first_frame": {
+          "samples": 3,
+          "median_ms": 494.5,
+          "p95_ms": null,
+          "max_ms": 502.4
+        },
+        "usable": {
+          "samples": 3,
+          "median_ms": 10217.9,
+          "p95_ms": null,
+          "max_ms": 11038.6
+        },
+        "fresh": {
+          "samples": 3,
+          "median_ms": 17102.3,
+          "p95_ms": null,
+          "max_ms": 19142.2
+        },
+        "rss_mb": {
+          "samples": 3,
+          "median_ms": 123.0,
+          "p95_ms": null,
+          "max_ms": 123.1
+        },
+        "cpu_s": {
+          "samples": 3,
+          "median_ms": 1.0,
+          "p95_ms": null,
+          "max_ms": 1.0
+        }
+      },
+      "reads": {
+        "home id": {
+          "samples": 3,
+          "median_ms": 3701.6,
+          "p95_ms": null,
+          "max_ms": 3774
+        },
+        "ps": {
+          "samples": 3,
+          "median_ms": 3406,
+          "p95_ms": null,
+          "max_ms": 3478.2
+        },
+        "refresh planning": {
+          "samples": 3,
+          "median_ms": 16618.5,
+          "p95_ms": null,
+          "max_ms": 18647
+        },
+        "refresh sessions": {
+          "samples": 3,
+          "median_ms": 9710.6,
+          "p95_ms": null,
+          "max_ms": 10518.9
+        },
+        "roadmap": {
+          "samples": 3,
+          "median_ms": 16610.6,
+          "p95_ms": null,
+          "max_ms": 18639.2
+        },
+        "session list": {
+          "samples": 3,
+          "median_ms": 9709.6,
+          "p95_ms": null,
+          "max_ms": 10517.7
+        },
+        "wave list": {
+          "samples": 3,
+          "median_ms": 4935.4,
+          "p95_ms": null,
+          "max_ms": 4953.7
+        }
+      },
+      "failed_reads": {},
+      "lf_calls": {
+        "home id": 3,
+        "ps --json": 3,
+        "roadmap --all": 3,
+        "session list": 6,
+        "wave list": 3,
+        "activity --since": 3
+      },
+      "lf_refused": {
+        "repo ci": 3
+      },
+      "saved_workspace_kept": true
+    },
+    "saved": {
+      "launches": 20,
+      "reached_endpoint": 20,
+      "cache": {
+        "hit": 20
+      },
+      "usable_source": {
+        "saved": 20
+      },
+      "metrics": {
+        "pre_main": {
+          "samples": 20,
+          "median_ms": 33.3,
+          "p95_ms": 37.6,
+          "max_ms": 38.2
+        },
+        "restored": {
+          "samples": 20,
+          "median_ms": 89.5,
+          "p95_ms": 103.5,
+          "max_ms": 107.8
+        },
+        "first_frame": {
+          "samples": 20,
+          "median_ms": 735.5,
+          "p95_ms": 933.6,
+          "max_ms": 949.1
+        },
+        "usable": {
+          "samples": 20,
+          "median_ms": 735.1,
+          "p95_ms": 933.6,
+          "max_ms": 947.7
+        },
+        "fresh": {
+          "samples": 20,
+          "median_ms": 21353.7,
+          "p95_ms": 24309.5,
+          "max_ms": 24861.2
+        },
+        "rss_mb": {
+          "samples": 20,
+          "median_ms": 145.2,
+          "p95_ms": 146.9,
+          "max_ms": 147.2
+        },
+        "cpu_s": {
+          "samples": 20,
+          "median_ms": 1.6,
+          "p95_ms": 1.8,
+          "max_ms": 1.8
+        }
+      },
+      "reads": {
+        "home id": {
+          "samples": 20,
+          "median_ms": 4380.5,
+          "p95_ms": 5210.5,
+          "max_ms": 5409.4
+        },
+        "ps": {
+          "samples": 20,
+          "median_ms": 4054.8,
+          "p95_ms": 4851.4,
+          "max_ms": 5073
+        },
+        "refresh planning": {
+          "samples": 20,
+          "median_ms": 20658.0,
+          "p95_ms": 23571,
+          "max_ms": 23910.5
+        },
+        "refresh sessions": {
+          "samples": 36,
+          "median_ms": 10049.9,
+          "p95_ms": 12104.3,
+          "max_ms": 13124.7
+        },
+        "roadmap": {
+          "samples": 20,
+          "median_ms": 20649.8,
+          "p95_ms": 23563.4,
+          "max_ms": 23903.5
+        },
+        "session list": {
+          "samples": 36,
+          "median_ms": 10049.0,
+          "p95_ms": 12103.4,
+          "max_ms": 13123.7
+        },
+        "wave list": {
+          "samples": 20,
+          "median_ms": 5421.4,
+          "p95_ms": 6499.9,
+          "max_ms": 6792.5
+        }
+      },
+      "failed_reads": {},
+      "lf_calls": {
+        "home id": 20,
+        "ps --json": 20,
+        "roadmap --all": 20,
+        "wave list": 20,
+        "session list": 40,
+        "activity --since": 20
+      },
+      "lf_refused": {
+        "repo ci": 20
+      },
+      "saved_workspace_kept": true
+    },
+    "saved_refresh_fails": {
+      "launches": 3,
+      "reached_endpoint": 3,
+      "cache": {
+        "hit": 3
+      },
+      "usable_source": {
+        "saved": 3
+      },
+      "metrics": {
+        "pre_main": {
+          "samples": 3,
+          "median_ms": 32.1,
+          "p95_ms": null,
+          "max_ms": 34.9
+        },
+        "restored": {
+          "samples": 3,
+          "median_ms": 102.7,
+          "p95_ms": null,
+          "max_ms": 103.6
+        },
+        "first_frame": {
+          "samples": 3,
+          "median_ms": 872,
+          "p95_ms": null,
+          "max_ms": 895.6
+        },
+        "usable": {
+          "samples": 3,
+          "median_ms": 870.7,
+          "p95_ms": null,
+          "max_ms": 895.6
+        },
+        "fresh": {
+          "samples": 0,
+          "median_ms": null,
+          "p95_ms": null,
+          "max_ms": null
+        },
+        "rss_mb": {
+          "samples": 3,
+          "median_ms": 120.1,
+          "p95_ms": null,
+          "max_ms": 121.5
+        },
+        "cpu_s": {
+          "samples": 3,
+          "median_ms": 1.1,
+          "p95_ms": null,
+          "max_ms": 1.1
+        }
+      },
+      "reads": {},
+      "failed_reads": {
+        "roadmap": 3,
+        "session list": 3,
+        "refresh sessions": 3
+      },
+      "lf_calls": {
+        "home id": 3,
+        "ps --json": 3,
+        "roadmap --all": 3,
+        "wave list": 3,
+        "session list": 3
+      },
+      "lf_refused": {
+        "repo ci": 3
+      },
+      "saved_workspace_kept": true
+    }
+  },
+  "collection": "Original 12 launches plus 14 resumed launches after the parent agent exited; same preserved app and Home snapshot. Concurrent development continued on this host."
+}

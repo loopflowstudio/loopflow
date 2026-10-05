@@ -996,6 +996,10 @@ unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
 
+Release repair checks must cover completion before inherited checkout locks close.
+Use the public release path with a delayed repair launcher; a terminal Exec receipt
+does not prove that its process or descendants released their descriptors.
+
 When a subprocess fixture signals readiness with file contents, write a sibling
 temporary file and rename it into place after closing it. File existence alone
 can expose an empty file between creation and the first write.

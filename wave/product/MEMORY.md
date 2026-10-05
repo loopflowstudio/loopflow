@@ -875,8 +875,11 @@ no owning Task (LOO-375 owns `wt list` only).
   CPU and the 400/1000 ms targets are unmeasured.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- PR 2 has the app journal real launches and reads in the Home; `timings.py`
-  reports them. No real launch is recorded yet: read it before completing.
+- Rendered receipt (`launch.py`, [20261004-launch-rendered](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)):
+  saved launch usable at 506 ms median / 540 p95, under load, never waiting on
+  a read. Still open on LOO-376: first frame misses 400 ms (~420 ms of first
+  render after an 89 ms restore); an unsaved launch waits 10–12 s; every `lf`
+  read costs 3.7 s or more; `session list` runs twice. Stalls unmeasured.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
@@ -1067,14 +1070,6 @@ shared `lf` projections and explicit Home transport. Their dated observations ar
 preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
-
-## Historical Wave controls
-
-The retired listener controls, failed-turn presentation and dictation decisions
-are preserved in `12016c6d6dd34a4c1a553c25b5cf2529ee93615b:wave/product/MEMORY.md`
-under “Historical Wave controls & truthful failures”. They do not authorize
-restoring the listener. Attempt failure remains distinct from Work failure;
-Wispr Flow owns dictation; configured UI execution requires a capable host.
 
 ## Learnings
 

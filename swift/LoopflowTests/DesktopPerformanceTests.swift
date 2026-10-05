@@ -571,6 +571,7 @@ extension DesktopPerformanceTests {
                     try await Task.sleep(for: .milliseconds(5))
                     let deadline = ContinuousClock.now + .seconds(45)
                     var ready = false
+                    var blocked = "workspace model not found"
                     repeat {
                         window.contentView?.layoutSubtreeIfNeeded()
                         window.displayIfNeeded()
@@ -585,16 +586,24 @@ extension DesktopPerformanceTests {
                                                 "task_link_sheet": sheet, "selection": selected])
                             lastState = state
                         }
-                        if let model, let selected = model.selection,
-                           model.task(id: selected.id)?.task.task.identifier == issue,
-                           !model.taskLinkReading.isLoading, !sheet {
-                            try window.capture()
-                            ready = (window.contentText + window.outlineText).contains { $0.contains(issue) }
-                            if ready { break }
+                        if let model {
+                            if model.selection.flatMap({ model.task(id: $0.id) })?.task.task.identifier != issue {
+                                blocked = "selection is not the Task"
+                            } else if model.taskLinkReading.isLoading || sheet {
+                                blocked = sheet ? "Task-link sheet shown" : "Task link still resolving"
+                            } else {
+                                try window.capture()
+                                // Fast recognition splits the breadcrumb's mono identifier ("LOO- 368").
+                                ready = (window.contentText + window.outlineText).contains {
+                                    $0.filter { !$0.isWhitespace }.contains(issue)
+                                }
+                                if ready { break }
+                                blocked = "captured content lacks the issue: \(window.contentText.prefix(24))"
+                            }
                         }
                         try await Task.sleep(for: .milliseconds(5))
                     } while ContinuousClock.now < deadline
-                    guard ready else { throw PerformanceFailure("timeout", "Task identity not captured in 45 seconds") }
+                    guard ready else { throw PerformanceFailure("timeout", "Task identity not captured in 45 seconds: \(blocked)") }
                     record["outcome"] = "passed"
                     record["capture_ready_ms"] = Double(window.observedAt - start) / 1_000_000
                 } catch {

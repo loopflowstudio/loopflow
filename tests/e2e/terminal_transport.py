@@ -53,7 +53,7 @@ def _terminal() -> None:
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-def _spawn(argv: list[str], env: dict[str, str], width: int = 100) -> tuple:
+def _spawn(argv: list[str], env: dict[str, str], width: int = 100) -> tuple[subprocess.Popen, int]:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, width, 0, 0))
     try:
@@ -113,7 +113,7 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
     socket = root / "tmux.sock"
     base = ["tmux", "-S", str(socket), "-f", "/dev/null"]
 
-    def command(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    def _command(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         completed = subprocess.run(
             [*base, *args], env=env, capture_output=True, check=False, timeout=5
         )
@@ -121,10 +121,21 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
             raise RuntimeError(f"tmux {args}: {completed.stderr.decode(errors='replace')}")
         return completed
 
-    clients = []
+    clients: list[tuple[subprocess.Popen, int]] = []
+
+    def _attach(*flags: str, width: int = 100) -> tuple[subprocess.Popen, int]:
+        client = _spawn([*base, "attach-session", *flags, "-t", "=probe"], env, width)
+        clients.append(client)
+        return client
+
+    def _detach() -> None:
+        _command("detach-client", "-s", "probe")
+        for child, _ in clients:
+            child.wait(timeout=3)
+
     provider_pid = None
     try:
-        command(
+        _command(
             "new-session",
             "-d",
             "-x",
@@ -143,11 +154,10 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
             ("set", "-g", "terminal-features", "xterm*:RGB:clipboard"),
             ("set", "-g", "window-size", "manual"),
         ]:
-            command(*args)
+            _command(*args)
         _wait_file(root / "pid")
         provider_pid = int((root / "pid").read_text())
-        owner, terminal = _spawn([*base, "attach-session", "-t", "=probe"], env)
-        clients.append((owner, terminal))
+        owner, terminal = _attach()
         initial = _read(terminal, 1)
         os.write(terminal, PASTE)
         draft = _read(terminal)
@@ -170,8 +180,7 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
             b"YWN0aXZlLWNsaXBib2FyZA==" in (root / "input").read_bytes()
         )
 
-        passive, second = _spawn([*base, "attach-session", "-r", "-t", "=probe"], env, 60)
-        clients.append((passive, second))
+        passive, second = _attach("-r", width=60)
         replay = _read(second, 1)
         (output / "tmux-passive.bin").write_bytes(replay)
         before = (root / "input").read_bytes()
@@ -181,7 +190,7 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
         result["late_draft_replay"] = b"draft survives detach" in replay
         result["late_clipboard_query_replayed"] = CLIPBOARD in replay
         result["pane_size_with_smaller_view"] = (
-            command("display-message", "-p", "-t", "probe:0.0", "#{pane_width}x#{pane_height}")
+            _command("display-message", "-p", "-t", "probe:0.0", "#{pane_width}x#{pane_height}")
             .stdout.decode()
             .strip()
         )
@@ -205,14 +214,14 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
 
         client_names = dict(
             line.split(" ", 1)
-            for line in command("list-clients", "-F", "#{client_pid} #{client_name}")
+            for line in _command("list-clients", "-F", "#{client_pid} #{client_name}")
             .stdout.decode()
             .splitlines()
         )
-        command("refresh-client", "-t", client_names[str(owner.pid)], "-f", "read-only")
-        command("switch-client", "-c", client_names[str(passive.pid)], "-r")
+        _command("refresh-client", "-t", client_names[str(owner.pid)], "-f", "read-only")
+        _command("switch-client", "-c", client_names[str(passive.pid)], "-r")
         result["clients_after_transfer"] = (
-            command("list-clients", "-F", "#{client_pid} #{client_readonly} #{client_flags}")
+            _command("list-clients", "-F", "#{client_pid} #{client_readonly} #{client_flags}")
             .stdout.decode()
             .splitlines()
         )
@@ -233,24 +242,19 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
         )
 
         # Detach all clients without sending an input byte to the provider.
-        command("detach-client", "-s", "probe")
-        for child, _ in clients:
-            child.wait(timeout=3)
+        _detach()
         os.kill(provider_pid, 0)
         result["detach_keeps_process"] = True
         for index in range(3):
-            child, master = _spawn([*base, "attach-session", "-t", "=probe"], env)
-            clients.append((child, master))
+            _, master = _attach()
             late = _read(master, 0.6)
             (output / f"tmux-reattach-{index}.bin").write_bytes(late)
             if b"draft survives detach" not in late:
                 raise AssertionError("reattachment lost retained draft display")
-            command("detach-client", "-s", "probe")
-            child.wait(timeout=3)
+            _detach()
         result["repeated_attachments"] = 3
         result["same_process"] = int((root / "pid").read_text()) == provider_pid
-        child, master = _spawn([*base, "attach-session", "-t", "=probe"], env)
-        clients.append((child, master))
+        _, master = _attach()
         _read(master)
         os.write(master, b"\r")
         _wait_file(root / "submitted")
@@ -264,7 +268,7 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
         if (root / "input").exists():
             (output / "tmux-provider-input.bin").write_bytes((root / "input").read_bytes())
         try:
-            result["cleanup_status"] = command("kill-server", check=False).returncode
+            result["cleanup_status"] = _command("kill-server", check=False).returncode
         except Exception as error:
             cleanup_errors.append(str(error))
         for child, master in clients:
@@ -274,7 +278,7 @@ def _tmux(root: Path, output: Path, env: dict[str, str], result: dict) -> None:
                 cleanup_errors.append(str(error))
         try:
             result["server_absent_after_cleanup"] = (
-                command("list-sessions", check=False).returncode != 0
+                _command("list-sessions", check=False).returncode != 0
             )
         except Exception as error:
             cleanup_errors.append(str(error))

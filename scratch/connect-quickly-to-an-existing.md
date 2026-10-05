@@ -167,7 +167,9 @@ unrelated processes were not touched.
 
 Earlier design chronology and observer notes are preserved at
 `42c4c791cea8d8cb07f8ee545c2b83194bf8fc63:scratch/connect-quickly-to-an-existing.md`.
-Compression removes the superseded engine-first sequence and duplicate evidence;
-production code and the failing regression remain unchanged.
+The transport comparison now centralizes attachment registration and detach/wait,
+so every view shares cleanup ownership. Review retained explicit controller-first
+revocation and both clipboard counterexamples. The native replacement path and
+its failing regression remain untouched pending the retained-terminal cut.
 
-Check: `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-comparison-12` and runner Ruff passed; transport comparison only, with clipboard/replay counterexamples retained; native connection acceptance remains open.
+Check: `uv run python tests/e2e/terminal_transport.py --output /tmp/lf-terminal-compress-20261005-01`, runner Ruff check/format and `git diff --check` passed; three reattachments and owned cleanup passed, clipboard/replay counterexamples retained; native acceptance remains with implementation/gate.

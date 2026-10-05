@@ -175,6 +175,12 @@ only, no conflicts); Jack Heart has not reviewed it.
 
 Flow history in these means Exec sequence.
 
+- **Two notions of Flow.** Jack (October 5): "two different notions of flow.
+  One where there there is a start and a land node and then in between are
+  human sessions, and the edges are lf flows". The outer one is the workflow
+  below; each edge is an operational Flow with a FlowSession. A workflow has
+  no record of its own yet; the Task-level "primary" layer Jack deferred
+  would sit here.
 - **Workflows.** `.lf/workflows/<name>.yaml`: conversation-stage keys with
   optional review skills, and edges with `from`, `to`, `flow`. Source guidance
   only: no Work kind, runtime row, cursor or token, never compiled into a Flow

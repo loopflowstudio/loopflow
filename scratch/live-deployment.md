@@ -13,9 +13,19 @@ Applied through supported operations on the live Home:
 | LOO-375 | Blocked: `pr land -c` exit 1, though #1427 merged | `lf flow end 197c157d…` | idle, "PR merged; continue the Task on its next PR"; Task left open for its production-timing scope |
 | LOO-312 | Blocked: "repeat at step 6 requires a decision" since Sept 27; worktree and branch gone locally and on origin | `lf flow end 34b35eab…` | idle; checkout still missing |
 
-Source change: the sidebar working set is started Work with unresolved execution (`WorkspaceTask.inWorkingSet`), so locally done/abandoned Work leaves it even when planning has not caught up; the Wave plan is unchanged. Direct Task opening already exists in the LOO-353 parent (`SessionsView.openTask` → `enterTask`, covered by `TaskMonitorProofTests`); nothing was added.
+Source change (unshipped, stacked behind LOO-353's review): the sidebar working set is started Work with unresolved execution (`WorkspaceTask.inWorkingSet`). A locally `ready` Task always counts as unresolved, so open started Work stays; locally done/abandoned Work leaves even when planning has not caught up, unless it holds an open Session, a non-idle latest Flow or observed unsettled files. The Wave plan and Show completed are unchanged.
 
 Check: `swift test --filter "TaskHistoryFilterTests|startedWorkingSet|manyStarted"` — 9 tests passed.
+
+## Acceptance against the directive
+
+| Acceptance | Exists | Remains |
+|---|---|---|
+| Sidebar is the open, started working set | Projection change and test on this branch; live Home data reconciled so 0.13.3 already shows it for the nine Tasks above | Ships only after LOO-353 lands |
+| Clicking a Task opens its Session directly | Inherited from the LOO-353 parent: `SessionsView.openTask` → `enterTask` focuses the retained pane's Session, else opens the current Flow-step Session, else the first open one (`TaskMonitorProofTests`) | A Task with no Session opens empty panes; nothing is created or picked by input recency. That is LOO-353's unimplemented Task primary selection / LOO-371, not added here. Draft, focus and history continuity unverified on the installed app |
+| Every blocked Task inspected | LOO-375 and LOO-312 retired; LOO-367 kept with reason, next action and owner | LOO-343's stale `current` Flow until LOO-353's claim removal |
+| Installed Desktop and CLI agree | Both 0.13.3 on one Home, containing the five named PRs | — |
+| Rendered check of the installed app, after-state evidence | Before-state screenshots only | No headless rendering; Jack's demo |
 
 Remaining, each with owner and next action:
 

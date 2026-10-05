@@ -1313,6 +1313,41 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn session_binding_retains_a_task_in_completed_project_history() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().to_path_buf();
+        let session = store.create_session(conversation, None, None).unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+
+        // Rotation can complete a predecessor after observing untouched backlog.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, task.project_id);
+        assert_eq!(retained.worktree, task.worktree);
+        assert_eq!(
+            store
+                .bind_session(&session.id, session.captured, &task_id)
+                .unwrap(),
+            bound
+        );
+    }
+
+    #[test]
     fn session_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
